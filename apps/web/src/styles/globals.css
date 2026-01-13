@@ -1,0 +1,254 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* iOS-Inspired Color System - Light Mode */
+    --background: 250 250 250;           /* #FAFAFA - barely off-white */
+    --foreground: 26 26 26;              /* #1A1A1A - almost black */
+    
+    --card: 255 255 255;                 /* #FFFFFF - pure white cards */
+    --card-foreground: 26 26 26;         /* #1A1A1A */
+    
+    --popover: 255 255 255;
+    --popover-foreground: 26 26 26;
+    
+    --primary: 26 26 26;                 /* #1A1A1A - primary text/buttons */
+    --primary-foreground: 255 255 255;   /* White on primary */
+    
+    --secondary: 142 142 147;            /* #8E8E93 - Apple gray */
+    --secondary-foreground: 26 26 26;
+    
+    --muted: 245 245 247;                /* #F5F5F7 - subtle backgrounds */
+    --muted-foreground: 142 142 147;     /* #8E8E93 */
+    
+    --accent: 10 132 255;                /* #0A84FF - iOS blue */
+    --accent-foreground: 255 255 255;
+    
+    --destructive: 255 59 48;            /* iOS red */
+    --destructive-foreground: 255 255 255;
+    
+    --success: 52 199 89;                /* #34C759 - iOS green */
+    --success-foreground: 255 255 255;
+    
+    --warning: 255 149 0;                /* iOS orange */
+    --warning-foreground: 255 255 255;
+    
+    --border: 229 229 234;               /* #E5E5EA - subtle separation */
+    --input: 229 229 234;
+    --ring: 10 132 255;                  /* #0A84FF - focus ring */
+    
+    --radius: 0.75rem;                   /* 12px - native feel */
+    --radius-lg: 1rem;                   /* 16px - larger elements */
+    --radius-xl: 1.25rem;                /* 20px - cards & modals */
+  }
+
+  .dark {
+    /* iOS-Inspired Color System - Dark Mode (OLED) */
+    --background: 0 0 0;                 /* #000000 - true black */
+    --foreground: 245 245 247;           /* #F5F5F7 - off-white text */
+    
+    --card: 28 28 30;                    /* #1C1C1E - elevated surfaces */
+    --card-foreground: 245 245 247;
+    
+    --popover: 28 28 30;
+    --popover-foreground: 245 245 247;
+    
+    --primary: 245 245 247;              /* #F5F5F7 - primary text */
+    --primary-foreground: 0 0 0;
+    
+    --secondary: 142 142 147;            /* #8E8E93 - same gray */
+    --secondary-foreground: 245 245 247;
+    
+    --muted: 44 44 46;                   /* #2C2C2E - subtle backgrounds */
+    --muted-foreground: 142 142 147;
+    
+    --accent: 10 132 255;                /* #0A84FF - same blue */
+    --accent-foreground: 255 255 255;
+    
+    --destructive: 255 69 58;            /* iOS red (dark) */
+    --destructive-foreground: 255 255 255;
+    
+    --success: 48 209 88;                /* iOS green (dark) */
+    --success-foreground: 255 255 255;
+    
+    --warning: 255 159 10;               /* iOS orange (dark) */
+    --warning-foreground: 255 255 255;
+    
+    --border: 56 56 58;                  /* #38383A - dark borders */
+    --input: 56 56 58;
+    --ring: 10 132 255;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Better focus states */
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent ring-offset-2 ring-offset-background;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Smooth transitions for theme switching */
+  .transition-theme {
+    @apply transition-colors duration-200 ease-out;
+  }
+
+  /* Glass morphism effect */
+  .glass {
+    @apply bg-card/80 backdrop-blur-xl border border-border/50;
+  }
+
+  /* Subtle shadow for cards (light mode optimized) */
+  .shadow-soft {
+    box-shadow: 
+      0 1px 3px rgba(0, 0, 0, 0.02),
+      0 4px 12px rgba(0, 0, 0, 0.04);
+  }
+
+  .shadow-soft-lg {
+    box-shadow: 
+      0 2px 8px rgba(0, 0, 0, 0.02),
+      0 8px 24px rgba(0, 0, 0, 0.06);
+  }
+
+  /* Dark mode shadows */
+  .dark .shadow-soft {
+    box-shadow: 
+      0 1px 3px rgba(0, 0, 0, 0.3),
+      0 4px 12px rgba(0, 0, 0, 0.2);
+  }
+
+  .dark .shadow-soft-lg {
+    box-shadow: 
+      0 2px 8px rgba(0, 0, 0, 0.4),
+      0 8px 24px rgba(0, 0, 0, 0.3);
+  }
+
+  /* iOS-style pressed state */
+  .active-scale {
+    @apply transition-transform duration-100 active:scale-[0.98];
+  }
+}
+
+/* Custom scrollbar - minimal */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--secondary) / 0.3);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--secondary) / 0.5);
+}
+
+/* Hide scrollbar but allow scrolling */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Animation utilities */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-up {
+  from { 
+    opacity: 0; 
+    transform: translateY(8px); 
+  }
+  to { 
+    opacity: 1; 
+    transform: translateY(0); 
+  }
+}
+
+@keyframes slide-down {
+  from { 
+    opacity: 0; 
+    transform: translateY(-8px); 
+  }
+  to { 
+    opacity: 1; 
+    transform: translateY(0); 
+  }
+}
+
+@keyframes scale-in {
+  from { 
+    opacity: 0; 
+    transform: scale(0.95); 
+  }
+  to { 
+    opacity: 1; 
+    transform: scale(1); 
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out forwards;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.4s ease-out forwards;
+}
+
+.animate-slide-down {
+  animation: slide-down 0.4s ease-out forwards;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.3s ease-out forwards;
+}
+
+/* Staggered animation delays */
+.delay-75 { animation-delay: 75ms; }
+.delay-100 { animation-delay: 100ms; }
+.delay-150 { animation-delay: 150ms; }
+.delay-200 { animation-delay: 200ms; }
+.delay-300 { animation-delay: 300ms; }
+.delay-400 { animation-delay: 400ms; }
+.delay-500 { animation-delay: 500ms; }
+
+/* Selection color */
+::selection {
+  background: rgb(var(--accent) / 0.2);
+  color: inherit;
+}
