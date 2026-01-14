@@ -334,28 +334,36 @@ CREATE TRIGGER trigger_generate_attendee_face_tag
 -- (This creates registry entries for existing users)
 -- ============================================
 
--- Migrate attendees with existing face_tags
--- Note: attendees.id IS the user_id (references auth.users)
+-- Migrate ALL existing face_tags (attendees + photographers combined)
+-- Using a combined query to ensure sequence numbers are unique across both tables
 INSERT INTO username_registry (username, sequence_number, user_id, user_type, face_tag)
 SELECT 
-    LOWER(LEFT(REGEXP_REPLACE(REPLACE(a.face_tag, '@', ''), '[^a-zA-Z0-9]', '', 'g'), 8)) as username,
-    ROW_NUMBER() OVER (PARTITION BY LOWER(LEFT(REGEXP_REPLACE(REPLACE(a.face_tag, '@', ''), '[^a-zA-Z0-9]', '', 'g'), 8)) ORDER BY a.created_at) as sequence_number,
-    a.id,  -- attendees.id = auth.uid()
-    'attendee',
-    a.face_tag
-FROM attendees a
-WHERE a.face_tag IS NOT NULL AND a.face_tag != ''
-ON CONFLICT (face_tag) DO NOTHING;
-
--- Migrate photographers with existing face_tags
--- Note: photographers.id IS the user_id (references auth.users)
-INSERT INTO username_registry (username, sequence_number, user_id, user_type, face_tag)
-SELECT 
-    LOWER(LEFT(REGEXP_REPLACE(REPLACE(p.face_tag, '@', ''), '[^a-zA-Z0-9]', '', 'g'), 8)) as username,
-    ROW_NUMBER() OVER (PARTITION BY LOWER(LEFT(REGEXP_REPLACE(REPLACE(p.face_tag, '@', ''), '[^a-zA-Z0-9]', '', 'g'), 8)) ORDER BY p.created_at) as sequence_number,
-    p.id,  -- photographers.id = auth.uid()
-    'photographer',
-    p.face_tag
-FROM photographers p
-WHERE p.face_tag IS NOT NULL AND p.face_tag != ''
-ON CONFLICT (face_tag) DO NOTHING;
+    username,
+    ROW_NUMBER() OVER (PARTITION BY username ORDER BY created_at) as sequence_number,
+    user_id,
+    user_type,
+    face_tag
+FROM (
+    -- Attendees
+    SELECT 
+        LOWER(LEFT(REGEXP_REPLACE(REPLACE(a.face_tag, '@', ''), '[^a-zA-Z0-9]', '', 'g'), 8)) as username,
+        a.id as user_id,
+        'attendee'::VARCHAR(20) as user_type,
+        a.face_tag,
+        a.created_at
+    FROM attendees a
+    WHERE a.face_tag IS NOT NULL AND a.face_tag != ''
+    
+    UNION ALL
+    
+    -- Photographers
+    SELECT 
+        LOWER(LEFT(REGEXP_REPLACE(REPLACE(p.face_tag, '@', ''), '[^a-zA-Z0-9]', '', 'g'), 8)) as username,
+        p.id as user_id,
+        'photographer'::VARCHAR(20) as user_type,
+        p.face_tag,
+        p.created_at
+    FROM photographers p
+    WHERE p.face_tag IS NOT NULL AND p.face_tag != ''
+) combined
+ON CONFLICT (username, sequence_number) DO NOTHING;

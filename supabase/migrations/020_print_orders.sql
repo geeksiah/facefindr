@@ -63,10 +63,19 @@ CREATE TABLE IF NOT EXISTS print_orders (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_print_orders_customer ON print_orders(customer_id);
-CREATE INDEX idx_print_orders_status ON print_orders(status);
-CREATE INDEX idx_print_orders_order_number ON print_orders(order_number);
-CREATE INDEX idx_print_orders_stripe ON print_orders(stripe_payment_intent_id);
+-- Ensure columns exist if table was created previously with different schema
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES auth.users(id) ON DELETE RESTRICT;
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS customer_email VARCHAR(255);
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255);
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS subtotal INTEGER;
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS shipping_cost INTEGER DEFAULT 0;
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS tax_amount INTEGER DEFAULT 0;
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS total_amount INTEGER;
+
+CREATE INDEX IF NOT EXISTS idx_print_orders_customer ON print_orders(customer_id);
+CREATE INDEX IF NOT EXISTS idx_print_orders_status ON print_orders(status);
+CREATE INDEX IF NOT EXISTS idx_print_orders_order_number ON print_orders(order_number);
+CREATE INDEX IF NOT EXISTS idx_print_orders_stripe ON print_orders(stripe_payment_intent_id);
 
 -- ============================================
 -- PRINT ORDER ITEMS TABLE
@@ -107,9 +116,9 @@ EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
 
-CREATE INDEX idx_print_order_items_order ON print_order_items(order_id);
-CREATE INDEX idx_print_order_items_product ON print_order_items(product_id);
-CREATE INDEX idx_print_order_items_media ON print_order_items(media_id);
+CREATE INDEX IF NOT EXISTS idx_print_order_items_order ON print_order_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_print_order_items_product ON print_order_items(product_id);
+CREATE INDEX IF NOT EXISTS idx_print_order_items_media ON print_order_items(media_id);
 
 -- ============================================
 -- SAVED SHIPPING ADDRESSES
@@ -133,8 +142,8 @@ CREATE TABLE IF NOT EXISTS shipping_addresses (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_shipping_addresses_user ON shipping_addresses(user_id);
-CREATE INDEX idx_shipping_addresses_default ON shipping_addresses(user_id) WHERE is_default = TRUE;
+CREATE INDEX IF NOT EXISTS idx_shipping_addresses_user ON shipping_addresses(user_id);
+CREATE INDEX IF NOT EXISTS idx_shipping_addresses_default ON shipping_addresses(user_id) WHERE is_default = TRUE;
 
 -- ============================================
 -- FUNCTIONS
@@ -262,21 +271,36 @@ $$ LANGUAGE plpgsql;
 -- RLS POLICIES
 -- ============================================
 
-ALTER TABLE print_orders ENABLE ROW LEVEL SECURITY;
-ALTER TABLE print_order_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE shipping_addresses ENABLE ROW LEVEL SECURITY;
+-- Enable RLS on tables (safe to run multiple times)
+DO $$ BEGIN
+    ALTER TABLE print_orders ENABLE ROW LEVEL SECURITY;
+EXCEPTION WHEN undefined_table THEN null;
+END $$;
+
+DO $$ BEGIN
+    ALTER TABLE print_order_items ENABLE ROW LEVEL SECURITY;
+EXCEPTION WHEN undefined_table THEN null;
+END $$;
+
+DO $$ BEGIN
+    ALTER TABLE shipping_addresses ENABLE ROW LEVEL SECURITY;
+EXCEPTION WHEN undefined_table THEN null;
+END $$;
 
 -- Users can view their own orders
+DROP POLICY IF EXISTS "Users can view own orders" ON print_orders;
 CREATE POLICY "Users can view own orders" ON print_orders
     FOR SELECT USING (auth.uid() = customer_id);
 
 -- Users can view their own order items
+DROP POLICY IF EXISTS "Users can view own order items" ON print_order_items;
 CREATE POLICY "Users can view own order items" ON print_order_items
     FOR SELECT USING (
         order_id IN (SELECT id FROM print_orders WHERE customer_id = auth.uid())
     );
 
 -- Users can manage their shipping addresses
+DROP POLICY IF EXISTS "Users can manage own addresses" ON shipping_addresses;
 CREATE POLICY "Users can manage own addresses" ON shipping_addresses
     FOR ALL USING (auth.uid() = user_id);
 
