@@ -12,19 +12,19 @@
  * - SCHEDULED: Payout on specific days (weekly/monthly)
  */
 
-import { createMomoTransfer, createBankTransfer, isFlutterwaveConfigured } from './flutterwave';
+import { createMomoTransfer, isFlutterwaveConfigured } from './flutterwave';
 import { createServiceClient } from '@/lib/supabase/server';
 import { v4 as uuidv4 } from 'uuid';
+import {
+  getPayoutMinimum,
+  getPhotographerPayoutSettings,
+  areAutoPayoutsEnabled,
+  getInstantPayoutFeePercent,
+  PayoutFrequency,
+} from './payout-config';
 
 // Payout configuration
 export const PAYOUT_CONFIG = {
-  // Minimum balance for threshold payouts (in cents)
-  MIN_THRESHOLD: 5000, // $50
-  
-  // Payout fee (deducted from photographer's balance)
-  MOMO_FEE_PERCENT: 0, // Platform absorbs MoMo fees
-  BANK_FEE_FLAT: 0, // Platform absorbs bank fees
-  
   // Retry configuration
   MAX_RETRIES: 3,
   RETRY_DELAY_MS: 60000, // 1 minute
@@ -214,7 +214,7 @@ export interface BatchPayoutResult {
 }
 
 export async function processPendingPayouts(
-  mode: 'threshold' | 'scheduled'
+  triggerType: 'daily' | 'weekly' | 'monthly' | 'threshold'
 ): Promise<BatchPayoutResult> {
   const supabase = createServiceClient();
   const results: BatchPayoutResult = {
@@ -224,31 +224,108 @@ export async function processPendingPayouts(
     errors: [],
   };
 
-  try {
-    // Get all wallets with pending balances
-    const { data: balances } = await supabase
-      .from('wallet_balances')
-      .select('*')
-      .gt('available_balance', mode === 'threshold' ? PAYOUT_CONFIG.MIN_THRESHOLD : 0);
+  // Check if auto-payouts are enabled globally
+  const autoPayoutsEnabled = await areAutoPayoutsEnabled();
+  if (!autoPayoutsEnabled) {
+    console.log('[PAYOUT] Auto-payouts disabled globally');
+    return results;
+  }
 
-    if (!balances || balances.length === 0) {
+  try {
+    // Get all wallets with pending balances and their photographer settings
+    const { data: wallets } = await supabase
+      .from('wallets')
+      .select(`
+        id,
+        photographer_id,
+        provider,
+        preferred_currency,
+        payout_settings:photographer_id (
+          payout_frequency,
+          weekly_payout_day,
+          monthly_payout_day,
+          auto_payout_enabled
+        )
+      `)
+      .eq('status', 'active')
+      .eq('payouts_enabled', true);
+
+    if (!wallets || wallets.length === 0) {
       return results;
     }
 
-    // Process each wallet
-    for (const balance of balances) {
-      results.processed++;
+    // Get current day info for schedule matching
+    const now = new Date();
+    const dayOfWeek = now.getDay() || 7; // 1-7 (Monday=1, Sunday=7)
+    const dayOfMonth = now.getDate();
 
-      // Skip if below threshold for threshold mode
-      if (mode === 'threshold' && balance.available_balance < PAYOUT_CONFIG.MIN_THRESHOLD) {
+    for (const wallet of wallets) {
+      const settings = wallet.payout_settings?.[0] || null;
+      const frequency: PayoutFrequency = settings?.payout_frequency || 'weekly';
+      
+      // Skip if photographer disabled auto-payouts
+      if (settings && settings.auto_payout_enabled === false) {
         continue;
       }
 
+      // Check if this wallet should be processed based on frequency
+      let shouldProcess = false;
+
+      switch (triggerType) {
+        case 'daily':
+          shouldProcess = frequency === 'daily';
+          break;
+        case 'weekly':
+          shouldProcess = frequency === 'weekly' && 
+            dayOfWeek === (settings?.weekly_payout_day || 1);
+          break;
+        case 'monthly':
+          shouldProcess = frequency === 'monthly' && 
+            dayOfMonth === (settings?.monthly_payout_day || 1);
+          break;
+        case 'threshold':
+          // Threshold payouts apply to everyone (as a fallback)
+          shouldProcess = true;
+          break;
+      }
+
+      if (!shouldProcess) {
+        continue;
+      }
+
+      // Get balance for this wallet
+      const { data: balanceData } = await supabase
+        .from('wallet_balances')
+        .select('available_balance, currency')
+        .eq('wallet_id', wallet.id)
+        .single();
+
+      if (!balanceData || balanceData.available_balance <= 0) {
+        continue;
+      }
+
+      // Get currency-aware minimum
+      const currency = balanceData.currency || wallet.preferred_currency || 'USD';
+      const minPayout = await getPayoutMinimum(currency);
+
+      // For threshold trigger, check minimum
+      if (triggerType === 'threshold' && balanceData.available_balance < minPayout) {
+        continue;
+      }
+
+      // For scheduled payouts, pay regardless of minimum (unless below absolute minimum)
+      const absoluteMinimum = 100; // $1 equivalent
+      if (balanceData.available_balance < absoluteMinimum) {
+        continue;
+      }
+
+      results.processed++;
+
       const result = await processPayout({
-        walletId: balance.wallet_id,
-        amount: balance.available_balance,
-        currency: balance.currency,
-        mode,
+        walletId: wallet.id,
+        amount: balanceData.available_balance,
+        currency,
+        mode: triggerType === 'threshold' ? 'threshold' : 'scheduled',
       });
 
       if (result.success) {
@@ -256,7 +333,7 @@ export async function processPendingPayouts(
       } else {
         results.failed++;
         results.errors.push({
-          walletId: balance.wallet_id,
+          walletId: wallet.id,
           error: result.error || 'Unknown error',
         });
       }

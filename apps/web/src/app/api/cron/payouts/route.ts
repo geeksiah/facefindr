@@ -37,17 +37,27 @@ export async function GET(request: Request) {
 
     switch (type) {
       case 'threshold':
-        // Process payouts above threshold
+        // Process payouts for wallets above their currency-specific threshold
         console.log('[CRON] Processing threshold payouts...');
         result = await processPendingPayouts('threshold');
         break;
 
+      case 'daily':
+        // Process payouts for photographers who selected daily frequency
+        console.log('[CRON] Processing daily payouts...');
+        result = await processPendingPayouts('daily');
+        break;
+
       case 'weekly':
+        // Process payouts for photographers who selected weekly frequency
+        console.log('[CRON] Processing weekly payouts...');
+        result = await processPendingPayouts('weekly');
+        break;
+
       case 'monthly':
-      case 'scheduled':
-        // Process all scheduled payouts
-        console.log('[CRON] Processing scheduled payouts...');
-        result = await processPendingPayouts('scheduled');
+        // Process payouts for photographers who selected monthly frequency
+        console.log('[CRON] Processing monthly payouts...');
+        result = await processPendingPayouts('monthly');
         break;
 
       case 'retry':
@@ -58,7 +68,7 @@ export async function GET(request: Request) {
 
       default:
         return NextResponse.json(
-          { error: 'Invalid type. Use: threshold, scheduled, weekly, monthly, retry' },
+          { error: 'Invalid type. Use: threshold, daily, weekly, monthly, retry' },
           { status: 400 }
         );
     }

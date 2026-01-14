@@ -17,6 +17,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast, useConfirm } from '@/components/ui/toast';
+import { PayoutPreferences } from './payout-preferences';
 
 interface WalletData {
   id: string;
@@ -523,6 +524,14 @@ export function WalletSettings() {
           <p className="text-secondary mt-1">
             Add a payment method to start receiving payments for your photos.
           </p>
+        </div>
+      )}
+
+      {/* Payout Preferences - Only show if they have at least one wallet */}
+      {wallets.length > 0 && (
+        <div className="mt-8 pt-8 border-t border-border">
+          <h3 className="text-lg font-semibold text-foreground mb-4">Payout Schedule</h3>
+          <PayoutPreferences />
         </div>
       )}
 
