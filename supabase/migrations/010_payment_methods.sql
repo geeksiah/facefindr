@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS mobile_money_providers (
     verification_api VARCHAR(50), -- 'paystack', 'flutterwave', 'hubtel'
     
     -- Number format
-    number_prefix VARCHAR(10), -- '024', '055'
+    number_prefix VARCHAR(255), -- Comma-separated prefixes like '024,054,055'
     number_length INTEGER DEFAULT 10,
     
     -- Limits
