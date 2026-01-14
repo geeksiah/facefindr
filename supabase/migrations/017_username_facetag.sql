@@ -208,8 +208,9 @@ BEGIN
     -- Only generate if face_tag is null
     IF NEW.face_tag IS NULL THEN
         -- Check if username was provided in user metadata
+        -- Note: photographers.id = auth.uid()
         SELECT raw_user_meta_data->>'username' INTO v_username
-        FROM auth.users WHERE id = NEW.user_id;
+        FROM auth.users WHERE id = NEW.id;
         
         IF v_username IS NOT NULL AND LENGTH(v_username) >= 4 THEN
             -- Use the new username-based system
@@ -246,9 +247,9 @@ BEGIN
             END IF;
         END LOOP;
         
-        -- Register the FaceTag
+        -- Register the FaceTag (NEW.id = user_id for photographers)
         INSERT INTO username_registry (username, sequence_number, user_id, user_type, face_tag)
-        VALUES (v_username, v_random_num, NEW.user_id, 'photographer', v_face_tag)
+        VALUES (v_username, v_random_num, NEW.id, 'photographer', v_face_tag)
         ON CONFLICT (face_tag) DO NOTHING;
         
         NEW.face_tag := v_face_tag;
@@ -270,8 +271,9 @@ BEGIN
     -- Only generate if face_tag is null
     IF NEW.face_tag IS NULL THEN
         -- Check if username was provided in user metadata
+        -- Note: attendees.id = auth.uid()
         SELECT raw_user_meta_data->>'username' INTO v_username
-        FROM auth.users WHERE id = NEW.user_id;
+        FROM auth.users WHERE id = NEW.id;
         
         IF v_username IS NOT NULL AND LENGTH(v_username) >= 4 THEN
             -- Use the new username-based system
@@ -308,9 +310,9 @@ BEGIN
             END IF;
         END LOOP;
         
-        -- Register the FaceTag
+        -- Register the FaceTag (NEW.id = user_id for attendees)
         INSERT INTO username_registry (username, sequence_number, user_id, user_type, face_tag)
-        VALUES (v_username, v_random_num, NEW.user_id, 'attendee', v_face_tag)
+        VALUES (v_username, v_random_num, NEW.id, 'attendee', v_face_tag)
         ON CONFLICT (face_tag) DO NOTHING;
         
         NEW.face_tag := v_face_tag;
@@ -333,11 +335,12 @@ CREATE TRIGGER trigger_generate_attendee_face_tag
 -- ============================================
 
 -- Migrate attendees with existing face_tags
+-- Note: attendees.id IS the user_id (references auth.users)
 INSERT INTO username_registry (username, sequence_number, user_id, user_type, face_tag)
 SELECT 
     LOWER(LEFT(REGEXP_REPLACE(REPLACE(a.face_tag, '@', ''), '[^a-zA-Z0-9]', '', 'g'), 8)) as username,
     ROW_NUMBER() OVER (PARTITION BY LOWER(LEFT(REGEXP_REPLACE(REPLACE(a.face_tag, '@', ''), '[^a-zA-Z0-9]', '', 'g'), 8)) ORDER BY a.created_at) as sequence_number,
-    a.user_id,
+    a.id,  -- attendees.id = auth.uid()
     'attendee',
     a.face_tag
 FROM attendees a
@@ -345,11 +348,12 @@ WHERE a.face_tag IS NOT NULL AND a.face_tag != ''
 ON CONFLICT (face_tag) DO NOTHING;
 
 -- Migrate photographers with existing face_tags
+-- Note: photographers.id IS the user_id (references auth.users)
 INSERT INTO username_registry (username, sequence_number, user_id, user_type, face_tag)
 SELECT 
     LOWER(LEFT(REGEXP_REPLACE(REPLACE(p.face_tag, '@', ''), '[^a-zA-Z0-9]', '', 'g'), 8)) as username,
     ROW_NUMBER() OVER (PARTITION BY LOWER(LEFT(REGEXP_REPLACE(REPLACE(p.face_tag, '@', ''), '[^a-zA-Z0-9]', '', 'g'), 8)) ORDER BY p.created_at) as sequence_number,
-    p.user_id,
+    p.id,  -- photographers.id = auth.uid()
     'photographer',
     p.face_tag
 FROM photographers p
