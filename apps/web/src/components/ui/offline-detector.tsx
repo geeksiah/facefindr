@@ -46,7 +46,7 @@ export function OfflineDetector() {
   if (!isOffline) return null;
 
   return (
-    <div className="fixed inset-0 z-[200] bg-background/95 backdrop-blur-sm flex items-center justify-center p-6">
+    <div className="fixed top-0 left-0 right-0 bottom-0 w-screen h-screen z-[200] bg-background/95 backdrop-blur-sm flex items-center justify-center p-6 m-0">
       <div className="max-w-sm w-full text-center">
         {/* Illustration */}
         <div className="relative mx-auto w-40 h-40 mb-8">

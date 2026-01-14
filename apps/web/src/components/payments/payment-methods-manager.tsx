@@ -526,10 +526,10 @@ function AddPaymentMethodModal({ onClose, onAdd, initialType }: AddPaymentMethod
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed top-0 left-0 right-0 bottom-0 w-screen h-screen z-50 flex items-center justify-center p-4 m-0">
       {/* Backdrop */}
       <div 
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
+        className="absolute top-0 left-0 right-0 bottom-0 w-full h-full bg-black/50 backdrop-blur-sm animate-in fade-in duration-200 m-0"
         onClick={onClose}
       />
       
