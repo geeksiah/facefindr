@@ -5,6 +5,7 @@ import { ThemeProvider } from 'next-themes';
 import { useState } from 'react';
 
 import { AuthProvider } from './auth-provider';
+import { CurrencyProvider } from './currency-provider';
 import { ToastProvider, OfflineDetector } from '@/components/ui';
 
 interface ProvidersProps {
@@ -32,11 +33,15 @@ export function Providers({ children }: ProvidersProps) {
         enableSystem
         disableTransitionOnChange
       >
-        <ToastProvider>
-          <AuthProvider>{children}</AuthProvider>
-          <OfflineDetector />
-        </ToastProvider>
+        <CurrencyProvider>
+          <ToastProvider>
+            <AuthProvider>{children}</AuthProvider>
+            <OfflineDetector />
+          </ToastProvider>
+        </CurrencyProvider>
       </ThemeProvider>
     </QueryClientProvider>
   );
 }
+
+export { useCurrency, CurrencySelector } from './currency-provider';

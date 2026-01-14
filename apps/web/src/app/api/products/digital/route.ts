@@ -2,42 +2,108 @@
  * Digital Products API
  * 
  * Get available digital products and their pricing.
+ * Supports multi-currency display.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
 import { getDigitalProducts, getEventPricing } from '@/lib/delivery';
+import { 
+  getEffectiveCurrency, 
+  getCountryFromRequest,
+  convertCurrency,
+  formatPrice,
+  getCurrency,
+} from '@/lib/currency';
 
 // GET - Get digital products with optional event-specific pricing
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const eventId = searchParams.get('eventId');
+    let displayCurrency = searchParams.get('currency');
+
+    // Detect user's currency if not specified
+    if (!displayCurrency) {
+      const supabase = await createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      const detectedCountry = getCountryFromRequest(request.headers);
+      displayCurrency = await getEffectiveCurrency(user?.id, detectedCountry || undefined);
+    }
 
     // Get all products
     const products = await getDigitalProducts();
+    
+    // Get event currency if event specified
+    let eventCurrency = 'USD';
+    if (eventId) {
+      const supabase = await createClient();
+      const { data: event } = await supabase
+        .from('events')
+        .select('currency')
+        .eq('id', eventId)
+        .single();
+      
+      if (event?.currency) {
+        eventCurrency = event.currency;
+      }
+    }
 
     // If event ID provided, get event-specific pricing
+    let productsWithPricing;
+    
     if (eventId) {
       const eventPricing = await getEventPricing(eventId);
       
-      // Apply event-specific prices
-      const productsWithPricing = products.map(product => ({
-        ...product,
-        price: eventPricing.get(product.id) ?? product.defaultPrice,
-        hasCustomPrice: eventPricing.has(product.id),
+      // Apply event-specific prices and convert currency
+      productsWithPricing = await Promise.all(products.map(async product => {
+        const priceInEventCurrency = eventPricing.get(product.id) ?? product.defaultPrice;
+        const priceInDisplayCurrency = await convertCurrency(
+          priceInEventCurrency,
+          eventCurrency,
+          displayCurrency!
+        );
+        
+        return {
+          ...product,
+          price: priceInDisplayCurrency,
+          originalPrice: priceInEventCurrency,
+          originalCurrency: eventCurrency,
+          currency: displayCurrency,
+          formattedPrice: await formatPrice(priceInDisplayCurrency, displayCurrency!),
+          hasCustomPrice: eventPricing.has(product.id),
+        };
       }));
-
-      return NextResponse.json({ products: productsWithPricing });
+    } else {
+      // Return products with default pricing (USD), converted to display currency
+      productsWithPricing = await Promise.all(products.map(async product => {
+        const priceInDisplayCurrency = await convertCurrency(
+          product.defaultPrice,
+          'USD',
+          displayCurrency!
+        );
+        
+        return {
+          ...product,
+          price: priceInDisplayCurrency,
+          originalPrice: product.defaultPrice,
+          originalCurrency: 'USD',
+          currency: displayCurrency,
+          formattedPrice: await formatPrice(priceInDisplayCurrency, displayCurrency!),
+          hasCustomPrice: false,
+        };
+      }));
     }
 
-    // Return products with default pricing
-    const productsWithPricing = products.map(product => ({
-      ...product,
-      price: product.defaultPrice,
-      hasCustomPrice: false,
-    }));
+    // Get currency info for display
+    const currencyInfo = await getCurrency(displayCurrency!);
 
-    return NextResponse.json({ products: productsWithPricing });
+    return NextResponse.json({ 
+      products: productsWithPricing,
+      currency: displayCurrency,
+      currencyInfo,
+      eventCurrency: eventId ? eventCurrency : null,
+    });
 
   } catch (error) {
     console.error('Digital products GET error:', error);
