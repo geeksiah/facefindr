@@ -128,7 +128,7 @@ ON CONFLICT (provider_code) DO UPDATE SET
     supports_name_verification = EXCLUDED.supports_name_verification;
 
 -- Insert Nigeria mobile money providers
-INSERT INTO mobile_money_providers (provider_code, provider_name, country_code, supports_name_verification, verification_api, number_prefix)
+INSERT INTO mobile_money_providers (provider_code, provider_name, country_code, supports_name_verification, verification_api, number_prefix, number_length)
 VALUES
     ('mtn_momo_ng', 'MTN MoMo', 'NG', TRUE, 'paystack', '0803,0806,0703,0706,0813,0816,0810,0814,0903,0906,0913,0916', 11),
     ('opay_ng', 'OPay', 'NG', TRUE, 'paystack', '', 11)

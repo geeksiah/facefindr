@@ -19,7 +19,7 @@ export function DashboardHeader() {
   });
 
   return (
-    <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-border bg-card/95 px-6 backdrop-blur-xl">
+    <header className="flex-shrink-0 z-20 flex h-16 items-center justify-between border-b border-border bg-card px-6">
       {/* Left side */}
       <div className="flex items-center gap-4">
         {/* Mobile spacer for menu button */}
