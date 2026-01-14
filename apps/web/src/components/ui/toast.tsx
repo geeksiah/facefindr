@@ -220,10 +220,27 @@ export function ConfirmDialog({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed top-0 left-0 right-0 bottom-0 w-screen h-screen z-[100] flex items-center justify-center p-4 m-0">
+    <div 
+      className="z-[100] flex items-center justify-center"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        width: '100vw',
+        height: '100vh',
+        margin: 0,
+        padding: '1rem',
+      }}
+    >
       {/* Backdrop */}
       <div
-        className="absolute top-0 left-0 right-0 bottom-0 w-full h-full bg-black/50 backdrop-blur-sm animate-in fade-in duration-200 m-0"
+        className="bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
+        style={{
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          margin: 0,
+        }}
         onClick={onCancel}
       />
       
