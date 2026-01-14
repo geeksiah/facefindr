@@ -2,10 +2,11 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Bell, Search, Plus, Moon, Sun } from 'lucide-react';
+import { Search, Plus, Moon, Sun } from 'lucide-react';
 import { useTheme } from 'next-themes';
 
 import { Button } from '@/components/ui/button';
+import { NotificationBell } from '@/components/notifications';
 
 export function DashboardHeader() {
   const [searchOpen, setSearchOpen] = useState(false);
@@ -65,13 +66,7 @@ export function DashboardHeader() {
         )}
 
         {/* Notifications */}
-        <button className="relative rounded-xl p-2.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
-          <Bell className="h-5 w-5" />
-          <span className="absolute right-2 top-2 flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
-          </span>
-        </button>
+        <NotificationBell />
 
         {/* Create Event Button */}
         <Button asChild size="sm" variant="primary" className="ml-1">

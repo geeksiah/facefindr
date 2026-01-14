@@ -2,8 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import { Check, CreditCard, Download, Sparkles, Loader2, ExternalLink } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { useCurrency, CurrencySelector } from '@/components/providers';
+import { Button, Switch, CurrencySwitcher } from '@/components/ui';
+import { useCurrency } from '@/components/providers';
+import { PaymentMethodsManager } from '@/components/payments';
+import { DashboardBanner } from '@/components/notifications';
 
 interface PlanPricing {
   planCode: string;
@@ -146,6 +148,9 @@ export default function BillingPage() {
 
   return (
     <div className="space-y-8">
+      {/* Ad Placement */}
+      <DashboardBanner />
+
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -154,7 +159,7 @@ export default function BillingPage() {
             Manage your subscription and payment methods.
           </p>
         </div>
-        <CurrencySelector />
+        <CurrencySwitcher variant="compact" />
       </div>
 
       {/* Current Plan */}
@@ -357,56 +362,13 @@ export default function BillingPage() {
         })}
       </div>
 
-      {/* Payment Method */}
+      {/* Payment Methods */}
       <div className="rounded-2xl border border-border bg-card p-6">
-        <h2 className="font-semibold text-foreground mb-4">Payment Method</h2>
-        {paymentMethod ? (
-          <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
-            <div className="flex items-center gap-4">
-              <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center">
-                <CreditCard className="h-5 w-5 text-foreground" />
-              </div>
-              <div>
-                <p className="font-medium text-foreground capitalize">
-                  {paymentMethod.brand} ending in {paymentMethod.last4}
-                </p>
-                <p className="text-sm text-secondary">
-                  Expires {paymentMethod.expMonth}/{paymentMethod.expYear}
-                </p>
-              </div>
-            </div>
-            <Button variant="ghost" size="sm">
-              Update
-            </Button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-4 p-4 rounded-xl bg-muted/50">
-            <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center">
-              <CreditCard className="h-5 w-5 text-muted-foreground" />
-            </div>
-            <p className="text-sm text-muted-foreground">
-              No payment method on file
-            </p>
-          </div>
-        )}
-        <Button 
-          variant="outline" 
-          size="sm" 
-          className="mt-4"
-          onClick={handleAddPaymentMethod}
-          disabled={isAddingPayment}
-        >
-          {isAddingPayment ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              Connecting...
-            </>
-          ) : paymentMethod ? (
-            'Update Payment Method'
-          ) : (
-            'Add Payment Method'
-          )}
-        </Button>
+        <h2 className="font-semibold text-foreground mb-4">Payment Methods</h2>
+        <p className="text-sm text-secondary mb-6">
+          Add payment methods for subscriptions. You can use cards, mobile money, or PayPal.
+        </p>
+        <PaymentMethodsManager />
       </div>
 
       {/* Payout Settings Link */}

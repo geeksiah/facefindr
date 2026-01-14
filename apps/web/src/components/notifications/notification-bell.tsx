@@ -7,9 +7,10 @@
  * Uses real-time updates for new notifications.
  */
 
-import { useState, useEffect, useCallback } from 'react';
-import { Bell, Check, X } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Bell, Check, CheckCheck, X, ExternalLink, Loader2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import Link from 'next/link';
 
 interface Notification {
   id: string;
@@ -18,6 +19,7 @@ interface Notification {
   body: string;
   createdAt: string;
   readAt: string | null;
+  metadata?: Record<string, unknown>;
 }
 
 export function NotificationBell() {
@@ -25,6 +27,8 @@ export function NotificationBell() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isMarkingAll, setIsMarkingAll] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Fetch notifications
   const fetchNotifications = useCallback(async () => {
@@ -50,7 +54,7 @@ export function NotificationBell() {
     const supabase = createClient();
     
     const channel = supabase
-      .channel('notifications')
+      .channel('user-notifications')
       .on(
         'postgres_changes',
         {
@@ -59,8 +63,16 @@ export function NotificationBell() {
           table: 'notifications',
         },
         (payload) => {
-          // Add new notification to list
-          const newNotification = payload.new as Notification;
+          // Add new notification to list with animation
+          const newNotification = {
+            id: payload.new.id,
+            templateCode: payload.new.template_code,
+            subject: payload.new.subject,
+            body: payload.new.body,
+            createdAt: payload.new.created_at,
+            readAt: payload.new.read_at,
+            metadata: payload.new.metadata,
+          };
           setNotifications(prev => [newNotification, ...prev].slice(0, 10));
           setUnreadCount(prev => prev + 1);
         }
@@ -72,43 +84,73 @@ export function NotificationBell() {
     };
   }, [fetchNotifications]);
 
+  // Close dropdown on click outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [isOpen]);
+
   // Mark single as read
-  const markAsRead = async (notificationId: string) => {
+  const markAsRead = async (notificationId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    
+    // Optimistic update
+    setNotifications(prev =>
+      prev.map(n =>
+        n.id === notificationId
+          ? { ...n, readAt: new Date().toISOString() }
+          : n
+      )
+    );
+    setUnreadCount(prev => Math.max(0, prev - 1));
+
     try {
       await fetch('/api/notifications', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ notificationId }),
       });
-
-      setNotifications(prev =>
-        prev.map(n =>
-          n.id === notificationId
-            ? { ...n, readAt: new Date().toISOString() }
-            : n
-        )
-      );
-      setUnreadCount(prev => Math.max(0, prev - 1));
     } catch (error) {
       console.error('Failed to mark as read:', error);
+      // Revert on error
+      fetchNotifications();
     }
   };
 
   // Mark all as read
   const markAllAsRead = async () => {
+    setIsMarkingAll(true);
+    
+    // Optimistic update
+    const prevNotifications = [...notifications];
+    const prevCount = unreadCount;
+    
+    setNotifications(prev =>
+      prev.map(n => ({ ...n, readAt: n.readAt || new Date().toISOString() }))
+    );
+    setUnreadCount(0);
+
     try {
       await fetch('/api/notifications', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ markAllRead: true }),
       });
-
-      setNotifications(prev =>
-        prev.map(n => ({ ...n, readAt: new Date().toISOString() }))
-      );
-      setUnreadCount(0);
     } catch (error) {
       console.error('Failed to mark all as read:', error);
+      // Revert on error
+      setNotifications(prevNotifications);
+      setUnreadCount(prevCount);
+    } finally {
+      setIsMarkingAll(false);
     }
   };
 
@@ -120,110 +162,185 @@ export function NotificationBell() {
     if (diff < 60000) return 'Just now';
     if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
     if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`;
     return date.toLocaleDateString();
   };
 
+  // Get notification link based on type
+  const getNotificationLink = (notification: Notification): string | null => {
+    const meta = notification.metadata as Record<string, string> | undefined;
+    switch (notification.templateCode) {
+      case 'photo_drop':
+        return meta?.event_id ? `/gallery/events/${meta.event_id}` : '/gallery';
+      case 'payout_success':
+        return '/dashboard/billing';
+      case 'order_shipped':
+        return meta?.order_id ? `/gallery/orders/${meta.order_id}` : '/gallery/orders';
+      case 'event_live':
+        return meta?.event_id ? `/events/${meta.event_id}` : '/gallery/events';
+      case 'purchase_complete':
+        return '/gallery/purchases';
+      default:
+        return null;
+    }
+  };
+
   return (
-    <div className="relative">
+    <div className="relative" ref={dropdownRef}>
       {/* Bell Button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="relative p-2 rounded-xl text-secondary hover:bg-muted transition-colors"
+        className="relative p-2 rounded-xl text-secondary hover:text-foreground hover:bg-muted transition-all duration-200 active:scale-95"
         aria-label="Notifications"
       >
-        <Bell className="h-5 w-5" />
+        <Bell className={`h-5 w-5 transition-transform duration-200 ${isOpen ? 'scale-110' : ''}`} />
+        
+        {/* Badge with animation */}
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[10px] font-bold text-white">
-            {unreadCount > 9 ? '9+' : unreadCount}
+          <span className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent text-[10px] font-bold text-white px-1 animate-in zoom-in-50 duration-200">
+            {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
       </button>
 
       {/* Dropdown */}
       {isOpen && (
-        <>
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => setIsOpen(false)}
-          />
-          <div className="absolute right-0 top-full mt-2 z-50 w-80 rounded-2xl bg-card border border-border shadow-xl overflow-hidden">
-            {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-              <h3 className="font-semibold text-foreground">Notifications</h3>
+        <div className="absolute right-0 top-full mt-2 z-50 w-80 sm:w-96 rounded-2xl bg-card border border-border shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
+            <h3 className="font-semibold text-foreground">Notifications</h3>
+            <div className="flex items-center gap-2">
               {unreadCount > 0 && (
                 <button
                   onClick={markAllAsRead}
-                  className="text-xs text-accent hover:underline"
+                  disabled={isMarkingAll}
+                  className="flex items-center gap-1 text-xs text-accent hover:underline disabled:opacity-50 transition-opacity"
                 >
+                  {isMarkingAll ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <CheckCheck className="h-3 w-3" />
+                  )}
                   Mark all read
                 </button>
               )}
+              <button
+                onClick={() => setIsOpen(false)}
+                className="p-1 rounded-lg text-secondary hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
+          </div>
 
-            {/* List */}
-            <div className="max-h-96 overflow-y-auto">
-              {isLoading ? (
-                <div className="p-8 text-center">
-                  <div className="animate-spin h-6 w-6 border-2 border-accent border-t-transparent rounded-full mx-auto" />
-                </div>
-              ) : notifications.length === 0 ? (
-                <div className="p-8 text-center">
-                  <Bell className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground">No notifications yet</p>
-                </div>
-              ) : (
-                notifications.map(notification => (
-                  <div
-                    key={notification.id}
-                    className={`px-4 py-3 border-b border-border last:border-b-0 hover:bg-muted/50 transition-colors ${
-                      !notification.readAt ? 'bg-accent/5' : ''
-                    }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="flex-1 min-w-0">
-                        {notification.subject && (
-                          <p className="font-medium text-sm text-foreground truncate">
-                            {notification.subject}
-                          </p>
-                        )}
-                        <p className="text-sm text-secondary line-clamp-2">
-                          {notification.body}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {formatTime(notification.createdAt)}
-                        </p>
-                      </div>
-                      {!notification.readAt && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            markAsRead(notification.id);
-                          }}
-                          className="p-1 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                          title="Mark as read"
-                        >
-                          <Check className="h-4 w-4" />
-                        </button>
+          {/* List */}
+          <div className="max-h-[400px] overflow-y-auto">
+            {isLoading ? (
+              <div className="p-8 text-center">
+                <Loader2 className="h-6 w-6 animate-spin text-accent mx-auto" />
+              </div>
+            ) : notifications.length === 0 ? (
+              <div className="p-8 text-center">
+                <Bell className="h-10 w-10 text-muted-foreground mx-auto mb-3 opacity-50" />
+                <p className="text-sm text-secondary font-medium">No notifications yet</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  We'll notify you when something happens
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-border">
+                {notifications.map((notification, index) => {
+                  const link = getNotificationLink(notification);
+                  const isUnread = !notification.readAt;
+                  
+                  const content = (
+                    <div
+                      className={`
+                        relative px-4 py-3 transition-all duration-200
+                        ${isUnread ? 'bg-accent/5' : 'hover:bg-muted/50'}
+                        ${link ? 'cursor-pointer' : ''}
+                      `}
+                      style={{ animationDelay: `${index * 50}ms` }}
+                    >
+                      {/* Unread indicator */}
+                      {isUnread && (
+                        <div className="absolute left-1.5 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
                       )}
+                      
+                      <div className="flex items-start gap-3 pl-2">
+                        <div className="flex-1 min-w-0">
+                          {notification.subject && (
+                            <p className={`text-sm truncate ${isUnread ? 'font-semibold text-foreground' : 'font-medium text-foreground/80'}`}>
+                              {notification.subject}
+                            </p>
+                          )}
+                          <p className={`text-sm ${isUnread ? 'text-secondary' : 'text-muted-foreground'} line-clamp-2`}>
+                            {notification.body}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {formatTime(notification.createdAt)}
+                          </p>
+                        </div>
+                        
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          {link && (
+                            <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" />
+                          )}
+                          {isUnread && (
+                            <button
+                              onClick={(e) => markAsRead(notification.id, e)}
+                              className="p-1.5 rounded-lg text-muted-foreground hover:text-accent hover:bg-accent/10 transition-all duration-200"
+                              title="Mark as read"
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ))
-              )}
-            </div>
+                  );
 
-            {/* Footer */}
-            {notifications.length > 0 && (
-              <div className="px-4 py-3 border-t border-border">
-                <a
-                  href="/notifications"
-                  className="text-sm text-accent hover:underline"
-                >
-                  View all notifications
-                </a>
+                  return link ? (
+                    <Link 
+                      key={notification.id} 
+                      href={link}
+                      onClick={() => {
+                        if (isUnread) markAsRead(notification.id);
+                        setIsOpen(false);
+                      }}
+                      className="block animate-in fade-in slide-in-from-top-1"
+                      style={{ animationDelay: `${index * 30}ms` }}
+                    >
+                      {content}
+                    </Link>
+                  ) : (
+                    <div 
+                      key={notification.id}
+                      className="animate-in fade-in slide-in-from-top-1"
+                      style={{ animationDelay: `${index * 30}ms` }}
+                    >
+                      {content}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
-        </>
+
+          {/* Footer */}
+          {notifications.length > 0 && (
+            <div className="px-4 py-3 border-t border-border bg-muted/30">
+              <Link
+                href="/notifications"
+                onClick={() => setIsOpen(false)}
+                className="flex items-center justify-center gap-2 text-sm text-accent font-medium hover:underline transition-colors"
+              >
+                View all notifications
+                <ExternalLink className="h-3.5 w-3.5" />
+              </Link>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

@@ -247,6 +247,234 @@
 .delay-400 { animation-delay: 400ms; }
 .delay-500 { animation-delay: 500ms; }
 
+/* ============================================
+   SMOOTH INTERACTIVE ANIMATIONS
+   ============================================ */
+
+/* Button press effect */
+button, [role="button"], .clickable {
+  transition: transform 150ms cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 150ms cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1),
+              background-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+button:active:not(:disabled), [role="button"]:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* Toggle/Switch animation */
+.switch-thumb {
+  transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              background-color 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.switch-track {
+  transition: background-color 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Tab/Pill switcher animation */
+@keyframes tab-indicator-slide {
+  from { transform: translateX(var(--from-x, 0)); }
+  to { transform: translateX(var(--to-x, 0)); }
+}
+
+.tab-indicator {
+  transition: transform 250ms cubic-bezier(0.4, 0, 0.2, 1),
+              width 250ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Card hover lift effect */
+.card-hover {
+  transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px -5px rgba(0, 0, 0, 0.1),
+              0 4px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+.dark .card-hover:hover {
+  box-shadow: 0 8px 25px -5px rgba(0, 0, 0, 0.4),
+              0 4px 10px -5px rgba(0, 0, 0, 0.2);
+}
+
+/* Dropdown/Modal animations */
+@keyframes dropdown-open {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes dropdown-close {
+  from {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95) translateY(-4px);
+  }
+}
+
+.animate-dropdown-open {
+  animation: dropdown-open 200ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.animate-dropdown-close {
+  animation: dropdown-close 150ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Modal overlay animation */
+@keyframes modal-overlay-open {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-content-open {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-modal-overlay {
+  animation: modal-overlay-open 200ms ease-out forwards;
+}
+
+.animate-modal-content {
+  animation: modal-content-open 300ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Accordion/Collapse animation */
+@keyframes accordion-open {
+  from {
+    height: 0;
+    opacity: 0;
+  }
+  to {
+    height: var(--accordion-height);
+    opacity: 1;
+  }
+}
+
+@keyframes accordion-close {
+  from {
+    height: var(--accordion-height);
+    opacity: 1;
+  }
+  to {
+    height: 0;
+    opacity: 0;
+  }
+}
+
+/* Skeleton loading shimmer */
+@keyframes shimmer {
+  0% {
+    background-position: -200px 0;
+  }
+  100% {
+    background-position: calc(200px + 100%) 0;
+  }
+}
+
+.skeleton {
+  animation: shimmer 1.5s ease-in-out infinite;
+  background: linear-gradient(
+    90deg,
+    rgb(var(--muted)) 0%,
+    rgb(var(--muted-foreground) / 0.1) 50%,
+    rgb(var(--muted)) 100%
+  );
+  background-size: 200px 100%;
+}
+
+/* Pulse animation (for notifications, badges) */
+@keyframes subtle-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.animate-subtle-pulse {
+  animation: subtle-pulse 2s ease-in-out infinite;
+}
+
+/* Spinner animation */
+@keyframes spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spinner {
+  animation: spinner 1s linear infinite;
+}
+
+/* Bounce in animation */
+@keyframes bounce-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  70% {
+    transform: scale(0.9);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-bounce-in {
+  animation: bounce-in 400ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Shake animation (for errors) */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
+  20%, 40%, 60%, 80% { transform: translateX(4px); }
+}
+
+.animate-shake {
+  animation: shake 500ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Success checkmark animation */
+@keyframes check-draw {
+  0% {
+    stroke-dashoffset: 100;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.animate-check-draw {
+  stroke-dasharray: 100;
+  animation: check-draw 400ms ease-out forwards;
+}
+
 /* Selection color */
 ::selection {
   background: rgb(var(--accent) / 0.2);
