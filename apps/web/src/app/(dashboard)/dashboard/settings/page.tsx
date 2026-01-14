@@ -1,17 +1,29 @@
 'use client';
 
-import { useState } from 'react';
-import { User, Mail, Lock, Bell, Shield, Trash2, Camera } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { User, Mail, Lock, Bell, Shield, Trash2, Camera, CreditCard } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
+import { WalletSettings } from '@/components/dashboard/wallet-settings';
 
 export default function SettingsPage() {
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState('profile');
+
+  // Handle URL params for tab switching (e.g., after Stripe onboarding)
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab) {
+      setActiveTab(tab);
+    }
+  }, [searchParams]);
 
   const tabs = [
     { id: 'profile', label: 'Profile', icon: User },
+    { id: 'payments', label: 'Payments', icon: CreditCard },
     { id: 'security', label: 'Security', icon: Lock },
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'privacy', label: 'Privacy', icon: Shield },
@@ -105,6 +117,19 @@ export default function SettingsPage() {
         </div>
       )}
 
+      {/* Payment Settings */}
+      {activeTab === 'payments' && (
+        <div className="max-w-2xl">
+          <div className="mb-6">
+            <h2 className="font-semibold text-foreground">Payment Settings</h2>
+            <p className="text-sm text-secondary mt-1">
+              Connect payment providers to receive earnings from photo sales.
+            </p>
+          </div>
+          <WalletSettings />
+        </div>
+      )}
+
       {/* Security Settings */}
       {activeTab === 'security' && (
         <div className="space-y-6">
@@ -151,6 +176,7 @@ export default function SettingsPage() {
             {[
               { id: 'sales', label: 'New photo sales', description: 'Get notified when someone purchases your photos', defaultChecked: true },
               { id: 'activity', label: 'Event activity', description: 'Updates about your event views and engagement', defaultChecked: true },
+              { id: 'payouts', label: 'Payout updates', description: 'Get notified when payouts are processed', defaultChecked: true },
               { id: 'marketing', label: 'Marketing updates', description: 'Tips, features, and promotional offers', defaultChecked: false },
             ].map((item) => (
               <div key={item.id} className="flex items-center justify-between py-3">
