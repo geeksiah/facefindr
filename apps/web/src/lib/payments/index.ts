@@ -10,6 +10,9 @@
 export * from './stripe';
 export * from './flutterwave';
 export * from './paypal';
+export * from './payout-minimums';
+export * from './payout-config';
+export * from './payout-service';
 
 export type PaymentProvider = 'stripe' | 'flutterwave' | 'paypal';
 

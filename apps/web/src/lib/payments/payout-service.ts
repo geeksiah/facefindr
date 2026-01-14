@@ -16,12 +16,15 @@ import { createMomoTransfer, isFlutterwaveConfigured } from './flutterwave';
 import { createServiceClient } from '@/lib/supabase/server';
 import { v4 as uuidv4 } from 'uuid';
 import {
-  getPayoutMinimum,
   getPhotographerPayoutSettings,
   areAutoPayoutsEnabled,
-  getInstantPayoutFeePercent,
   PayoutFrequency,
 } from './payout-config';
+import {
+  getProviderMinimum,
+  getPlatformMinimum,
+  checkPayoutEligibility,
+} from './payout-minimums';
 
 // Payout configuration
 export const PAYOUT_CONFIG = {
@@ -304,18 +307,23 @@ export async function processPendingPayouts(
         continue;
       }
 
-      // Get currency-aware minimum
+      // Get currency and provider method
       const currency = balanceData.currency || wallet.preferred_currency || 'USD';
-      const minPayout = await getPayoutMinimum(currency);
+      const provider = wallet.provider || 'stripe';
+      const method = wallet.momo_provider || 'bank';
+      
+      // Check eligibility using two-tier minimum system
+      const isScheduled = triggerType !== 'threshold';
+      const eligibility = checkPayoutEligibility(
+        balanceData.available_balance,
+        currency,
+        provider,
+        method,
+        isScheduled
+      );
 
-      // For threshold trigger, check minimum
-      if (triggerType === 'threshold' && balanceData.available_balance < minPayout) {
-        continue;
-      }
-
-      // For scheduled payouts, pay regardless of minimum (unless below absolute minimum)
-      const absoluteMinimum = 100; // $1 equivalent
-      if (balanceData.available_balance < absoluteMinimum) {
+      if (!eligibility.canPayout) {
+        // Skip if not eligible
         continue;
       }
 
