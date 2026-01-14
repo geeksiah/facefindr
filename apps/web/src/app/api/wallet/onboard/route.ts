@@ -147,6 +147,26 @@ export async function POST(request: Request) {
       walletData.details_submitted = true;
     }
 
+    // Handle Mobile Money (direct payout to mobile wallet)
+    if (provider === 'momo') {
+      const { momoNetwork, momoNumber } = body;
+      if (!momoNetwork || !momoNumber) {
+        return NextResponse.json(
+          { error: 'Mobile money details required' },
+          { status: 400 }
+        );
+      }
+
+      // Store mobile money details for payouts
+      // Platform collects payments, then pays out to this number
+      walletData.momo_account_number = momoNumber;
+      walletData.momo_provider = momoNetwork;
+      walletData.status = 'active';
+      walletData.payouts_enabled = true;
+      walletData.charges_enabled = false; // Platform collects, not the photographer
+      walletData.details_submitted = true;
+    }
+
     // Create wallet record
     const { data: wallet, error: walletError } = await supabase
       .from('wallets')

@@ -7,6 +7,11 @@
  * - Bank transfers
  * - USSD
  * 
+ * Payout Model:
+ * - Platform collects payments via our Flutterwave account
+ * - Payouts go directly to photographer's mobile money or bank
+ * - No business registration required for photographers
+ * 
  * Documentation: https://developer.flutterwave.com/docs
  */
 
@@ -56,74 +61,43 @@ async function flutterwaveRequest<T>(
 }
 
 // ============================================
-// SUBACCOUNT MANAGEMENT (for photographers)
+// MOBILE MONEY PAYOUT DESTINATIONS
 // ============================================
 
-export interface CreateSubaccountParams {
-  businessName: string;
+export type MomoNetwork = 'MTN' | 'VODAFONE' | 'TIGO' | 'AIRTEL';
+
+export interface MomoPayoutDestination {
+  type: 'momo';
+  network: MomoNetwork;
+  phoneNumber: string;
+  country: string; // GH, NG, KE, UG, RW, etc.
+}
+
+export interface BankPayoutDestination {
+  type: 'bank';
+  bankCode: string;
+  accountNumber: string;
+  accountName: string;
+  country: string;
+}
+
+export type PayoutDestination = MomoPayoutDestination | BankPayoutDestination;
+
+// ============================================
+// PHOTOGRAPHER PAYOUT PROFILE (No subaccount needed)
+// ============================================
+
+export interface PhotographerPayoutProfile {
+  photographerId: string;
+  displayName: string;
   email: string;
   country: string;
-  accountBank: string;
-  accountNumber: string;
-  splitType: 'percentage' | 'flat';
-  splitValue: number;
-  photographerId: string;
-}
-
-export interface FlutterwaveSubaccount {
-  id: number;
-  subaccount_id: string;
-  account_bank: string;
-  account_number: string;
-  business_name: string;
-  country: string;
-  split_type: string;
-  split_value: number;
-  created_at: string;
-}
-
-export async function createSubaccount(
-  params: CreateSubaccountParams
-): Promise<FlutterwaveSubaccount> {
-  const response = await flutterwaveRequest<{
-    status: string;
-    message: string;
-    data: FlutterwaveSubaccount;
-  }>('/subaccounts', {
-    method: 'POST',
-    body: JSON.stringify({
-      account_bank: params.accountBank,
-      account_number: params.accountNumber,
-      business_name: params.businessName,
-      business_email: params.email,
-      country: params.country,
-      split_type: params.splitType,
-      split_value: params.splitValue,
-      business_mobile: '',
-      meta: [{ photographer_id: params.photographerId }],
-    }),
-  });
-
-  return response.data;
-}
-
-export async function getSubaccount(subaccountId: string): Promise<FlutterwaveSubaccount> {
-  const response = await flutterwaveRequest<{
-    status: string;
-    data: FlutterwaveSubaccount;
-  }>(`/subaccounts/${subaccountId}`);
-
-  return response.data;
-}
-
-export async function deleteSubaccount(subaccountId: string): Promise<void> {
-  await flutterwaveRequest(`/subaccounts/${subaccountId}`, {
-    method: 'DELETE',
-  });
+  preferredCurrency: string;
+  payoutDestination: PayoutDestination;
 }
 
 // ============================================
-// PAYMENT INITIALIZATION
+// PAYMENT INITIALIZATION (Platform collects)
 // ============================================
 
 export interface InitializePaymentParams {
@@ -136,7 +110,7 @@ export interface InitializePaymentParams {
   customerPhone?: string;
   eventId: string;
   eventName: string;
-  photographerSubaccountId: string;
+  photographerId: string;
   paymentOptions?: string; // 'card,mobilemoney,ussd,banktransfer'
   metadata?: Record<string, string>;
 }
@@ -148,8 +122,7 @@ export interface FlutterwavePaymentLink {
 export async function initializePayment(
   params: InitializePaymentParams
 ): Promise<FlutterwavePaymentLink> {
-  const platformFee = Math.round(params.amount * PLATFORM_FEE_PERCENT);
-
+  // Platform collects full amount - we'll payout to photographer later
   const response = await flutterwaveRequest<{
     status: string;
     message: string;
@@ -172,15 +145,10 @@ export async function initializePayment(
         logo: process.env.NEXT_PUBLIC_APP_URL + '/assets/logos/icon.svg',
       },
       payment_options: params.paymentOptions || 'card,mobilemoney,banktransfer',
-      subaccounts: [
-        {
-          id: params.photographerSubaccountId,
-          transaction_split_ratio: 100 - PLATFORM_FEE_PERCENT * 100,
-        },
-      ],
       meta: {
         event_id: params.eventId,
-        platform_fee: platformFee,
+        photographer_id: params.photographerId,
+        platform_fee_percent: PLATFORM_FEE_PERCENT,
         ...params.metadata,
       },
     }),
@@ -190,30 +158,30 @@ export async function initializePayment(
 }
 
 // ============================================
-// MOBILE MONEY SPECIFIC
+// MOBILE MONEY CHARGE (Direct from customer)
 // ============================================
 
-export interface MomoPaymentParams {
+export interface MomoChargeParams {
   txRef: string;
   amount: number;
   currency: string; // GHS, UGX, RWF, XAF, XOF, KES, ZAR
   phoneNumber: string;
-  network: 'MTN' | 'VODAFONE' | 'TIGO' | 'AIRTEL';
+  network: MomoNetwork;
   email: string;
   eventId: string;
-  photographerSubaccountId: string;
+  photographerId: string;
 }
 
-export async function initiateMomoPayment(
-  params: MomoPaymentParams
-): Promise<{ status: string; message: string }> {
-  const platformFee = Math.round(params.amount * PLATFORM_FEE_PERCENT);
-
+export async function initiateMomoCharge(
+  params: MomoChargeParams
+): Promise<{ status: string; message: string; mode?: string }> {
+  const endpoint = getMomoEndpoint(params.currency);
+  
   const response = await flutterwaveRequest<{
     status: string;
     message: string;
-    meta: { authorization: { mode: string } };
-  }>('/charges?type=mobile_money_ghana', {
+    meta?: { authorization: { mode: string } };
+  }>(endpoint, {
     method: 'POST',
     body: JSON.stringify({
       tx_ref: params.txRef,
@@ -222,20 +190,36 @@ export async function initiateMomoPayment(
       phone_number: params.phoneNumber,
       network: params.network,
       email: params.email,
-      subaccounts: [
-        {
-          id: params.photographerSubaccountId,
-          transaction_split_ratio: 100 - PLATFORM_FEE_PERCENT * 100,
-        },
-      ],
       meta: {
         event_id: params.eventId,
-        platform_fee: platformFee,
+        photographer_id: params.photographerId,
       },
     }),
   });
 
-  return response;
+  return {
+    status: response.status,
+    message: response.message,
+    mode: response.meta?.authorization?.mode,
+  };
+}
+
+function getMomoEndpoint(currency: string): string {
+  switch (currency) {
+    case 'GHS':
+      return '/charges?type=mobile_money_ghana';
+    case 'UGX':
+      return '/charges?type=mobile_money_uganda';
+    case 'RWF':
+      return '/charges?type=mobile_money_rwanda';
+    case 'ZMW':
+      return '/charges?type=mobile_money_zambia';
+    case 'XAF':
+    case 'XOF':
+      return '/charges?type=mobile_money_franco';
+    default:
+      return '/charges?type=mobile_money_ghana';
+  }
 }
 
 // ============================================
@@ -314,36 +298,92 @@ export async function createRefund(
 }
 
 // ============================================
-// TRANSFERS (Payouts)
+// TRANSFERS / PAYOUTS (To photographer's MoMo or Bank)
 // ============================================
 
-export interface TransferParams {
-  accountBank: string;
-  accountNumber: string;
-  amount: number;
-  currency: string;
-  narration: string;
+export interface MomoTransferParams {
   reference: string;
-  beneficiaryName?: string;
+  amount: number; // in cents
+  currency: string;
+  phoneNumber: string;
+  network: MomoNetwork;
+  beneficiaryName: string;
+  narration: string;
 }
 
-export async function createTransfer(
-  params: TransferParams
-): Promise<{ status: string; message: string; data: { id: number } }> {
+export async function createMomoTransfer(
+  params: MomoTransferParams
+): Promise<{ status: string; message: string; data?: { id: number; status: string } }> {
   const response = await flutterwaveRequest<{
     status: string;
     message: string;
-    data: { id: number };
+    data?: { id: number; status: string };
   }>('/transfers', {
     method: 'POST',
     body: JSON.stringify({
-      account_bank: params.accountBank,
-      account_number: params.accountNumber,
+      account_bank: getMomoBankCode(params.network, params.currency),
+      account_number: params.phoneNumber,
       amount: params.amount / 100,
       currency: params.currency,
       narration: params.narration,
       reference: params.reference,
       beneficiary_name: params.beneficiaryName,
+      meta: {
+        mobile_number: params.phoneNumber,
+        sender: 'FaceFindr',
+      },
+    }),
+  });
+
+  return response;
+}
+
+function getMomoBankCode(network: MomoNetwork, currency: string): string {
+  // Bank codes for mobile money in different countries
+  if (currency === 'GHS') {
+    switch (network) {
+      case 'MTN':
+        return 'MTN';
+      case 'VODAFONE':
+        return 'VDF';
+      case 'TIGO':
+      case 'AIRTEL':
+        return 'ATL';
+      default:
+        return 'MTN';
+    }
+  }
+  // Add more countries as needed
+  return network;
+}
+
+export interface BankTransferParams {
+  reference: string;
+  amount: number; // in cents
+  currency: string;
+  bankCode: string;
+  accountNumber: string;
+  accountName: string;
+  narration: string;
+}
+
+export async function createBankTransfer(
+  params: BankTransferParams
+): Promise<{ status: string; message: string; data?: { id: number; status: string } }> {
+  const response = await flutterwaveRequest<{
+    status: string;
+    message: string;
+    data?: { id: number; status: string };
+  }>('/transfers', {
+    method: 'POST',
+    body: JSON.stringify({
+      account_bank: params.bankCode,
+      account_number: params.accountNumber,
+      amount: params.amount / 100,
+      currency: params.currency,
+      narration: params.narration,
+      reference: params.reference,
+      beneficiary_name: params.accountName,
     }),
   });
 
@@ -415,4 +455,71 @@ export function calculateFees(
   const netAmount = grossAmount - platformFee - providerFee;
 
   return { platformFee, providerFee, netAmount };
+}
+
+// ============================================
+// SUBACCOUNT (For formal businesses only)
+// ============================================
+
+export interface CreateSubaccountParams {
+  businessName: string;
+  email: string;
+  country: string;
+  accountBank: string;
+  accountNumber: string;
+  splitType: 'percentage' | 'flat';
+  splitValue: number;
+  photographerId: string;
+}
+
+export interface FlutterwaveSubaccount {
+  id: number;
+  subaccount_id: string;
+  account_bank: string;
+  account_number: string;
+  business_name: string;
+  country: string;
+  split_type: string;
+  split_value: number;
+  created_at: string;
+}
+
+export async function createSubaccount(
+  params: CreateSubaccountParams
+): Promise<FlutterwaveSubaccount> {
+  const response = await flutterwaveRequest<{
+    status: string;
+    message: string;
+    data: FlutterwaveSubaccount;
+  }>('/subaccounts', {
+    method: 'POST',
+    body: JSON.stringify({
+      account_bank: params.accountBank,
+      account_number: params.accountNumber,
+      business_name: params.businessName,
+      business_email: params.email,
+      country: params.country,
+      split_type: params.splitType,
+      split_value: params.splitValue,
+      business_mobile: '',
+      meta: [{ photographer_id: params.photographerId }],
+    }),
+  });
+
+  return response.data;
+}
+
+export async function getSubaccount(subaccountId: string): Promise<FlutterwaveSubaccount> {
+  const response = await flutterwaveRequest<{
+    status: string;
+    data: FlutterwaveSubaccount;
+  }>(`/subaccounts/${subaccountId}`);
+
+  return response.data;
+}
+
+export async function deleteSubaccount(subaccountId: string): Promise<void> {
+  await flutterwaveRequest(`/subaccounts/${subaccountId}`, {
+    method: 'DELETE',
+  });
 }

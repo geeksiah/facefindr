@@ -5,6 +5,7 @@ import { ThemeProvider } from 'next-themes';
 import { useState } from 'react';
 
 import { AuthProvider } from './auth-provider';
+import { ToastProvider, OfflineDetector } from '@/components/ui';
 
 interface ProvidersProps {
   children: React.ReactNode;
@@ -31,7 +32,10 @@ export function Providers({ children }: ProvidersProps) {
         enableSystem
         disableTransitionOnChange
       >
-        <AuthProvider>{children}</AuthProvider>
+        <ToastProvider>
+          <AuthProvider>{children}</AuthProvider>
+          <OfflineDetector />
+        </ToastProvider>
       </ThemeProvider>
     </QueryClientProvider>
   );

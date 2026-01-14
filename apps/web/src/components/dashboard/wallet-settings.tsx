@@ -12,9 +12,11 @@ import {
   Loader2,
   Building2,
   Globe,
+  Smartphone,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useToast, useConfirm } from '@/components/ui/toast';
 
 interface WalletData {
   id: string;
@@ -62,6 +64,12 @@ const PROVIDER_INFO = {
     icon: Wallet,
     color: 'bg-blue-500',
   },
+  momo: {
+    name: 'Mobile Money',
+    description: 'Receive payouts to your mobile wallet (no business registration)',
+    icon: Smartphone,
+    color: 'bg-yellow-500',
+  },
 };
 
 export function WalletSettings() {
@@ -70,14 +78,19 @@ export function WalletSettings() {
   const [loading, setLoading] = useState(true);
   const [onboarding, setOnboarding] = useState<string | null>(null);
   const [showAddWallet, setShowAddWallet] = useState(false);
-  const [newWalletProvider, setNewWalletProvider] = useState<'stripe' | 'flutterwave' | 'paypal' | null>(null);
+  const [newWalletProvider, setNewWalletProvider] = useState<'stripe' | 'flutterwave' | 'paypal' | 'momo' | null>(null);
   const [formData, setFormData] = useState({
-    country: 'US',
+    country: 'GH',
     businessName: '',
     accountBank: '',
     accountNumber: '',
     paypalEmail: '',
+    momoNetwork: 'MTN',
+    momoNumber: '',
   });
+  
+  const toast = useToast();
+  const { confirm, ConfirmDialog } = useConfirm();
 
   useEffect(() => {
     fetchWallets();
@@ -99,7 +112,7 @@ export function WalletSettings() {
     }
   };
 
-  const handleOnboard = async (provider: 'stripe' | 'flutterwave' | 'paypal') => {
+  const handleOnboard = async (provider: 'stripe' | 'flutterwave' | 'paypal' | 'momo') => {
     setOnboarding(provider);
 
     try {
@@ -113,6 +126,8 @@ export function WalletSettings() {
           accountBank: formData.accountBank,
           accountNumber: formData.accountNumber,
           paypalEmail: formData.paypalEmail,
+          momoNetwork: formData.momoNetwork,
+          momoNumber: formData.momoNumber,
         }),
       });
 
@@ -130,17 +145,26 @@ export function WalletSettings() {
         await fetchWallets();
         setShowAddWallet(false);
         setNewWalletProvider(null);
+        toast.success('Payment method added', 'You can now receive payments');
       }
     } catch (error) {
       console.error('Onboarding error:', error);
-      alert(error instanceof Error ? error.message : 'Failed to onboard');
+      toast.error('Failed to add payment method', error instanceof Error ? error.message : 'Please try again');
     } finally {
       setOnboarding(null);
     }
   };
 
   const handleDeleteWallet = async (walletId: string) => {
-    if (!confirm('Are you sure you want to remove this payment method?')) {
+    const confirmed = await confirm({
+      title: 'Remove payment method?',
+      message: 'This will disconnect this payment method from your account. You can add it again later.',
+      confirmLabel: 'Remove',
+      cancelLabel: 'Keep',
+      variant: 'destructive',
+    });
+
+    if (!confirmed) {
       return;
     }
 
@@ -151,12 +175,14 @@ export function WalletSettings() {
 
       if (response.ok) {
         await fetchWallets();
+        toast.success('Payment method removed');
       } else {
         const data = await response.json();
-        alert(data.error || 'Failed to delete wallet');
+        toast.error('Failed to remove', data.error || 'Please try again');
       }
     } catch (error) {
       console.error('Delete error:', error);
+      toast.error('Failed to remove', 'An unexpected error occurred');
     }
   };
 
@@ -421,6 +447,37 @@ export function WalletSettings() {
                     required
                   />
                 )}
+
+                {/* Mobile Money specific fields */}
+                {newWalletProvider === 'momo' && (
+                  <>
+                    <div>
+                      <label className="text-sm font-medium text-foreground mb-1 block">
+                        Mobile Network
+                      </label>
+                      <select
+                        value={formData.momoNetwork}
+                        onChange={(e) => setFormData({ ...formData, momoNetwork: e.target.value })}
+                        className="w-full rounded-xl border border-input bg-background px-4 py-3 text-sm"
+                      >
+                        <option value="MTN">MTN Mobile Money</option>
+                        <option value="VODAFONE">Vodafone Cash</option>
+                        <option value="AIRTEL">AirtelTigo Money</option>
+                      </select>
+                    </div>
+                    <Input
+                      label="Mobile Number"
+                      type="tel"
+                      value={formData.momoNumber}
+                      onChange={(e) => setFormData({ ...formData, momoNumber: e.target.value })}
+                      placeholder="0241234567"
+                      required
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Payouts will be sent directly to this mobile money wallet. No business registration required.
+                    </p>
+                  </>
+                )}
               </div>
 
               <div className="flex gap-3 pt-2">
@@ -468,6 +525,9 @@ export function WalletSettings() {
           </p>
         </div>
       )}
+
+      {/* Confirm Dialog */}
+      {ConfirmDialog}
     </div>
   );
 }
