@@ -1,25 +1,296 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { User, Mail, Lock, Bell, Shield, Trash2, Camera, CreditCard } from 'lucide-react';
+import Image from 'next/image';
+import { 
+  User, 
+  Lock, 
+  Bell, 
+  Shield, 
+  Camera, 
+  CreditCard,
+  Loader2,
+  Check,
+  X,
+  Eye,
+  EyeOff,
+  Globe,
+  Instagram,
+  Twitter,
+  Facebook,
+  MapPin,
+  Phone,
+  AlertCircle,
+} from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { WalletSettings } from '@/components/dashboard/wallet-settings';
+import { useToast } from '@/components/ui';
+
+interface Profile {
+  id: string;
+  email: string;
+  displayName: string;
+  businessName: string;
+  bio: string;
+  profilePhotoUrl: string | null;
+  website: string;
+  instagram: string;
+  twitter: string;
+  facebook: string;
+  phone: string;
+  location: string;
+  timezone: string;
+}
+
+interface NotificationSettings {
+  emailEnabled: boolean;
+  smsEnabled: boolean;
+  pushEnabled: boolean;
+  newPhotoSale: boolean;
+  payoutCompleted: boolean;
+  newEventView: boolean;
+  weeklyDigest: boolean;
+  monthlyReport: boolean;
+  newFollower: boolean;
+  eventReminder: boolean;
+  lowBalance: boolean;
+  subscriptionReminder: boolean;
+  marketingEmails: boolean;
+}
 
 export default function SettingsPage() {
   const searchParams = useSearchParams();
+  const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('profile');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  
+  // Profile state
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profileForm, setProfileForm] = useState({
+    displayName: '',
+    businessName: '',
+    bio: '',
+    website: '',
+    instagram: '',
+    twitter: '',
+    facebook: '',
+    phone: '',
+    location: '',
+  });
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Handle URL params for tab switching (e.g., after Stripe onboarding)
+  // Security state
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+  });
+  const [showPasswords, setShowPasswords] = useState({
+    current: false,
+    new: false,
+    confirm: false,
+  });
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+
+  // Notification state
+  const [notifications, setNotifications] = useState<NotificationSettings>({
+    emailEnabled: true,
+    smsEnabled: false,
+    pushEnabled: true,
+    newPhotoSale: true,
+    payoutCompleted: true,
+    newEventView: false,
+    weeklyDigest: true,
+    monthlyReport: true,
+    newFollower: true,
+    eventReminder: true,
+    lowBalance: true,
+    subscriptionReminder: true,
+    marketingEmails: false,
+  });
+  const [isSavingNotifications, setIsSavingNotifications] = useState(false);
+
+  // Handle URL params for tab switching
   useEffect(() => {
     const tab = searchParams.get('tab');
     if (tab) {
       setActiveTab(tab);
     }
   }, [searchParams]);
+
+  // Load profile and settings
+  useEffect(() => {
+    async function loadData() {
+      try {
+        // Load profile
+        const profileRes = await fetch('/api/photographer/profile');
+        if (profileRes.ok) {
+          const data = await profileRes.json();
+          setProfile(data.profile);
+          setProfileForm({
+            displayName: data.profile.displayName || '',
+            businessName: data.profile.businessName || '',
+            bio: data.profile.bio || '',
+            website: data.profile.website || '',
+            instagram: data.profile.instagram || '',
+            twitter: data.profile.twitter || '',
+            facebook: data.profile.facebook || '',
+            phone: data.profile.phone || '',
+            location: data.profile.location || '',
+          });
+        }
+
+        // Load notification settings
+        const notifRes = await fetch('/api/photographer/notification-settings');
+        if (notifRes.ok) {
+          const data = await notifRes.json();
+          setNotifications(data.settings);
+        }
+      } catch (error) {
+        console.error('Failed to load settings:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    loadData();
+  }, []);
+
+  // Save profile
+  const handleSaveProfile = async () => {
+    setIsSaving(true);
+    try {
+      const response = await fetch('/api/photographer/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profileForm),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setProfile(prev => prev ? { ...prev, ...data.profile } : null);
+        toast({ type: 'success', message: 'Profile updated successfully' });
+      } else {
+        const data = await response.json();
+        toast({ type: 'error', message: data.error || 'Failed to update profile' });
+      }
+    } catch {
+      toast({ type: 'error', message: 'Failed to update profile' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Handle photo upload
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingPhoto(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/photographer/profile-photo', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setProfile(prev => prev ? { ...prev, profilePhotoUrl: data.photoUrl } : null);
+        toast({ type: 'success', message: 'Photo uploaded successfully' });
+      } else {
+        const data = await response.json();
+        toast({ type: 'error', message: data.error || 'Failed to upload photo' });
+      }
+    } catch {
+      toast({ type: 'error', message: 'Failed to upload photo' });
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
+
+  // Remove photo
+  const handleRemovePhoto = async () => {
+    try {
+      const response = await fetch('/api/photographer/profile-photo', {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        setProfile(prev => prev ? { ...prev, profilePhotoUrl: null } : null);
+        toast({ type: 'success', message: 'Photo removed' });
+      }
+    } catch {
+      toast({ type: 'error', message: 'Failed to remove photo' });
+    }
+  };
+
+  // Change password
+  const handleChangePassword = async () => {
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      toast({ type: 'error', message: 'Passwords do not match' });
+      return;
+    }
+
+    if (passwordForm.newPassword.length < 8) {
+      toast({ type: 'error', message: 'Password must be at least 8 characters' });
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      const response = await fetch('/api/auth/password', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          currentPassword: passwordForm.currentPassword,
+          newPassword: passwordForm.newPassword,
+        }),
+      });
+
+      if (response.ok) {
+        setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+        toast({ type: 'success', message: 'Password changed successfully' });
+      } else {
+        const data = await response.json();
+        toast({ type: 'error', message: data.error || 'Failed to change password' });
+      }
+    } catch {
+      toast({ type: 'error', message: 'Failed to change password' });
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
+  // Save notification settings
+  const handleSaveNotifications = async () => {
+    setIsSavingNotifications(true);
+    try {
+      const response = await fetch('/api/photographer/notification-settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(notifications),
+      });
+
+      if (response.ok) {
+        toast({ type: 'success', message: 'Notification settings saved' });
+      } else {
+        toast({ type: 'error', message: 'Failed to save settings' });
+      }
+    } catch {
+      toast({ type: 'error', message: 'Failed to save settings' });
+    } finally {
+      setIsSavingNotifications(false);
+    }
+  };
 
   const tabs = [
     { id: 'profile', label: 'Profile', icon: User },
@@ -28,6 +299,14 @@ export default function SettingsPage() {
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'privacy', label: 'Privacy', icon: Shield },
   ];
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Loader2 className="h-8 w-8 animate-spin text-accent" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -45,7 +324,7 @@ export default function SettingsPage() {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 whitespace-nowrap ${
               activeTab === tab.id
                 ? 'bg-foreground text-background'
                 : 'text-secondary hover:bg-muted hover:text-foreground'
@@ -65,18 +344,58 @@ export default function SettingsPage() {
             <h2 className="font-semibold text-foreground mb-4">Profile Photo</h2>
             <div className="flex items-center gap-6">
               <div className="relative">
-                <div className="h-20 w-20 rounded-full bg-accent/10 flex items-center justify-center">
-                  <User className="h-10 w-10 text-accent" />
-                </div>
-                <button className="absolute -bottom-1 -right-1 h-8 w-8 rounded-full bg-foreground flex items-center justify-center">
-                  <Camera className="h-4 w-4 text-background" />
+                {profile?.profilePhotoUrl ? (
+                  <Image
+                    src={profile.profilePhotoUrl}
+                    alt="Profile"
+                    width={80}
+                    height={80}
+                    className="h-20 w-20 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="h-20 w-20 rounded-full bg-accent/10 flex items-center justify-center">
+                    <User className="h-10 w-10 text-accent" />
+                  </div>
+                )}
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploadingPhoto}
+                  className="absolute -bottom-1 -right-1 h-8 w-8 rounded-full bg-foreground flex items-center justify-center hover:scale-105 transition-transform disabled:opacity-50"
+                >
+                  {isUploadingPhoto ? (
+                    <Loader2 className="h-4 w-4 text-background animate-spin" />
+                  ) : (
+                    <Camera className="h-4 w-4 text-background" />
+                  )}
                 </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={handlePhotoUpload}
+                  className="hidden"
+                />
               </div>
-              <div>
-                <Button variant="outline" size="sm">
+              <div className="space-y-2">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploadingPhoto}
+                >
                   Upload Photo
                 </Button>
-                <p className="mt-2 text-xs text-muted-foreground">
+                {profile?.profilePhotoUrl && (
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={handleRemovePhoto}
+                    className="text-destructive hover:text-destructive"
+                  >
+                    Remove
+                  </Button>
+                )}
+                <p className="text-xs text-muted-foreground">
                   JPG, PNG or WebP. Max 2MB.
                 </p>
               </div>
@@ -86,111 +405,315 @@ export default function SettingsPage() {
           {/* Basic Info */}
           <div className="rounded-2xl border border-border bg-card p-6">
             <h2 className="font-semibold text-foreground mb-4">Basic Information</h2>
-            <div className="space-y-4 max-w-md">
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">
-                  Display Name
-                </label>
-                <Input placeholder="Your name" defaultValue="" />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Input
+                label="Display Name"
+                value={profileForm.displayName}
+                onChange={(e) => setProfileForm(prev => ({ ...prev, displayName: e.target.value }))}
+                placeholder="Your name"
+              />
+              <Input
+                label="Business Name"
+                value={profileForm.businessName}
+                onChange={(e) => setProfileForm(prev => ({ ...prev, businessName: e.target.value }))}
+                placeholder="Studio or business name"
+              />
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-medium text-foreground mb-2">Bio</label>
+                <textarea
+                  value={profileForm.bio}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, bio: e.target.value }))}
+                  placeholder="Tell people about yourself and your photography..."
+                  rows={3}
+                  className="w-full rounded-xl border border-border bg-background px-4 py-3 text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 transition-all duration-200 resize-none"
+                />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">
-                  Business Name
-                </label>
-                <Input placeholder="Your business name (optional)" />
+              <div className="flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-secondary" />
+                <Input
+                  label="Location"
+                  value={profileForm.location}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, location: e.target.value }))}
+                  placeholder="City, Country"
+                  className="flex-1"
+                />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">
-                  Email
-                </label>
-                <div className="relative">
-                  <Mail className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input placeholder="you@example.com" className="pl-11" disabled />
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Contact support to change your email.
-                </p>
+              <div className="flex items-center gap-2">
+                <Phone className="h-4 w-4 text-secondary" />
+                <Input
+                  label="Phone"
+                  value={profileForm.phone}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, phone: e.target.value }))}
+                  placeholder="+1 234 567 8900"
+                  className="flex-1"
+                />
               </div>
-              <Button variant="primary">Save Changes</Button>
             </div>
+          </div>
+
+          {/* Social Links */}
+          <div className="rounded-2xl border border-border bg-card p-6">
+            <h2 className="font-semibold text-foreground mb-4">Social Links</h2>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="flex items-center gap-2">
+                <Globe className="h-4 w-4 text-secondary" />
+                <Input
+                  value={profileForm.website}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, website: e.target.value }))}
+                  placeholder="https://yourwebsite.com"
+                  className="flex-1"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Instagram className="h-4 w-4 text-secondary" />
+                <Input
+                  value={profileForm.instagram}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, instagram: e.target.value }))}
+                  placeholder="@username"
+                  className="flex-1"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Twitter className="h-4 w-4 text-secondary" />
+                <Input
+                  value={profileForm.twitter}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, twitter: e.target.value }))}
+                  placeholder="@username"
+                  className="flex-1"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Facebook className="h-4 w-4 text-secondary" />
+                <Input
+                  value={profileForm.facebook}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, facebook: e.target.value }))}
+                  placeholder="facebook.com/username"
+                  className="flex-1"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Save Button */}
+          <div className="flex justify-end">
+            <Button onClick={handleSaveProfile} disabled={isSaving}>
+              {isSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Check className="h-4 w-4 mr-2" />
+                  Save Changes
+                </>
+              )}
+            </Button>
           </div>
         </div>
       )}
 
-      {/* Payment Settings */}
-      {activeTab === 'payments' && (
-        <div className="max-w-2xl">
-          <div className="mb-6">
-            <h2 className="font-semibold text-foreground">Payment Settings</h2>
-            <p className="text-sm text-secondary mt-1">
-              Connect payment providers to receive earnings from photo sales.
-            </p>
-          </div>
-          <WalletSettings />
-        </div>
-      )}
+      {/* Payments Settings */}
+      {activeTab === 'payments' && <WalletSettings />}
 
       {/* Security Settings */}
       {activeTab === 'security' && (
         <div className="space-y-6">
+          {/* Email */}
           <div className="rounded-2xl border border-border bg-card p-6">
-            <h2 className="font-semibold text-foreground mb-4">Change Password</h2>
-            <div className="space-y-4 max-w-md">
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">
-                  Current Password
-                </label>
-                <Input type="password" placeholder="••••••••" />
+            <h2 className="font-semibold text-foreground mb-4">Email Address</h2>
+            <div className="flex items-center gap-4">
+              <div className="flex-1">
+                <p className="text-foreground">{profile?.email}</p>
+                <p className="text-sm text-secondary">Your email is verified</p>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">
-                  New Password
-                </label>
-                <Input type="password" placeholder="••••••••" />
+              <div className="flex items-center gap-2 text-success">
+                <Check className="h-4 w-4" />
+                <span className="text-sm font-medium">Verified</span>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">
-                  Confirm New Password
-                </label>
-                <Input type="password" placeholder="••••••••" />
-              </div>
-              <Button variant="primary">Update Password</Button>
             </div>
           </div>
 
+          {/* Change Password */}
           <div className="rounded-2xl border border-border bg-card p-6">
-            <h2 className="font-semibold text-foreground mb-2">Two-Factor Authentication</h2>
-            <p className="text-sm text-secondary mb-4">
-              Add an extra layer of security to your account.
-            </p>
-            <Button variant="outline">Enable 2FA</Button>
+            <h2 className="font-semibold text-foreground mb-4">Change Password</h2>
+            <div className="space-y-4 max-w-md">
+              <div className="relative">
+                <Input
+                  label="Current Password"
+                  type={showPasswords.current ? 'text' : 'password'}
+                  value={passwordForm.currentPassword}
+                  onChange={(e) => setPasswordForm(prev => ({ ...prev, currentPassword: e.target.value }))}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPasswords(prev => ({ ...prev, current: !prev.current }))}
+                  className="absolute right-3 top-9 text-secondary hover:text-foreground"
+                >
+                  {showPasswords.current ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              <div className="relative">
+                <Input
+                  label="New Password"
+                  type={showPasswords.new ? 'text' : 'password'}
+                  value={passwordForm.newPassword}
+                  onChange={(e) => setPasswordForm(prev => ({ ...prev, newPassword: e.target.value }))}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPasswords(prev => ({ ...prev, new: !prev.new }))}
+                  className="absolute right-3 top-9 text-secondary hover:text-foreground"
+                >
+                  {showPasswords.new ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              <div className="relative">
+                <Input
+                  label="Confirm New Password"
+                  type={showPasswords.confirm ? 'text' : 'password'}
+                  value={passwordForm.confirmPassword}
+                  onChange={(e) => setPasswordForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                  error={passwordForm.confirmPassword && passwordForm.newPassword !== passwordForm.confirmPassword ? 'Passwords do not match' : undefined}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPasswords(prev => ({ ...prev, confirm: !prev.confirm }))}
+                  className="absolute right-3 top-9 text-secondary hover:text-foreground"
+                >
+                  {showPasswords.confirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              <Button 
+                onClick={handleChangePassword} 
+                disabled={isChangingPassword || !passwordForm.currentPassword || !passwordForm.newPassword}
+              >
+                {isChangingPassword ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Changing...
+                  </>
+                ) : (
+                  'Change Password'
+                )}
+              </Button>
+            </div>
+          </div>
+
+          {/* Two-Factor Auth */}
+          <div className="rounded-2xl border border-border bg-card p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="font-semibold text-foreground">Two-Factor Authentication</h2>
+                <p className="text-sm text-secondary mt-1">
+                  Add an extra layer of security to your account
+                </p>
+              </div>
+              <Button variant="outline">Enable 2FA</Button>
+            </div>
+          </div>
+
+          {/* Active Sessions */}
+          <div className="rounded-2xl border border-border bg-card p-6">
+            <h2 className="font-semibold text-foreground mb-4">Active Sessions</h2>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between p-3 rounded-xl bg-muted/50">
+                <div>
+                  <p className="font-medium text-foreground">Current Session</p>
+                  <p className="text-sm text-secondary">Chrome on Windows</p>
+                </div>
+                <span className="text-xs text-success font-medium">Active now</span>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
       {/* Notification Settings */}
       {activeTab === 'notifications' && (
-        <div className="rounded-2xl border border-border bg-card p-6">
-          <h2 className="font-semibold text-foreground mb-4">Email Notifications</h2>
-          <div className="space-y-4">
-            {[
-              { id: 'sales', label: 'New photo sales', description: 'Get notified when someone purchases your photos', defaultChecked: true },
-              { id: 'activity', label: 'Event activity', description: 'Updates about your event views and engagement', defaultChecked: true },
-              { id: 'payouts', label: 'Payout updates', description: 'Get notified when payouts are processed', defaultChecked: true },
-              { id: 'marketing', label: 'Marketing updates', description: 'Tips, features, and promotional offers', defaultChecked: false },
-            ].map((item) => (
-              <div key={item.id} className="flex items-center justify-between py-3">
-                <div className="flex-1 pr-4">
-                  <p className="font-medium text-foreground">{item.label}</p>
-                  <p className="text-sm text-muted-foreground">{item.description}</p>
+        <div className="space-y-6">
+          {/* Channels */}
+          <div className="rounded-2xl border border-border bg-card p-6">
+            <h2 className="font-semibold text-foreground mb-4">Notification Channels</h2>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-foreground">Email Notifications</p>
+                  <p className="text-sm text-secondary">Receive notifications via email</p>
                 </div>
-                <Switch 
-                  id={item.id} 
-                  defaultChecked={item.defaultChecked}
-                  onCheckedChange={(checked) => console.log(`${item.id}: ${checked}`)}
+                <Switch
+                  checked={notifications.emailEnabled}
+                  onChange={(checked) => setNotifications(prev => ({ ...prev, emailEnabled: checked }))}
                 />
               </div>
-            ))}
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-foreground">SMS Notifications</p>
+                  <p className="text-sm text-secondary">Receive notifications via SMS</p>
+                </div>
+                <Switch
+                  checked={notifications.smsEnabled}
+                  onChange={(checked) => setNotifications(prev => ({ ...prev, smsEnabled: checked }))}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-foreground">Push Notifications</p>
+                  <p className="text-sm text-secondary">Receive browser push notifications</p>
+                </div>
+                <Switch
+                  checked={notifications.pushEnabled}
+                  onChange={(checked) => setNotifications(prev => ({ ...prev, pushEnabled: checked }))}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Notification Types */}
+          <div className="rounded-2xl border border-border bg-card p-6">
+            <h2 className="font-semibold text-foreground mb-4">Notification Types</h2>
+            <div className="space-y-4">
+              {[
+                { key: 'newPhotoSale', label: 'New Photo Sale', desc: 'When someone purchases your photos' },
+                { key: 'payoutCompleted', label: 'Payout Completed', desc: 'When a payout is processed' },
+                { key: 'newEventView', label: 'New Event Views', desc: 'When someone views your event' },
+                { key: 'weeklyDigest', label: 'Weekly Digest', desc: 'Weekly summary of your activity' },
+                { key: 'monthlyReport', label: 'Monthly Report', desc: 'Monthly earnings and analytics' },
+                { key: 'newFollower', label: 'New Follower', desc: 'When someone follows you' },
+                { key: 'eventReminder', label: 'Event Reminders', desc: 'Reminders for upcoming events' },
+                { key: 'lowBalance', label: 'Low Balance Alert', desc: 'When your wallet balance is low' },
+                { key: 'subscriptionReminder', label: 'Subscription Reminder', desc: 'Before your subscription renews' },
+                { key: 'marketingEmails', label: 'Marketing & Updates', desc: 'Tips, features, and promotions' },
+              ].map((item) => (
+                <div key={item.key} className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium text-foreground">{item.label}</p>
+                    <p className="text-sm text-secondary">{item.desc}</p>
+                  </div>
+                  <Switch
+                    checked={notifications[item.key as keyof NotificationSettings] as boolean}
+                    onChange={(checked) => setNotifications(prev => ({ ...prev, [item.key]: checked }))}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Save Button */}
+          <div className="flex justify-end">
+            <Button onClick={handleSaveNotifications} disabled={isSavingNotifications}>
+              {isSavingNotifications ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Check className="h-4 w-4 mr-2" />
+                  Save Preferences
+                </>
+              )}
+            </Button>
           </div>
         </div>
       )}
@@ -198,26 +721,56 @@ export default function SettingsPage() {
       {/* Privacy Settings */}
       {activeTab === 'privacy' && (
         <div className="space-y-6">
+          {/* Data & Privacy */}
           <div className="rounded-2xl border border-border bg-card p-6">
             <h2 className="font-semibold text-foreground mb-4">Data & Privacy</h2>
             <div className="space-y-4">
-              <Button variant="outline">
-                Download My Data
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                Request a copy of all your data including photos, events, and account information.
-              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-foreground">Profile Visibility</p>
+                  <p className="text-sm text-secondary">Allow others to find and view your profile</p>
+                </div>
+                <Switch defaultChecked />
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-foreground">Show in Search</p>
+                  <p className="text-sm text-secondary">Appear in photographer search results</p>
+                </div>
+                <Switch defaultChecked />
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-foreground">Analytics Sharing</p>
+                  <p className="text-sm text-secondary">Help improve FaceFindr with anonymous usage data</p>
+                </div>
+                <Switch defaultChecked />
+              </div>
             </div>
           </div>
 
-          <div className="rounded-2xl border border-destructive/50 bg-destructive/5 p-6">
-            <div className="flex items-start gap-4">
-              <div className="rounded-xl bg-destructive/10 p-2">
-                <Trash2 className="h-5 w-5 text-destructive" />
-              </div>
+          {/* Export Data */}
+          <div className="rounded-2xl border border-border bg-card p-6">
+            <div className="flex items-center justify-between">
               <div>
-                <h2 className="font-semibold text-foreground">Delete Account</h2>
-                <p className="mt-1 text-sm text-secondary">
+                <h2 className="font-semibold text-foreground">Export Your Data</h2>
+                <p className="text-sm text-secondary mt-1">
+                  Download a copy of all your data in JSON format
+                </p>
+              </div>
+              <Button variant="outline">Export Data</Button>
+            </div>
+          </div>
+
+          {/* Delete Account */}
+          <div className="rounded-2xl border border-destructive/20 bg-destructive/5 p-6">
+            <div className="flex items-start gap-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-destructive/10">
+                <AlertCircle className="h-5 w-5 text-destructive" />
+              </div>
+              <div className="flex-1">
+                <h2 className="font-semibold text-destructive">Delete Account</h2>
+                <p className="text-sm text-secondary mt-1">
                   Permanently delete your account and all associated data. This action cannot be undone.
                 </p>
                 <Button variant="destructive" size="sm" className="mt-4">
