@@ -20,6 +20,7 @@ import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { logout } from '@/app/(auth)/actions';
 import { Logo } from '@/components/ui/logo';
+import { useConfirm } from '@/components/ui/toast';
 
 // ============================================
 // TYPES
@@ -29,6 +30,7 @@ interface SidebarUser {
   email: string;
   displayName: string;
   profilePhotoUrl?: string | null;
+  faceTag?: string | null;
   plan: 'free' | 'starter' | 'pro' | 'studio';
 }
 
@@ -102,9 +104,20 @@ function PlanBadge({ plan }: { plan: string }) {
 export function DashboardSidebar({ user }: DashboardSidebarProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { confirm, ConfirmDialog } = useConfirm();
 
   const handleLogout = async () => {
-    await logout();
+    const confirmed = await confirm({
+      title: 'Sign Out',
+      message: 'Are you sure you want to sign out? Any unsaved changes will be lost.',
+      confirmLabel: 'Sign Out',
+      cancelLabel: 'Stay',
+      variant: 'destructive',
+    });
+    
+    if (confirmed) {
+      await logout();
+    }
   };
 
   // Check if a nav item is active
@@ -170,6 +183,9 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
           </div>
           <div className="flex-1 min-w-0">
             <p className="truncate text-sm font-medium text-foreground">{user.displayName}</p>
+            {user.faceTag && (
+              <p className="truncate text-xs font-mono text-accent">{user.faceTag}</p>
+            )}
             <p className="truncate text-xs text-muted-foreground">{user.email}</p>
           </div>
         </div>
@@ -262,6 +278,9 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 border-r border-border bg-card lg:block">
         <SidebarContent />
       </aside>
+
+      {/* Logout Confirmation Dialog */}
+      {ConfirmDialog}
     </>
   );
 }

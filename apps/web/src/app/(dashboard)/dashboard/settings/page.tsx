@@ -37,6 +37,9 @@ interface Profile {
   businessName: string;
   bio: string;
   profilePhotoUrl: string | null;
+  faceTag: string | null;
+  publicProfileSlug: string | null;
+  isPublicProfile: boolean;
   website: string;
   instagram: string;
   twitter: string;
@@ -64,7 +67,7 @@ interface NotificationSettings {
 
 export default function SettingsPage() {
   const searchParams = useSearchParams();
-  const { toast } = useToast();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState('profile');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -184,13 +187,13 @@ export default function SettingsPage() {
       if (response.ok) {
         const data = await response.json();
         setProfile(prev => prev ? { ...prev, ...data.profile } : null);
-        toast({ type: 'success', message: 'Profile updated successfully' });
+        toast.success('Success', 'Profile updated successfully');
       } else {
         const data = await response.json();
-        toast({ type: 'error', message: data.error || 'Failed to update profile' });
+        toast.error('Error', data.error || 'Failed to update profile');
       }
     } catch {
-      toast({ type: 'error', message: 'Failed to update profile' });
+      toast.error('Error', 'Failed to update profile');
     } finally {
       setIsSaving(false);
     }
@@ -214,13 +217,13 @@ export default function SettingsPage() {
       if (response.ok) {
         const data = await response.json();
         setProfile(prev => prev ? { ...prev, profilePhotoUrl: data.photoUrl } : null);
-        toast({ type: 'success', message: 'Photo uploaded successfully' });
+        toast.success('Success', 'Photo uploaded successfully');
       } else {
         const data = await response.json();
-        toast({ type: 'error', message: data.error || 'Failed to upload photo' });
+        toast.error('Error', data.error || 'Failed to upload photo');
       }
     } catch {
-      toast({ type: 'error', message: 'Failed to upload photo' });
+      toast.error('Error', 'Failed to upload photo');
     } finally {
       setIsUploadingPhoto(false);
     }
@@ -235,22 +238,22 @@ export default function SettingsPage() {
 
       if (response.ok) {
         setProfile(prev => prev ? { ...prev, profilePhotoUrl: null } : null);
-        toast({ type: 'success', message: 'Photo removed' });
+        toast.success('Success', 'Photo removed');
       }
     } catch {
-      toast({ type: 'error', message: 'Failed to remove photo' });
+      toast.error('Error', 'Failed to remove photo');
     }
   };
 
   // Change password
   const handleChangePassword = async () => {
     if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-      toast({ type: 'error', message: 'Passwords do not match' });
+      toast.error('Error', 'Passwords do not match');
       return;
     }
 
     if (passwordForm.newPassword.length < 8) {
-      toast({ type: 'error', message: 'Password must be at least 8 characters' });
+      toast.error('Error', 'Password must be at least 8 characters');
       return;
     }
 
@@ -267,13 +270,13 @@ export default function SettingsPage() {
 
       if (response.ok) {
         setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
-        toast({ type: 'success', message: 'Password changed successfully' });
+        toast.success('Success', 'Password changed successfully');
       } else {
         const data = await response.json();
-        toast({ type: 'error', message: data.error || 'Failed to change password' });
+        toast.error('Error', data.error || 'Failed to change password');
       }
     } catch {
-      toast({ type: 'error', message: 'Failed to change password' });
+      toast.error('Error', 'Failed to change password');
     } finally {
       setIsChangingPassword(false);
     }
@@ -290,12 +293,12 @@ export default function SettingsPage() {
       });
 
       if (response.ok) {
-        toast({ type: 'success', message: 'Notification settings saved' });
+        toast.success('Success', 'Notification settings saved');
       } else {
-        toast({ type: 'error', message: 'Failed to save settings' });
+        toast.error('Error', 'Failed to save settings');
       }
     } catch {
-      toast({ type: 'error', message: 'Failed to save settings' });
+      toast.error('Error', 'Failed to save settings');
     } finally {
       setIsSavingNotifications(false);
     }
@@ -409,6 +412,48 @@ export default function SettingsPage() {
                 </p>
               </div>
             </div>
+          </div>
+
+          {/* FaceTag */}
+          <div className="rounded-2xl border border-border bg-card p-6">
+            <h2 className="font-semibold text-foreground mb-4">Your FaceTag</h2>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-lg font-mono font-semibold text-accent">
+                  {profile?.faceTag || 'Not assigned yet'}
+                </p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Share this tag so attendees can find and follow you
+                </p>
+              </div>
+              {profile?.faceTag && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    navigator.clipboard.writeText(profile.faceTag || '');
+                    toast.success('Copied', 'FaceTag copied to clipboard');
+                  }}
+                >
+                  Copy
+                </Button>
+              )}
+            </div>
+            {profile?.isPublicProfile && profile?.publicProfileSlug && (
+              <div className="mt-4 pt-4 border-t border-border">
+                <p className="text-sm text-muted-foreground">
+                  Public profile:{' '}
+                  <a 
+                    href={`/p/${profile.publicProfileSlug}`} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-accent hover:underline"
+                  >
+                    facefindr.com/p/{profile.publicProfileSlug}
+                  </a>
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Basic Info */}
@@ -547,51 +592,72 @@ export default function SettingsPage() {
           <div className="rounded-2xl border border-border bg-card p-6">
             <h2 className="font-semibold text-foreground mb-4">Change Password</h2>
             <div className="space-y-4 max-w-md">
-              <div className="relative">
-                <Input
-                  label="Current Password"
-                  type={showPasswords.current ? 'text' : 'password'}
-                  value={passwordForm.currentPassword}
-                  onChange={(e) => setPasswordForm(prev => ({ ...prev, currentPassword: e.target.value }))}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPasswords(prev => ({ ...prev, current: !prev.current }))}
-                  className="absolute right-3 top-9 text-secondary hover:text-foreground"
-                >
-                  {showPasswords.current ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Current Password
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPasswords.current ? 'text' : 'password'}
+                    value={passwordForm.currentPassword}
+                    onChange={(e) => setPasswordForm(prev => ({ ...prev, currentPassword: e.target.value }))}
+                    className="w-full rounded-xl border border-border bg-background px-4 py-3 pr-12 text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 transition-all duration-200"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPasswords(prev => ({ ...prev, current: !prev.current }))}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-secondary hover:text-foreground transition-colors"
+                  >
+                    {showPasswords.current ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
+                </div>
               </div>
-              <div className="relative">
-                <Input
-                  label="New Password"
-                  type={showPasswords.new ? 'text' : 'password'}
-                  value={passwordForm.newPassword}
-                  onChange={(e) => setPasswordForm(prev => ({ ...prev, newPassword: e.target.value }))}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPasswords(prev => ({ ...prev, new: !prev.new }))}
-                  className="absolute right-3 top-9 text-secondary hover:text-foreground"
-                >
-                  {showPasswords.new ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  New Password
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPasswords.new ? 'text' : 'password'}
+                    value={passwordForm.newPassword}
+                    onChange={(e) => setPasswordForm(prev => ({ ...prev, newPassword: e.target.value }))}
+                    className="w-full rounded-xl border border-border bg-background px-4 py-3 pr-12 text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 transition-all duration-200"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPasswords(prev => ({ ...prev, new: !prev.new }))}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-secondary hover:text-foreground transition-colors"
+                  >
+                    {showPasswords.new ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
+                </div>
               </div>
-              <div className="relative">
-                <Input
-                  label="Confirm New Password"
-                  type={showPasswords.confirm ? 'text' : 'password'}
-                  value={passwordForm.confirmPassword}
-                  onChange={(e) => setPasswordForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
-                  error={passwordForm.confirmPassword && passwordForm.newPassword !== passwordForm.confirmPassword ? 'Passwords do not match' : undefined}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPasswords(prev => ({ ...prev, confirm: !prev.confirm }))}
-                  className="absolute right-3 top-9 text-secondary hover:text-foreground"
-                >
-                  {showPasswords.confirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Confirm New Password
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPasswords.confirm ? 'text' : 'password'}
+                    value={passwordForm.confirmPassword}
+                    onChange={(e) => setPasswordForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                    className={`w-full rounded-xl border bg-background px-4 py-3 pr-12 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 transition-all duration-200 ${
+                      passwordForm.confirmPassword && passwordForm.newPassword !== passwordForm.confirmPassword
+                        ? 'border-destructive focus:border-destructive focus:ring-destructive/20'
+                        : 'border-border focus:border-accent focus:ring-accent/20'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPasswords(prev => ({ ...prev, confirm: !prev.confirm }))}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-secondary hover:text-foreground transition-colors"
+                  >
+                    {showPasswords.confirm ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
+                </div>
+                {passwordForm.confirmPassword && passwordForm.newPassword !== passwordForm.confirmPassword && (
+                  <p className="mt-2 text-sm text-destructive">Passwords do not match</p>
+                )}
               </div>
               <Button 
                 onClick={handleChangePassword} 

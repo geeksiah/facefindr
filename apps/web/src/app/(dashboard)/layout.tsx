@@ -38,6 +38,7 @@ export default async function DashboardLayout({
           email: user.email || '',
           displayName: profile?.display_name || 'Photographer',
           profilePhotoUrl: profile?.profile_photo_url,
+          faceTag: profile?.face_tag,
           plan: profile?.subscriptions?.[0]?.plan_code || 'free',
         }}
       />

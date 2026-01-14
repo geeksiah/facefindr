@@ -13,6 +13,7 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { FaceGuideHead } from './face-guide-head';
+import { useConfirm } from '@/components/ui/toast';
 
 // Face position types
 type FacePosition = 'center' | 'left' | 'right' | 'up' | 'down';
@@ -79,6 +80,8 @@ export function GuidedFaceScanner({
   const [holdProgress, setHoldProgress] = useState(0);
   const [useAutoCapture, setUseAutoCapture] = useState(true);
   const [modelLoaded, setModelLoaded] = useState(false);
+  
+  const { confirm, ConfirmDialog } = useConfirm();
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -466,7 +469,18 @@ export function GuidedFaceScanner({
         {/* Cancel button */}
         {state === 'ready' && (
           <button
-            onClick={() => {
+            onClick={async () => {
+              // Show confirmation if scan is in progress
+              if (captures.length > 0 || currentPositionIndex > 0) {
+                const confirmed = await confirm({
+                  title: 'Cancel Face Scan?',
+                  message: 'Your face scan is in progress. Are you sure you want to cancel? You will need to start over.',
+                  confirmLabel: 'Cancel Scan',
+                  cancelLabel: 'Continue',
+                  variant: 'destructive',
+                });
+                if (!confirmed) return;
+              }
               cleanup();
               onCancel?.();
             }}
@@ -556,6 +570,9 @@ export function GuidedFaceScanner({
 
       {/* Hidden canvas */}
       <canvas ref={canvasRef} className="hidden" />
+
+      {/* Cancel Confirmation Dialog */}
+      {ConfirmDialog}
     </div>
   );
 }

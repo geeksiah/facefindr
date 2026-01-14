@@ -351,6 +351,7 @@ function AddPaymentMethodModal({ onClose, onAdd, initialType }: AddPaymentMethod
   const [type, setType] = useState<'card' | 'mobile_money' | 'paypal' | null>(initialType);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { confirm, ConfirmDialog } = useConfirm();
 
   // Mobile money form state
   const [providers, setProviders] = useState<MobileMoneyProvider[]>([]);
@@ -361,6 +362,24 @@ function AddPaymentMethodModal({ onClose, onAdd, initialType }: AddPaymentMethod
   const [isVerifying, setIsVerifying] = useState(false);
   const [verifiedName, setVerifiedName] = useState<string | null>(null);
   const [verificationError, setVerificationError] = useState<string | null>(null);
+
+  // Check if form has data
+  const hasUnsavedData = step === 'form' && (phoneNumber.length > 0 || selectedProvider || verifiedName);
+
+  // Confirm before closing if there's unsaved data
+  const handleClose = async () => {
+    if (hasUnsavedData) {
+      const confirmed = await confirm({
+        title: 'Discard Changes?',
+        message: 'You have entered payment information that will be lost. Are you sure you want to cancel?',
+        confirmLabel: 'Discard',
+        cancelLabel: 'Continue Editing',
+        variant: 'destructive',
+      });
+      if (!confirmed) return;
+    }
+    onClose();
+  };
 
   // Country options for mobile money
   const countryOptions = [
@@ -547,7 +566,7 @@ function AddPaymentMethodModal({ onClose, onAdd, initialType }: AddPaymentMethod
           height: '100%',
           margin: 0,
         }}
-        onClick={onClose}
+        onClick={handleClose}
       />
       
       {/* Modal */}
@@ -558,7 +577,7 @@ function AddPaymentMethodModal({ onClose, onAdd, initialType }: AddPaymentMethod
             {step === 'select' ? 'Add Payment Method' : `Add ${type === 'card' ? 'Card' : type === 'mobile_money' ? 'Mobile Money' : 'PayPal'}`}
           </h2>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="p-2 rounded-xl text-secondary hover:text-foreground hover:bg-muted transition-all duration-200 hover:scale-105"
           >
             <X className="h-5 w-5" />
@@ -792,6 +811,9 @@ function AddPaymentMethodModal({ onClose, onAdd, initialType }: AddPaymentMethod
           )}
         </div>
       </div>
+
+      {/* Confirmation Dialog */}
+      {ConfirmDialog}
     </div>
   );
 }

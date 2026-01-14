@@ -7,6 +7,7 @@
     "icon": "./assets/icon.png",
     "scheme": "facefindr",
     "userInterfaceStyle": "automatic",
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
@@ -16,8 +17,9 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.facefindr.app",
+      "usePrecompiledReactNative": false,
       "infoPlist": {
-        "NSCameraUsageDescription": "FaceFindr uses your camera to scan your face and find photos of you.",
+        "NSCameraUsageDescription": "FaceFindr uses your camera to scan your face and find photos of you at events.",
         "NSPhotoLibraryUsageDescription": "FaceFindr uses your photo library to upload photos or use a photo for face scanning.",
         "NSFaceIDUsageDescription": "FaceFindr uses Face ID to secure your account."
       }
@@ -28,11 +30,15 @@
         "backgroundColor": "#0ea5e9"
       },
       "package": "com.facefindr.app",
+      "usePrecompiledReactNative": false,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.USE_BIOMETRIC",
-        "android.permission.USE_FINGERPRINT"
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.VIBRATE"
       ]
     },
     "web": {
@@ -45,7 +51,8 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow FaceFindr to access your camera to scan your face."
+          "cameraPermission": "Allow FaceFindr to access your camera to scan your face and find photos.",
+          "microphonePermission": false
         }
       ],
       [
@@ -53,10 +60,23 @@
         {
           "photosPermission": "Allow FaceFindr to access your photos for face scanning or uploading."
         }
-      ]
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#0ea5e9"
+        }
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "your-project-id"
+      }
     }
   }
 }

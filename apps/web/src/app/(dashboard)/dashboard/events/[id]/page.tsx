@@ -7,7 +7,6 @@ import {
   Globe,
   Lock,
   Settings,
-  Share2,
   Image,
   Users,
   Scan,
@@ -20,7 +19,7 @@ import { Button } from '@/components/ui/button';
 import { PhotoUploader } from '@/components/events/photo-uploader';
 import { EventGallery } from '@/components/events/event-gallery';
 import { EventSettings } from '@/components/events/event-settings';
-import { EventSharePanel } from '@/components/events/event-share-panel';
+import { ShareButton } from '@/components/events/share-button';
 import { cn } from '@/lib/utils';
 
 interface EventPageProps {
@@ -123,10 +122,7 @@ export default async function EventPage({ params }: EventPageProps) {
               Settings
             </Link>
           </Button>
-          <Button size="sm">
-            <Share2 className="h-4 w-4 mr-2" />
-            Share
-          </Button>
+          <ShareButton eventId={event.id} />
         </div>
       </div>
 

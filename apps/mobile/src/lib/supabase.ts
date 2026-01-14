@@ -1,24 +1,30 @@
+/**
+ * Supabase Client for Mobile
+ * 
+ * Uses expo-secure-store for secure token storage.
+ */
+
+import 'react-native-url-polyfill/auto';
 import { createClient } from '@supabase/supabase-js';
 import * as SecureStore from 'expo-secure-store';
-
-import type { Database } from '@facefind/shared/types';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 
+// Secure storage adapter for Supabase auth
 const ExpoSecureStoreAdapter = {
-  getItem: (key: string) => {
-    return SecureStore.getItemAsync(key);
+  getItem: async (key: string) => {
+    return await SecureStore.getItemAsync(key);
   },
-  setItem: (key: string, value: string) => {
-    return SecureStore.setItemAsync(key, value);
+  setItem: async (key: string, value: string) => {
+    await SecureStore.setItemAsync(key, value);
   },
-  removeItem: (key: string) => {
-    return SecureStore.deleteItemAsync(key);
+  removeItem: async (key: string) => {
+    await SecureStore.deleteItemAsync(key);
   },
 };
 
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     storage: ExpoSecureStoreAdapter,
     autoRefreshToken: true,
@@ -26,3 +32,5 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
     detectSessionInUrl: false,
   },
 });
+
+export type { Session, User } from '@supabase/supabase-js';

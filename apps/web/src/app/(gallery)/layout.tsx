@@ -7,12 +7,12 @@ import {
   Scan,
   Image as ImageIcon,
   Bell,
-  LogOut,
 } from 'lucide-react';
 
 import { createClient } from '@/lib/supabase/server';
 import { Logo } from '@/components/ui/logo';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
+import { LogoutButton } from '@/components/auth/logout-button';
 
 export default async function GalleryLayout({
   children,
@@ -98,13 +98,7 @@ export default async function GalleryLayout({
             <span className="text-sm text-secondary">Theme</span>
             <ThemeToggle />
           </div>
-          <Link
-            href="/api/auth/logout"
-            className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-secondary transition-colors hover:bg-destructive/10 hover:text-destructive"
-          >
-            <LogOut className="h-5 w-5" />
-            Sign Out
-          </Link>
+          <LogoutButton className="rounded-xl px-4 py-3 w-full" />
         </div>
       </aside>
 
