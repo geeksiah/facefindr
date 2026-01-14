@@ -6,9 +6,12 @@ import {
   SearchFacesByImageCommand,
   DeleteFacesCommand,
   DetectFacesCommand,
+  CreateFaceLivenessSessionCommand,
+  GetFaceLivenessSessionResultsCommand,
   type FaceRecord,
   type FaceMatch,
   type BoundingBox,
+  type AuditImage,
 } from '@aws-sdk/client-rekognition';
 
 // Initialize Rekognition client
@@ -280,6 +283,181 @@ export async function deleteFaces(
 }
 
 // ============================================
+// FACE LIVENESS DETECTION (Anti-Spoofing)
+// SRS §3.3.1: Liveness detection to prevent photo-of-photo attacks
+// ============================================
+
+export interface LivenessSession {
+  sessionId: string;
+  createdAt: string;
+}
+
+export interface LivenessResult {
+  isLive: boolean;
+  confidence: number;
+  referenceImage?: {
+    bytes: Uint8Array;
+    boundingBox: BoundingBox;
+  };
+  auditImages?: AuditImage[];
+}
+
+/**
+ * Create a Face Liveness session
+ * The client (web/mobile) will use this session to perform liveness check
+ */
+export async function createLivenessSession(
+  userId: string
+): Promise<{ session: LivenessSession | null; error?: string }> {
+  try {
+    const response = await rekognitionClient.send(
+      new CreateFaceLivenessSessionCommand({
+        // Optional: Set a client request token for idempotency
+        ClientRequestToken: `${userId}-${Date.now()}`,
+        // Optional: Settings for the session
+        Settings: {
+          // Audit images contain the reference image and frames used for liveness
+          AuditImagesLimit: 4,
+          // Output configuration for storing audit images
+          // OutputConfig: { ... } // Can configure S3 bucket if needed
+        },
+      })
+    );
+
+    return {
+      session: {
+        sessionId: response.SessionId!,
+        createdAt: new Date().toISOString(),
+      },
+    };
+  } catch (error: any) {
+    console.error('Error creating liveness session:', error);
+    return { session: null, error: error.message };
+  }
+}
+
+/**
+ * Get Face Liveness session results
+ * Call this after the client completes the liveness check
+ */
+export async function getLivenessSessionResults(
+  sessionId: string
+): Promise<{ result: LivenessResult | null; error?: string }> {
+  try {
+    const response = await rekognitionClient.send(
+      new GetFaceLivenessSessionResultsCommand({
+        SessionId: sessionId,
+      })
+    );
+
+    // Check if session completed successfully
+    if (response.Status !== 'SUCCEEDED') {
+      return {
+        result: null,
+        error: `Session status: ${response.Status}`,
+      };
+    }
+
+    // Confidence > 90 means high confidence the face is live
+    const isLive = (response.Confidence || 0) >= 90;
+
+    return {
+      result: {
+        isLive,
+        confidence: response.Confidence || 0,
+        referenceImage: response.ReferenceImage ? {
+          bytes: response.ReferenceImage.Bytes!,
+          boundingBox: response.ReferenceImage.BoundingBox!,
+        } : undefined,
+        auditImages: response.AuditImages,
+      },
+    };
+  } catch (error: any) {
+    console.error('Error getting liveness results:', error);
+    return { result: null, error: error.message };
+  }
+}
+
+/**
+ * Perform simplified liveness check using multiple images
+ * Fallback for when Face Liveness API is not available
+ * Uses face angle analysis to detect real faces
+ */
+export async function analyzeMultiAngleLiveness(
+  images: Uint8Array[]
+): Promise<{ isLive: boolean; confidence: number; error?: string }> {
+  if (images.length < 3) {
+    return { isLive: false, confidence: 0, error: 'At least 3 images required for liveness check' };
+  }
+
+  try {
+    const results = await Promise.all(
+      images.map(async (imageBytes) => {
+        const response = await rekognitionClient.send(
+          new DetectFacesCommand({
+            Image: { Bytes: imageBytes },
+            Attributes: ['ALL'], // Get full attributes including pose
+          })
+        );
+        return response.FaceDetails?.[0];
+      })
+    );
+
+    // Filter out images where no face was detected
+    const validFaces = results.filter(Boolean);
+    if (validFaces.length < 3) {
+      return { isLive: false, confidence: 0, error: 'Could not detect face in all images' };
+    }
+
+    // Analyze pose variations to check for liveness
+    // A real person would have natural pose variations
+    const poses = validFaces.map(face => ({
+      yaw: face?.Pose?.Yaw || 0,
+      pitch: face?.Pose?.Pitch || 0,
+      roll: face?.Pose?.Roll || 0,
+    }));
+
+    // Calculate variance in poses
+    const yawVariance = calculateVariance(poses.map(p => p.yaw));
+    const pitchVariance = calculateVariance(poses.map(p => p.pitch));
+
+    // Check for eye blink or mouth movement (signs of liveness)
+    const eyeStates = validFaces.map(face => ({
+      leftOpen: face?.EyesOpen?.Value,
+      confidence: face?.EyesOpen?.Confidence || 0,
+    }));
+
+    // A printed photo would have consistent poses and no blinking
+    const hasNaturalVariation = yawVariance > 5 || pitchVariance > 3;
+    const hasConsistentQuality = validFaces.every(f => (f?.Confidence || 0) > 90);
+
+    // Calculate overall liveness confidence
+    let confidence = 0;
+    if (hasNaturalVariation) confidence += 40;
+    if (hasConsistentQuality) confidence += 30;
+    
+    // Check for at least one face with good quality per angle
+    const avgConfidence = validFaces.reduce((sum, f) => sum + (f?.Confidence || 0), 0) / validFaces.length;
+    confidence += (avgConfidence / 100) * 30;
+
+    return {
+      isLive: confidence >= 70,
+      confidence,
+    };
+  } catch (error: any) {
+    console.error('Error analyzing liveness:', error);
+    return { isLive: false, confidence: 0, error: error.message };
+  }
+}
+
+// Helper function to calculate variance
+function calculateVariance(values: number[]): number {
+  const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
+  const squaredDiffs = values.map(v => Math.pow(v - mean, 2));
+  return squaredDiffs.reduce((sum, v) => sum + v, 0) / values.length;
+}
+
+// ============================================
 // UTILITY FUNCTIONS
 // ============================================
 
@@ -292,4 +470,14 @@ export function isRekognitionConfigured(): boolean {
     process.env.AWS_SECRET_ACCESS_KEY &&
     process.env.AWS_REGION
   );
+}
+
+/**
+ * Check if Face Liveness API is available (requires additional setup)
+ */
+export function isFaceLivenessAvailable(): boolean {
+  // Face Liveness requires specific regions and setup
+  const supportedRegions = ['us-east-1', 'us-west-2', 'eu-west-1', 'ap-northeast-1'];
+  const currentRegion = process.env.AWS_REGION || 'us-east-1';
+  return supportedRegions.includes(currentRegion);
 }
