@@ -7,11 +7,15 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   Switch,
   Alert,
+  TouchableOpacity,
+  StatusBar,
 } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ArrowLeft, Bell } from 'lucide-react-native';
 
 import { Button, Card } from '@/components/ui';
 import { usePushNotifications } from '@/hooks';
@@ -27,6 +31,8 @@ interface NotificationSettings {
 }
 
 export default function NotificationSettingsScreen() {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { profile } = useAuthStore();
   const { isRegistered, expoPushToken, error: pushError } = usePushNotifications();
   
@@ -103,60 +109,93 @@ export default function NotificationSettingsScreen() {
   ];
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
+    <View style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+      
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <ArrowLeft size={24} color={colors.foreground} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Notifications</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+
+      <ScrollView 
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Push Notification Status */}
-        <Card style={styles.statusCard}>
+        <View style={styles.statusCard}>
           <View style={styles.statusRow}>
-            <View style={[styles.statusDot, isRegistered && styles.statusDotActive]} />
-            <Text style={styles.statusText}>
-              {isRegistered
-                ? 'Push notifications enabled'
-                : 'Push notifications disabled'}
-            </Text>
+            <View style={[
+              styles.statusIconContainer,
+              isRegistered && styles.statusIconActive
+            ]}>
+              <Bell size={20} color={isRegistered ? '#fff' : colors.secondary} />
+            </View>
+            <View style={styles.statusInfo}>
+              <Text style={styles.statusText}>
+                {isRegistered
+                  ? 'Push notifications enabled'
+                  : 'Push notifications disabled'}
+              </Text>
+              {pushError && (
+                <Text style={styles.errorText}>{pushError}</Text>
+              )}
+              {!isRegistered && (
+                <Text style={styles.hintText}>
+                  Enable in device settings to receive updates
+                </Text>
+              )}
+            </View>
           </View>
-          {pushError && (
-            <Text style={styles.errorText}>{pushError}</Text>
-          )}
-          {!isRegistered && (
-            <Text style={styles.hintText}>
-              Enable push notifications in your device settings to receive updates.
-            </Text>
-          )}
-        </Card>
+        </View>
 
         {/* Notification Options */}
         <Text style={styles.sectionTitle}>Notification Types</Text>
         
-        {notificationOptions.map((option) => (
-          <View key={option.key} style={styles.optionRow}>
-            <View style={styles.optionInfo}>
-              <Text style={styles.optionTitle}>{option.title}</Text>
-              <Text style={styles.optionDescription}>{option.description}</Text>
+        <View style={styles.optionsCard}>
+          {notificationOptions.map((option, index) => (
+            <View 
+              key={option.key} 
+              style={[
+                styles.optionRow,
+                index < notificationOptions.length - 1 && styles.optionRowBorder
+              ]}
+            >
+              <View style={styles.optionInfo}>
+                <Text style={styles.optionTitle}>{option.title}</Text>
+                <Text style={styles.optionDescription}>{option.description}</Text>
+              </View>
+              <Switch
+                value={settings[option.key]}
+                onValueChange={(value) => updateSetting(option.key, value)}
+                trackColor={{ false: colors.muted, true: colors.accent + '50' }}
+                thumbColor={settings[option.key] ? colors.accent : colors.secondary}
+              />
             </View>
-            <Switch
-              value={settings[option.key]}
-              onValueChange={(value) => updateSetting(option.key, value)}
-              trackColor={{ false: colors.muted, true: colors.accent + '50' }}
-              thumbColor={settings[option.key] ? colors.accent : colors.secondary}
-            />
-          </View>
-        ))}
+          ))}
+        </View>
 
         {/* Test Notification */}
         {isRegistered && (
-          <Button
-            variant="outline"
+          <TouchableOpacity
+            style={styles.testButton}
             onPress={() => {
               Alert.alert('Test', 'A test notification will be sent shortly.');
             }}
-            style={{ marginTop: spacing.xl }}
+            activeOpacity={0.7}
           >
-            Send Test Notification
-          </Button>
+            <Text style={styles.testButtonText}>Send Test Notification</Text>
+          </TouchableOpacity>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -165,51 +204,95 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: colors.foreground,
+  },
+  headerSpacer: {
+    width: 40,
+  },
   content: {
     padding: spacing.lg,
+    paddingBottom: 100,
   },
   statusCard: {
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
     marginBottom: spacing.lg,
   },
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: spacing.md,
   },
-  statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: colors.destructive,
+  statusIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.muted,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  statusDotActive: {
+  statusIconActive: {
     backgroundColor: colors.success,
   },
+  statusInfo: {
+    flex: 1,
+  },
   statusText: {
-    fontSize: fontSize.base,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: '600',
     color: colors.foreground,
   },
   errorText: {
-    fontSize: fontSize.sm,
+    fontSize: 13,
     color: colors.destructive,
-    marginTop: spacing.sm,
+    marginTop: 4,
   },
   hintText: {
-    fontSize: fontSize.sm,
+    fontSize: 13,
     color: colors.secondary,
-    marginTop: spacing.sm,
+    marginTop: 4,
   },
   sectionTitle: {
-    fontSize: fontSize.lg,
+    fontSize: 13,
     fontWeight: '600',
-    color: colors.foreground,
-    marginBottom: spacing.md,
+    color: colors.secondary,
+    marginBottom: spacing.sm,
+    marginLeft: 4,
+  },
+  optionsCard: {
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
   },
   optionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing.md,
+    padding: spacing.md,
+  },
+  optionRowBorder: {
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
@@ -218,13 +301,23 @@ const styles = StyleSheet.create({
     marginRight: spacing.md,
   },
   optionTitle: {
-    fontSize: fontSize.base,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: '600',
     color: colors.foreground,
   },
   optionDescription: {
-    fontSize: fontSize.sm,
+    fontSize: 13,
     color: colors.secondary,
     marginTop: 2,
+  },
+  testButton: {
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    marginTop: spacing.lg,
+  },
+  testButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.accent,
   },
 });

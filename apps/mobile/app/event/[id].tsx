@@ -174,7 +174,8 @@ export default function EventDetailScreen() {
 
   const handleShare = async () => {
     try {
-      const eventUrl = `https://facefindr.com/e/${id}`;
+      const baseUrl = process.env.EXPO_PUBLIC_APP_URL || 'https://app.example.com';
+      const eventUrl = `${baseUrl}/e/${id}`;
       await Share.share({
         message: `Check out photos from ${event?.name} on FaceFindr!\n${eventUrl}`,
         url: eventUrl,

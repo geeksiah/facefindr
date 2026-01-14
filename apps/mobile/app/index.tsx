@@ -1,7 +1,7 @@
 /**
  * Welcome Screen
  * 
- * Beautiful landing page with onboarding for new users.
+ * Clean, minimal landing page with elegant onboarding.
  */
 
 import { useState, useRef, useEffect } from 'react';
@@ -12,215 +12,180 @@ import {
   Dimensions,
   TouchableOpacity,
   Animated,
-  Image,
   StatusBar,
+  FlatList,
 } from 'react-native';
-import { Link, useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Link } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Camera,
   Sparkles,
   Zap,
   Shield,
   ChevronRight,
-  QrCode,
-  ArrowRight,
 } from 'lucide-react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Button } from '@/components/ui';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
-const ONBOARDING_SLIDES = [
+const SLIDES = [
   {
-    id: 1,
+    id: '1',
     icon: Camera,
     title: 'Find Your Photos',
-    subtitle: 'Instantly',
-    description: 'Just snap a selfie and discover all your event photos in seconds. No more endless scrolling.',
-    gradient: ['#0ea5e9', '#0284c7'],
+    description: 'Scan your face to instantly discover all your event photos',
+    color: colors.accent,
   },
   {
-    id: 2,
+    id: '2',
     icon: Sparkles,
     title: 'AI-Powered',
-    subtitle: 'Face Recognition',
-    description: 'Our advanced AI finds you in thousands of photos with incredible accuracy.',
-    gradient: ['#8b5cf6', '#7c3aed'],
+    description: 'Advanced face recognition finds you in thousands of photos',
+    color: '#8b5cf6',
   },
   {
-    id: 3,
+    id: '3',
     icon: Zap,
-    title: 'Instant',
-    subtitle: 'Delivery',
-    description: 'Get notified the moment new photos of you are uploaded. Never miss a memory.',
-    gradient: ['#f59e0b', '#d97706'],
+    title: 'Instant Delivery',
+    description: 'Get notified the moment new photos of you are uploaded',
+    color: '#f59e0b',
   },
   {
-    id: 4,
+    id: '4',
     icon: Shield,
-    title: 'Your Privacy',
-    subtitle: 'Protected',
-    description: 'You control who can find you. Your face data is encrypted and secure.',
-    gradient: ['#10b981', '#059669'],
+    title: 'Privacy First',
+    description: 'You control who can find you. Your data stays secure',
+    color: '#10b981',
   },
 ];
 
 export default function WelcomeScreen() {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [currentSlide, setCurrentSlide] = useState(0);
-  const slideAnim = useRef(new Animated.Value(0)).current;
-  const fadeAnim = useRef(new Animated.Value(1)).current;
-  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const [activeIndex, setActiveIndex] = useState(0);
+  const flatListRef = useRef<FlatList>(null);
+  const scrollX = useRef(new Animated.Value(0)).current;
 
   // Auto-advance slides
   useEffect(() => {
     const timer = setInterval(() => {
-      setCurrentSlide((prev) => (prev + 1) % ONBOARDING_SLIDES.length);
+      const nextIndex = (activeIndex + 1) % SLIDES.length;
+      flatListRef.current?.scrollToIndex({ index: nextIndex, animated: true });
+      setActiveIndex(nextIndex);
     }, 4000);
     return () => clearInterval(timer);
-  }, []);
+  }, [activeIndex]);
 
-  // Animate slide change
-  useEffect(() => {
-    Animated.parallel([
-      Animated.sequence([
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 150,
-          useNativeDriver: true,
-        }),
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-      ]),
-      Animated.sequence([
-        Animated.timing(scaleAnim, {
-          toValue: 0.95,
-          duration: 150,
-          useNativeDriver: true,
-        }),
-        Animated.spring(scaleAnim, {
-          toValue: 1,
-          tension: 100,
-          friction: 8,
-          useNativeDriver: true,
-        }),
-      ]),
-    ]).start();
-  }, [currentSlide]);
+  const handleScroll = Animated.event(
+    [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+    { useNativeDriver: false }
+  );
 
-  const currentData = ONBOARDING_SLIDES[currentSlide];
-  const IconComponent = currentData.icon;
+  const handleMomentumScrollEnd = (e: any) => {
+    const index = Math.round(e.nativeEvent.contentOffset.x / width);
+    setActiveIndex(index);
+  };
+
+  const renderSlide = ({ item, index }: { item: typeof SLIDES[0]; index: number }) => {
+    const Icon = item.icon;
+    return (
+      <View style={styles.slide}>
+        <View style={[styles.iconContainer, { backgroundColor: item.color + '15' }]}>
+          <Icon size={40} color={item.color} strokeWidth={1.5} />
+        </View>
+        <Text style={styles.slideTitle}>{item.title}</Text>
+        <Text style={styles.slideDescription}>{item.description}</Text>
+      </View>
+    );
+  };
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle="dark-content" />
       
-      {/* Animated Background */}
-      <LinearGradient
-        colors={currentData.gradient as [string, string]}
-        style={StyleSheet.absoluteFill}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-      />
-
-      {/* Decorative circles */}
-      <View style={[styles.decorCircle, styles.decorCircle1]} />
-      <View style={[styles.decorCircle, styles.decorCircle2]} />
-      <View style={[styles.decorCircle, styles.decorCircle3]} />
-
-      {/* Content */}
-      <View style={[styles.content, { paddingTop: insets.top + 20 }]}>
-        {/* Logo */}
-        <View style={styles.logoSection}>
-          <View style={styles.logoContainer}>
-            <Image
-              source={require('../assets/logos/app-icon-512.png')}
-              style={styles.logo}
-              resizeMode="contain"
-            />
-          </View>
-          <Text style={styles.brandName}>FaceFindr</Text>
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 40 }]}>
+        <View style={styles.logoContainer}>
+          <Camera size={28} color={colors.accent} strokeWidth={1.5} />
         </View>
+        <Text style={styles.brandName}>FaceFindr</Text>
+        <Text style={styles.tagline}>Your photos, found instantly</Text>
+      </View>
 
-        {/* Onboarding Content */}
-        <Animated.View
-          style={[
-            styles.slideContent,
-            {
-              opacity: fadeAnim,
-              transform: [{ scale: scaleAnim }],
-            },
-          ]}
-        >
-          <View style={styles.iconContainer}>
-            <IconComponent size={48} color="#fff" strokeWidth={1.5} />
-          </View>
-          <Text style={styles.slideTitle}>{currentData.title}</Text>
-          <Text style={styles.slideSubtitle}>{currentData.subtitle}</Text>
-          <Text style={styles.slideDescription}>{currentData.description}</Text>
-        </Animated.View>
+      {/* Slides */}
+      <View style={styles.slidesContainer}>
+        <FlatList
+          ref={flatListRef}
+          data={SLIDES}
+          renderItem={renderSlide}
+          keyExtractor={(item) => item.id}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          onScroll={handleScroll}
+          onMomentumScrollEnd={handleMomentumScrollEnd}
+          scrollEventThrottle={16}
+          getItemLayout={(_, index) => ({
+            length: width,
+            offset: width * index,
+            index,
+          })}
+        />
 
-        {/* Slide Indicators */}
+        {/* Indicators */}
         <View style={styles.indicators}>
-          {ONBOARDING_SLIDES.map((slide, index) => (
+          {SLIDES.map((_, index) => (
             <TouchableOpacity
-              key={slide.id}
-              onPress={() => setCurrentSlide(index)}
-              style={[
-                styles.indicator,
-                currentSlide === index && styles.indicatorActive,
-              ]}
-            />
+              key={index}
+              onPress={() => {
+                flatListRef.current?.scrollToIndex({ index, animated: true });
+                setActiveIndex(index);
+              }}
+            >
+              <View
+                style={[
+                  styles.indicator,
+                  activeIndex === index && styles.indicatorActive,
+                ]}
+              />
+            </TouchableOpacity>
           ))}
         </View>
       </View>
 
-      {/* Bottom Actions */}
+      {/* Actions */}
       <View style={[styles.actions, { paddingBottom: insets.bottom + 20 }]}>
-        {/* Quick Access */}
-        <View style={styles.quickAccess}>
-          <Link href="/scan" asChild>
-            <TouchableOpacity style={styles.quickButton}>
-              <QrCode size={20} color="#fff" />
-              <Text style={styles.quickButtonText}>Scan QR</Text>
-            </TouchableOpacity>
-          </Link>
-          <Link href="/enter-code" asChild>
-            <TouchableOpacity style={styles.quickButton}>
-              <Text style={styles.quickButtonText}>Enter Code</Text>
-              <ChevronRight size={18} color="#fff" />
-            </TouchableOpacity>
-          </Link>
-        </View>
-
-        {/* Auth Buttons */}
         <Link href="/(auth)/register" asChild>
-          <TouchableOpacity style={styles.primaryButton}>
+          <TouchableOpacity style={styles.primaryButton} activeOpacity={0.8}>
             <Text style={styles.primaryButtonText}>Get Started</Text>
-            <ArrowRight size={20} color={currentData.gradient[0]} />
+            <ChevronRight size={20} color="#fff" />
           </TouchableOpacity>
         </Link>
 
         <Link href="/(auth)/login" asChild>
-          <TouchableOpacity style={styles.secondaryButton}>
+          <TouchableOpacity style={styles.secondaryButton} activeOpacity={0.7}>
             <Text style={styles.secondaryButtonText}>
               Already have an account? <Text style={styles.signInText}>Sign In</Text>
             </Text>
           </TouchableOpacity>
         </Link>
 
-        {/* Terms */}
+        <View style={styles.quickActions}>
+          <Link href="/scan" asChild>
+            <TouchableOpacity style={styles.quickButton} activeOpacity={0.7}>
+              <Text style={styles.quickButtonText}>Scan QR</Text>
+            </TouchableOpacity>
+          </Link>
+          <View style={styles.quickDivider} />
+          <Link href="/enter-code" asChild>
+            <TouchableOpacity style={styles.quickButton} activeOpacity={0.7}>
+              <Text style={styles.quickButtonText}>Enter Code</Text>
+            </TouchableOpacity>
+          </Link>
+        </View>
+
         <Text style={styles.terms}>
-          By continuing, you agree to our{' '}
-          <Text style={styles.termsLink}>Terms</Text> and{' '}
-          <Text style={styles.termsLink}>Privacy Policy</Text>
+          By continuing, you agree to our Terms & Privacy Policy
         </Text>
       </View>
     </View>
@@ -230,168 +195,134 @@ export default function WelcomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: colors.background,
   },
-  decorCircle: {
-    position: 'absolute',
-    borderRadius: 9999,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  decorCircle1: {
-    width: 300,
-    height: 300,
-    top: -100,
-    right: -100,
-  },
-  decorCircle2: {
-    width: 200,
-    height: 200,
-    bottom: 200,
-    left: -80,
-  },
-  decorCircle3: {
-    width: 150,
-    height: 150,
-    top: '40%',
-    right: -50,
-  },
-  content: {
-    flex: 1,
+  header: {
+    alignItems: 'center',
     paddingHorizontal: spacing.lg,
   },
-  logoSection: {
-    alignItems: 'center',
-    marginBottom: spacing.xl,
-  },
   logoContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    width: 64,
+    height: 64,
+    borderRadius: 16,
+    backgroundColor: colors.accent + '10',
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  logo: {
-    width: 60,
-    height: 60,
+    marginBottom: spacing.md,
   },
   brandName: {
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: '700',
-    color: '#fff',
-    marginTop: spacing.md,
-    letterSpacing: -0.5,
+    color: colors.foreground,
+    letterSpacing: -1,
   },
-  slideContent: {
+  tagline: {
+    fontSize: 15,
+    color: colors.secondary,
+    marginTop: 4,
+  },
+  slidesContainer: {
     flex: 1,
-    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing.md,
+  },
+  slide: {
+    width: width,
+    alignItems: 'center',
+    paddingHorizontal: spacing.xl,
   },
   iconContainer: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    width: 80,
+    height: 80,
+    borderRadius: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.xl,
+    marginBottom: spacing.lg,
   },
   slideTitle: {
-    fontSize: 36,
-    fontWeight: '800',
-    color: '#fff',
+    fontSize: 24,
+    fontWeight: '700',
+    color: colors.foreground,
     textAlign: 'center',
-    letterSpacing: -1,
-  },
-  slideSubtitle: {
-    fontSize: 36,
-    fontWeight: '300',
-    color: 'rgba(255, 255, 255, 0.9)',
-    textAlign: 'center',
-    marginBottom: spacing.md,
-    letterSpacing: -1,
+    marginBottom: spacing.sm,
   },
   slideDescription: {
     fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: colors.secondary,
     textAlign: 'center',
     lineHeight: 24,
-    maxWidth: 300,
+    maxWidth: 280,
   },
   indicators: {
     flexDirection: 'row',
     justifyContent: 'center',
     gap: spacing.sm,
-    marginBottom: spacing.xl,
+    marginTop: spacing.xl,
   },
   indicator: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    backgroundColor: colors.border,
   },
   indicatorActive: {
     width: 24,
-    backgroundColor: '#fff',
+    backgroundColor: colors.accent,
   },
   actions: {
     paddingHorizontal: spacing.lg,
-  },
-  quickAccess: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: spacing.lg,
-    marginBottom: spacing.lg,
-  },
-  quickButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    borderRadius: borderRadius.full,
-  },
-  quickButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
   },
   primaryButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.sm,
-    backgroundColor: '#fff',
+    gap: spacing.xs,
+    backgroundColor: colors.accent,
     paddingVertical: 16,
     borderRadius: borderRadius.lg,
     marginBottom: spacing.md,
   },
   primaryButtonText: {
     fontSize: 17,
-    fontWeight: '700',
-    color: '#0ea5e9',
+    fontWeight: '600',
+    color: '#fff',
   },
   secondaryButton: {
     alignItems: 'center',
     paddingVertical: spacing.sm,
+    marginBottom: spacing.md,
   },
   secondaryButtonText: {
     fontSize: 15,
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: colors.secondary,
   },
   signInText: {
-    fontWeight: '700',
-    color: '#fff',
+    fontWeight: '600',
+    color: colors.accent,
+  },
+  quickActions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  quickButton: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  quickButtonText: {
+    fontSize: 14,
+    color: colors.secondary,
+    fontWeight: '500',
+  },
+  quickDivider: {
+    width: 1,
+    height: 16,
+    backgroundColor: colors.border,
   },
   terms: {
     fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.5)',
+    color: colors.secondary,
     textAlign: 'center',
-    marginTop: spacing.md,
-  },
-  termsLink: {
-    textDecorationLine: 'underline',
+    opacity: 0.7,
   },
 });

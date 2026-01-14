@@ -6,126 +6,174 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
   Linking,
+  StatusBar,
 } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  HelpCircle,
+  ArrowLeft,
+  ChevronRight,
   MessageCircle,
   Mail,
   FileText,
   Shield,
-  ChevronRight,
+  HelpCircle,
   ExternalLink,
 } from 'lucide-react-native';
 
-import { Card } from '@/components/ui';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 
-export default function HelpSupportScreen() {
-  const helpOptions = [
+export default function HelpScreen() {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+
+  const faqItems = [
     {
-      icon: HelpCircle,
-      title: 'FAQs',
-      description: 'Frequently asked questions',
-      onPress: () => Linking.openURL('https://facefindr.com/help/faq'),
+      question: 'How does face recognition work?',
+      answer: 'Our AI analyzes your selfie to find matching faces in event photos. Your face data is encrypted and secure.',
     },
     {
-      icon: FileText,
-      title: 'How to Use FaceFindr',
-      description: 'Step-by-step guides',
-      onPress: () => Linking.openURL('https://facefindr.com/help/guides'),
+      question: 'How do I find my photos?',
+      answer: 'Scan your face using the camera or upload an existing photo. You can also scan event QR codes or enter event codes.',
     },
     {
-      icon: MessageCircle,
-      title: 'Contact Support',
-      description: 'Get help from our team',
-      onPress: () => Linking.openURL('mailto:support@facefindr.com'),
+      question: 'Are my photos private?',
+      answer: 'Yes, only you can see your matched photos until you choose to share them. Photographers cannot access your personal data.',
     },
     {
-      icon: Mail,
-      title: 'Feature Request',
-      description: 'Suggest new features',
-      onPress: () => Linking.openURL('mailto:feedback@facefindr.com'),
+      question: 'How do I contact a photographer?',
+      answer: 'Visit the photographer\'s profile from any event or photo they\'ve uploaded. You can follow them or view their contact info.',
     },
   ];
 
-  const legalOptions = [
+  const baseUrl = process.env.EXPO_PUBLIC_APP_URL || 'https://app.example.com';
+  const supportEmail = process.env.EXPO_PUBLIC_SUPPORT_EMAIL || 'support@example.com';
+
+  const contactOptions = [
     {
+      icon: Mail,
+      title: 'Email Support',
+      description: supportEmail,
+      onPress: () => Linking.openURL(`mailto:${supportEmail}`),
+    },
+    {
+      icon: MessageCircle,
+      title: 'Live Chat',
+      description: 'Chat with our support team',
+      onPress: () => Linking.openURL(`${baseUrl}/support`),
+    },
+  ];
+
+  const legalLinks = [
+    {
+      icon: FileText,
       title: 'Terms of Service',
-      onPress: () => Linking.openURL('https://facefindr.com/terms'),
+      onPress: () => Linking.openURL(`${baseUrl}/terms`),
     },
     {
+      icon: Shield,
       title: 'Privacy Policy',
-      onPress: () => Linking.openURL('https://facefindr.com/privacy'),
-    },
-    {
-      title: 'Cookie Policy',
-      onPress: () => Linking.openURL('https://facefindr.com/cookies'),
+      onPress: () => Linking.openURL(`${baseUrl}/privacy`),
     },
   ];
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
-        {/* Help Options */}
-        <Text style={styles.sectionTitle}>Get Help</Text>
+    <View style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+      
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <ArrowLeft size={24} color={colors.foreground} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Help & Support</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+
+      <ScrollView 
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Contact */}
+        <Text style={styles.sectionTitle}>Contact Us</Text>
         
-        {helpOptions.map((option, index) => (
-          <TouchableOpacity
-            key={index}
-            style={styles.optionRow}
-            onPress={option.onPress}
-          >
-            <View style={styles.optionIcon}>
-              <option.icon size={20} color={colors.accent} />
-            </View>
-            <View style={styles.optionInfo}>
-              <Text style={styles.optionTitle}>{option.title}</Text>
-              <Text style={styles.optionDescription}>{option.description}</Text>
-            </View>
-            <ExternalLink size={18} color={colors.secondary} />
-          </TouchableOpacity>
-        ))}
+        <View style={styles.optionsCard}>
+          {contactOptions.map((option, index) => (
+            <TouchableOpacity
+              key={index}
+              style={[
+                styles.optionRow,
+                index < contactOptions.length - 1 && styles.optionRowBorder
+              ]}
+              onPress={option.onPress}
+              activeOpacity={0.7}
+            >
+              <View style={styles.optionIcon}>
+                <option.icon size={20} color={colors.accent} />
+              </View>
+              <View style={styles.optionInfo}>
+                <Text style={styles.optionTitle}>{option.title}</Text>
+                <Text style={styles.optionDescription}>{option.description}</Text>
+              </View>
+              <ExternalLink size={18} color={colors.secondary} />
+            </TouchableOpacity>
+          ))}
+        </View>
 
-        {/* About */}
-        <Text style={[styles.sectionTitle, { marginTop: spacing.xl }]}>About</Text>
-
-        <Card style={styles.aboutCard}>
-          <Text style={styles.appName}>FaceFindr</Text>
-          <Text style={styles.appVersion}>Version 1.0.0</Text>
-          <Text style={styles.appTagline}>
-            Find your event photos instantly with face recognition
-          </Text>
-        </Card>
+        {/* FAQ */}
+        <Text style={styles.sectionTitle}>Frequently Asked Questions</Text>
+        
+        <View style={styles.faqContainer}>
+          {faqItems.map((item, index) => (
+            <View key={index} style={styles.faqItem}>
+              <View style={styles.faqQuestion}>
+                <HelpCircle size={16} color={colors.accent} />
+                <Text style={styles.faqQuestionText}>{item.question}</Text>
+              </View>
+              <Text style={styles.faqAnswer}>{item.answer}</Text>
+            </View>
+          ))}
+        </View>
 
         {/* Legal */}
-        <Text style={[styles.sectionTitle, { marginTop: spacing.xl }]}>Legal</Text>
+        <Text style={styles.sectionTitle}>Legal</Text>
+        
+        <View style={styles.optionsCard}>
+          {legalLinks.map((option, index) => (
+            <TouchableOpacity
+              key={index}
+              style={[
+                styles.optionRow,
+                index < legalLinks.length - 1 && styles.optionRowBorder
+              ]}
+              onPress={option.onPress}
+              activeOpacity={0.7}
+            >
+              <View style={styles.optionIcon}>
+                <option.icon size={20} color={colors.secondary} />
+              </View>
+              <View style={styles.optionInfo}>
+                <Text style={styles.optionTitle}>{option.title}</Text>
+              </View>
+              <ChevronRight size={18} color={colors.secondary} />
+            </TouchableOpacity>
+          ))}
+        </View>
 
-        {legalOptions.map((option, index) => (
-          <TouchableOpacity
-            key={index}
-            style={styles.legalRow}
-            onPress={option.onPress}
-          >
-            <Text style={styles.legalText}>{option.title}</Text>
-            <ChevronRight size={18} color={colors.secondary} />
-          </TouchableOpacity>
-        ))}
-
-        {/* Footer */}
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>
-            Made with ❤️ by FaceFindr Team
-          </Text>
-          <Text style={styles.footerCopyright}>
-            © {new Date().getFullYear()} FaceFindr. All rights reserved.
-          </Text>
+        {/* App Info */}
+        <View style={styles.appInfo}>
+          <Text style={styles.appVersion}>FaceFindr v1.0.0</Text>
+          <Text style={styles.appCopyright}>© 2025 FaceFindr. All rights reserved.</Text>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -134,28 +182,62 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  content: {
-    padding: spacing.lg,
-    paddingBottom: spacing.xl,
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  sectionTitle: {
-    fontSize: fontSize.lg,
+  backButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 17,
     fontWeight: '600',
     color: colors.foreground,
-    marginBottom: spacing.md,
+  },
+  headerSpacer: {
+    width: 40,
+  },
+  content: {
+    padding: spacing.lg,
+    paddingBottom: 100,
+  },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.secondary,
+    marginBottom: spacing.sm,
+    marginLeft: 4,
+  },
+  optionsCard: {
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
+    marginBottom: spacing.lg,
   },
   optionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing.md,
+    padding: spacing.md,
+  },
+  optionRowBorder: {
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
   optionIcon: {
     width: 40,
     height: 40,
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.accent + '15',
+    borderRadius: 20,
+    backgroundColor: colors.muted,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: spacing.md,
@@ -164,60 +246,57 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   optionTitle: {
-    fontSize: fontSize.base,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: '600',
     color: colors.foreground,
   },
   optionDescription: {
-    fontSize: fontSize.sm,
+    fontSize: 13,
     color: colors.secondary,
     marginTop: 2,
   },
-  aboutCard: {
-    alignItems: 'center',
-    paddingVertical: spacing.lg,
+  faqContainer: {
+    gap: spacing.md,
+    marginBottom: spacing.lg,
   },
-  appName: {
-    fontSize: fontSize['2xl'],
-    fontWeight: 'bold',
-    color: colors.accent,
+  faqItem: {
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
   },
-  appVersion: {
-    fontSize: fontSize.sm,
-    color: colors.secondary,
-    marginTop: spacing.xs,
-  },
-  appTagline: {
-    fontSize: fontSize.base,
-    color: colors.secondary,
-    textAlign: 'center',
-    marginTop: spacing.md,
-    lineHeight: 24,
-  },
-  legalRow: {
+  faqQuestion: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
   },
-  legalText: {
-    fontSize: fontSize.base,
+  faqQuestionText: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
     color: colors.foreground,
   },
-  footer: {
+  faqAnswer: {
+    fontSize: 14,
+    color: colors.secondary,
+    lineHeight: 20,
+    marginLeft: 24,
+  },
+  appInfo: {
     alignItems: 'center',
-    marginTop: spacing.xl,
-    paddingTop: spacing.lg,
+    paddingTop: spacing.xl,
   },
-  footerText: {
-    fontSize: fontSize.sm,
+  appVersion: {
+    fontSize: 14,
+    fontWeight: '500',
     color: colors.secondary,
   },
-  footerCopyright: {
-    fontSize: fontSize.xs,
+  appCopyright: {
+    fontSize: 12,
     color: colors.secondary,
-    marginTop: spacing.xs,
+    opacity: 0.7,
+    marginTop: 4,
   },
 });

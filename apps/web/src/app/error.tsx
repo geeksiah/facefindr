@@ -60,7 +60,7 @@ export default function Error({
         {/* Help text */}
         <p className="mt-8 text-sm text-muted-foreground">
           If this keeps happening, please{' '}
-          <a href="mailto:support@facefindr.com" className="text-accent hover:underline">
+          <a href={`mailto:${process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'support@example.com'}`} className="text-accent hover:underline">
             contact support
           </a>
         </p>

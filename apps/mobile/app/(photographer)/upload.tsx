@@ -9,28 +9,36 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
   Image,
   Alert,
-  ActivityIndicator,
+  StatusBar,
+  Dimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
   Image as ImageIcon,
-  Camera,
   FolderOpen,
   X,
   Upload,
   CheckCircle2,
+  Plus,
+  Calendar,
+  CameraIcon,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { Camera } from 'expo-camera';
 
-import { Button, Card } from '@/components/ui';
+import { Button } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+
+const { width } = Dimensions.get('window');
+const PREVIEW_SIZE = (width - spacing.lg * 2 - spacing.sm * 3) / 4;
 
 interface SelectedImage {
   uri: string;
@@ -41,10 +49,12 @@ interface SelectedImage {
 interface Event {
   id: string;
   name: string;
+  eventDate: string;
 }
 
 export default function UploadScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { profile } = useAuthStore();
   
   const [events, setEvents] = useState<Event[]>([]);
@@ -52,21 +62,29 @@ export default function UploadScreen() {
   const [selectedImages, setSelectedImages] = useState<SelectedImage[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadedCount, setUploadedCount] = useState(0);
 
-  // Load events
   useEffect(() => {
     const loadEvents = async () => {
       const { data } = await supabase
         .from('events')
-        .select('id, name')
+        .select('id, name, event_date')
         .eq('photographer_id', profile?.id)
         .in('status', ['active', 'draft'])
         .order('created_at', { ascending: false });
 
       if (data) {
-        setEvents(data);
+        setEvents(data.map((e: any) => ({
+          id: e.id,
+          name: e.name,
+          eventDate: e.event_date,
+        })));
         if (data.length > 0) {
-          setSelectedEvent(data[0]);
+          setSelectedEvent({
+            id: data[0].id,
+            name: data[0].name,
+            eventDate: data[0].event_date,
+          });
         }
       }
     };
@@ -135,6 +153,17 @@ export default function UploadScreen() {
     setSelectedImages((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const clearAllImages = () => {
+    Alert.alert(
+      'Clear All',
+      'Remove all selected photos?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Clear', style: 'destructive', onPress: () => setSelectedImages([]) },
+      ]
+    );
+  };
+
   const handleUpload = async () => {
     if (!selectedEvent) {
       Alert.alert('Select Event', 'Please select an event to upload photos to.');
@@ -148,12 +177,12 @@ export default function UploadScreen() {
 
     setIsUploading(true);
     setUploadProgress(0);
+    setUploadedCount(0);
 
     try {
       for (let i = 0; i < selectedImages.length; i++) {
         const image = selectedImages[i];
         
-        // Upload to Supabase Storage
         const fileName = `events/${selectedEvent.id}/${Date.now()}_${image.fileName}`;
         const response = await fetch(image.uri);
         const blob = await response.blob();
@@ -169,7 +198,6 @@ export default function UploadScreen() {
           continue;
         }
 
-        // Create media record
         await supabase.from('media').insert({
           event_id: selectedEvent.id,
           photographer_id: profile?.id,
@@ -178,12 +206,13 @@ export default function UploadScreen() {
           file_size: image.fileSize,
         });
 
+        setUploadedCount(i + 1);
         setUploadProgress(((i + 1) / selectedImages.length) * 100);
       }
 
       Alert.alert(
         'Upload Complete',
-        `Successfully uploaded ${selectedImages.length} photos.`,
+        `Successfully uploaded ${selectedImages.length} photos to ${selectedEvent.name}.`,
         [
           {
             text: 'View Event',
@@ -201,14 +230,25 @@ export default function UploadScreen() {
     }
   };
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.title}>Upload Photos</Text>
-        </View>
+  const totalSize = selectedImages.reduce((sum, img) => sum + img.fileSize, 0);
+  const formattedSize = totalSize > 1024 * 1024
+    ? `${(totalSize / (1024 * 1024)).toFixed(1)} MB`
+    : `${(totalSize / 1024).toFixed(0)} KB`;
 
+  return (
+    <View style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+      
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+        <Text style={styles.title}>Upload Photos</Text>
+        <Text style={styles.subtitle}>Add photos to your events</Text>
+      </View>
+
+      <ScrollView 
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Event Selector */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Select Event</Text>
@@ -231,16 +271,27 @@ export default function UploadScreen() {
                     styles.eventChipText,
                     selectedEvent?.id === event.id && styles.eventChipTextSelected,
                   ]}
+                  numberOfLines={1}
                 >
                   {event.name}
                 </Text>
+                <View style={styles.eventChipDate}>
+                  <Calendar size={10} color={selectedEvent?.id === event.id ? 'rgba(255,255,255,0.7)' : colors.secondary} />
+                  <Text style={[
+                    styles.eventChipDateText,
+                    selectedEvent?.id === event.id && styles.eventChipDateTextSelected,
+                  ]}>
+                    {new Date(event.eventDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </Text>
+                </View>
               </TouchableOpacity>
             ))}
             <TouchableOpacity
               style={styles.newEventChip}
               onPress={() => router.push('/create-event')}
             >
-              <Text style={styles.newEventText}>+ New Event</Text>
+              <Plus size={16} color={colors.accent} />
+              <Text style={styles.newEventText}>New Event</Text>
             </TouchableOpacity>
           </ScrollView>
         </View>
@@ -249,28 +300,56 @@ export default function UploadScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Add Photos</Text>
           <View style={styles.uploadOptions}>
-            <TouchableOpacity style={styles.uploadOption} onPress={handlePickImages}>
-              <View style={[styles.uploadIcon, { backgroundColor: colors.accent + '20' }]}>
-                <FolderOpen size={24} color={colors.accent} />
-              </View>
-              <Text style={styles.uploadOptionText}>Photo Library</Text>
+            <TouchableOpacity style={styles.uploadCard} onPress={handlePickImages} activeOpacity={0.8}>
+              <LinearGradient
+                colors={[colors.accent + '15', colors.accent + '05']}
+                style={styles.uploadCardGradient}
+              >
+                <View style={[styles.uploadIcon, { backgroundColor: colors.accent + '20' }]}>
+                  <FolderOpen size={28} color={colors.accent} />
+                </View>
+                <Text style={styles.uploadCardTitle}>Photo Library</Text>
+                <Text style={styles.uploadCardDesc}>Select multiple photos</Text>
+              </LinearGradient>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.uploadOption} onPress={handleTakePhoto}>
-              <View style={[styles.uploadIcon, { backgroundColor: colors.success + '20' }]}>
-                <Camera size={24} color={colors.success} />
-              </View>
-              <Text style={styles.uploadOptionText}>Take Photo</Text>
+            <TouchableOpacity style={styles.uploadCard} onPress={handleTakePhoto} activeOpacity={0.8}>
+              <LinearGradient
+                colors={['#10b98115', '#10b98105']}
+                style={styles.uploadCardGradient}
+              >
+                <View style={[styles.uploadIcon, { backgroundColor: '#10b98120' }]}>
+                  <CameraIcon size={28} color="#10b981" />
+                </View>
+                <Text style={styles.uploadCardTitle}>Camera</Text>
+                <Text style={styles.uploadCardDesc}>Take a new photo</Text>
+              </LinearGradient>
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Selected Photos Preview */}
+        {/* Selected Photos */}
         {selectedImages.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>
-              Selected Photos ({selectedImages.length})
-            </Text>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>
+                Selected ({selectedImages.length})
+              </Text>
+              <TouchableOpacity onPress={clearAllImages}>
+                <Text style={styles.clearAllText}>Clear all</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.selectionInfo}>
+              <View style={styles.infoBadge}>
+                <ImageIcon size={12} color={colors.accent} />
+                <Text style={styles.infoBadgeText}>{selectedImages.length} photos</Text>
+              </View>
+              <View style={styles.infoBadge}>
+                <Text style={styles.infoBadgeText}>{formattedSize}</Text>
+              </View>
+            </View>
+
             <View style={styles.previewGrid}>
               {selectedImages.map((image, index) => (
                 <View key={index} style={styles.previewItem}>
@@ -279,36 +358,45 @@ export default function UploadScreen() {
                     style={styles.removeButton}
                     onPress={() => removeImage(index)}
                   >
-                    <X size={14} color="#fff" />
+                    <X size={12} color="#fff" strokeWidth={3} />
                   </TouchableOpacity>
                 </View>
               ))}
+              <TouchableOpacity style={styles.addMoreButton} onPress={handlePickImages}>
+                <Plus size={24} color={colors.secondary} />
+              </TouchableOpacity>
             </View>
           </View>
         )}
-
-        {/* Upload Button */}
-        {selectedImages.length > 0 && (
-          <View style={styles.uploadButtonContainer}>
-            <Button
-              onPress={handleUpload}
-              loading={isUploading}
-              fullWidth
-              size="lg"
-            >
-              {isUploading ? (
-                `Uploading... ${Math.round(uploadProgress)}%`
-              ) : (
-                <>
-                  <Upload size={20} color="#fff" />
-                  {`  Upload ${selectedImages.length} Photos`}
-                </>
-              )}
-            </Button>
-          </View>
-        )}
       </ScrollView>
-    </SafeAreaView>
+
+      {/* Upload Footer */}
+      {selectedImages.length > 0 && (
+        <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+          {isUploading && (
+            <View style={styles.progressContainer}>
+              <View style={styles.progressBar}>
+                <View style={[styles.progressFill, { width: `${uploadProgress}%` }]} />
+              </View>
+              <Text style={styles.progressText}>
+                Uploading {uploadedCount} of {selectedImages.length}...
+              </Text>
+            </View>
+          )}
+          <Button
+            onPress={handleUpload}
+            loading={isUploading}
+            fullWidth
+            size="lg"
+          >
+            <Upload size={20} color="#fff" />
+            <Text style={styles.uploadButtonText}>
+              Upload {selectedImages.length} Photo{selectedImages.length !== 1 ? 's' : ''}
+            </Text>
+          </Button>
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -317,28 +405,44 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  scrollContent: {
-    paddingBottom: spacing.xl,
-  },
   header: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
     paddingBottom: spacing.md,
   },
   title: {
-    fontSize: fontSize['2xl'],
-    fontWeight: 'bold',
+    fontSize: 26,
+    fontWeight: '700',
     color: colors.foreground,
+    letterSpacing: -0.5,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: colors.secondary,
+    marginTop: 2,
+  },
+  scrollContent: {
+    paddingBottom: 180,
   },
   section: {
     paddingHorizontal: spacing.lg,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.xl,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
   },
   sectionTitle: {
-    fontSize: fontSize.base,
+    fontSize: 15,
     fontWeight: '600',
     color: colors.foreground,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  clearAllText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.destructive,
   },
   eventList: {
     gap: spacing.sm,
@@ -346,58 +450,103 @@ const styles = StyleSheet.create({
   eventChip: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    borderRadius: borderRadius.full,
+    borderRadius: borderRadius.xl,
     backgroundColor: colors.muted,
+    minWidth: 120,
   },
   eventChipSelected: {
     backgroundColor: colors.accent,
   },
   eventChipText: {
-    fontSize: fontSize.sm,
-    fontWeight: '500',
+    fontSize: 13,
+    fontWeight: '600',
     color: colors.foreground,
+    marginBottom: 2,
   },
   eventChipTextSelected: {
     color: '#fff',
   },
+  eventChipDate: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  eventChipDateText: {
+    fontSize: 11,
+    color: colors.secondary,
+  },
+  eventChipDateTextSelected: {
+    color: 'rgba(255,255,255,0.7)',
+  },
   newEventChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: borderRadius.full,
-    borderWidth: 1,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.xl,
+    borderWidth: 1.5,
     borderColor: colors.accent,
     borderStyle: 'dashed',
   },
   newEventText: {
-    fontSize: fontSize.sm,
-    fontWeight: '500',
+    fontSize: 13,
+    fontWeight: '600',
     color: colors.accent,
   },
   uploadOptions: {
     flexDirection: 'row',
     gap: spacing.md,
   },
-  uploadOption: {
+  uploadCard: {
     flex: 1,
+    borderRadius: borderRadius.xl,
+    overflow: 'hidden',
+  },
+  uploadCardGradient: {
     alignItems: 'center',
-    padding: spacing.lg,
+    paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.md,
     borderRadius: borderRadius.xl,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.card,
   },
   uploadIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 64,
+    height: 64,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
   },
-  uploadOptionText: {
-    fontSize: fontSize.sm,
-    fontWeight: '500',
+  uploadCardTitle: {
+    fontSize: 15,
+    fontWeight: '600',
     color: colors.foreground,
+    marginBottom: 2,
+  },
+  uploadCardDesc: {
+    fontSize: 12,
+    color: colors.secondary,
+  },
+  selectionInfo: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  infoBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.muted,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  infoBadgeText: {
+    fontSize: 12,
+    color: colors.secondary,
+    fontWeight: '500',
   },
   previewGrid: {
     flexDirection: 'row',
@@ -408,23 +557,67 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   previewImage: {
-    width: 80,
-    height: 80,
+    width: PREVIEW_SIZE,
+    height: PREVIEW_SIZE,
     borderRadius: borderRadius.md,
   },
   removeButton: {
     position: 'absolute',
     top: -6,
     right: -6,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: colors.destructive,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: colors.background,
   },
-  uploadButtonContainer: {
-    paddingHorizontal: spacing.lg,
-    marginTop: spacing.lg,
+  addMoreButton: {
+    width: PREVIEW_SIZE,
+    height: PREVIEW_SIZE,
+    borderRadius: borderRadius.md,
+    borderWidth: 2,
+    borderColor: colors.border,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  footer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: colors.background,
+    padding: spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  progressContainer: {
+    marginBottom: spacing.md,
+  },
+  progressBar: {
+    height: 6,
+    backgroundColor: colors.muted,
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginBottom: spacing.xs,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: colors.accent,
+    borderRadius: 3,
+  },
+  progressText: {
+    fontSize: 12,
+    color: colors.secondary,
+    textAlign: 'center',
+  },
+  uploadButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: spacing.sm,
   },
 });

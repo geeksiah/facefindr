@@ -46,7 +46,7 @@ export default function GlobalError({
           {/* Help text */}
           <p className="mt-8 text-sm text-gray-400">
             If this keeps happening, please try refreshing the page or{' '}
-            <a href="mailto:support@facefindr.com" className="text-blue-500 hover:underline">
+            <a href={`mailto:${process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'support@example.com'}`} className="text-blue-500 hover:underline">
               contact support
             </a>
           </p>

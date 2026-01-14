@@ -16,25 +16,43 @@ import {
   TouchableOpacity,
   Platform,
   StatusBar,
+  FlatList,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Image as ImageIcon, Scan, Sparkles, Camera } from 'lucide-react-native';
+import {
+  Image as ImageIcon,
+  Sparkles,
+  Camera,
+  Calendar,
+  ChevronRight,
+  Search,
+  QrCode,
+} from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import { Button, Card } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 
 const { width } = Dimensions.get('window');
 const PHOTO_SIZE = (width - spacing.lg * 2 - spacing.sm * 2) / 3;
+const EVENT_CARD_WIDTH = width * 0.7;
 
 interface Photo {
   id: string;
   thumbnailUrl: string;
   eventName: string;
+  eventId: string;
   createdAt: string;
+}
+
+interface EventGroup {
+  eventId: string;
+  eventName: string;
+  photoCount: number;
+  latestPhoto: string;
+  date: string;
 }
 
 export default function MyPhotosScreen() {
@@ -43,12 +61,12 @@ export default function MyPhotosScreen() {
   const { profile } = useAuthStore();
   
   const [photos, setPhotos] = useState<Photo[]>([]);
+  const [eventGroups, setEventGroups] = useState<EventGroup[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const loadPhotos = async () => {
     try {
-      // Fetch user's purchased/entitled photos
       const { data, error } = await supabase
         .from('entitlements')
         .select(`
@@ -56,7 +74,8 @@ export default function MyPhotosScreen() {
           media:media_id (
             id,
             thumbnail_path,
-            events:event_id (name)
+            event_id,
+            events:event_id (name, event_date)
           ),
           created_at
         `)
@@ -65,14 +84,31 @@ export default function MyPhotosScreen() {
         .limit(50);
 
       if (!error && data) {
-        setPhotos(
-          data.map((item: any) => ({
-            id: item.media?.id,
-            thumbnailUrl: item.media?.thumbnail_path,
-            eventName: item.media?.events?.name,
-            createdAt: item.created_at,
-          }))
-        );
+        const photosData = data.map((item: any) => ({
+          id: item.media?.id,
+          thumbnailUrl: item.media?.thumbnail_path,
+          eventName: item.media?.events?.name,
+          eventId: item.media?.event_id,
+          createdAt: item.created_at,
+        }));
+        setPhotos(photosData);
+
+        // Group by event
+        const groups: Record<string, EventGroup> = {};
+        photosData.forEach((photo) => {
+          if (!photo.eventId) return;
+          if (!groups[photo.eventId]) {
+            groups[photo.eventId] = {
+              eventId: photo.eventId,
+              eventName: photo.eventName,
+              photoCount: 0,
+              latestPhoto: photo.thumbnailUrl,
+              date: photo.createdAt,
+            };
+          }
+          groups[photo.eventId].photoCount++;
+        });
+        setEventGroups(Object.values(groups));
       }
     } catch (err) {
       console.error('Error loading photos:', err);
@@ -91,6 +127,33 @@ export default function MyPhotosScreen() {
     loadPhotos();
   };
 
+  const renderEventCard = ({ item }: { item: EventGroup }) => (
+    <TouchableOpacity
+      style={styles.eventCard}
+      onPress={() => router.push(`/event/${item.eventId}`)}
+      activeOpacity={0.8}
+    >
+      {item.latestPhoto ? (
+        <Image source={{ uri: item.latestPhoto }} style={styles.eventCardImage} />
+      ) : (
+        <View style={[styles.eventCardImage, styles.eventCardPlaceholder]}>
+          <ImageIcon size={32} color={colors.secondary} />
+        </View>
+      )}
+      <LinearGradient
+        colors={['transparent', 'rgba(0,0,0,0.8)']}
+        style={styles.eventCardOverlay}
+      />
+      <View style={styles.eventCardContent}>
+        <Text style={styles.eventCardName} numberOfLines={1}>{item.eventName}</Text>
+        <View style={styles.eventCardMeta}>
+          <ImageIcon size={12} color="rgba(255,255,255,0.8)" />
+          <Text style={styles.eventCardCount}>{item.photoCount} photos</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
   // Empty state
   if (!isLoading && photos.length === 0) {
     return (
@@ -106,42 +169,89 @@ export default function MyPhotosScreen() {
             <Text style={styles.title}>Photo Passport</Text>
           </View>
           {profile?.faceTag && (
-            <View style={styles.faceTagBadge}>
+            <TouchableOpacity 
+              style={styles.faceTagBadge}
+              onPress={() => router.push('/profile/qr-code')}
+            >
               <Text style={styles.faceTagText}>{profile.faceTag}</Text>
-            </View>
+            </TouchableOpacity>
           )}
         </View>
 
         {/* Empty State */}
-        <View style={styles.emptyState}>
-          <LinearGradient
-            colors={[colors.accent + '15', colors.accent + '05']}
-            style={styles.emptyIconContainer}
-          >
-            <ImageIcon size={40} color={colors.accent} strokeWidth={1.5} />
-          </LinearGradient>
-          
-          <Text style={styles.emptyTitle}>Your photos await</Text>
-          <Text style={styles.emptyDescription}>
-            Scan your face at any event to instantly discover and collect all your photos
-          </Text>
-          
-          <TouchableOpacity
-            style={styles.ctaButton}
-            onPress={() => router.push('/(attendee)/scan')}
-            activeOpacity={0.8}
-          >
+        <ScrollView 
+          contentContainerStyle={styles.emptyScrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.emptyState}>
             <LinearGradient
-              colors={[colors.accent, colors.accentDark]}
-              style={styles.ctaGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
+              colors={[colors.accent + '20', colors.accent + '05']}
+              style={styles.emptyIconContainer}
             >
-              <Camera size={20} color="#fff" strokeWidth={2} />
-              <Text style={styles.ctaText}>Find My Photos</Text>
+              <ImageIcon size={48} color={colors.accent} strokeWidth={1.5} />
             </LinearGradient>
-          </TouchableOpacity>
-        </View>
+            
+            <Text style={styles.emptyTitle}>Your photos await</Text>
+            <Text style={styles.emptyDescription}>
+              Scan your face at any event to instantly discover and collect all your photos
+            </Text>
+            
+            <TouchableOpacity
+              style={styles.primaryCta}
+              onPress={() => router.push('/(attendee)/scan')}
+              activeOpacity={0.8}
+            >
+              <LinearGradient
+                colors={[colors.accent, colors.accentDark]}
+                style={styles.primaryCtaGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+              >
+                <Camera size={22} color="#fff" strokeWidth={2} />
+                <Text style={styles.primaryCtaText}>Find My Photos</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+
+          {/* Quick Actions */}
+          <View style={styles.quickActionsSection}>
+            <Text style={styles.quickActionsTitle}>Quick Actions</Text>
+            <View style={styles.quickActionsRow}>
+              <TouchableOpacity
+                style={styles.quickAction}
+                onPress={() => router.push('/scan')}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.quickActionIcon, { backgroundColor: '#8b5cf615' }]}>
+                  <QrCode size={24} color="#8b5cf6" />
+                </View>
+                <Text style={styles.quickActionLabel}>Scan QR</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.quickAction}
+                onPress={() => router.push('/enter-code')}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.quickActionIcon, { backgroundColor: '#f59e0b15' }]}>
+                  <Search size={24} color="#f59e0b" />
+                </View>
+                <Text style={styles.quickActionLabel}>Enter Code</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.quickAction}
+                onPress={() => router.push('/(attendee)/events')}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.quickActionIcon, { backgroundColor: '#10b98115' }]}>
+                  <Calendar size={24} color="#10b981" />
+                </View>
+                <Text style={styles.quickActionLabel}>Browse Events</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </ScrollView>
       </View>
     );
   }
@@ -158,28 +268,14 @@ export default function MyPhotosScreen() {
           </Text>
           <Text style={styles.title}>Photo Passport</Text>
         </View>
-        <View style={styles.headerRight}>
-          {profile?.faceTag && (
-            <View style={styles.faceTagBadge}>
-              <Text style={styles.faceTagText}>{profile.faceTag}</Text>
-            </View>
-          )}
-        </View>
-      </View>
-
-      {/* Stats */}
-      <View style={styles.statsContainer}>
-        <View style={styles.statItem}>
-          <Text style={styles.statValue}>{photos.length}</Text>
-          <Text style={styles.statLabel}>Photos</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.statItem}>
-          <Text style={styles.statValue}>
-            {new Set(photos.map(p => p.eventName)).size}
-          </Text>
-          <Text style={styles.statLabel}>Events</Text>
-        </View>
+        {profile?.faceTag && (
+          <TouchableOpacity 
+            style={styles.faceTagBadge}
+            onPress={() => router.push('/profile/qr-code')}
+          >
+            <Text style={styles.faceTagText}>{profile.faceTag}</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <ScrollView
@@ -194,6 +290,29 @@ export default function MyPhotosScreen() {
         }
         showsVerticalScrollIndicator={false}
       >
+        {/* Stats Row */}
+        <View style={styles.statsCard}>
+          <View style={styles.statItem}>
+            <View style={[styles.statIcon, { backgroundColor: colors.accent + '15' }]}>
+              <ImageIcon size={18} color={colors.accent} />
+            </View>
+            <View>
+              <Text style={styles.statValue}>{photos.length}</Text>
+              <Text style={styles.statLabel}>Photos</Text>
+            </View>
+          </View>
+          <View style={styles.statDivider} />
+          <View style={styles.statItem}>
+            <View style={[styles.statIcon, { backgroundColor: '#8b5cf615' }]}>
+              <Calendar size={18} color="#8b5cf6" />
+            </View>
+            <View>
+              <Text style={styles.statValue}>{eventGroups.length}</Text>
+              <Text style={styles.statLabel}>Events</Text>
+            </View>
+          </View>
+        </View>
+
         {/* Memory Highlight */}
         {photos.length > 0 && photos[0].thumbnailUrl && (
           <TouchableOpacity
@@ -201,50 +320,97 @@ export default function MyPhotosScreen() {
             onPress={() => router.push(`/photo/${photos[0].id}`)}
             activeOpacity={0.9}
           >
-            <LinearGradient
-              colors={['transparent', 'rgba(0,0,0,0.7)']}
-              style={styles.memoryOverlay}
-            />
             <Image
               source={{ uri: photos[0].thumbnailUrl }}
               style={styles.memoryImage}
             />
+            <LinearGradient
+              colors={['transparent', 'rgba(0,0,0,0.7)']}
+              style={styles.memoryOverlay}
+            />
             <View style={styles.memoryBadge}>
-              <Sparkles size={14} color="#fff" />
-              <Text style={styles.memoryBadgeText}>Memory</Text>
+              <Sparkles size={12} color="#fff" />
+              <Text style={styles.memoryBadgeText}>Latest Memory</Text>
             </View>
             <View style={styles.memoryInfo}>
               <Text style={styles.memoryTitle}>{photos[0].eventName || 'Recent Event'}</Text>
               <Text style={styles.memoryDate}>
-                {new Date(photos[0].createdAt).toLocaleDateString()}
+                {new Date(photos[0].createdAt).toLocaleDateString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric',
+                })}
               </Text>
             </View>
           </TouchableOpacity>
         )}
 
-        {/* Section Title */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>All Photos</Text>
-          <Text style={styles.sectionCount}>{photos.length}</Text>
-        </View>
+        {/* Events Carousel */}
+        {eventGroups.length > 1 && (
+          <View style={styles.eventsSection}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>My Events</Text>
+              <TouchableOpacity 
+                onPress={() => router.push('/(attendee)/events')}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Text style={styles.seeAllText}>See all</Text>
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={eventGroups}
+              renderItem={renderEventCard}
+              keyExtractor={(item) => item.eventId}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.eventsCarousel}
+            />
+          </View>
+        )}
 
-        {/* Photo Grid */}
-        <View style={styles.photoGrid}>
-          {photos.map((photo) => (
-            <TouchableOpacity
-              key={photo.id}
-              style={styles.photoItem}
-              onPress={() => router.push(`/photo/${photo.id}`)}
-              activeOpacity={0.8}
-            >
-              <Image
-                source={{ uri: photo.thumbnailUrl }}
-                style={styles.photoImage}
-              />
-            </TouchableOpacity>
-          ))}
+        {/* All Photos Grid */}
+        <View style={styles.photosSection}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>All Photos</Text>
+            <Text style={styles.sectionCount}>{photos.length}</Text>
+          </View>
+          <View style={styles.photoGrid}>
+            {photos.map((photo, index) => (
+              <TouchableOpacity
+                key={`${photo.id}-${index}`}
+                style={styles.photoItem}
+                onPress={() => router.push(`/photo/${photo.id}`)}
+                activeOpacity={0.8}
+              >
+                {photo.thumbnailUrl ? (
+                  <Image
+                    source={{ uri: photo.thumbnailUrl }}
+                    style={styles.photoImage}
+                  />
+                ) : (
+                  <View style={[styles.photoImage, styles.photoPlaceholder]}>
+                    <ImageIcon size={20} color={colors.secondary} />
+                  </View>
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
       </ScrollView>
+
+      {/* Floating Scan Button */}
+      <TouchableOpacity
+        style={[styles.fab, { bottom: insets.bottom + 80 }]}
+        onPress={() => router.push('/(attendee)/scan')}
+        activeOpacity={0.9}
+      >
+        <LinearGradient
+          colors={[colors.accent, colors.accentDark]}
+          style={styles.fabGradient}
+        >
+          <Camera size={24} color="#fff" />
+        </LinearGradient>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -264,16 +430,13 @@ const styles = StyleSheet.create({
   headerContent: {
     flex: 1,
   },
-  headerRight: {
-    alignItems: 'flex-end',
-  },
   greeting: {
-    fontSize: 15,
+    fontSize: 14,
     color: colors.secondary,
-    marginBottom: 4,
+    marginBottom: 2,
   },
   title: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '700',
     color: colors.foreground,
     letterSpacing: -0.5,
@@ -290,81 +453,135 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     fontWeight: '600',
   },
-  statsContainer: {
-    flexDirection: 'row',
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    paddingBottom: 160,
+  },
+  emptyScrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: 100,
+  },
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.xl * 2,
+  },
+  emptyIconContainer: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.lg,
+  },
+  emptyTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: colors.foreground,
+    marginBottom: spacing.sm,
+  },
+  emptyDescription: {
+    fontSize: 16,
+    color: colors.secondary,
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: spacing.xl,
+    maxWidth: 280,
+  },
+  primaryCta: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    width: '100%',
+    maxWidth: 280,
+  },
+  primaryCtaGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: 18,
+    paddingHorizontal: 32,
+  },
+  primaryCtaText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  quickActionsSection: {
+    marginTop: spacing.xl,
+  },
+  quickActionsTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.secondary,
+    marginBottom: spacing.md,
+    textAlign: 'center',
+  },
+  quickActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: spacing.md,
+  },
+  quickAction: {
+    alignItems: 'center',
+    width: 90,
+  },
+  quickActionIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.sm,
+  },
+  quickActionLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.foreground,
+    textAlign: 'center',
+  },
+  statsCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
   },
   statItem: {
+    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.lg,
+    gap: spacing.md,
+    justifyContent: 'center',
+  },
+  statIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   statValue: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '700',
     color: colors.foreground,
   },
   statLabel: {
     fontSize: 12,
     color: colors.secondary,
-    marginTop: 2,
   },
   statDivider: {
     width: 1,
+    height: 40,
     backgroundColor: colors.border,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: spacing.lg,
-    paddingBottom: 120,
-  },
-  emptyState: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.xl,
-  },
-  emptyIconContainer: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing.lg,
-  },
-  emptyTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.foreground,
-    marginBottom: spacing.sm,
-  },
-  emptyDescription: {
-    fontSize: 15,
-    color: colors.secondary,
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: spacing.xl,
-  },
-  ctaButton: {
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  ctaGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-  },
-  ctaText: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#fff',
   },
   memoryCard: {
     height: 200,
@@ -373,13 +590,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
     backgroundColor: colors.muted,
   },
-  memoryOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 1,
-  },
   memoryImage: {
     width: '100%',
     height: '100%',
+  },
+  memoryOverlay: {
+    ...StyleSheet.absoluteFillObject,
   },
   memoryBadge: {
     position: 'absolute',
@@ -387,12 +603,11 @@ const styles = StyleSheet.create({
     left: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 6,
     backgroundColor: 'rgba(0,0,0,0.5)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 20,
-    zIndex: 2,
   },
   memoryBadgeText: {
     fontSize: 12,
@@ -404,7 +619,6 @@ const styles = StyleSheet.create({
     bottom: 16,
     left: 16,
     right: 16,
-    zIndex: 2,
   },
   memoryTitle: {
     fontSize: 18,
@@ -414,7 +628,10 @@ const styles = StyleSheet.create({
   memoryDate: {
     fontSize: 13,
     color: 'rgba(255,255,255,0.8)',
-    marginTop: 2,
+    marginTop: 4,
+  },
+  eventsSection: {
+    marginBottom: spacing.lg,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -427,9 +644,59 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.foreground,
   },
+  seeAllText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.accent,
+  },
   sectionCount: {
     fontSize: 14,
     color: colors.secondary,
+  },
+  eventsCarousel: {
+    gap: spacing.md,
+  },
+  eventCard: {
+    width: EVENT_CARD_WIDTH,
+    height: 140,
+    borderRadius: borderRadius.xl,
+    overflow: 'hidden',
+    backgroundColor: colors.muted,
+  },
+  eventCardImage: {
+    width: '100%',
+    height: '100%',
+  },
+  eventCardPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  eventCardOverlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  eventCardContent: {
+    position: 'absolute',
+    bottom: 12,
+    left: 12,
+    right: 12,
+  },
+  eventCardName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  eventCardMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+  },
+  eventCardCount: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.8)',
+  },
+  photosSection: {
+    marginBottom: spacing.lg,
   },
   photoGrid: {
     flexDirection: 'row',
@@ -446,5 +713,28 @@ const styles = StyleSheet.create({
   photoImage: {
     width: '100%',
     height: '100%',
+  },
+  photoPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fab: {
+    position: 'absolute',
+    right: spacing.lg,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    shadowColor: colors.accent,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  fabGradient: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

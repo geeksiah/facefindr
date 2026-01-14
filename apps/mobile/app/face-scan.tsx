@@ -174,10 +174,10 @@ export default function FaceScanScreen() {
           <Text style={styles.permissionText}>
             We need camera access to scan your face and find your photos.
           </Text>
-          <Button onPress={requestPermission} style={{ marginTop: spacing.lg }}>
+          <Button onPress={requestPermission} fullWidth style={{ marginTop: spacing.lg }}>
             Allow Camera Access
           </Button>
-          <Button variant="ghost" onPress={() => router.back()} style={{ marginTop: spacing.sm }}>
+          <Button variant="ghost" onPress={() => router.back()} fullWidth style={{ marginTop: spacing.sm }}>
             Go Back
           </Button>
         </View>
@@ -282,6 +282,24 @@ export default function FaceScanScreen() {
     );
   }
 
+  const handleCancelSearch = () => {
+    Alert.alert(
+      'Cancel Search?',
+      'Are you sure you want to stop searching? You can always try again later.',
+      [
+        { text: 'Keep Searching', style: 'cancel' },
+        {
+          text: 'Yes, Cancel',
+          style: 'destructive',
+          onPress: () => {
+            setIsProcessing(false);
+            router.back();
+          },
+        },
+      ]
+    );
+  };
+
   // Processing screen
   if (step === 'processing') {
     return (
@@ -295,6 +313,12 @@ export default function FaceScanScreen() {
           <Text style={styles.processingText}>
             This may take a few moments
           </Text>
+          <TouchableOpacity
+            style={styles.cancelSearchButton}
+            onPress={handleCancelSearch}
+          >
+            <Text style={styles.cancelSearchText}>Cancel</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -318,10 +342,10 @@ export default function FaceScanScreen() {
           </View>
           <Text style={styles.errorTitle}>No Match Found</Text>
           <Text style={styles.errorText}>{errorMessage}</Text>
-          <Button onPress={retryCapture} style={{ marginTop: spacing.lg }}>
+          <Button onPress={retryCapture} fullWidth style={{ marginTop: spacing.lg }}>
             Try Again
           </Button>
-          <Button variant="ghost" onPress={() => router.back()} style={{ marginTop: spacing.sm }}>
+          <Button variant="ghost" onPress={() => router.back()} fullWidth style={{ marginTop: spacing.sm }}>
             Go Back
           </Button>
         </View>
@@ -584,6 +608,16 @@ const styles = StyleSheet.create({
     fontSize: fontSize.base,
     color: colors.secondary,
     marginTop: spacing.sm,
+  },
+  cancelSearchButton: {
+    marginTop: spacing.xl,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+  },
+  cancelSearchText: {
+    fontSize: fontSize.base,
+    fontWeight: '600',
+    color: colors.destructive,
   },
   errorContainer: {
     flex: 1,

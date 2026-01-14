@@ -240,7 +240,7 @@ export default function EmbedGalleryPage() {
       )}>
         Powered by{' '}
         <a
-          href="https://facefindr.com"
+          href={process.env.NEXT_PUBLIC_APP_URL || '/'}
           target="_blank"
           rel="noopener noreferrer"
           className="font-medium hover:underline"

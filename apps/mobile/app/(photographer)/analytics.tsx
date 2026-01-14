@@ -9,11 +9,14 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   RefreshControl,
-  Dimensions,
+  TouchableOpacity,
+  StatusBar,
 } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
   TrendingUp,
   TrendingDown,
@@ -21,9 +24,12 @@ import {
   Eye,
   ShoppingCart,
   Users,
+  Calendar,
+  ChevronRight,
+  BarChart3,
+  ArrowUpRight,
 } from 'lucide-react-native';
 
-import { Card } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
@@ -44,9 +50,14 @@ interface TopEvent {
   name: string;
   revenue: number;
   views: number;
+  sales: number;
 }
 
+type PeriodType = '7d' | '30d' | '90d';
+
 export default function AnalyticsScreen() {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { profile } = useAuthStore();
   
   const [analytics, setAnalytics] = useState<AnalyticsData>({
@@ -62,12 +73,10 @@ export default function AnalyticsScreen() {
   const [topEvents, setTopEvents] = useState<TopEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [period, setPeriod] = useState<'7d' | '30d' | '90d'>('30d');
+  const [period, setPeriod] = useState<PeriodType>('30d');
 
   const loadAnalytics = async () => {
     try {
-      // In a real app, this would call an analytics API
-      // For now, we'll use placeholder data
       const { data: wallet } = await supabase
         .from('wallets')
         .select('balance')
@@ -85,7 +94,6 @@ export default function AnalyticsScreen() {
         conversionChange: 0.5,
       });
 
-      // Get top events
       const { data: events } = await supabase
         .from('events')
         .select('id, name')
@@ -100,6 +108,7 @@ export default function AnalyticsScreen() {
             name: e.name,
             revenue: Math.random() * 500,
             views: Math.floor(Math.random() * 1000),
+            sales: Math.floor(Math.random() * 50),
           }))
         );
       }
@@ -125,34 +134,48 @@ export default function AnalyticsScreen() {
     value: string,
     change: number,
     icon: React.ReactNode,
-    color: string
+    bgColor: string,
+    iconColor: string
   ) => (
-    <Card style={styles.statCard}>
-      <View style={[styles.statIcon, { backgroundColor: color + '20' }]}>
-        {icon}
+    <View style={styles.statCard}>
+      <View style={styles.statCardHeader}>
+        <View style={[styles.statIcon, { backgroundColor: bgColor }]}>
+          {icon}
+        </View>
+        <View style={[
+          styles.changeBadge,
+          { backgroundColor: change >= 0 ? '#10b98115' : '#ef444415' }
+        ]}>
+          {change >= 0 ? (
+            <TrendingUp size={10} color="#10b981" />
+          ) : (
+            <TrendingDown size={10} color="#ef4444" />
+          )}
+          <Text style={[
+            styles.changeText,
+            { color: change >= 0 ? '#10b981' : '#ef4444' }
+          ]}>
+            {Math.abs(change)}%
+          </Text>
+        </View>
       </View>
       <Text style={styles.statValue}>{value}</Text>
       <Text style={styles.statTitle}>{title}</Text>
-      <View style={styles.changeRow}>
-        {change >= 0 ? (
-          <TrendingUp size={12} color={colors.success} />
-        ) : (
-          <TrendingDown size={12} color={colors.destructive} />
-        )}
-        <Text
-          style={[
-            styles.changeText,
-            { color: change >= 0 ? colors.success : colors.destructive },
-          ]}
-        >
-          {Math.abs(change)}%
-        </Text>
-      </View>
-    </Card>
+    </View>
   );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+      
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+        <View>
+          <Text style={styles.title}>Analytics</Text>
+          <Text style={styles.subtitle}>Track your performance</Text>
+        </View>
+      </View>
+
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         refreshControl={
@@ -162,91 +185,164 @@ export default function AnalyticsScreen() {
             tintColor={colors.accent}
           />
         }
+        showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.title}>Analytics</Text>
-          <View style={styles.periodSelector}>
-            {(['7d', '30d', '90d'] as const).map((p) => (
+        {/* Period Selector */}
+        <View style={styles.periodContainer}>
+          {(['7d', '30d', '90d'] as PeriodType[]).map((p) => (
+            <TouchableOpacity
+              key={p}
+              style={[
+                styles.periodChip,
+                period === p && styles.periodChipActive,
+              ]}
+              onPress={() => setPeriod(p)}
+            >
               <Text
-                key={p}
                 style={[
-                  styles.periodOption,
-                  period === p && styles.periodOptionActive,
+                  styles.periodText,
+                  period === p && styles.periodTextActive,
                 ]}
-                onPress={() => setPeriod(p)}
               >
                 {p === '7d' ? '7 Days' : p === '30d' ? '30 Days' : '90 Days'}
               </Text>
-            ))}
-          </View>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Revenue Highlight */}
+        <View style={styles.section}>
+          <TouchableOpacity style={styles.revenueCard} activeOpacity={0.9}>
+            <LinearGradient
+              colors={['#10b981', '#059669']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.revenueGradient}
+            >
+              <View style={styles.revenueHeader}>
+                <View style={styles.revenueIconWrapper}>
+                  <DollarSign size={20} color="#fff" />
+                </View>
+                <View style={styles.revenueChangeBadge}>
+                  <TrendingUp size={12} color="#fff" />
+                  <Text style={styles.revenueChangeText}>+{analytics.revenueChange}%</Text>
+                </View>
+              </View>
+              <Text style={styles.revenueAmount}>${analytics.totalRevenue.toFixed(2)}</Text>
+              <Text style={styles.revenueLabel}>Total Revenue</Text>
+              <View style={styles.revenueAction}>
+                <Text style={styles.revenueActionText}>View Details</Text>
+                <ArrowUpRight size={14} color="rgba(255,255,255,0.8)" />
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
         </View>
 
         {/* Stats Grid */}
         <View style={styles.statsGrid}>
           {renderStatCard(
-            'Revenue',
-            `$${analytics.totalRevenue.toFixed(2)}`,
-            analytics.revenueChange,
-            <DollarSign size={20} color={colors.success} />,
-            colors.success
-          )}
-          {renderStatCard(
             'Views',
             analytics.totalViews.toLocaleString(),
             analytics.viewsChange,
-            <Eye size={20} color={colors.accent} />,
+            <Eye size={18} color={colors.accent} />,
+            colors.accent + '15',
             colors.accent
           )}
           {renderStatCard(
             'Sales',
             analytics.totalSales.toString(),
             analytics.salesChange,
-            <ShoppingCart size={20} color={colors.warning} />,
-            colors.warning
+            <ShoppingCart size={18} color="#f59e0b" />,
+            '#f59e0b15',
+            '#f59e0b'
           )}
           {renderStatCard(
             'Conversion',
             `${analytics.conversionRate}%`,
             analytics.conversionChange,
-            <Users size={20} color={colors.info} />,
-            colors.info
+            <Users size={18} color="#8b5cf6" />,
+            '#8b5cf615',
+            '#8b5cf6'
+          )}
+          {renderStatCard(
+            'Events',
+            topEvents.length.toString(),
+            0,
+            <Calendar size={18} color="#ec4899" />,
+            '#ec489915',
+            '#ec4899'
           )}
         </View>
 
-        {/* Top Events */}
+        {/* Top Performing Events */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Top Performing Events</Text>
-          {topEvents.map((event, index) => (
-            <View key={event.id} style={styles.eventRow}>
-              <Text style={styles.eventRank}>{index + 1}</Text>
-              <View style={styles.eventInfo}>
-                <Text style={styles.eventName} numberOfLines={1}>
-                  {event.name}
-                </Text>
-                <Text style={styles.eventStats}>
-                  {event.views} views
-                </Text>
-              </View>
-              <Text style={styles.eventRevenue}>
-                ${event.revenue.toFixed(2)}
-              </Text>
-            </View>
-          ))}
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Top Performing</Text>
+            <TouchableOpacity onPress={() => router.push('/(photographer)/events')}>
+              <Text style={styles.seeAllText}>See all</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <View style={styles.eventsCard}>
+            {topEvents.map((event, index) => (
+              <TouchableOpacity
+                key={event.id}
+                style={[
+                  styles.eventRow,
+                  index === topEvents.length - 1 && styles.eventRowLast,
+                ]}
+                onPress={() => router.push(`/event/${event.id}`)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.eventRankBadge}>
+                  <Text style={styles.eventRankText}>{index + 1}</Text>
+                </View>
+                <View style={styles.eventInfo}>
+                  <Text style={styles.eventName} numberOfLines={1}>
+                    {event.name}
+                  </Text>
+                  <View style={styles.eventStats}>
+                    <View style={styles.eventStat}>
+                      <Eye size={10} color={colors.secondary} />
+                      <Text style={styles.eventStatText}>{event.views}</Text>
+                    </View>
+                    <View style={styles.eventStat}>
+                      <ShoppingCart size={10} color={colors.secondary} />
+                      <Text style={styles.eventStatText}>{event.sales}</Text>
+                    </View>
+                  </View>
+                </View>
+                <View style={styles.eventRevenue}>
+                  <Text style={styles.eventRevenueText}>
+                    ${event.revenue.toFixed(0)}
+                  </Text>
+                  <ChevronRight size={16} color={colors.secondary} />
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
 
-        {/* Revenue Chart Placeholder */}
+        {/* Chart Placeholder */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Revenue Over Time</Text>
-          <Card style={styles.chartPlaceholder}>
-            <TrendingUp size={48} color={colors.muted} />
-            <Text style={styles.chartPlaceholderText}>
-              Charts coming soon
-            </Text>
-          </Card>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Revenue Over Time</Text>
+          </View>
+          <View style={styles.chartCard}>
+            <LinearGradient
+              colors={[colors.muted, colors.background]}
+              style={styles.chartGradient}
+            >
+              <BarChart3 size={48} color={colors.secondary} strokeWidth={1} />
+              <Text style={styles.chartPlaceholderTitle}>Charts Coming Soon</Text>
+              <Text style={styles.chartPlaceholderText}>
+                Detailed analytics visualizations will be available in a future update
+              </Text>
+            </LinearGradient>
+          </View>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -255,119 +351,259 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  scrollContent: {
-    paddingBottom: spacing.xl,
-  },
   header: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
     paddingBottom: spacing.md,
   },
   title: {
-    fontSize: fontSize['2xl'],
-    fontWeight: 'bold',
+    fontSize: 26,
+    fontWeight: '700',
     color: colors.foreground,
+    letterSpacing: -0.5,
   },
-  periodSelector: {
+  subtitle: {
+    fontSize: 14,
+    color: colors.secondary,
+    marginTop: 2,
+  },
+  scrollContent: {
+    paddingBottom: 120,
+  },
+  periodContainer: {
     flexDirection: 'row',
-    marginTop: spacing.sm,
-    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.lg,
+    gap: spacing.sm,
   },
-  periodOption: {
-    fontSize: fontSize.sm,
+  periodChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: colors.muted,
+    borderRadius: 20,
+  },
+  periodChipActive: {
+    backgroundColor: colors.foreground,
+  },
+  periodText: {
+    fontSize: 13,
+    fontWeight: '500',
     color: colors.secondary,
   },
-  periodOptionActive: {
-    color: colors.accent,
+  periodTextActive: {
+    color: colors.background,
+  },
+  section: {
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.lg,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  sectionTitle: {
+    fontSize: 16,
     fontWeight: '600',
+    color: colors.foreground,
+  },
+  seeAllText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.accent,
+  },
+  revenueCard: {
+    borderRadius: borderRadius.xl,
+    overflow: 'hidden',
+  },
+  revenueGradient: {
+    padding: spacing.lg,
+  },
+  revenueHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  revenueIconWrapper: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  revenueChangeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  revenueChangeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  revenueAmount: {
+    fontSize: 36,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  revenueLabel: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.8)',
+    marginBottom: spacing.md,
+  },
+  revenueAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  revenueActionText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.8)',
   },
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,
+    marginBottom: spacing.lg,
   },
   statCard: {
     width: '48%',
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+  },
+  statCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: spacing.md,
+    marginBottom: spacing.sm,
   },
   statIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.xs,
   },
-  statValue: {
-    fontSize: fontSize.xl,
-    fontWeight: 'bold',
-    color: colors.foreground,
-  },
-  statTitle: {
-    fontSize: fontSize.sm,
-    color: colors.secondary,
-    marginTop: 2,
-  },
-  changeRow: {
+  changeBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
-    marginTop: spacing.xs,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
   },
   changeText: {
-    fontSize: fontSize.xs,
-    fontWeight: '500',
-  },
-  section: {
-    marginTop: spacing.lg,
-    paddingHorizontal: spacing.lg,
-  },
-  sectionTitle: {
-    fontSize: fontSize.lg,
+    fontSize: 10,
     fontWeight: '600',
+  },
+  statValue: {
+    fontSize: 22,
+    fontWeight: '700',
     color: colors.foreground,
-    marginBottom: spacing.md,
+  },
+  statTitle: {
+    fontSize: 12,
+    color: colors.secondary,
+    marginTop: 2,
+  },
+  eventsCard: {
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
   },
   eventRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing.sm,
+    padding: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  eventRank: {
-    width: 24,
-    fontSize: fontSize.base,
-    fontWeight: '600',
+  eventRowLast: {
+    borderBottomWidth: 0,
+  },
+  eventRankBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: colors.muted,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
+  },
+  eventRankText: {
+    fontSize: 12,
+    fontWeight: '700',
     color: colors.secondary,
   },
   eventInfo: {
     flex: 1,
   },
   eventName: {
-    fontSize: fontSize.base,
-    fontWeight: '500',
+    fontSize: 14,
+    fontWeight: '600',
     color: colors.foreground,
+    marginBottom: 2,
   },
   eventStats: {
-    fontSize: fontSize.sm,
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  eventStat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  eventStatText: {
+    fontSize: 11,
     color: colors.secondary,
   },
   eventRevenue: {
-    fontSize: fontSize.base,
-    fontWeight: '600',
-    color: colors.success,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
-  chartPlaceholder: {
-    height: 200,
+  eventRevenueText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#10b981',
+  },
+  chartCard: {
+    borderRadius: borderRadius.xl,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  chartGradient: {
+    height: 180,
     alignItems: 'center',
     justifyContent: 'center',
+    padding: spacing.lg,
+  },
+  chartPlaceholderTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.foreground,
+    marginTop: spacing.md,
   },
   chartPlaceholderText: {
-    fontSize: fontSize.base,
+    fontSize: 13,
     color: colors.secondary,
-    marginTop: spacing.sm,
+    textAlign: 'center',
+    marginTop: spacing.xs,
+    lineHeight: 18,
   },
 });

@@ -4,26 +4,30 @@
  * Shows user notifications for photo drops, purchases, etc.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   FlatList,
   RefreshControl,
   TouchableOpacity,
+  StatusBar,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
   Bell,
   Image as ImageIcon,
   ShoppingBag,
   Tag,
   CheckCircle2,
+  Settings,
+  Trash2,
+  Sparkles,
 } from 'lucide-react-native';
 
-import { Button } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
@@ -38,15 +42,16 @@ interface Notification {
   data?: Record<string, any>;
 }
 
-const NOTIFICATION_ICONS: Record<string, React.ComponentType<any>> = {
-  photo_drop: ImageIcon,
-  purchase: ShoppingBag,
-  promo: Tag,
-  system: Bell,
+const NOTIFICATION_ICONS: Record<string, { icon: React.ComponentType<any>; color: string; bg: string }> = {
+  photo_drop: { icon: ImageIcon, color: colors.accent, bg: colors.accent + '15' },
+  purchase: { icon: ShoppingBag, color: '#10b981', bg: '#10b98115' },
+  promo: { icon: Tag, color: '#f59e0b', bg: '#f59e0b15' },
+  system: { icon: Bell, color: '#8b5cf6', bg: '#8b5cf615' },
 };
 
 export default function NotificationsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { profile } = useAuthStore();
   
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -116,7 +121,6 @@ export default function NotificationsScreen() {
   const handleNotificationPress = (notification: Notification) => {
     markAsRead(notification.id);
 
-    // Navigate based on notification type
     if (notification.type === 'photo_drop' && notification.data?.eventId) {
       router.push(`/event/${notification.data.eventId}`);
     } else if (notification.type === 'purchase' && notification.data?.orderId) {
@@ -126,8 +130,9 @@ export default function NotificationsScreen() {
 
   const unreadCount = notifications.filter((n) => !n.isRead).length;
 
-  const renderNotification = ({ item }: { item: Notification }) => {
-    const Icon = NOTIFICATION_ICONS[item.type] || Bell;
+  const renderNotification = useCallback(({ item, index }: { item: Notification; index: number }) => {
+    const config = NOTIFICATION_ICONS[item.type] || NOTIFICATION_ICONS.system;
+    const Icon = config.icon;
 
     return (
       <TouchableOpacity
@@ -138,26 +143,22 @@ export default function NotificationsScreen() {
         onPress={() => handleNotificationPress(item)}
         activeOpacity={0.7}
       >
-        <View
-          style={[
-            styles.iconContainer,
-            { backgroundColor: item.isRead ? colors.muted : colors.accent + '20' },
-          ]}
-        >
-          <Icon
-            size={20}
-            color={item.isRead ? colors.secondary : colors.accent}
-          />
+        <View style={[styles.iconContainer, { backgroundColor: config.bg }]}>
+          <Icon size={20} color={config.color} />
         </View>
         <View style={styles.notificationContent}>
-          <Text
-            style={[
-              styles.notificationTitle,
-              !item.isRead && styles.notificationTitleUnread,
-            ]}
-          >
-            {item.title}
-          </Text>
+          <View style={styles.notificationHeader}>
+            <Text
+              style={[
+                styles.notificationTitle,
+                !item.isRead && styles.notificationTitleUnread,
+              ]}
+              numberOfLines={1}
+            >
+              {item.title}
+            </Text>
+            {!item.isRead && <View style={styles.unreadDot} />}
+          </View>
           <Text style={styles.notificationMessage} numberOfLines={2}>
             {item.message}
           </Text>
@@ -165,33 +166,107 @@ export default function NotificationsScreen() {
             {formatTimeAgo(item.createdAt)}
           </Text>
         </View>
-        {!item.isRead && <View style={styles.unreadDot} />}
       </TouchableOpacity>
     );
-  };
+  }, []);
+
+  const EmptyState = () => (
+    <View style={styles.emptyState}>
+      <LinearGradient
+        colors={[colors.accent + '15', colors.accent + '05']}
+        style={styles.emptyIcon}
+      >
+        <Bell size={40} color={colors.accent} strokeWidth={1.5} />
+      </LinearGradient>
+      <Text style={styles.emptyTitle}>All caught up!</Text>
+      <Text style={styles.emptyDescription}>
+        You have no new notifications. When photographers drop photos or you receive updates, they'll appear here.
+      </Text>
+      
+      {/* Notification Types Legend */}
+      <View style={styles.legendCard}>
+        <View style={styles.legendHeader}>
+          <Sparkles size={14} color={colors.accent} />
+          <Text style={styles.legendTitle}>What to expect</Text>
+        </View>
+        <View style={styles.legendItems}>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendIcon, { backgroundColor: colors.accent + '15' }]}>
+              <ImageIcon size={14} color={colors.accent} />
+            </View>
+            <Text style={styles.legendText}>New photos from events</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendIcon, { backgroundColor: '#10b98115' }]}>
+              <ShoppingBag size={14} color="#10b981" />
+            </View>
+            <Text style={styles.legendText}>Purchase confirmations</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendIcon, { backgroundColor: '#f59e0b15' }]}>
+              <Tag size={14} color="#f59e0b" />
+            </View>
+            <Text style={styles.legendText}>Special offers & promos</Text>
+          </View>
+        </View>
+      </View>
+    </View>
+  );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <View>
+    <View style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+      
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+        <View style={styles.headerLeft}>
           <Text style={styles.title}>Notifications</Text>
           {unreadCount > 0 && (
-            <Text style={styles.unreadCount}>{unreadCount} unread</Text>
+            <View style={styles.unreadBadge}>
+              <Text style={styles.unreadBadgeText}>{unreadCount}</Text>
+            </View>
           )}
         </View>
-        {unreadCount > 0 && (
-          <TouchableOpacity onPress={markAllAsRead} style={styles.markAllButton}>
-            <CheckCircle2 size={16} color={colors.accent} />
+        <View style={styles.headerActions}>
+          {unreadCount > 0 && (
+            <TouchableOpacity 
+              onPress={markAllAsRead} 
+              style={styles.headerButton}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <CheckCircle2 size={20} color={colors.accent} />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity 
+            onPress={() => router.push('/settings/notifications')} 
+            style={styles.headerButton}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Settings size={20} color={colors.secondary} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Unread Summary */}
+      {unreadCount > 0 && (
+        <View style={styles.summaryBar}>
+          <Text style={styles.summaryText}>
+            <Text style={styles.summaryCount}>{unreadCount}</Text> unread notification{unreadCount !== 1 ? 's' : ''}
+          </Text>
+          <TouchableOpacity onPress={markAllAsRead}>
             <Text style={styles.markAllText}>Mark all read</Text>
           </TouchableOpacity>
-        )}
-      </View>
+        </View>
+      )}
 
       <FlatList
         data={notifications}
         renderItem={renderNotification}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[
+          styles.listContent,
+          notifications.length === 0 && styles.emptyListContent,
+        ]}
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}
@@ -199,21 +274,11 @@ export default function NotificationsScreen() {
             tintColor={colors.accent}
           />
         }
-        ListEmptyComponent={
-          !isLoading ? (
-            <View style={styles.emptyState}>
-              <View style={styles.emptyIcon}>
-                <Bell size={48} color={colors.secondary} />
-              </View>
-              <Text style={styles.emptyTitle}>No notifications</Text>
-              <Text style={styles.emptyDescription}>
-                You're all caught up! New notifications will appear here.
-              </Text>
-            </View>
-          ) : null
-        }
+        ListEmptyComponent={!isLoading ? EmptyState : null}
+        showsVerticalScrollIndicator={false}
+        ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -229,7 +294,7 @@ function formatTimeAgo(dateString: string): string {
   if (diffMins < 60) return `${diffMins}m ago`;
   if (diffHours < 24) return `${diffHours}h ago`;
   if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString();
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 const styles = StyleSheet.create({
@@ -242,52 +307,92 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
     paddingBottom: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
   },
-  title: {
-    fontSize: fontSize['2xl'],
-    fontWeight: 'bold',
-    color: colors.foreground,
-  },
-  unreadCount: {
-    fontSize: fontSize.sm,
-    color: colors.accent,
-    marginTop: 2,
-  },
-  markAllButton: {
+  headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
+    gap: spacing.sm,
+  },
+  title: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: colors.foreground,
+    letterSpacing: -0.5,
+  },
+  unreadBadge: {
+    backgroundColor: colors.accent,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    minWidth: 24,
+    alignItems: 'center',
+  },
+  unreadBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  headerButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.muted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  summaryBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.accent + '10',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.accent + '20',
+  },
+  summaryText: {
+    fontSize: 13,
+    color: colors.secondary,
+  },
+  summaryCount: {
+    fontWeight: '600',
+    color: colors.accent,
   },
   markAllText: {
-    fontSize: fontSize.sm,
+    fontSize: 13,
+    fontWeight: '600',
     color: colors.accent,
-    fontWeight: '500',
   },
   listContent: {
-    padding: spacing.md,
-    gap: spacing.sm,
+    padding: spacing.lg,
+    paddingBottom: 120,
+  },
+  emptyListContent: {
+    flexGrow: 1,
   },
   notificationCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     padding: spacing.md,
     backgroundColor: colors.card,
-    borderRadius: borderRadius.lg,
+    borderRadius: borderRadius.xl,
     borderWidth: 1,
     borderColor: colors.border,
   },
   notificationUnread: {
-    backgroundColor: colors.accent + '08',
-    borderColor: colors.accent + '30',
+    backgroundColor: colors.accent + '05',
+    borderColor: colors.accent + '20',
   },
   iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: borderRadius.md,
+    width: 44,
+    height: 44,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: spacing.md,
@@ -295,55 +400,99 @@ const styles = StyleSheet.create({
   notificationContent: {
     flex: 1,
   },
+  notificationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
   notificationTitle: {
-    fontSize: fontSize.base,
+    fontSize: 15,
     fontWeight: '500',
     color: colors.foreground,
+    flex: 1,
   },
   notificationTitleUnread: {
     fontWeight: '600',
-  },
-  notificationMessage: {
-    fontSize: fontSize.sm,
-    color: colors.secondary,
-    marginTop: 2,
-    lineHeight: 20,
-  },
-  notificationTime: {
-    fontSize: fontSize.xs,
-    color: colors.secondary,
-    marginTop: spacing.xs,
   },
   unreadDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
     backgroundColor: colors.accent,
-    marginLeft: spacing.sm,
+  },
+  notificationMessage: {
+    fontSize: 13,
+    color: colors.secondary,
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  notificationTime: {
+    fontSize: 11,
+    color: colors.secondary,
+    marginTop: spacing.xs,
   },
   emptyState: {
+    flex: 1,
     alignItems: 'center',
-    paddingTop: spacing['2xl'],
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xl,
   },
   emptyIcon: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: colors.muted,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.lg,
   },
   emptyTitle: {
-    fontSize: fontSize.lg,
+    fontSize: 22,
+    fontWeight: '700',
+    color: colors.foreground,
+    marginBottom: spacing.sm,
+  },
+  emptyDescription: {
+    fontSize: 15,
+    color: colors.secondary,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: spacing.xl,
+  },
+  legendCard: {
+    width: '100%',
+    backgroundColor: colors.muted,
+    borderRadius: borderRadius.xl,
+    padding: spacing.lg,
+  },
+  legendHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.md,
+  },
+  legendTitle: {
+    fontSize: 13,
     fontWeight: '600',
     color: colors.foreground,
   },
-  emptyDescription: {
-    fontSize: fontSize.base,
+  legendItems: {
+    gap: spacing.md,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  legendIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  legendText: {
+    fontSize: 13,
     color: colors.secondary,
-    marginTop: spacing.xs,
-    textAlign: 'center',
-    paddingHorizontal: spacing.xl,
+    flex: 1,
   },
 });

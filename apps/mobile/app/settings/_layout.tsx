@@ -1,5 +1,5 @@
 /**
- * Settings Layout
+ * Settings Stack Layout
  */
 
 import { Stack } from 'expo-router';
@@ -9,16 +9,15 @@ export default function SettingsLayout() {
   return (
     <Stack
       screenOptions={{
-        headerStyle: { backgroundColor: colors.background },
-        headerTintColor: colors.foreground,
-        headerShadowVisible: false,
+        headerShown: false,
         contentStyle: { backgroundColor: colors.background },
+        animation: 'slide_from_right',
       }}
     >
-      <Stack.Screen name="profile" options={{ title: 'Edit Profile' }} />
-      <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
-      <Stack.Screen name="privacy" options={{ title: 'Privacy & Security' }} />
-      <Stack.Screen name="help" options={{ title: 'Help & Support' }} />
+      <Stack.Screen name="profile" />
+      <Stack.Screen name="notifications" />
+      <Stack.Screen name="privacy" />
+      <Stack.Screen name="help" />
     </Stack>
   );
 }

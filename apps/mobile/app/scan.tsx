@@ -41,14 +41,22 @@ export default function ScanScreen() {
 
     // Parse the QR code data
     // Expected formats:
-    // - https://facefindr.com/e/[slug]
-    // - https://facefindr.com/s/[code]
+    // - https://{domain}/e/[slug]
+    // - https://{domain}/s/[code]
     // - facefindr://event/[id]
+    
+    const appUrl = process.env.EXPO_PUBLIC_APP_URL || '';
+    const appDomain = appUrl ? new URL(appUrl).hostname : '';
+    const appScheme = process.env.EXPO_PUBLIC_APP_SCHEME || 'facefindr';
 
     try {
       const url = new URL(data);
       
-      if (url.hostname === 'facefindr.com' || url.protocol === 'facefindr:') {
+      // Check if URL matches our domain or custom scheme
+      const isValidDomain = appDomain && url.hostname === appDomain;
+      const isCustomScheme = url.protocol === `${appScheme}:`;
+      
+      if (isValidDomain || isCustomScheme) {
         const pathParts = url.pathname.split('/').filter(Boolean);
         
         if (pathParts[0] === 'e' && pathParts[1]) {
@@ -66,7 +74,7 @@ export default function ScanScreen() {
     } catch (error) {
       Alert.alert(
         'Invalid QR Code',
-        'This QR code is not recognized. Please scan a FaceFindr event QR code.',
+        'This QR code is not recognized. Please scan a valid event QR code.',
         [
           { text: 'Try Again', onPress: () => setScanned(false) },
           { text: 'Cancel', onPress: () => router.back() },

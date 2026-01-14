@@ -6,6 +6,7 @@
 
 import { create } from 'zustand';
 import { supabase, Session, User } from '@/lib/supabase';
+import { router } from 'expo-router';
 
 interface Profile {
   id: string;
@@ -68,6 +69,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       supabase.auth.onAuthStateChange(async (event, session) => {
         if (event === 'SIGNED_OUT') {
           set({ session: null, user: null, profile: null });
+          // Navigate to welcome screen
+          router.replace('/');
         } else if (session?.user) {
           const userType = session.user.user_metadata?.user_type || 'attendee';
           const table = userType === 'photographer' ? 'photographers' : 'attendees';
@@ -108,6 +111,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
       await get().refreshProfile();
       return { error: null };
+    } catch (err: any) {
+      return { error: err.message || 'Sign in failed' };
     } finally {
       set({ isLoading: false });
     }
@@ -130,40 +135,57 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         return { error: error.message };
       }
       return { error: null };
+    } catch (err: any) {
+      return { error: err.message || 'Sign up failed' };
     } finally {
       set({ isLoading: false });
     }
   },
 
   signOut: async () => {
-    await supabase.auth.signOut();
-    set({ session: null, user: null, profile: null });
+    try {
+      set({ isLoading: true });
+      await supabase.auth.signOut();
+      set({ session: null, user: null, profile: null, isLoading: false });
+      // Force navigation to welcome
+      router.replace('/');
+    } catch (error) {
+      console.error('Sign out error:', error);
+      set({ isLoading: false });
+      // Still clear local state even if signout fails
+      set({ session: null, user: null, profile: null });
+      router.replace('/');
+    }
   },
 
   refreshProfile: async () => {
     const { session } = get();
     if (!session?.user) return;
 
-    const userType = session.user.user_metadata?.user_type || 'attendee';
-    const table = userType === 'photographer' ? 'photographers' : 'attendees';
-    
-    const { data: profile } = await supabase
-      .from(table)
-      .select('*')
-      .eq('id', session.user.id)
-      .single();
+    try {
+      const userType = session.user.user_metadata?.user_type || 'attendee';
+      const table = userType === 'photographer' ? 'photographers' : 'attendees';
+      
+      const { data: profile } = await supabase
+        .from(table)
+        .select('*')
+        .eq('id', session.user.id)
+        .single();
 
-    if (profile) {
-      set({
-        profile: {
-          id: profile.id,
-          displayName: profile.display_name || 'User',
-          email: session.user.email || '',
-          faceTag: profile.face_tag,
-          profilePhotoUrl: profile.profile_photo_url,
-          userType,
-        },
-      });
+      if (profile) {
+        set({
+          profile: {
+            id: profile.id,
+            displayName: profile.display_name || 'User',
+            email: session.user.email || '',
+            faceTag: profile.face_tag,
+            profilePhotoUrl: profile.profile_photo_url,
+            userType,
+          },
+        });
+      }
+    } catch (error) {
+      console.error('Refresh profile error:', error);
     }
   },
 }));

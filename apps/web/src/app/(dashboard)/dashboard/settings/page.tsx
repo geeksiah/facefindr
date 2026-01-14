@@ -209,7 +209,7 @@ export default function SettingsPage() {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch('/api/photographer/profile-photo', {
+      const response = await fetch('/api/user/profile-photo', {
         method: 'POST',
         body: formData,
       });
@@ -232,7 +232,7 @@ export default function SettingsPage() {
   // Remove photo
   const handleRemovePhoto = async () => {
     try {
-      const response = await fetch('/api/photographer/profile-photo', {
+      const response = await fetch('/api/user/profile-photo', {
         method: 'DELETE',
       });
 
@@ -449,7 +449,7 @@ export default function SettingsPage() {
                     rel="noopener noreferrer"
                     className="text-accent hover:underline"
                   >
-                    facefindr.com/p/{profile.publicProfileSlug}
+                    {new URL(process.env.NEXT_PUBLIC_APP_URL || window.location.origin).hostname}/p/{profile.publicProfileSlug}
                   </a>
                 </p>
               </div>

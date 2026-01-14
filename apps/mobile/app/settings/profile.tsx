@@ -2,20 +2,21 @@
  * Edit Profile Screen
  */
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
   Image,
   Alert,
   ActivityIndicator,
+  StatusBar,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Camera, User } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ArrowLeft, Camera, User, Check } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 
 import { Button, Input } from '@/components/ui';
@@ -25,6 +26,7 @@ import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 
 export default function EditProfileScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { profile, refreshProfile } = useAuthStore();
 
   const [displayName, setDisplayName] = useState(profile?.displayName || '');
@@ -52,11 +54,12 @@ export default function EditProfileScreen() {
       }
 
       await refreshProfile();
-      Alert.alert('Success', 'Profile updated successfully');
-      router.back();
+      Alert.alert('Success', 'Profile updated successfully', [
+        { text: 'OK', onPress: () => router.back() }
+      ]);
     } catch (err) {
       console.error('Update profile error:', err);
-      Alert.alert('Error', 'Failed to update profile');
+      Alert.alert('Error', 'Failed to update profile. Please check your connection.');
     } finally {
       setIsLoading(false);
     }
@@ -114,34 +117,63 @@ export default function EditProfileScreen() {
       Alert.alert('Success', 'Profile photo updated');
     } catch (err) {
       console.error('Photo upload error:', err);
-      Alert.alert('Error', 'Failed to upload photo');
+      Alert.alert('Upload Failed', 'Could not upload photo. Please check your internet connection and try again.');
     } finally {
       setIsUploadingPhoto(false);
     }
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
+    <View style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+      
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <ArrowLeft size={24} color={colors.foreground} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Edit Profile</Text>
+        <TouchableOpacity
+          style={[styles.saveButton, isLoading && styles.saveButtonDisabled]}
+          onPress={handleUpdateProfile}
+          disabled={isLoading}
+        >
+          {isLoading ? (
+            <ActivityIndicator size="small" color={colors.accent} />
+          ) : (
+            <Check size={24} color={colors.accent} />
+          )}
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView 
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Profile Photo */}
         <View style={styles.photoSection}>
           <TouchableOpacity
             style={styles.photoContainer}
             onPress={handleChangePhoto}
             disabled={isUploadingPhoto}
+            activeOpacity={0.8}
           >
             {profile?.profilePhotoUrl ? (
               <Image source={{ uri: profile.profilePhotoUrl }} style={styles.photo} />
             ) : (
               <View style={[styles.photo, styles.photoPlaceholder]}>
-                <User size={48} color={colors.secondary} />
+                <User size={48} color={colors.secondary} strokeWidth={1.5} />
               </View>
             )}
             <View style={styles.cameraButton}>
               {isUploadingPhoto ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
-                <Camera size={16} color="#fff" />
+                <Camera size={16} color="#fff" strokeWidth={2} />
               )}
             </View>
           </TouchableOpacity>
@@ -150,38 +182,38 @@ export default function EditProfileScreen() {
 
         {/* Form */}
         <View style={styles.form}>
-          <Input
-            label="Display Name"
-            value={displayName}
-            onChangeText={setDisplayName}
-            placeholder="Your name"
-          />
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Display Name</Text>
+            <View style={styles.inputContainer}>
+              <Input
+                value={displayName}
+                onChangeText={setDisplayName}
+                placeholder="Your name"
+                style={styles.input}
+              />
+            </View>
+          </View>
 
-          <Input
-            label="Email"
-            value={profile?.email || ''}
-            editable={false}
-            style={{ opacity: 0.6 }}
-          />
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Email</Text>
+            <View style={[styles.inputContainer, styles.inputDisabled]}>
+              <Text style={styles.inputValue}>{profile?.email || ''}</Text>
+            </View>
+            <Text style={styles.inputHint}>Email cannot be changed</Text>
+          </View>
 
           {profile?.faceTag && (
-            <View style={styles.faceTagContainer}>
-              <Text style={styles.faceTagLabel}>Your FaceTag</Text>
-              <Text style={styles.faceTag}>{profile.faceTag}</Text>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Your FaceTag</Text>
+              <View style={styles.faceTagContainer}>
+                <Text style={styles.faceTag}>{profile.faceTag}</Text>
+              </View>
+              <Text style={styles.inputHint}>Share this tag so photographers can find you</Text>
             </View>
           )}
-
-          <Button
-            onPress={handleUpdateProfile}
-            loading={isLoading}
-            fullWidth
-            style={{ marginTop: spacing.lg }}
-          >
-            Save Changes
-          </Button>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -190,8 +222,38 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: colors.foreground,
+  },
+  saveButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveButtonDisabled: {
+    opacity: 0.5,
+  },
   content: {
     padding: spacing.lg,
+    paddingBottom: 100,
   },
   photoSection: {
     alignItems: 'center',
@@ -212,8 +274,8 @@ const styles = StyleSheet.create({
   },
   cameraButton: {
     position: 'absolute',
-    bottom: 0,
-    right: 0,
+    bottom: 4,
+    right: 4,
     width: 36,
     height: 36,
     borderRadius: 18,
@@ -224,27 +286,55 @@ const styles = StyleSheet.create({
     borderColor: colors.background,
   },
   photoHint: {
-    fontSize: fontSize.sm,
+    fontSize: 13,
     color: colors.secondary,
     marginTop: spacing.sm,
   },
   form: {
-    gap: spacing.md,
+    gap: spacing.lg,
+  },
+  inputGroup: {
+    gap: spacing.xs,
+  },
+  inputLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.foreground,
+    marginBottom: 4,
+  },
+  inputContainer: {
+    backgroundColor: colors.muted,
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+  },
+  input: {
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+  },
+  inputDisabled: {
+    padding: spacing.md,
+  },
+  inputValue: {
+    fontSize: 16,
+    color: colors.secondary,
+  },
+  inputHint: {
+    fontSize: 12,
+    color: colors.secondary,
+    marginTop: 4,
   },
   faceTagContainer: {
     padding: spacing.md,
-    backgroundColor: colors.muted,
+    backgroundColor: colors.accent + '10',
     borderRadius: borderRadius.lg,
-  },
-  faceTagLabel: {
-    fontSize: fontSize.sm,
-    color: colors.secondary,
-    marginBottom: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.accent + '30',
   },
   faceTag: {
-    fontSize: fontSize.lg,
-    fontWeight: 'bold',
+    fontSize: 18,
+    fontWeight: '700',
     color: colors.accent,
     fontFamily: 'monospace',
+    textAlign: 'center',
   },
 });

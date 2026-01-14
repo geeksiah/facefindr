@@ -492,7 +492,7 @@ export function EventSharePanel({ eventId, onClose }: EventSharePanelProps) {
               <div className="flex gap-2">
                 <div className="flex-1 flex items-center gap-0 rounded-xl border border-border overflow-hidden bg-muted">
                   <span className="px-3 text-sm text-secondary whitespace-nowrap">
-                    facefindr.com/e/
+                    {typeof window !== 'undefined' ? window.location.hostname : ''}/e/
                   </span>
                   <input
                     type="text"

@@ -7,7 +7,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { generateQRCode } from '@/lib/sharing/qr-service';
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://facefindr.com';
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || '';
 const APP_SCHEME = 'facefindr://';
 
 interface ProfileResult {

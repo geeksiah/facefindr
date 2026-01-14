@@ -129,9 +129,10 @@ export default function PhotoViewerScreen() {
 
   const handleShare = async () => {
     try {
+      const baseUrl = process.env.EXPO_PUBLIC_APP_URL || 'https://app.example.com';
       await Share.share({
         message: `Check out this photo from ${photo?.eventName} on FaceFindr!`,
-        url: `https://facefindr.com/photo/${id}`,
+        url: `${baseUrl}/photo/${id}`,
       });
     } catch (error) {
       console.error('Share error:', error);
@@ -223,7 +224,7 @@ export default function PhotoViewerScreen() {
         <View style={styles.errorContainer}>
           <X size={48} color={colors.destructive} />
           <Text style={styles.errorText}>Photo not found</Text>
-          <Button onPress={() => router.back()}>Go Back</Button>
+          <Button onPress={() => router.back()} fullWidth>Go Back</Button>
         </View>
       </SafeAreaView>
     );
@@ -340,6 +341,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.md,
+    paddingHorizontal: spacing.lg,
   },
   errorText: {
     fontSize: fontSize.lg,

@@ -94,7 +94,7 @@ export function generateEventUrls(
   embedUrl: string;
   scanUrl: string;
 } {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://facefindr.com';
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || '';
   
   const directUrl = `${baseUrl}/e/${eventSlug}`;
   const shortUrl = shortLink ? `${baseUrl}/s/${shortLink}` : directUrl;
@@ -134,7 +134,7 @@ export function generateEmbedCode(
     primaryColor = '#0A84FF',
   } = options;
   
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://facefindr.com';
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || '';
   const embedUrl = `${baseUrl}/embed/${eventSlug}?type=${type}&theme=${theme}&color=${encodeURIComponent(primaryColor)}`;
   
   if (type === 'button') {

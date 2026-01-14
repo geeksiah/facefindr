@@ -9,14 +9,18 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
   Image,
   Share,
   Alert,
+  StatusBar,
+  Linking,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
   User,
   Settings,
@@ -29,28 +33,33 @@ import {
   Copy,
   QrCode,
   ExternalLink,
+  Shield,
+  Camera,
+  Sparkles,
 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 
-import { Button, Card } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { profile, signOut } = useAuthStore();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  const APP_URL = process.env.EXPO_PUBLIC_APP_URL || 'https://app.example.com';
 
   const handleCopyFaceTag = async () => {
     if (profile?.faceTag) {
       await Clipboard.setStringAsync(profile.faceTag);
-      Alert.alert('Copied', 'FaceTag copied to clipboard');
+      Alert.alert('Copied!', 'FaceTag copied to clipboard');
     }
   };
 
   const handleShare = async () => {
     try {
-      const profileUrl = `https://facefindr.com/p/${profile?.faceTag?.replace('@', '')}`;
+      const profileUrl = `${APP_URL}/p/${profile?.faceTag?.replace('@', '')}`;
       await Share.share({
         message: `Check out my photography on FaceFindr!\n${profileUrl}`,
         url: profileUrl,
@@ -63,7 +72,7 @@ export default function ProfileScreen() {
   const handleLogout = () => {
     Alert.alert(
       'Sign Out',
-      'Are you sure you want to sign out?',
+      'Are you sure you want to sign out of your account?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -72,6 +81,7 @@ export default function ProfileScreen() {
           onPress: async () => {
             setIsLoggingOut(true);
             await signOut();
+            router.replace('/');
           },
         },
       ]
@@ -79,13 +89,12 @@ export default function ProfileScreen() {
   };
 
   const handleOpenWebDashboard = () => {
-    // Open web dashboard in browser
     Alert.alert(
       'Open Web Dashboard',
       'For advanced features like watermark settings, billing, and detailed analytics, use the web dashboard.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Open', onPress: () => {/* Linking.openURL('https://facefindr.com/dashboard') */} },
+        { text: 'Open', onPress: () => Linking.openURL(`${APP_URL}/dashboard`) },
       ]
     );
   };
@@ -94,131 +103,193 @@ export default function ProfileScreen() {
     {
       icon: User,
       label: 'Edit Profile',
+      description: 'Update your name and photo',
       onPress: () => router.push('/settings/profile'),
+      color: colors.accent,
     },
     {
       icon: CreditCard,
       label: 'Billing & Payouts',
+      description: 'Manage payment methods',
       onPress: () => router.push('/settings/billing'),
+      color: '#10b981',
     },
     {
       icon: Bell,
       label: 'Notifications',
+      description: 'Configure alerts',
       onPress: () => router.push('/settings/notifications'),
+      color: '#f59e0b',
     },
     {
-      icon: Settings,
-      label: 'Settings',
-      onPress: () => router.push('/settings'),
+      icon: Shield,
+      label: 'Privacy & Security',
+      description: 'Account security settings',
+      onPress: () => router.push('/settings/privacy'),
+      color: '#8b5cf6',
     },
     {
       icon: HelpCircle,
       label: 'Help & Support',
+      description: 'Get assistance',
       onPress: () => router.push('/settings/help'),
+      color: '#ec4899',
     },
   ];
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+    <View style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+      
+      <ScrollView 
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Profile Header */}
-        <View style={styles.header}>
-          <View style={styles.avatarContainer}>
+        <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+          <TouchableOpacity 
+            style={styles.avatarContainer}
+            onPress={() => router.push('/settings/profile')}
+            activeOpacity={0.9}
+          >
             {profile?.profilePhotoUrl ? (
               <Image
                 source={{ uri: profile.profilePhotoUrl }}
                 style={styles.avatar}
               />
             ) : (
-              <View style={[styles.avatar, styles.avatarPlaceholder]}>
+              <LinearGradient
+                colors={[colors.accent, colors.accentDark]}
+                style={[styles.avatar, styles.avatarPlaceholder]}
+              >
                 <Text style={styles.avatarText}>
                   {profile?.displayName?.charAt(0).toUpperCase() || 'P'}
                 </Text>
-              </View>
+              </LinearGradient>
             )}
-          </View>
+            <View style={styles.editAvatarBadge}>
+              <Camera size={12} color="#fff" />
+            </View>
+          </TouchableOpacity>
+          
           <Text style={styles.displayName}>{profile?.displayName}</Text>
           <Text style={styles.email}>{profile?.email}</Text>
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>Photographer</Text>
+          
+          <View style={styles.roleBadge}>
+            <Sparkles size={12} color={colors.accent} />
+            <Text style={styles.roleBadgeText}>Photographer</Text>
           </View>
         </View>
 
         {/* FaceTag Card */}
-        <Card style={styles.faceTagCard}>
-          <View style={styles.faceTagHeader}>
-            <Text style={styles.faceTagLabel}>Your FaceTag</Text>
-            <View style={styles.faceTagActions}>
-              <TouchableOpacity onPress={handleCopyFaceTag} style={styles.iconButton}>
-                <Copy size={18} color={colors.secondary} />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={handleShare} style={styles.iconButton}>
-                <Share2 size={18} color={colors.secondary} />
-              </TouchableOpacity>
-            </View>
-          </View>
-          <Text style={styles.faceTag}>{profile?.faceTag || 'Not assigned'}</Text>
-          <Text style={styles.faceTagHint}>
-            Share this so attendees can find and follow you
-          </Text>
-
-          <TouchableOpacity
-            style={styles.qrButton}
-            onPress={() => router.push('/profile/qr-code')}
+        <View style={styles.faceTagCard}>
+          <LinearGradient
+            colors={[colors.accent + '10', colors.accent + '05']}
+            style={styles.faceTagGradient}
           >
-            <QrCode size={20} color={colors.accent} />
-            <Text style={styles.qrButtonText}>Show QR Code</Text>
-          </TouchableOpacity>
-        </Card>
+            <View style={styles.faceTagHeader}>
+              <View>
+                <Text style={styles.faceTagLabel}>Your FaceTag</Text>
+                <Text style={styles.faceTag}>{profile?.faceTag || '@facefindr'}</Text>
+              </View>
+              <View style={styles.faceTagActions}>
+                <TouchableOpacity 
+                  onPress={handleCopyFaceTag} 
+                  style={styles.iconButton}
+                  activeOpacity={0.7}
+                >
+                  <Copy size={18} color={colors.accent} />
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  onPress={handleShare} 
+                  style={styles.iconButton}
+                  activeOpacity={0.7}
+                >
+                  <Share2 size={18} color={colors.accent} />
+                </TouchableOpacity>
+              </View>
+            </View>
+            
+            <Text style={styles.faceTagHint}>
+              Share your FaceTag so attendees can find and follow you
+            </Text>
+
+            <TouchableOpacity
+              style={styles.qrButton}
+              onPress={() => router.push('/profile/qr-code')}
+              activeOpacity={0.8}
+            >
+              <QrCode size={18} color="#fff" />
+              <Text style={styles.qrButtonText}>Show QR Code</Text>
+            </TouchableOpacity>
+          </LinearGradient>
+        </View>
 
         {/* Web Dashboard Link */}
         <TouchableOpacity
           style={styles.webDashboardCard}
           onPress={handleOpenWebDashboard}
+          activeOpacity={0.8}
         >
-          <View style={styles.webDashboardContent}>
-            <ExternalLink size={20} color={colors.accent} />
-            <View style={styles.webDashboardText}>
-              <Text style={styles.webDashboardTitle}>Web Dashboard</Text>
-              <Text style={styles.webDashboardSubtitle}>
-                Access advanced settings & analytics
-              </Text>
-            </View>
+          <View style={styles.webDashboardIcon}>
+            <ExternalLink size={20} color="#8b5cf6" />
+          </View>
+          <View style={styles.webDashboardText}>
+            <Text style={styles.webDashboardTitle}>Web Dashboard</Text>
+            <Text style={styles.webDashboardSubtitle}>
+              Advanced settings & full analytics
+            </Text>
           </View>
           <ChevronRight size={20} color={colors.secondary} />
         </TouchableOpacity>
 
-        {/* Menu */}
-        <View style={styles.menu}>
-          {menuItems.map((item, index) => (
-            <TouchableOpacity
-              key={index}
-              style={styles.menuItem}
-              onPress={item.onPress}
-            >
-              <item.icon size={20} color={colors.secondary} />
-              <Text style={styles.menuItemLabel}>{item.label}</Text>
-              <ChevronRight size={20} color={colors.secondary} />
-            </TouchableOpacity>
-          ))}
+        {/* Menu Section */}
+        <View style={styles.menuSection}>
+          <Text style={styles.menuSectionTitle}>Account</Text>
+          <View style={styles.menuCard}>
+            {menuItems.map((item, index) => (
+              <TouchableOpacity
+                key={index}
+                style={[
+                  styles.menuItem,
+                  index === menuItems.length - 1 && styles.menuItemLast,
+                ]}
+                onPress={item.onPress}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.menuItemIcon, { backgroundColor: item.color + '15' }]}>
+                  <item.icon size={18} color={item.color} />
+                </View>
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.menuItemLabel}>{item.label}</Text>
+                  <Text style={styles.menuItemDescription}>{item.description}</Text>
+                </View>
+                <ChevronRight size={18} color={colors.secondary} />
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
 
-        {/* Logout */}
+        {/* Logout Button */}
         <TouchableOpacity
           style={styles.logoutButton}
           onPress={handleLogout}
           disabled={isLoggingOut}
+          activeOpacity={0.7}
         >
-          <LogOut size={20} color={colors.destructive} />
+          <LogOut size={18} color={colors.destructive} />
           <Text style={styles.logoutText}>
             {isLoggingOut ? 'Signing out...' : 'Sign Out'}
           </Text>
         </TouchableOpacity>
 
-        {/* Version */}
-        <Text style={styles.version}>FaceFindr v1.0.0</Text>
+        {/* App Version */}
+        <View style={styles.footer}>
+          <Text style={styles.version}>FaceFindr v1.0.0</Text>
+          <Text style={styles.copyright}>© 2025 The FaceFindr Team</Text>
+        </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -228,99 +299,128 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   scrollContent: {
-    paddingBottom: spacing.xl,
+    paddingBottom: 120,
   },
   header: {
     alignItems: 'center',
-    paddingTop: spacing.lg,
+    paddingHorizontal: spacing.lg,
     paddingBottom: spacing.lg,
   },
   avatarContainer: {
+    position: 'relative',
     marginBottom: spacing.md,
   },
   avatar: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
   },
   avatarPlaceholder: {
-    backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarText: {
-    fontSize: fontSize['3xl'],
-    fontWeight: 'bold',
+    fontSize: 36,
+    fontWeight: '700',
     color: '#fff',
   },
+  editAvatarBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: colors.background,
+  },
   displayName: {
-    fontSize: fontSize.xl,
-    fontWeight: 'bold',
+    fontSize: 24,
+    fontWeight: '700',
     color: colors.foreground,
+    marginBottom: 2,
   },
   email: {
-    fontSize: fontSize.sm,
+    fontSize: 14,
     color: colors.secondary,
-    marginTop: 2,
+    marginBottom: spacing.sm,
   },
-  badge: {
-    marginTop: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.full,
-    backgroundColor: colors.accent + '20',
+  roleBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: colors.accent + '15',
   },
-  badgeText: {
-    fontSize: fontSize.sm,
-    fontWeight: '500',
+  roleBadgeText: {
+    fontSize: 13,
+    fontWeight: '600',
     color: colors.accent,
   },
   faceTagCard: {
     marginHorizontal: spacing.lg,
     marginBottom: spacing.md,
+    borderRadius: borderRadius.xl,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.accent + '20',
+  },
+  faceTagGradient: {
+    padding: spacing.lg,
   },
   faceTagHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: spacing.sm,
   },
   faceTagLabel: {
-    fontSize: fontSize.sm,
+    fontSize: 12,
     color: colors.secondary,
+    marginBottom: 4,
+  },
+  faceTag: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: colors.accent,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   faceTagActions: {
     flexDirection: 'row',
     gap: spacing.sm,
   },
   iconButton: {
-    padding: spacing.xs,
-  },
-  faceTag: {
-    fontSize: fontSize['2xl'],
-    fontWeight: 'bold',
-    color: colors.accent,
-    fontFamily: 'monospace',
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: colors.accent + '15',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   faceTagHint: {
-    fontSize: fontSize.xs,
+    fontSize: 13,
     color: colors.secondary,
-    marginTop: spacing.xs,
+    marginBottom: spacing.md,
+    lineHeight: 18,
   },
   qrButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    marginTop: spacing.md,
-    paddingVertical: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
+    backgroundColor: colors.accent,
+    paddingVertical: 12,
+    borderRadius: borderRadius.lg,
   },
   qrButtonText: {
-    fontSize: fontSize.base,
-    fontWeight: '500',
-    color: colors.accent,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
   },
   webDashboardCard: {
     flexDirection: 'row',
@@ -329,30 +429,44 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
     padding: spacing.md,
     borderRadius: borderRadius.xl,
-    backgroundColor: colors.accent + '10',
+    backgroundColor: '#8b5cf610',
     borderWidth: 1,
-    borderColor: colors.accent + '30',
+    borderColor: '#8b5cf620',
   },
-  webDashboardContent: {
-    flex: 1,
-    flexDirection: 'row',
+  webDashboardIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: '#8b5cf615',
     alignItems: 'center',
-    gap: spacing.md,
+    justifyContent: 'center',
+    marginRight: spacing.md,
   },
   webDashboardText: {
     flex: 1,
   },
   webDashboardTitle: {
-    fontSize: fontSize.base,
+    fontSize: 15,
     fontWeight: '600',
     color: colors.foreground,
+    marginBottom: 2,
   },
   webDashboardSubtitle: {
-    fontSize: fontSize.sm,
+    fontSize: 12,
     color: colors.secondary,
   },
-  menu: {
-    marginHorizontal: spacing.lg,
+  menuSection: {
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.lg,
+  },
+  menuSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.secondary,
+    marginBottom: spacing.md,
+    marginLeft: spacing.xs,
+  },
+  menuCard: {
     backgroundColor: colors.card,
     borderRadius: borderRadius.xl,
     borderWidth: 1,
@@ -362,35 +476,63 @@ const styles = StyleSheet.create({
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
+    padding: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  menuItemLabel: {
+  menuItemLast: {
+    borderBottomWidth: 0,
+  },
+  menuItemIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
+  },
+  menuItemContent: {
     flex: 1,
-    fontSize: fontSize.base,
+  },
+  menuItemLabel: {
+    fontSize: 15,
+    fontWeight: '600',
     color: colors.foreground,
-    marginLeft: spacing.md,
+    marginBottom: 2,
+  },
+  menuItemDescription: {
+    fontSize: 12,
+    color: colors.secondary,
   },
   logoutButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    marginTop: spacing.lg,
     marginHorizontal: spacing.lg,
     paddingVertical: spacing.md,
+    borderRadius: borderRadius.xl,
+    backgroundColor: colors.destructive + '10',
+    borderWidth: 1,
+    borderColor: colors.destructive + '20',
   },
   logoutText: {
-    fontSize: fontSize.base,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: '600',
     color: colors.destructive,
   },
+  footer: {
+    alignItems: 'center',
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.lg,
+  },
   version: {
-    fontSize: fontSize.xs,
+    fontSize: 12,
     color: colors.secondary,
-    textAlign: 'center',
-    marginTop: spacing.lg,
+    marginBottom: 4,
+  },
+  copyright: {
+    fontSize: 11,
+    color: colors.muted,
   },
 });

@@ -80,7 +80,8 @@ export default function QRCodeScreen() {
   const { profile } = useAuthStore();
   const [isCopied, setIsCopied] = useState(false);
 
-  const profileUrl = `https://facefindr.com/u/${profile?.faceTag?.replace('@', '')}`;
+  const baseUrl = process.env.EXPO_PUBLIC_APP_URL || 'https://app.example.com';
+  const profileUrl = `${baseUrl}/u/${profile?.faceTag?.replace('@', '')}`;
 
   const handleCopy = async () => {
     await Clipboard.setStringAsync(profileUrl);

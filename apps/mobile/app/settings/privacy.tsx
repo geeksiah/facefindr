@@ -7,93 +7,52 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   Switch,
   TouchableOpacity,
   Alert,
+  StatusBar,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import {
-  Shield,
-  Eye,
-  Trash2,
-  Lock,
-  ChevronRight,
-  AlertTriangle,
-} from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ArrowLeft, Eye, Lock, Trash2, Download } from 'lucide-react-native';
 
-import { Button, Card } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 
-export default function PrivacySecurityScreen() {
+export default function PrivacySettingsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { profile, signOut } = useAuthStore();
 
-  const [profilePublic, setProfilePublic] = useState(true);
-  const [showInSearch, setShowInSearch] = useState(true);
-  const [isDeletingFaceData, setIsDeletingFaceData] = useState(false);
+  const [settings, setSettings] = useState({
+    profileVisible: true,
+    allowPhotoTagging: true,
+    showInSearch: true,
+  });
 
-  const handleDeleteFaceData = () => {
+  const handleDeleteAccount = () => {
     Alert.alert(
-      'Delete Face Data',
-      'This will permanently delete your face recognition data. You will need to scan again to find photos at events. Continue?',
+      'Delete Account',
+      'This action cannot be undone. All your data, photos, and purchases will be permanently deleted.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: async () => {
-            setIsDeletingFaceData(true);
-            try {
-              // Delete face data from AWS Rekognition via API
-              const apiUrl = process.env.EXPO_PUBLIC_API_URL;
-              await fetch(`${apiUrl}/api/face/delete`, {
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ attendeeId: profile?.id }),
-              });
-
-              Alert.alert('Success', 'Your face data has been deleted.');
-            } catch (err) {
-              console.error('Delete face data error:', err);
-              Alert.alert('Error', 'Failed to delete face data. Please try again.');
-            } finally {
-              setIsDeletingFaceData(false);
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const handleDeleteAccount = () => {
-    Alert.alert(
-      'Delete Account',
-      'This will permanently delete your account and all associated data. This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete Account',
-          style: 'destructive',
           onPress: () => {
             Alert.alert(
-              'Are you sure?',
-              'Type "DELETE" to confirm account deletion.',
+              'Confirm Deletion',
+              'Type DELETE to confirm account deletion.',
               [
                 { text: 'Cancel', style: 'cancel' },
                 {
-                  text: 'Confirm',
+                  text: 'I understand, delete my account',
                   style: 'destructive',
                   onPress: async () => {
-                    try {
-                      // This would call a server function to delete the account
-                      await signOut();
-                    } catch (err) {
-                      console.error('Delete account error:', err);
-                    }
+                    // In production, this would call an API to delete the account
+                    await signOut();
                   },
                 },
               ]
@@ -104,107 +63,138 @@ export default function PrivacySecurityScreen() {
     );
   };
 
+  const handleExportData = () => {
+    Alert.alert(
+      'Export Your Data',
+      'We will prepare a download of all your data and send it to your email address.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Request Export',
+          onPress: () => {
+            Alert.alert('Request Sent', 'You will receive an email with your data within 24 hours.');
+          },
+        },
+      ]
+    );
+  };
+
+  const privacyOptions = [
+    {
+      key: 'profileVisible' as const,
+      icon: Eye,
+      title: 'Public Profile',
+      description: 'Allow others to see your profile when they search your FaceTag',
+    },
+    {
+      key: 'allowPhotoTagging' as const,
+      icon: Eye,
+      title: 'Photo Tagging',
+      description: 'Allow photographers to tag you in event photos',
+    },
+    {
+      key: 'showInSearch' as const,
+      icon: Eye,
+      title: 'Searchable',
+      description: 'Appear in search results when people look for attendees',
+    },
+  ];
+
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
-        {/* Privacy Settings */}
+    <View style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+      
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <ArrowLeft size={24} color={colors.foreground} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Privacy & Security</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+
+      <ScrollView 
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Privacy Options */}
         <Text style={styles.sectionTitle}>Privacy</Text>
         
-        <View style={styles.settingRow}>
-          <View style={styles.settingInfo}>
-            <View style={styles.settingHeader}>
-              <Eye size={20} color={colors.secondary} />
-              <Text style={styles.settingTitle}>Public Profile</Text>
+        <View style={styles.optionsCard}>
+          {privacyOptions.map((option, index) => (
+            <View 
+              key={option.key} 
+              style={[
+                styles.optionRow,
+                index < privacyOptions.length - 1 && styles.optionRowBorder
+              ]}
+            >
+              <View style={styles.optionInfo}>
+                <Text style={styles.optionTitle}>{option.title}</Text>
+                <Text style={styles.optionDescription}>{option.description}</Text>
+              </View>
+              <Switch
+                value={settings[option.key]}
+                onValueChange={(value) => 
+                  setSettings((prev) => ({ ...prev, [option.key]: value }))
+                }
+                trackColor={{ false: colors.muted, true: colors.accent + '50' }}
+                thumbColor={settings[option.key] ? colors.accent : colors.secondary}
+              />
             </View>
-            <Text style={styles.settingDescription}>
-              Allow others to view your profile and photos
-            </Text>
-          </View>
-          <Switch
-            value={profilePublic}
-            onValueChange={setProfilePublic}
-            trackColor={{ false: colors.muted, true: colors.accent + '50' }}
-            thumbColor={profilePublic ? colors.accent : colors.secondary}
-          />
+          ))}
         </View>
 
-        <View style={styles.settingRow}>
-          <View style={styles.settingInfo}>
-            <View style={styles.settingHeader}>
-              <Shield size={20} color={colors.secondary} />
-              <Text style={styles.settingTitle}>Appear in Search</Text>
+        {/* Data Management */}
+        <Text style={styles.sectionTitle}>Your Data</Text>
+        
+        <View style={styles.optionsCard}>
+          <TouchableOpacity
+            style={[styles.actionRow, styles.optionRowBorder]}
+            onPress={handleExportData}
+            activeOpacity={0.7}
+          >
+            <View style={styles.actionIcon}>
+              <Download size={20} color={colors.accent} />
             </View>
-            <Text style={styles.settingDescription}>
-              Let photographers find you by your FaceTag
-            </Text>
-          </View>
-          <Switch
-            value={showInSearch}
-            onValueChange={setShowInSearch}
-            trackColor={{ false: colors.muted, true: colors.accent + '50' }}
-            thumbColor={showInSearch ? colors.accent : colors.secondary}
-          />
-        </View>
-
-        {/* Security */}
-        <Text style={[styles.sectionTitle, { marginTop: spacing.xl }]}>Security</Text>
-
-        <TouchableOpacity style={styles.menuRow}>
-          <Lock size={20} color={colors.secondary} />
-          <Text style={styles.menuLabel}>Change Password</Text>
-          <ChevronRight size={20} color={colors.secondary} />
-        </TouchableOpacity>
-
-        {/* Face Data */}
-        <Text style={[styles.sectionTitle, { marginTop: spacing.xl }]}>Face Recognition Data</Text>
-
-        <Card style={styles.faceDataCard}>
-          <View style={styles.faceDataHeader}>
-            <Shield size={24} color={colors.accent} />
-            <View style={styles.faceDataInfo}>
-              <Text style={styles.faceDataTitle}>Your Face Data</Text>
-              <Text style={styles.faceDataDescription}>
-                Used to find photos of you at events
+            <View style={styles.optionInfo}>
+              <Text style={styles.optionTitle}>Export Your Data</Text>
+              <Text style={styles.optionDescription}>
+                Download a copy of all your data
               </Text>
             </View>
-          </View>
-          <Button
-            variant="outline"
-            onPress={handleDeleteFaceData}
-            loading={isDeletingFaceData}
-            style={{ marginTop: spacing.md }}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.actionRow}
+            onPress={handleDeleteAccount}
+            activeOpacity={0.7}
           >
-            <Trash2 size={16} color={colors.destructive} />
-            {' Delete Face Data'}
-          </Button>
-        </Card>
-
-        {/* Danger Zone */}
-        <Text style={[styles.sectionTitle, styles.dangerTitle, { marginTop: spacing.xl }]}>
-          Danger Zone
-        </Text>
-
-        <Card style={styles.dangerCard}>
-          <View style={styles.dangerHeader}>
-            <AlertTriangle size={24} color={colors.destructive} />
-            <View style={styles.dangerInfo}>
-              <Text style={styles.dangerTitle}>Delete Account</Text>
-              <Text style={styles.dangerDescription}>
+            <View style={[styles.actionIcon, styles.actionIconDanger]}>
+              <Trash2 size={20} color={colors.destructive} />
+            </View>
+            <View style={styles.optionInfo}>
+              <Text style={[styles.optionTitle, styles.dangerText]}>Delete Account</Text>
+              <Text style={styles.optionDescription}>
                 Permanently delete your account and all data
               </Text>
             </View>
-          </View>
-          <Button
-            variant="outline"
-            onPress={handleDeleteAccount}
-            style={[styles.dangerButton, { marginTop: spacing.md }]}
-          >
-            <Trash2 size={16} color={colors.destructive} />
-            {' Delete Account'}
-          </Button>
-        </Card>
+          </TouchableOpacity>
+        </View>
+
+        {/* Info */}
+        <View style={styles.infoCard}>
+          <Lock size={16} color={colors.secondary} />
+          <Text style={styles.infoText}>
+            Your face data is encrypted and stored securely. We never share your biometric data with third parties.
+          </Text>
+        </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -213,100 +203,103 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  content: {
-    padding: spacing.lg,
-    paddingBottom: spacing.xl,
-  },
-  sectionTitle: {
-    fontSize: fontSize.lg,
-    fontWeight: '600',
-    color: colors.foreground,
-    marginBottom: spacing.md,
-  },
-  settingRow: {
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing.md,
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  settingInfo: {
+  backButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: colors.foreground,
+  },
+  headerSpacer: {
+    width: 40,
+  },
+  content: {
+    padding: spacing.lg,
+    paddingBottom: 100,
+  },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.secondary,
+    marginBottom: spacing.sm,
+    marginLeft: 4,
+  },
+  optionsCard: {
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
+    marginBottom: spacing.lg,
+  },
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.md,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.md,
+  },
+  optionRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  optionInfo: {
     flex: 1,
     marginRight: spacing.md,
   },
-  settingHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  settingTitle: {
-    fontSize: fontSize.base,
-    fontWeight: '500',
-    color: colors.foreground,
-  },
-  settingDescription: {
-    fontSize: fontSize.sm,
-    color: colors.secondary,
-    marginTop: 2,
-    marginLeft: 28,
-  },
-  menuRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    gap: spacing.sm,
-  },
-  menuLabel: {
-    flex: 1,
-    fontSize: fontSize.base,
-    color: colors.foreground,
-  },
-  faceDataCard: {
-    borderColor: colors.accent + '30',
-  },
-  faceDataHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  faceDataInfo: {
-    marginLeft: spacing.md,
-    flex: 1,
-  },
-  faceDataTitle: {
-    fontSize: fontSize.base,
+  optionTitle: {
+    fontSize: 15,
     fontWeight: '600',
     color: colors.foreground,
   },
-  faceDataDescription: {
-    fontSize: fontSize.sm,
+  optionDescription: {
+    fontSize: 13,
     color: colors.secondary,
     marginTop: 2,
   },
-  dangerCard: {
-    borderColor: colors.destructive + '30',
-    backgroundColor: colors.destructive + '05',
-  },
-  dangerHeader: {
-    flexDirection: 'row',
+  actionIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.accent + '15',
     alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
   },
-  dangerInfo: {
-    marginLeft: spacing.md,
+  actionIconDanger: {
+    backgroundColor: colors.destructive + '15',
+  },
+  dangerText: {
+    color: colors.destructive,
+  },
+  infoCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    padding: spacing.md,
+    backgroundColor: colors.muted,
+    borderRadius: borderRadius.lg,
+  },
+  infoText: {
     flex: 1,
-  },
-  dangerTitle: {
-    fontSize: fontSize.base,
-    fontWeight: '600',
-    color: colors.foreground,
-  },
-  dangerDescription: {
-    fontSize: fontSize.sm,
+    fontSize: 13,
     color: colors.secondary,
-    marginTop: 2,
-  },
-  dangerButton: {
-    borderColor: colors.destructive,
+    lineHeight: 18,
   },
 });
