@@ -327,11 +327,13 @@ CREATE POLICY "Users can manage own addresses" ON shipping_addresses
 -- TRIGGERS
 -- ============================================
 
+DROP TRIGGER IF EXISTS update_print_orders_updated_at ON print_orders;
 CREATE TRIGGER update_print_orders_updated_at
     BEFORE UPDATE ON print_orders
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_shipping_addresses_updated_at ON shipping_addresses;
 CREATE TRIGGER update_shipping_addresses_updated_at
     BEFORE UPDATE ON shipping_addresses
     FOR EACH ROW
