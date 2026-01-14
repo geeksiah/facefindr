@@ -106,6 +106,49 @@ This document outlines all the controls and features needed for the FaceFindr ad
 
 ---
 
+## 2.6 Print Products Management
+
+### Regional Pricing System
+
+Print products have different pricing per region due to:
+- Different fulfillment partners
+- Different production costs
+- Different currencies
+- Different shipping logistics
+
+### Regions
+
+| Region | Countries | Currency | Fulfillment Partner |
+|--------|-----------|----------|-------------------|
+| US | United States | USD | PrintifyUS |
+| GB | United Kingdom | GBP | PrintifyUK |
+| EU | DE, FR, IT, ES, NL, BE, AT, PT, IE | EUR | PrintifyEU |
+| GH | Ghana | GHS | GhanaPrint |
+| NG | Nigeria | NGN | NigeriaPrint |
+| KE | Kenya | KES | KenyaPrint |
+| ZA | South Africa | ZAR | SAPrint |
+
+### Example Pricing: 8x10 Print
+
+| Region | Base Cost | Base Price | Suggested | Currency |
+|--------|-----------|------------|-----------|----------|
+| US | $4.50 | $6.99 | $12.99 | USD |
+| GB | £4.00 | £6.50 | £11.99 | GBP |
+| GH | GHS 25 | GHS 45 | GHS 80 | GHS |
+| NG | ₦500 | ₦900 | ₦1,500 | NGN |
+
+### Admin Controls for Print Products
+- Manage regions (add/edit/disable)
+- Set regional pricing per product
+- Manage fulfillment partners
+- View print order status
+- Handle print order issues/refunds
+- Track fulfillment metrics
+- Update shipping estimates
+- Enable/disable products per region
+
+---
+
 ## 3. User Management
 
 ### Photographer Management
