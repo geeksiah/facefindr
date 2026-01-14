@@ -6,3 +6,4 @@ export { Logo, LogoIcon } from './logo';
 export { Switch } from './switch';
 export { ToastProvider, useToast, ConfirmDialog, useConfirm } from './toast';
 export { OfflineDetector } from './offline-detector';
+export { CurrencySwitcher } from './currency-switcher';

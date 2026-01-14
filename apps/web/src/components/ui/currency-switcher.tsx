@@ -23,21 +23,34 @@ interface CurrencySwitcherProps {
 }
 
 export function CurrencySwitcher({ className, variant = 'default' }: CurrencySwitcherProps) {
-  const { currency, setCurrency, isLoading } = useCurrency();
+  const { currencyCode, setCurrency, isLoading, currencies: contextCurrencies } = useCurrency();
   const [isOpen, setIsOpen] = useState(false);
   const [currencies, setCurrencies] = useState<Currency[]>([]);
   const [isFetching, setIsFetching] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Fetch available currencies
+  // Use currencies from context or fetch them
   useEffect(() => {
+    if (contextCurrencies && contextCurrencies.length > 0) {
+      setCurrencies(contextCurrencies.map(c => ({
+        code: c.code,
+        name: c.name,
+        symbol: c.symbol,
+      })));
+      return;
+    }
+
     async function fetchCurrencies() {
       setIsFetching(true);
       try {
-        const response = await fetch('/api/currency?type=list');
+        const response = await fetch('/api/currency');
         if (response.ok) {
           const data = await response.json();
-          setCurrencies(data.currencies || []);
+          setCurrencies((data.currencies || []).map((c: Currency) => ({
+            code: c.code,
+            name: c.name,
+            symbol: c.symbol,
+          })));
         }
       } catch (error) {
         console.error('Failed to fetch currencies:', error);
@@ -55,7 +68,7 @@ export function CurrencySwitcher({ className, variant = 'default' }: CurrencySwi
     }
 
     fetchCurrencies();
-  }, []);
+  }, [contextCurrencies]);
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -76,10 +89,10 @@ export function CurrencySwitcher({ className, variant = 'default' }: CurrencySwi
     setIsOpen(false);
   };
 
-  const currentCurrency = currencies.find(c => c.code === currency) || {
-    code: currency,
-    name: currency,
-    symbol: currency,
+  const currentCurrency = currencies.find(c => c.code === currencyCode) || {
+    code: currencyCode,
+    name: currencyCode,
+    symbol: currencyCode,
   };
 
   if (variant === 'compact') {
@@ -100,7 +113,7 @@ export function CurrencySwitcher({ className, variant = 'default' }: CurrencySwi
           ) : (
             <span>{currentCurrency.symbol}</span>
           )}
-          <span>{currency}</span>
+          <span>{currencyCode}</span>
           <ChevronDown className={cn(
             'h-3.5 w-3.5 text-secondary transition-transform duration-200',
             isOpen && 'rotate-180'
@@ -121,14 +134,14 @@ export function CurrencySwitcher({ className, variant = 'default' }: CurrencySwi
                     onClick={() => handleSelect(curr.code)}
                     className={cn(
                       'w-full flex items-center gap-3 px-3 py-2 text-left transition-colors',
-                      currency === curr.code
+                      currencyCode === curr.code
                         ? 'bg-accent/10 text-accent'
                         : 'hover:bg-muted'
                     )}
                   >
                     <span className="w-6 text-center font-medium">{curr.symbol}</span>
                     <span className="flex-1 text-sm">{curr.code}</span>
-                    {currency === curr.code && (
+                    {currencyCode === curr.code && (
                       <Check className="h-4 w-4 text-accent" />
                     )}
                   </button>
@@ -146,7 +159,7 @@ export function CurrencySwitcher({ className, variant = 'default' }: CurrencySwi
       <div className={cn('flex items-center gap-2', className)}>
         <Globe className="h-4 w-4 text-secondary" />
         <select
-          value={currency}
+          value={currencyCode}
           onChange={(e) => setCurrency(e.target.value)}
           disabled={isLoading}
           className={cn(
@@ -217,14 +230,14 @@ export function CurrencySwitcher({ className, variant = 'default' }: CurrencySwi
                   onClick={() => handleSelect(curr.code)}
                   className={cn(
                     'w-full flex items-center gap-4 px-4 py-3 text-left transition-all duration-200',
-                    currency === curr.code
+                    currencyCode === curr.code
                       ? 'bg-accent/10'
                       : 'hover:bg-muted'
                   )}
                 >
                   <span className={cn(
                     'flex h-10 w-10 items-center justify-center rounded-xl text-lg font-semibold',
-                    currency === curr.code
+                    currencyCode === curr.code
                       ? 'bg-accent text-white'
                       : 'bg-muted'
                   )}>
@@ -233,13 +246,13 @@ export function CurrencySwitcher({ className, variant = 'default' }: CurrencySwi
                   <div className="flex-1">
                     <p className={cn(
                       'font-medium',
-                      currency === curr.code ? 'text-accent' : 'text-foreground'
+                      currencyCode === curr.code ? 'text-accent' : 'text-foreground'
                     )}>
                       {curr.code}
                     </p>
                     <p className="text-sm text-secondary">{curr.name}</p>
                   </div>
-                  {currency === curr.code && (
+                  {currencyCode === curr.code && (
                     <Check className="h-5 w-5 text-accent animate-bounce-in" />
                   )}
                 </button>
