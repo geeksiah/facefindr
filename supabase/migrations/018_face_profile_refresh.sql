@@ -49,8 +49,17 @@ CREATE INDEX idx_match_confidence_user_date ON match_confidence_log(user_id, mat
 -- REFRESH PROMPTS (track prompts shown to users)
 -- ============================================
 
-CREATE TYPE refresh_prompt_type AS ENUM ('confidence_low', 'age_based', 'time_based', 'appearance_change');
-CREATE TYPE refresh_prompt_status AS ENUM ('pending', 'shown', 'dismissed', 'completed');
+DO $$ BEGIN
+    CREATE TYPE refresh_prompt_type AS ENUM ('confidence_low', 'age_based', 'time_based', 'appearance_change');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE refresh_prompt_status AS ENUM ('pending', 'shown', 'dismissed', 'completed');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS refresh_prompts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -73,17 +82,25 @@ CREATE INDEX idx_refresh_prompts_pending ON refresh_prompts(user_id) WHERE promp
 -- APPEARANCE CHANGES (user-declared changes)
 -- ============================================
 
-CREATE TYPE appearance_change_type AS ENUM (
-    'new_hairstyle', 
-    'facial_hair', 
-    'new_glasses', 
-    'weight_change',
-    'aging',
-    'temporary_costume',
-    'other'
-);
+DO $$ BEGIN
+    CREATE TYPE appearance_change_type AS ENUM (
+        'new_hairstyle', 
+        'facial_hair', 
+        'new_glasses', 
+        'weight_change',
+        'aging',
+        'temporary_costume',
+        'other'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
-CREATE TYPE appearance_change_mode AS ENUM ('add_to_profile', 'replace_profile', 'temporary');
+DO $$ BEGIN
+    CREATE TYPE appearance_change_mode AS ENUM ('add_to_profile', 'replace_profile', 'temporary');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS appearance_changes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -99,8 +116,9 @@ CREATE TABLE IF NOT EXISTS appearance_changes (
 );
 
 CREATE INDEX idx_appearance_changes_user ON appearance_changes(user_id);
+-- Note: Cannot use NOW() in index predicate - query will filter by temporary_until at runtime
 CREATE INDEX idx_appearance_changes_temporary ON appearance_changes(user_id) 
-    WHERE is_temporary = TRUE AND temporary_until > NOW();
+    WHERE is_temporary = TRUE;
 
 -- ============================================
 -- ADD AGE-BASED REFRESH TRACKING TO ATTENDEES

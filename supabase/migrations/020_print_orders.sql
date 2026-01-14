@@ -5,15 +5,19 @@
 -- PRINT ORDERS TABLE
 -- ============================================
 
-CREATE TYPE print_order_status AS ENUM (
-    'pending',
-    'processing', 
-    'production',
-    'shipped',
-    'delivered',
-    'cancelled',
-    'refunded'
-);
+DO $$ BEGIN
+    CREATE TYPE print_order_status AS ENUM (
+        'pending',
+        'processing', 
+        'production',
+        'shipped',
+        'delivered',
+        'cancelled',
+        'refunded'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS print_orders (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -72,8 +76,8 @@ CREATE TABLE IF NOT EXISTS print_order_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     order_id UUID NOT NULL REFERENCES print_orders(id) ON DELETE CASCADE,
     
-    -- Product info
-    product_id UUID NOT NULL REFERENCES print_products(id) ON DELETE RESTRICT,
+    -- Product info (product_id references print_products from 005_regional_print_pricing.sql)
+    product_id UUID NOT NULL,
     product_name VARCHAR(255) NOT NULL,
     product_size VARCHAR(50) NOT NULL,
     
@@ -92,6 +96,16 @@ CREATE TABLE IF NOT EXISTS print_order_items (
     
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Add foreign key if print_products exists (from earlier migration)
+DO $$ BEGIN
+    ALTER TABLE print_order_items 
+    ADD CONSTRAINT fk_print_order_items_product 
+    FOREIGN KEY (product_id) REFERENCES print_products(id) ON DELETE RESTRICT;
+EXCEPTION
+    WHEN undefined_table THEN null;
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE INDEX idx_print_order_items_order ON print_order_items(order_id);
 CREATE INDEX idx_print_order_items_product ON print_order_items(product_id);

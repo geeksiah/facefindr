@@ -5,9 +5,23 @@
 -- NOTIFICATION QUEUE TABLE
 -- ============================================
 
-CREATE TYPE notification_priority AS ENUM ('low', 'normal', 'high', 'urgent');
-CREATE TYPE notification_channel AS ENUM ('push', 'email', 'sms', 'in_app');
-CREATE TYPE queue_status AS ENUM ('pending', 'processing', 'sent', 'failed', 'throttled');
+DO $$ BEGIN
+    CREATE TYPE notification_priority AS ENUM ('low', 'normal', 'high', 'urgent');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE notification_channel AS ENUM ('push', 'email', 'sms', 'in_app');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE queue_status AS ENUM ('pending', 'processing', 'sent', 'failed', 'throttled');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS notification_queue (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

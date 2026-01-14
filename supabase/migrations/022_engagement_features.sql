@@ -5,7 +5,11 @@
 -- PHOTO REACTIONS
 -- ============================================
 
-CREATE TYPE reaction_type AS ENUM ('love', 'fire', 'amazing', 'beautiful');
+DO $$ BEGIN
+    CREATE TYPE reaction_type AS ENUM ('love', 'fire', 'amazing', 'beautiful');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS photo_reactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -24,7 +28,11 @@ CREATE INDEX idx_photo_reactions_user ON photo_reactions(user_id);
 -- TIPS
 -- ============================================
 
-CREATE TYPE tip_status AS ENUM ('pending', 'completed', 'failed', 'refunded');
+DO $$ BEGIN
+    CREATE TYPE tip_status AS ENUM ('pending', 'completed', 'failed', 'refunded');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS tips (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
