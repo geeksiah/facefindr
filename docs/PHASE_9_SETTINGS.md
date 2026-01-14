@@ -36,8 +36,11 @@ Complete settings management for photographers and attendees.
 ### Notifications Tab
 - **Channels**:
   - Email notifications toggle
-  - SMS notifications toggle
   - Push notifications toggle
+- **SMS Notifications** (Studio Plan Only):
+  - Only available for Studio plan subscribers
+  - Only for payout notifications (not all types)
+  - Server-side enforcement of plan restriction
 - **Notification Types**:
   - New photo sale
   - Payout completed

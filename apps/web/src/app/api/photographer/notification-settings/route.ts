@@ -86,13 +86,30 @@ export async function PUT(request: NextRequest) {
 
     const body = await request.json();
 
+    // Check if user is on Studio plan for SMS
+    let smsEnabled = false;
+    if (body.smsEnabled) {
+      const { data: subscription } = await supabase
+        .from('user_subscriptions')
+        .select('plan_id, subscription_plans(name)')
+        .eq('user_id', user.id)
+        .eq('status', 'active')
+        .single();
+
+      // Only allow SMS on Studio plan
+      const planName = (subscription?.subscription_plans as { name?: string } | null)?.name?.toLowerCase();
+      if (planName === 'studio') {
+        smsEnabled = true;
+      }
+    }
+
     // Upsert settings
     const { error } = await supabase
       .from('notification_settings')
       .upsert({
         user_id: user.id,
         email_enabled: body.emailEnabled,
-        sms_enabled: body.smsEnabled,
+        sms_enabled: smsEnabled, // Enforced server-side
         push_enabled: body.pushEnabled,
         new_photo_sale: body.newPhotoSale,
         payout_completed: body.payoutCompleted,
@@ -117,7 +134,7 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, smsEnabled });
 
   } catch (error) {
     console.error('Update notification settings error:', error);

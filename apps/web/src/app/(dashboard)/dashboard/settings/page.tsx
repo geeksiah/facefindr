@@ -115,6 +115,8 @@ export default function SettingsPage() {
     marketingEmails: false,
   });
   const [isSavingNotifications, setIsSavingNotifications] = useState(false);
+  const [currentPlan, setCurrentPlan] = useState<string>('free');
+  const isStudioPlan = currentPlan === 'studio';
 
   // Handle URL params for tab switching
   useEffect(() => {
@@ -144,6 +146,13 @@ export default function SettingsPage() {
             phone: data.profile.phone || '',
             location: data.profile.location || '',
           });
+        }
+
+        // Load subscription to check plan
+        const subRes = await fetch('/api/photographer/subscription');
+        if (subRes.ok) {
+          const data = await subRes.json();
+          setCurrentPlan(data.subscription?.planCode || 'free');
         }
 
         // Load notification settings
@@ -648,16 +657,6 @@ export default function SettingsPage() {
               </div>
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="font-medium text-foreground">SMS Notifications</p>
-                  <p className="text-sm text-secondary">Receive notifications via SMS</p>
-                </div>
-                <Switch
-                  checked={notifications.smsEnabled}
-                  onChange={(checked) => setNotifications(prev => ({ ...prev, smsEnabled: checked }))}
-                />
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
                   <p className="font-medium text-foreground">Push Notifications</p>
                   <p className="text-sm text-secondary">Receive browser push notifications</p>
                 </div>
@@ -667,6 +666,35 @@ export default function SettingsPage() {
                 />
               </div>
             </div>
+          </div>
+
+          {/* SMS Notifications - Studio Plan Only */}
+          <div className="rounded-2xl border border-border bg-card p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <h2 className="font-semibold text-foreground">SMS Notifications</h2>
+              <span className="px-2 py-0.5 text-xs font-medium bg-accent/10 text-accent rounded-full">
+                Studio Plan
+              </span>
+            </div>
+            <p className="text-sm text-secondary mb-4">
+              Receive SMS alerts for payout notifications. Available exclusively on the Studio plan.
+            </p>
+            <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
+              <div>
+                <p className="font-medium text-foreground">Payout SMS Alerts</p>
+                <p className="text-sm text-secondary">Get notified via SMS when payouts are processed</p>
+              </div>
+              <Switch
+                checked={notifications.smsEnabled}
+                onChange={(checked) => setNotifications(prev => ({ ...prev, smsEnabled: checked }))}
+                disabled={!isStudioPlan}
+              />
+            </div>
+            {!isStudioPlan && (
+              <p className="text-xs text-secondary mt-3">
+                Upgrade to Studio plan to enable SMS notifications.
+              </p>
+            )}
           </div>
 
           {/* Notification Types */}
