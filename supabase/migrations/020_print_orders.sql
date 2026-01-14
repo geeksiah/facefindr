@@ -63,7 +63,8 @@ CREATE TABLE IF NOT EXISTS print_orders (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Ensure columns exist if table was created previously with different schema
+-- Ensure ALL columns exist if table was created previously with different schema
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS order_number VARCHAR(20) UNIQUE;
 ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES auth.users(id) ON DELETE RESTRICT;
 ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS customer_email VARCHAR(255);
 ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255);
@@ -71,6 +72,24 @@ ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS subtotal INTEGER;
 ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS shipping_cost INTEGER DEFAULT 0;
 ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS tax_amount INTEGER DEFAULT 0;
 ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS total_amount INTEGER;
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS currency VARCHAR(3) DEFAULT 'USD';
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS stripe_payment_intent_id VARCHAR(255);
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS stripe_checkout_session_id VARCHAR(255);
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ;
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS shipping_name VARCHAR(255);
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS shipping_address_line1 VARCHAR(255);
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS shipping_address_line2 VARCHAR(255);
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS shipping_city VARCHAR(100);
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS shipping_state VARCHAR(100);
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS shipping_postal_code VARCHAR(20);
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS shipping_country VARCHAR(2);
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS fulfillment_partner VARCHAR(100);
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS tracking_number VARCHAR(100);
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS tracking_url TEXT;
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS shipped_at TIMESTAMPTZ;
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ;
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}';
 
 CREATE INDEX IF NOT EXISTS idx_print_orders_customer ON print_orders(customer_id);
 CREATE INDEX IF NOT EXISTS idx_print_orders_status ON print_orders(status);
