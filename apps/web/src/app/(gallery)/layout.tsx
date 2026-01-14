@@ -40,13 +40,14 @@ export default async function GalleryLayout({
     .eq('id', user.id)
     .single();
 
+  // Navigation items - desktop sidebar shows all, mobile shows first 5
   const navItems = [
     { href: '/gallery', label: 'My Photos', icon: ImageIcon },
     { href: '/gallery/scan', label: 'Find Photos', icon: Scan },
     { href: '/gallery/events', label: 'My Events', icon: Camera },
     { href: '/gallery/notifications', label: 'Notifications', icon: Bell },
-    { href: '/gallery/profile', label: 'Profile', icon: User },
-    { href: '/gallery/settings', label: 'Settings', icon: Settings },
+    { href: '/gallery/settings', label: 'Settings', icon: Settings }, // Settings in mobile bottom nav
+    { href: '/gallery/profile', label: 'Profile', icon: User }, // Profile only in sidebar
   ];
 
   return (

@@ -8,18 +8,21 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  TouchableOpacity,
+  Pressable,
   Image,
   Alert,
   ActivityIndicator,
   StatusBar,
+  TextInput,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, Camera, User, Check } from 'lucide-react-native';
+import { ArrowLeft, Camera, User, Check, Copy } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as Clipboard from 'expo-clipboard';
 
-import { Button, Input } from '@/components/ui';
+import { Button } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
@@ -32,6 +35,7 @@ export default function EditProfileScreen() {
   const [displayName, setDisplayName] = useState(profile?.displayName || '');
   const [isLoading, setIsLoading] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [copiedFaceTag, setCopiedFaceTag] = useState(false);
 
   const handleUpdateProfile = async () => {
     if (!displayName.trim()) {
@@ -123,22 +127,37 @@ export default function EditProfileScreen() {
     }
   };
 
+  const handleCopyFaceTag = async () => {
+    if (profile?.faceTag) {
+      await Clipboard.setStringAsync(profile.faceTag);
+      setCopiedFaceTag(true);
+      setTimeout(() => setCopiedFaceTag(false), 2000);
+    }
+  };
+
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
+      
+      {/* Status bar background */}
+      <View style={[styles.statusBarBg, { height: insets.top }]} />
       
       {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity
-          style={styles.backButton}
+      <View style={styles.header}>
+        <Pressable
+          style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
           onPress={() => router.back()}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
           <ArrowLeft size={24} color={colors.foreground} />
-        </TouchableOpacity>
+        </Pressable>
         <Text style={styles.headerTitle}>Edit Profile</Text>
-        <TouchableOpacity
-          style={[styles.saveButton, isLoading && styles.saveButtonDisabled]}
+        <Pressable
+          style={({ pressed }) => [
+            styles.saveButton, 
+            isLoading && styles.saveButtonDisabled,
+            pressed && styles.pressed
+          ]}
           onPress={handleUpdateProfile}
           disabled={isLoading}
         >
@@ -147,7 +166,7 @@ export default function EditProfileScreen() {
           ) : (
             <Check size={24} color={colors.accent} />
           )}
-        </TouchableOpacity>
+        </Pressable>
       </View>
 
       <ScrollView 
@@ -156,11 +175,10 @@ export default function EditProfileScreen() {
       >
         {/* Profile Photo */}
         <View style={styles.photoSection}>
-          <TouchableOpacity
-            style={styles.photoContainer}
+          <Pressable
+            style={({ pressed }) => [styles.photoContainer, pressed && styles.pressed]}
             onPress={handleChangePhoto}
             disabled={isUploadingPhoto}
-            activeOpacity={0.8}
           >
             {profile?.profilePhotoUrl ? (
               <Image source={{ uri: profile.profilePhotoUrl }} style={styles.photo} />
@@ -176,7 +194,7 @@ export default function EditProfileScreen() {
                 <Camera size={16} color="#fff" strokeWidth={2} />
               )}
             </View>
-          </TouchableOpacity>
+          </Pressable>
           <Text style={styles.photoHint}>Tap to change photo</Text>
         </View>
 
@@ -184,20 +202,19 @@ export default function EditProfileScreen() {
         <View style={styles.form}>
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>Display Name</Text>
-            <View style={styles.inputContainer}>
-              <Input
-                value={displayName}
-                onChangeText={setDisplayName}
-                placeholder="Your name"
-                style={styles.input}
-              />
-            </View>
+            <TextInput
+              value={displayName}
+              onChangeText={setDisplayName}
+              placeholder="Your name"
+              placeholderTextColor={colors.secondary}
+              style={styles.textInput}
+            />
           </View>
 
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>Email</Text>
-            <View style={[styles.inputContainer, styles.inputDisabled]}>
-              <Text style={styles.inputValue}>{profile?.email || ''}</Text>
+            <View style={styles.disabledInput}>
+              <Text style={styles.disabledInputText}>{profile?.email || ''}</Text>
             </View>
             <Text style={styles.inputHint}>Email cannot be changed</Text>
           </View>
@@ -205,10 +222,25 @@ export default function EditProfileScreen() {
           {profile?.faceTag && (
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Your FaceTag</Text>
-              <View style={styles.faceTagContainer}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.faceTagContainer,
+                  pressed && styles.faceTagPressed
+                ]}
+                onPress={handleCopyFaceTag}
+              >
                 <Text style={styles.faceTag}>{profile.faceTag}</Text>
-              </View>
-              <Text style={styles.inputHint}>Share this tag so photographers can find you</Text>
+                <View style={styles.copyButton}>
+                  {copiedFaceTag ? (
+                    <Check size={16} color="#10b981" />
+                  ) : (
+                    <Copy size={16} color={colors.accent} />
+                  )}
+                </View>
+              </Pressable>
+              <Text style={styles.inputHint}>
+                {copiedFaceTag ? 'Copied!' : 'Tap to copy • Share this tag so photographers can find you'}
+              </Text>
             </View>
           )}
         </View>
@@ -222,20 +254,28 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  statusBarBg: {
+    backgroundColor: colors.background,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
     paddingBottom: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+    backgroundColor: colors.background,
   },
   backButton: {
     width: 40,
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  pressed: {
+    opacity: 0.7,
   },
   headerTitle: {
     fontSize: 17,
@@ -294,47 +334,65 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
   },
   inputGroup: {
-    gap: spacing.xs,
+    gap: 6,
   },
   inputLabel: {
     fontSize: 13,
     fontWeight: '600',
     color: colors.foreground,
-    marginBottom: 4,
+    marginBottom: 2,
   },
-  inputContainer: {
+  textInput: {
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: colors.foreground,
+  },
+  disabledInput: {
     backgroundColor: colors.muted,
     borderRadius: borderRadius.lg,
-    overflow: 'hidden',
+    paddingHorizontal: spacing.md,
+    paddingVertical: 14,
   },
-  input: {
-    backgroundColor: 'transparent',
-    borderWidth: 0,
-  },
-  inputDisabled: {
-    padding: spacing.md,
-  },
-  inputValue: {
+  disabledInputText: {
     fontSize: 16,
     color: colors.secondary,
   },
   inputHint: {
     fontSize: 12,
     color: colors.secondary,
-    marginTop: 4,
+    marginTop: 2,
   },
   faceTagContainer: {
-    padding: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: spacing.md,
     backgroundColor: colors.accent + '10',
     borderRadius: borderRadius.lg,
     borderWidth: 1,
     borderColor: colors.accent + '30',
   },
+  faceTagPressed: {
+    backgroundColor: colors.accent + '20',
+  },
   faceTag: {
     fontSize: 18,
     fontWeight: '700',
     color: colors.accent,
-    fontFamily: 'monospace',
-    textAlign: 'center',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  copyButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

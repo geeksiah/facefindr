@@ -4,7 +4,7 @@
  * Displays user's photo collection from events.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
   RefreshControl,
   Image,
   Dimensions,
-  TouchableOpacity,
+  Pressable,
   Platform,
   StatusBar,
   FlatList,
@@ -22,12 +22,12 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Image as ImageIcon,
-  Sparkles,
   Camera,
   Calendar,
-  ChevronRight,
-  Search,
+  UserSearch,
   QrCode,
+  Clock,
+  Archive,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -128,10 +128,12 @@ export default function MyPhotosScreen() {
   };
 
   const renderEventCard = ({ item }: { item: EventGroup }) => (
-    <TouchableOpacity
-      style={styles.eventCard}
+    <Pressable
+      style={({ pressed }) => [
+        styles.eventCard,
+        pressed && styles.pressed,
+      ]}
       onPress={() => router.push(`/event/${item.eventId}`)}
-      activeOpacity={0.8}
     >
       {item.latestPhoto ? (
         <Image source={{ uri: item.latestPhoto }} style={styles.eventCardImage} />
@@ -151,31 +153,31 @@ export default function MyPhotosScreen() {
           <Text style={styles.eventCardCount}>{item.photoCount} photos</Text>
         </View>
       </View>
-    </TouchableOpacity>
+    </Pressable>
   );
 
   // Empty state
   if (!isLoading && photos.length === 0) {
     return (
       <View style={styles.container}>
-        <StatusBar barStyle="dark-content" />
+        <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
         
-        {/* Header */}
-        <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
-          <View style={styles.headerContent}>
-            <Text style={styles.greeting}>
-              Hi, {profile?.displayName?.split(' ')[0] || 'there'} 👋
-            </Text>
-            <Text style={styles.title}>Photo Passport</Text>
+        {/* Header with safe area background */}
+        <View style={[styles.headerWrapper, { paddingTop: insets.top }]}>
+          <View style={styles.header}>
+            <View style={styles.headerTop}>
+              <Text style={styles.title}>Photo Passport</Text>
+              <Pressable 
+                style={({ pressed }) => [
+                  styles.headerIconButton,
+                  pressed && styles.pressed,
+                ]}
+                onPress={() => router.push('/search')}
+              >
+                <UserSearch size={22} color={colors.foreground} />
+              </Pressable>
+            </View>
           </View>
-          {profile?.faceTag && (
-            <TouchableOpacity 
-              style={styles.faceTagBadge}
-              onPress={() => router.push('/profile/qr-code')}
-            >
-              <Text style={styles.faceTagText}>{profile.faceTag}</Text>
-            </TouchableOpacity>
-          )}
         </View>
 
         {/* Empty State */}
@@ -184,22 +186,21 @@ export default function MyPhotosScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.emptyState}>
-            <LinearGradient
-              colors={[colors.accent + '20', colors.accent + '05']}
-              style={styles.emptyIconContainer}
-            >
+            <View style={styles.emptyIconContainer}>
               <ImageIcon size={48} color={colors.accent} strokeWidth={1.5} />
-            </LinearGradient>
+            </View>
             
             <Text style={styles.emptyTitle}>Your photos await</Text>
             <Text style={styles.emptyDescription}>
               Scan your face at any event to instantly discover and collect all your photos
             </Text>
             
-            <TouchableOpacity
-              style={styles.primaryCta}
+            <Pressable
+              style={({ pressed }) => [
+                styles.primaryCta,
+                pressed && styles.primaryCtaPressed,
+              ]}
               onPress={() => router.push('/(attendee)/scan')}
-              activeOpacity={0.8}
             >
               <LinearGradient
                 colors={[colors.accent, colors.accentDark]}
@@ -210,45 +211,51 @@ export default function MyPhotosScreen() {
                 <Camera size={22} color="#fff" strokeWidth={2} />
                 <Text style={styles.primaryCtaText}>Find My Photos</Text>
               </LinearGradient>
-            </TouchableOpacity>
+            </Pressable>
           </View>
 
           {/* Quick Actions */}
           <View style={styles.quickActionsSection}>
-            <Text style={styles.quickActionsTitle}>Quick Actions</Text>
+            <Text style={styles.quickActionsTitle}>Other Options</Text>
             <View style={styles.quickActionsRow}>
-              <TouchableOpacity
-                style={styles.quickAction}
-                onPress={() => router.push('/scan')}
-                activeOpacity={0.7}
+              <Pressable
+                style={({ pressed }) => [
+                  styles.quickAction,
+                  pressed && styles.quickActionPressed,
+                ]}
+                onPress={() => router.push('/qr-scanner')}
               >
                 <View style={[styles.quickActionIcon, { backgroundColor: '#8b5cf615' }]}>
                   <QrCode size={24} color="#8b5cf6" />
                 </View>
                 <Text style={styles.quickActionLabel}>Scan QR</Text>
-              </TouchableOpacity>
+              </Pressable>
 
-              <TouchableOpacity
-                style={styles.quickAction}
+              <Pressable
+                style={({ pressed }) => [
+                  styles.quickAction,
+                  pressed && styles.quickActionPressed,
+                ]}
                 onPress={() => router.push('/enter-code')}
-                activeOpacity={0.7}
               >
                 <View style={[styles.quickActionIcon, { backgroundColor: '#f59e0b15' }]}>
-                  <Search size={24} color="#f59e0b" />
+                  <Calendar size={24} color="#f59e0b" />
                 </View>
                 <Text style={styles.quickActionLabel}>Enter Code</Text>
-              </TouchableOpacity>
+              </Pressable>
 
-              <TouchableOpacity
-                style={styles.quickAction}
-                onPress={() => router.push('/(attendee)/events')}
-                activeOpacity={0.7}
+              <Pressable
+                style={({ pressed }) => [
+                  styles.quickAction,
+                  pressed && styles.quickActionPressed,
+                ]}
+                onPress={() => router.push('/(attendee)/vault')}
               >
                 <View style={[styles.quickActionIcon, { backgroundColor: '#10b98115' }]}>
-                  <Calendar size={24} color="#10b981" />
+                  <Archive size={24} color="#10b981" />
                 </View>
-                <Text style={styles.quickActionLabel}>Browse Events</Text>
-              </TouchableOpacity>
+                <Text style={styles.quickActionLabel}>Vault</Text>
+              </Pressable>
             </View>
           </View>
         </ScrollView>
@@ -258,24 +265,24 @@ export default function MyPhotosScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
       
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
-        <View style={styles.headerContent}>
-          <Text style={styles.greeting}>
-            Hi, {profile?.displayName?.split(' ')[0] || 'there'} 👋
-          </Text>
-          <Text style={styles.title}>Photo Passport</Text>
+      {/* Header with safe area background */}
+      <View style={[styles.headerWrapper, { paddingTop: insets.top }]}>
+        <View style={styles.header}>
+          <View style={styles.headerTop}>
+            <Text style={styles.title}>Photo Passport</Text>
+            <Pressable 
+              style={({ pressed }) => [
+                styles.headerIconButton,
+                pressed && styles.pressed,
+              ]}
+              onPress={() => router.push('/search')}
+            >
+              <UserSearch size={22} color={colors.foreground} />
+            </Pressable>
+          </View>
         </View>
-        {profile?.faceTag && (
-          <TouchableOpacity 
-            style={styles.faceTagBadge}
-            onPress={() => router.push('/profile/qr-code')}
-          >
-            <Text style={styles.faceTagText}>{profile.faceTag}</Text>
-          </TouchableOpacity>
-        )}
       </View>
 
       <ScrollView
@@ -313,12 +320,14 @@ export default function MyPhotosScreen() {
           </View>
         </View>
 
-        {/* Memory Highlight */}
+        {/* Latest Photo Highlight */}
         {photos.length > 0 && photos[0].thumbnailUrl && (
-          <TouchableOpacity
-            style={styles.memoryCard}
+          <Pressable
+            style={({ pressed }) => [
+              styles.memoryCard,
+              pressed && styles.pressed,
+            ]}
             onPress={() => router.push(`/photo/${photos[0].id}`)}
-            activeOpacity={0.9}
           >
             <Image
               source={{ uri: photos[0].thumbnailUrl }}
@@ -329,8 +338,8 @@ export default function MyPhotosScreen() {
               style={styles.memoryOverlay}
             />
             <View style={styles.memoryBadge}>
-              <Sparkles size={12} color="#fff" />
-              <Text style={styles.memoryBadgeText}>Latest Memory</Text>
+              <Clock size={12} color="#fff" />
+              <Text style={styles.memoryBadgeText}>Latest</Text>
             </View>
             <View style={styles.memoryInfo}>
               <Text style={styles.memoryTitle}>{photos[0].eventName || 'Recent Event'}</Text>
@@ -342,7 +351,7 @@ export default function MyPhotosScreen() {
                 })}
               </Text>
             </View>
-          </TouchableOpacity>
+          </Pressable>
         )}
 
         {/* Events Carousel */}
@@ -350,12 +359,13 @@ export default function MyPhotosScreen() {
           <View style={styles.eventsSection}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>My Events</Text>
-              <TouchableOpacity 
+              <Pressable 
                 onPress={() => router.push('/(attendee)/events')}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                style={({ pressed }) => pressed && styles.pressed}
               >
                 <Text style={styles.seeAllText}>See all</Text>
-              </TouchableOpacity>
+              </Pressable>
             </View>
             <FlatList
               data={eventGroups}
@@ -376,11 +386,13 @@ export default function MyPhotosScreen() {
           </View>
           <View style={styles.photoGrid}>
             {photos.map((photo, index) => (
-              <TouchableOpacity
+              <Pressable
                 key={`${photo.id}-${index}`}
-                style={styles.photoItem}
+                style={({ pressed }) => [
+                  styles.photoItem,
+                  pressed && styles.pressed,
+                ]}
                 onPress={() => router.push(`/photo/${photo.id}`)}
-                activeOpacity={0.8}
               >
                 {photo.thumbnailUrl ? (
                   <Image
@@ -392,17 +404,20 @@ export default function MyPhotosScreen() {
                     <ImageIcon size={20} color={colors.secondary} />
                   </View>
                 )}
-              </TouchableOpacity>
+              </Pressable>
             ))}
           </View>
         </View>
       </ScrollView>
 
       {/* Floating Scan Button */}
-      <TouchableOpacity
-        style={[styles.fab, { bottom: insets.bottom + 80 }]}
+      <Pressable
+        style={({ pressed }) => [
+          styles.fab, 
+          { bottom: insets.bottom + 80 },
+          pressed && styles.fabPressed,
+        ]}
         onPress={() => router.push('/(attendee)/scan')}
-        activeOpacity={0.9}
       >
         <LinearGradient
           colors={[colors.accent, colors.accentDark]}
@@ -410,7 +425,7 @@ export default function MyPhotosScreen() {
         >
           <Camera size={24} color="#fff" />
         </LinearGradient>
-      </TouchableOpacity>
+      </Pressable>
     </View>
   );
 }
@@ -420,20 +435,36 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  headerWrapper: {
+    backgroundColor: colors.background,
+  },
   header: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: 16,
+    paddingBottom: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  headerTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.md,
   },
-  headerContent: {
+  headerTitleGroup: {
     flex: 1,
   },
-  greeting: {
-    fontSize: 14,
-    color: colors.secondary,
-    marginBottom: 2,
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  headerIconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.muted,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   title: {
     fontSize: 26,
@@ -441,11 +472,17 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     letterSpacing: -0.5,
   },
+  greeting: {
+    fontSize: 14,
+    color: colors.secondary,
+    marginTop: 2,
+  },
   faceTagBadge: {
     backgroundColor: colors.accent + '15',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
+    marginLeft: spacing.md,
   },
   faceTagText: {
     fontSize: 12,
@@ -453,11 +490,16 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     fontWeight: '600',
   },
+  pressed: {
+    opacity: 0.7,
+    transform: [{ scale: 0.98 }],
+  },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
     paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
     paddingBottom: 160,
   },
   emptyScrollContent: {
@@ -475,6 +517,7 @@ const styles = StyleSheet.create({
     width: 120,
     height: 120,
     borderRadius: 60,
+    backgroundColor: colors.accent + '15',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.lg,
@@ -498,6 +541,10 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     width: '100%',
     maxWidth: 280,
+  },
+  primaryCtaPressed: {
+    transform: [{ scale: 0.98 }],
+    opacity: 0.9,
   },
   primaryCtaGradient: {
     flexDirection: 'row',
@@ -525,11 +572,15 @@ const styles = StyleSheet.create({
   quickActionsRow: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: spacing.md,
+    gap: spacing.lg,
   },
   quickAction: {
     alignItems: 'center',
-    width: 90,
+    width: 80,
+  },
+  quickActionPressed: {
+    opacity: 0.7,
+    transform: [{ scale: 0.95 }],
   },
   quickActionIcon: {
     width: 56,
@@ -729,6 +780,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
+  },
+  fabPressed: {
+    transform: [{ scale: 0.95 }],
+    opacity: 0.9,
   },
   fabGradient: {
     width: '100%',

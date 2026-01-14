@@ -12,6 +12,7 @@ interface Profile {
   id: string;
   displayName: string;
   email: string;
+  username: string | null;
   faceTag: string | null;
   profilePhotoUrl: string | null;
   userType: 'photographer' | 'attendee';
@@ -25,7 +26,7 @@ interface AuthState {
   isInitialized: boolean;
   initialize: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
-  signUp: (email: string, password: string, userType: 'photographer' | 'attendee', displayName: string) => Promise<{ error: string | null }>;
+  signUp: (email: string, password: string, userType: 'photographer' | 'attendee', displayName: string, username?: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -58,6 +59,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             id: profile.id,
             displayName: profile.display_name || 'User',
             email: session.user.email || '',
+            username: profile.username,
             faceTag: profile.face_tag,
             profilePhotoUrl: profile.profile_photo_url,
             userType,
@@ -88,6 +90,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
               id: profile.id,
               displayName: profile.display_name || 'User',
               email: session.user.email || '',
+              username: profile.username,
               faceTag: profile.face_tag,
               profilePhotoUrl: profile.profile_photo_url,
               userType,
@@ -118,7 +121,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  signUp: async (email, password, userType, displayName) => {
+  signUp: async (email, password, userType, displayName, username) => {
     set({ isLoading: true });
     try {
       const { error } = await supabase.auth.signUp({
@@ -128,6 +131,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           data: {
             user_type: userType,
             display_name: displayName,
+            username: username, // Stored in user_metadata, used by trigger to generate FaceTag
           },
         },
       });
@@ -178,6 +182,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             id: profile.id,
             displayName: profile.display_name || 'User',
             email: session.user.email || '',
+            username: profile.username,
             faceTag: profile.face_tag,
             profilePhotoUrl: profile.profile_photo_url,
             userType,

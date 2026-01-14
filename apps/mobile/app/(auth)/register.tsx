@@ -18,6 +18,7 @@ import { Link, useRouter } from 'expo-router';
 import { ArrowLeft, Mail, Lock, User, Camera } from 'lucide-react-native';
 
 import { Button, Input, Card } from '@/components/ui';
+import { UsernameSelector } from '@/components/auth';
 import { useAuthStore } from '@/stores/auth-store';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 
@@ -29,6 +30,8 @@ export default function RegisterScreen() {
   
   const [userType, setUserType] = useState<UserType>('attendee');
   const [displayName, setDisplayName] = useState('');
+  const [username, setUsername] = useState('');
+  const [previewFaceTag, setPreviewFaceTag] = useState<string | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -39,6 +42,12 @@ export default function RegisterScreen() {
     
     if (!displayName.trim()) {
       newErrors.displayName = 'Name is required';
+    }
+    
+    if (!username || username.length < 4) {
+      newErrors.username = 'Username must be at least 4 characters';
+    } else if (!previewFaceTag) {
+      newErrors.username = 'Please choose a valid username';
     }
     
     if (!email) {
@@ -64,7 +73,7 @@ export default function RegisterScreen() {
   const handleRegister = async () => {
     if (!validateForm()) return;
 
-    const { error } = await signUp(email, password, userType, displayName);
+    const { error } = await signUp(email, password, userType, displayName, username);
     
     if (error) {
       Alert.alert('Registration Failed', error);
@@ -181,6 +190,19 @@ export default function RegisterScreen() {
                 error={errors.displayName}
                 leftIcon={<User size={20} color={colors.secondary} />}
               />
+
+              {/* Username / FaceTag Selection */}
+              <View style={styles.usernameSection}>
+                <Text style={styles.usernameLabel}>Choose your FaceTag</Text>
+                <UsernameSelector
+                  value={username}
+                  onChange={setUsername}
+                  onFaceTagChange={setPreviewFaceTag}
+                />
+                {errors.username && (
+                  <Text style={styles.usernameError}>{errors.username}</Text>
+                )}
+              </View>
 
               <Input
                 label="Email"
@@ -337,6 +359,20 @@ const styles = StyleSheet.create({
   },
   form: {
     gap: spacing.sm,
+  },
+  usernameSection: {
+    marginVertical: spacing.sm,
+  },
+  usernameLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.foreground,
+    marginBottom: spacing.sm,
+  },
+  usernameError: {
+    fontSize: 12,
+    color: '#ef4444',
+    marginTop: 4,
   },
   footer: {
     flexDirection: 'row',

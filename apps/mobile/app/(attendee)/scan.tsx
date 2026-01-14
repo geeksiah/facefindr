@@ -1,7 +1,7 @@
 /**
  * Find Photos Screen
  * 
- * Face scanning to find photos from events.
+ * Allows users to scan their face to find photos at events.
  */
 
 import { useState } from 'react';
@@ -9,68 +9,68 @@ import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
-  Alert,
+  ScrollView,
+  Pressable,
+  Platform,
   StatusBar,
+  Dimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Camera as CameraIcon, Image as ImageIcon, QrCode, Sparkles, ArrowRight } from 'lucide-react-native';
+import {
+  Image as ImageIcon,
+  QrCode,
+  ChevronRight,
+  Shield,
+  Zap,
+  Lock,
+  CheckCircle,
+} from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as ImagePicker from 'expo-image-picker';
 import { Camera } from 'expo-camera';
 
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 
+const { width } = Dimensions.get('window');
+
+// Head position illustrations - simple SVG-like circles
+const HEAD_POSITIONS = [
+  { label: 'Front', rotation: 0 },
+  { label: 'Left', rotation: -25 },
+  { label: 'Right', rotation: 25 },
+  { label: 'Up', rotation: 0, tilt: -15 },
+  { label: 'Down', rotation: 0, tilt: 15 },
+];
+
 export default function FindPhotosScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [isLoading, setIsLoading] = useState(false);
+  const [isRequestingPermission, setIsRequestingPermission] = useState(false);
 
-  const handleScanFace = async () => {
-    const { status } = await Camera.requestCameraPermissionsAsync();
-    
-    if (status !== 'granted') {
-      Alert.alert(
-        'Camera Permission',
-        'Please allow camera access to scan your face and find photos.',
-        [{ text: 'OK' }]
-      );
-      return;
+  const handleStartScan = async () => {
+    setIsRequestingPermission(true);
+    try {
+      const { status } = await Camera.requestCameraPermissionsAsync();
+      if (status === 'granted') {
+        router.push('/face-scan');
+      } else {
+        // Show permission denied feedback
+        alert('Camera permission is required to scan your face.');
+      }
+    } catch (error) {
+      console.error('Permission error:', error);
+      alert('Unable to request camera permission.');
+    } finally {
+      setIsRequestingPermission(false);
     }
-
-    router.push('/face-scan');
   };
 
-  const handleUploadPhoto = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    
-    if (status !== 'granted') {
-      Alert.alert(
-        'Photo Library Permission',
-        'Please allow access to your photos to upload a selfie.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
-
-    if (!result.canceled && result.assets[0]) {
-      router.push({
-        pathname: '/face-scan',
-        params: { imageUri: result.assets[0].uri },
-      });
-    }
+  const handleEnterCode = () => {
+    router.push('/enter-code');
   };
 
   const handleScanQR = () => {
-    router.push('/scan');
+    router.push('/qr-scanner');
   };
 
   return (
@@ -80,105 +80,184 @@ export default function FindPhotosScreen() {
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <Text style={styles.title}>Find Photos</Text>
-        <Text style={styles.subtitle}>
-          Use your face to discover photos from any event
-        </Text>
+        <Text style={styles.subtitle}>Discover photos of yourself at events</Text>
       </View>
 
-      {/* Main Options */}
-      <View style={styles.content}>
-        {/* Primary Action - Face Scan */}
-        <TouchableOpacity
-          style={styles.primaryCard}
-          onPress={handleScanFace}
-          activeOpacity={0.9}
-        >
-          <LinearGradient
-            colors={[colors.accent, colors.accentDark]}
-            style={styles.primaryGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          >
-            {/* Decorative circles */}
-            <View style={[styles.decorCircle, styles.decorCircle1]} />
-            <View style={[styles.decorCircle, styles.decorCircle2]} />
-            
-            <View style={styles.primaryIcon}>
-              <CameraIcon size={36} color="#fff" strokeWidth={1.5} />
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Main CTA Card */}
+        <View style={styles.mainCard}>
+          {/* Face Guide Illustration */}
+          <View style={styles.faceGuideContainer}>
+            <View style={styles.facePositionsRow}>
+              {HEAD_POSITIONS.map((pos, index) => (
+                <View key={pos.label} style={styles.positionItem}>
+                  <View style={[
+                    styles.headIcon,
+                    { 
+                      transform: [
+                        { rotate: `${pos.rotation}deg` },
+                        ...(pos.tilt ? [{ rotateX: `${pos.tilt}deg` }] : []),
+                      ]
+                    }
+                  ]}>
+                    <View style={styles.headOval} />
+                    <View style={styles.headFeatures}>
+                      <View style={styles.eyeRow}>
+                        <View style={styles.eye} />
+                        <View style={styles.eye} />
+                      </View>
+                      <View style={styles.nose} />
+                      <View style={styles.mouth} />
+                    </View>
+                  </View>
+                  <Text style={styles.positionLabel}>{pos.label}</Text>
+                </View>
+              ))}
             </View>
-            <View style={styles.primaryTextContainer}>
-              <Text style={styles.primaryTitle}>Scan Your Face</Text>
-              <Text style={styles.primaryDescription}>
-                Take a quick selfie and we'll find all your photos instantly
+            <Text style={styles.positionsHint}>
+              You'll capture 5 angles for better matching accuracy
+            </Text>
+          </View>
+
+          <Text style={styles.mainCardTitle}>Face Scan</Text>
+          <Text style={styles.mainCardDescription}>
+            Use your camera to capture your face from multiple angles. Our AI will find all your photos instantly.
+          </Text>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.primaryButton,
+              pressed && styles.primaryButtonPressed,
+            ]}
+            onPress={handleStartScan}
+            disabled={isRequestingPermission}
+          >
+            <LinearGradient
+              colors={[colors.accent, colors.accentDark]}
+              style={styles.primaryButtonGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+            >
+              <Text style={styles.primaryButtonText}>
+                {isRequestingPermission ? 'Starting...' : 'Start Scanning'}
+              </Text>
+              <ChevronRight size={20} color="#fff" />
+            </LinearGradient>
+          </Pressable>
+        </View>
+
+        {/* Alternative Methods */}
+        <Text style={styles.sectionTitle}>Other Ways to Find Photos</Text>
+
+        <View style={styles.alternativesContainer}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.alternativeCard,
+              pressed && styles.alternativeCardPressed,
+            ]}
+            onPress={handleScanQR}
+          >
+            <View style={[styles.alternativeIcon, { backgroundColor: '#8b5cf615' }]}>
+              <QrCode size={24} color="#8b5cf6" />
+            </View>
+            <View style={styles.alternativeContent}>
+              <Text style={styles.alternativeTitle}>Scan Event QR</Text>
+              <Text style={styles.alternativeDescription}>
+                Scan a QR code at the event venue
               </Text>
             </View>
-            <View style={styles.primaryArrow}>
-              <ArrowRight size={24} color="#fff" />
-            </View>
-          </LinearGradient>
-        </TouchableOpacity>
+            <ChevronRight size={20} color={colors.secondary} />
+          </Pressable>
 
-        {/* Secondary Options */}
-        <View style={styles.secondaryRow}>
-          {/* Upload Photo */}
-          <TouchableOpacity
-            style={styles.secondaryCard}
-            onPress={handleUploadPhoto}
-            activeOpacity={0.8}
+          <Pressable
+            style={({ pressed }) => [
+              styles.alternativeCard,
+              pressed && styles.alternativeCardPressed,
+            ]}
+            onPress={handleEnterCode}
           >
-            <View style={[styles.secondaryIcon, { backgroundColor: colors.muted }]}>
-              <ImageIcon size={24} color={colors.foreground} strokeWidth={1.5} />
+            <View style={[styles.alternativeIcon, { backgroundColor: '#f59e0b15' }]}>
+              <ImageIcon size={24} color="#f59e0b" />
             </View>
-            <Text style={styles.secondaryTitle}>Upload Photo</Text>
-            <Text style={styles.secondaryDescription}>
-              Use an existing selfie
-            </Text>
-          </TouchableOpacity>
-
-          {/* Scan QR */}
-          <TouchableOpacity
-            style={styles.secondaryCard}
-            onPress={handleScanQR}
-            activeOpacity={0.8}
-          >
-            <View style={[styles.secondaryIcon, { backgroundColor: '#8b5cf615' }]}>
-              <QrCode size={24} color="#8b5cf6" strokeWidth={1.5} />
+            <View style={styles.alternativeContent}>
+              <Text style={styles.alternativeTitle}>Enter Event Code</Text>
+              <Text style={styles.alternativeDescription}>
+                Type the code shared by the photographer
+              </Text>
             </View>
-            <Text style={styles.secondaryTitle}>Scan QR</Text>
-            <Text style={styles.secondaryDescription}>
-              Access event directly
-            </Text>
-          </TouchableOpacity>
+            <ChevronRight size={20} color={colors.secondary} />
+          </Pressable>
         </View>
 
-        {/* How it works */}
-        <View style={styles.infoSection}>
-          <View style={styles.infoHeader}>
-            <Sparkles size={16} color={colors.accent} />
-            <Text style={styles.infoTitle}>How it works</Text>
+        {/* Trust Badges */}
+        <View style={styles.trustSection}>
+          <View style={styles.trustBadge}>
+            <Shield size={16} color={colors.accent} />
+            <Text style={styles.trustText}>Privacy First</Text>
           </View>
-          <View style={styles.infoSteps}>
-            <View style={styles.infoStep}>
-              <View style={styles.stepNumber}>
-                <Text style={styles.stepNumberText}>1</Text>
-              </View>
-              <Text style={styles.stepText}>Take or upload a selfie</Text>
+          <View style={styles.trustBadge}>
+            <Zap size={16} color="#f59e0b" />
+            <Text style={styles.trustText}>Instant Results</Text>
+          </View>
+          <View style={styles.trustBadge}>
+            <Lock size={16} color="#10b981" />
+            <Text style={styles.trustText}>Secure</Text>
+          </View>
+        </View>
+
+        {/* How it Works */}
+        <View style={styles.howItWorks}>
+          <Text style={styles.howItWorksTitle}>How Face Scan Works</Text>
+          
+          <View style={styles.stepItem}>
+            <View style={styles.stepNumber}>
+              <Text style={styles.stepNumberText}>1</Text>
             </View>
-            <View style={styles.infoStep}>
-              <View style={styles.stepNumber}>
-                <Text style={styles.stepNumberText}>2</Text>
-              </View>
-              <Text style={styles.stepText}>AI scans thousands of photos</Text>
+            <View style={styles.stepContent}>
+              <Text style={styles.stepTitle}>Capture Your Face</Text>
+              <Text style={styles.stepDescription}>
+                We guide you through 5 positions for accurate matching
+              </Text>
             </View>
-            <View style={styles.infoStep}>
-              <View style={styles.stepNumber}>
-                <Text style={styles.stepNumberText}>3</Text>
-              </View>
-              <Text style={styles.stepText}>View and save your matches</Text>
+          </View>
+
+          <View style={styles.stepItem}>
+            <View style={styles.stepNumber}>
+              <Text style={styles.stepNumberText}>2</Text>
+            </View>
+            <View style={styles.stepContent}>
+              <Text style={styles.stepTitle}>AI Matching</Text>
+              <Text style={styles.stepDescription}>
+                Our AI searches thousands of event photos in seconds
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.stepItem}>
+            <View style={styles.stepNumber}>
+              <Text style={styles.stepNumberText}>3</Text>
+            </View>
+            <View style={styles.stepContent}>
+              <Text style={styles.stepTitle}>Get Your Photos</Text>
+              <Text style={styles.stepDescription}>
+                View, download, and share your photos instantly
+              </Text>
             </View>
           </View>
         </View>
-      </View>
+
+        {/* Privacy Note */}
+        <View style={styles.privacyNote}>
+          <CheckCircle size={16} color={colors.accent} />
+          <Text style={styles.privacyText}>
+            Your face data is encrypted and never shared. You can delete it anytime from settings.
+          </Text>
+        </View>
+      </ScrollView>
     </View>
   );
 }
@@ -190,156 +269,261 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.lg,
+    paddingBottom: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
   title: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '700',
     color: colors.foreground,
     letterSpacing: -0.5,
   },
   subtitle: {
-    fontSize: 15,
-    color: colors.secondary,
-    marginTop: 4,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: spacing.lg,
-  },
-  primaryCard: {
-    borderRadius: borderRadius.xl,
-    overflow: 'hidden',
-    marginBottom: spacing.md,
-  },
-  primaryGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: spacing.lg,
-    minHeight: 120,
-    position: 'relative',
-  },
-  decorCircle: {
-    position: 'absolute',
-    borderRadius: 9999,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  decorCircle1: {
-    width: 150,
-    height: 150,
-    top: -60,
-    right: -40,
-  },
-  decorCircle2: {
-    width: 80,
-    height: 80,
-    bottom: -30,
-    left: -20,
-  },
-  primaryIcon: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: spacing.md,
-  },
-  primaryTextContainer: {
-    flex: 1,
-  },
-  primaryTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  primaryDescription: {
     fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.8)',
-    lineHeight: 20,
+    color: colors.secondary,
+    marginTop: 2,
   },
-  primaryArrow: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  secondaryRow: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    marginBottom: spacing.xl,
-  },
-  secondaryCard: {
+  scrollView: {
     flex: 1,
+  },
+  scrollContent: {
+    padding: spacing.lg,
+    paddingBottom: 100,
+  },
+  mainCard: {
     backgroundColor: colors.card,
     borderRadius: borderRadius.xl,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: spacing.md,
+    padding: spacing.lg,
+    marginBottom: spacing.xl,
+  },
+  faceGuideContainer: {
+    alignItems: 'center',
+    marginBottom: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  facePositionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '100%',
+    marginBottom: spacing.md,
+  },
+  positionItem: {
     alignItems: 'center',
   },
-  secondaryIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+  headIcon: {
+    width: 44,
+    height: 52,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headOval: {
+    width: 40,
+    height: 48,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: colors.accent,
+    borderStyle: 'dashed',
+    position: 'absolute',
+  },
+  headFeatures: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.sm,
   },
-  secondaryTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.foreground,
-    marginBottom: 2,
+  eyeRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 4,
   },
-  secondaryDescription: {
+  eye: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.secondary,
+  },
+  nose: {
+    width: 4,
+    height: 8,
+    borderRadius: 2,
+    backgroundColor: colors.secondary,
+    marginBottom: 4,
+  },
+  mouth: {
+    width: 12,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.secondary,
+  },
+  positionLabel: {
+    fontSize: 10,
+    color: colors.secondary,
+    marginTop: 6,
+    fontWeight: '500',
+  },
+  positionsHint: {
     fontSize: 12,
     color: colors.secondary,
     textAlign: 'center',
   },
-  infoSection: {
-    backgroundColor: colors.muted,
-    borderRadius: borderRadius.xl,
-    padding: spacing.lg,
+  mainCardTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.foreground,
+    textAlign: 'center',
+    marginBottom: spacing.sm,
   },
-  infoHeader: {
+  mainCardDescription: {
+    fontSize: 14,
+    color: colors.secondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: spacing.lg,
+  },
+  primaryButton: {
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  primaryButtonPressed: {
+    transform: [{ scale: 0.98 }],
+    opacity: 0.9,
+  },
+  primaryButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    marginBottom: spacing.md,
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
   },
-  infoTitle: {
+  primaryButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  sectionTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.accent,
+    color: colors.secondary,
+    marginBottom: spacing.md,
   },
-  infoSteps: {
-    gap: spacing.md,
+  alternativesContainer: {
+    gap: spacing.sm,
+    marginBottom: spacing.xl,
   },
-  infoStep: {
+  alternativeCard: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+  },
+  alternativeCardPressed: {
+    backgroundColor: colors.muted,
+    transform: [{ scale: 0.99 }],
+  },
+  alternativeIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  alternativeContent: {
+    flex: 1,
+    marginLeft: spacing.md,
+  },
+  alternativeTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.foreground,
+  },
+  alternativeDescription: {
+    fontSize: 13,
+    color: colors.secondary,
+    marginTop: 2,
+  },
+  trustSection: {
+    flexDirection: 'row',
+    justifyContent: 'center',
     gap: spacing.md,
+    marginBottom: spacing.xl,
+  },
+  trustBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.muted,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  trustText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: colors.foreground,
+  },
+  howItWorks: {
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+  },
+  howItWorksTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.foreground,
+    marginBottom: spacing.lg,
+  },
+  stepItem: {
+    flexDirection: 'row',
+    marginBottom: spacing.md,
   },
   stepNumber: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: colors.accent + '20',
+    backgroundColor: colors.accent + '15',
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: spacing.md,
   },
   stepNumberText: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '700',
     color: colors.accent,
   },
-  stepText: {
-    fontSize: 14,
-    color: colors.foreground,
+  stepContent: {
     flex: 1,
+  },
+  stepTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.foreground,
+    marginBottom: 2,
+  },
+  stepDescription: {
+    fontSize: 13,
+    color: colors.secondary,
+    lineHeight: 18,
+  },
+  privacyNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    backgroundColor: colors.accent + '10',
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+  },
+  privacyText: {
+    flex: 1,
+    fontSize: 12,
+    color: colors.secondary,
+    lineHeight: 18,
   },
 });

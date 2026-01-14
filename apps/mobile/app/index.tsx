@@ -171,7 +171,7 @@ export default function WelcomeScreen() {
         </Link>
 
         <View style={styles.quickActions}>
-          <Link href="/scan" asChild>
+          <Link href="/qr-scanner" asChild>
             <TouchableOpacity style={styles.quickButton} activeOpacity={0.7}>
               <Text style={styles.quickButtonText}>Scan QR</Text>
             </TouchableOpacity>

@@ -215,10 +215,13 @@ export default function NotificationsScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
+      
+      {/* Status bar background */}
+      <View style={[styles.statusBarBg, { height: insets.top }]} />
       
       {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+      <View style={styles.header}>
         <View style={styles.headerLeft}>
           <Text style={styles.title}>Notifications</Text>
           {unreadCount > 0 && (
@@ -302,12 +305,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  statusBarBg: {
+    backgroundColor: colors.background,
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
+    paddingTop: 16,
     paddingBottom: spacing.md,
+    backgroundColor: colors.background,
   },
   headerLeft: {
     flexDirection: 'row',

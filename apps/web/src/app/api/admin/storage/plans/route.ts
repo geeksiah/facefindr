@@ -1,0 +1,263 @@
+/**
+ * Admin Storage Plans Management API
+ * 
+ * GET - List all storage plans (including inactive)
+ * POST - Create a new storage plan
+ * PUT - Update a storage plan
+ * DELETE - Soft delete a storage plan
+ */
+
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
+
+// Helper to check admin status
+async function isAdmin(supabase: any, userId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('admin_users')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('is_active', true)
+    .single();
+  
+  return !!data;
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const supabase = await createClient();
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || !(await isAdmin(supabase, user.id))) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { data: plans, error } = await supabase
+      .from('storage_plans')
+      .select('*')
+      .order('sort_order', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching storage plans:', error);
+      return NextResponse.json(
+        { error: 'Failed to fetch storage plans' },
+        { status: 500 }
+      );
+    }
+
+    // Get subscription counts for each plan
+    const planIds = plans.map((p: any) => p.id);
+    const { data: subscriptionCounts } = await supabase
+      .from('storage_subscriptions')
+      .select('plan_id')
+      .in('plan_id', planIds)
+      .eq('status', 'active');
+
+    const countMap: Record<string, number> = {};
+    (subscriptionCounts || []).forEach((s: any) => {
+      countMap[s.plan_id] = (countMap[s.plan_id] || 0) + 1;
+    });
+
+    const plansWithCounts = plans.map((plan: any) => ({
+      ...plan,
+      activeSubscriptions: countMap[plan.id] || 0,
+    }));
+
+    return NextResponse.json({ plans: plansWithCounts });
+  } catch (error) {
+    console.error('Admin storage plans error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const supabase = await createClient();
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || !(await isAdmin(supabase, user.id))) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const {
+      name,
+      slug,
+      description,
+      storageLimitMb,
+      photoLimit,
+      priceMonthly,
+      priceYearly,
+      currency,
+      features,
+      isPopular,
+      sortOrder,
+    } = body;
+
+    if (!name || !slug) {
+      return NextResponse.json(
+        { error: 'Name and slug are required' },
+        { status: 400 }
+      );
+    }
+
+    const { data: plan, error } = await supabase
+      .from('storage_plans')
+      .insert({
+        name,
+        slug,
+        description,
+        storage_limit_mb: storageLimitMb ?? 500,
+        photo_limit: photoLimit ?? 50,
+        price_monthly: priceMonthly ?? 0,
+        price_yearly: priceYearly ?? 0,
+        currency: currency ?? 'USD',
+        features: features ?? [],
+        is_popular: isPopular ?? false,
+        sort_order: sortOrder ?? 0,
+        is_active: true,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating storage plan:', error);
+      if (error.code === '23505') {
+        return NextResponse.json(
+          { error: 'A plan with this slug already exists' },
+          { status: 400 }
+        );
+      }
+      return NextResponse.json(
+        { error: 'Failed to create storage plan' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ plan });
+  } catch (error) {
+    console.error('Admin create storage plan error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    const supabase = await createClient();
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || !(await isAdmin(supabase, user.id))) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { id, ...updates } = body;
+
+    if (!id) {
+      return NextResponse.json(
+        { error: 'Plan ID is required' },
+        { status: 400 }
+      );
+    }
+
+    // Map camelCase to snake_case
+    const updateData: Record<string, any> = {};
+    if (updates.name !== undefined) updateData.name = updates.name;
+    if (updates.description !== undefined) updateData.description = updates.description;
+    if (updates.storageLimitMb !== undefined) updateData.storage_limit_mb = updates.storageLimitMb;
+    if (updates.photoLimit !== undefined) updateData.photo_limit = updates.photoLimit;
+    if (updates.priceMonthly !== undefined) updateData.price_monthly = updates.priceMonthly;
+    if (updates.priceYearly !== undefined) updateData.price_yearly = updates.priceYearly;
+    if (updates.currency !== undefined) updateData.currency = updates.currency;
+    if (updates.features !== undefined) updateData.features = updates.features;
+    if (updates.isPopular !== undefined) updateData.is_popular = updates.isPopular;
+    if (updates.isActive !== undefined) updateData.is_active = updates.isActive;
+    if (updates.sortOrder !== undefined) updateData.sort_order = updates.sortOrder;
+    updateData.updated_at = new Date().toISOString();
+
+    const { data: plan, error } = await supabase
+      .from('storage_plans')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating storage plan:', error);
+      return NextResponse.json(
+        { error: 'Failed to update storage plan' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ plan });
+  } catch (error) {
+    console.error('Admin update storage plan error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const supabase = await createClient();
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || !(await isAdmin(supabase, user.id))) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+
+    if (!id) {
+      return NextResponse.json(
+        { error: 'Plan ID is required' },
+        { status: 400 }
+      );
+    }
+
+    // Check if plan has active subscriptions
+    const { count } = await supabase
+      .from('storage_subscriptions')
+      .select('id', { count: 'exact' })
+      .eq('plan_id', id)
+      .eq('status', 'active');
+
+    if (count && count > 0) {
+      return NextResponse.json(
+        { error: `Cannot delete plan with ${count} active subscriptions. Deactivate it instead.` },
+        { status: 400 }
+      );
+    }
+
+    // Soft delete by setting is_active to false
+    const { error } = await supabase
+      .from('storage_plans')
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq('id', id);
+
+    if (error) {
+      console.error('Error deleting storage plan:', error);
+      return NextResponse.json(
+        { error: 'Failed to delete storage plan' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Admin delete storage plan error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}

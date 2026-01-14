@@ -282,10 +282,13 @@ export default function MyEventsScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
+      
+      {/* Status bar background */}
+      <View style={[styles.statusBarBg, { height: insets.top }]} />
       
       {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+      <View style={styles.header}>
         <Text style={styles.title}>My Events</Text>
         
         {/* Search Bar */}
@@ -333,11 +336,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  statusBarBg: {
+    backgroundColor: colors.background,
+  },
   header: {
     paddingHorizontal: spacing.lg,
+    paddingTop: 16,
     paddingBottom: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+    backgroundColor: colors.background,
   },
   title: {
     fontSize: 26,

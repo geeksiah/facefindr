@@ -4,7 +4,7 @@
  * Profile, FaceTag, and account management.
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -17,13 +17,13 @@ import {
   StatusBar,
   Linking,
   Platform,
+  Pressable,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   User,
-  Settings,
   CreditCard,
   Bell,
   HelpCircle,
@@ -35,18 +35,37 @@ import {
   ExternalLink,
   Shield,
   Camera,
-  Sparkles,
+  Info,
 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 
 import { useAuthStore } from '@/stores/auth-store';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 
+const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
+
 export default function ProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { profile, signOut } = useAuthStore();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [followersCount, setFollowersCount] = useState(0);
+
+  // Load followers count
+  useEffect(() => {
+    const loadFollowersCount = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/social/follow?type=followers`);
+        if (response.ok) {
+          const data = await response.json();
+          setFollowersCount(data.total || 0);
+        }
+      } catch (error) {
+        console.log('Error loading followers count:', error);
+      }
+    };
+    loadFollowersCount();
+  }, []);
 
   const APP_URL = process.env.EXPO_PUBLIC_APP_URL || 'https://app.example.com';
 
@@ -105,7 +124,7 @@ export default function ProfileScreen() {
       label: 'Edit Profile',
       description: 'Update your name and photo',
       onPress: () => router.push('/settings/profile'),
-      color: colors.accent,
+      color: '#3b82f6',
     },
     {
       icon: CreditCard,
@@ -135,18 +154,28 @@ export default function ProfileScreen() {
       onPress: () => router.push('/settings/help'),
       color: '#ec4899',
     },
+    {
+      icon: Info,
+      label: 'About App',
+      description: 'Version and legal info',
+      onPress: () => router.push('/settings/about'),
+      color: colors.secondary,
+    },
   ];
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
+      
+      {/* Status bar background - fixed at top */}
+      <View style={[styles.statusBarBg, { height: insets.top }]} />
       
       <ScrollView 
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
         {/* Profile Header */}
-        <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+        <View style={styles.header}>
           <TouchableOpacity 
             style={styles.avatarContainer}
             onPress={() => router.push('/settings/profile')}
@@ -175,8 +204,20 @@ export default function ProfileScreen() {
           <Text style={styles.displayName}>{profile?.displayName}</Text>
           <Text style={styles.email}>{profile?.email}</Text>
           
+          {/* Followers Count - TikTok/Instagram style */}
+          <Pressable
+            style={({ pressed }) => [
+              styles.followersRow,
+              pressed && styles.pressed,
+            ]}
+            onPress={() => router.push('/social/followers')}
+          >
+            <Text style={styles.followersCount}>{followersCount}</Text>
+            <Text style={styles.followersLabel}>Followers</Text>
+          </Pressable>
+          
           <View style={styles.roleBadge}>
-            <Sparkles size={12} color={colors.accent} />
+            <Camera size={12} color={colors.accent} />
             <Text style={styles.roleBadgeText}>Photographer</Text>
           </View>
         </View>
@@ -188,7 +229,7 @@ export default function ProfileScreen() {
             style={styles.faceTagGradient}
           >
             <View style={styles.faceTagHeader}>
-              <View>
+              <View style={styles.faceTagInfo}>
                 <Text style={styles.faceTagLabel}>Your FaceTag</Text>
                 <Text style={styles.faceTag}>{profile?.faceTag || '@facefindr'}</Text>
               </View>
@@ -197,15 +238,17 @@ export default function ProfileScreen() {
                   onPress={handleCopyFaceTag} 
                   style={styles.iconButton}
                   activeOpacity={0.7}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
-                  <Copy size={18} color={colors.accent} />
+                  <Copy size={16} color={colors.accent} />
                 </TouchableOpacity>
                 <TouchableOpacity 
                   onPress={handleShare} 
                   style={styles.iconButton}
                   activeOpacity={0.7}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
-                  <Share2 size={18} color={colors.accent} />
+                  <Share2 size={16} color={colors.accent} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -286,7 +329,7 @@ export default function ProfileScreen() {
         {/* App Version */}
         <View style={styles.footer}>
           <Text style={styles.version}>FaceFindr v1.0.0</Text>
-          <Text style={styles.copyright}>© 2025 The FaceFindr Team</Text>
+          <Text style={styles.copyright}>© {new Date().getFullYear()} The FaceFindr Team</Text>
         </View>
       </ScrollView>
     </View>
@@ -298,13 +341,24 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  statusBarBg: {
+    backgroundColor: colors.background,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+  },
   scrollContent: {
+    paddingTop: spacing.xl,
     paddingBottom: 120,
   },
   header: {
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
     paddingBottom: spacing.lg,
+    marginBottom: spacing.lg,
   },
   avatarContainer: {
     position: 'relative',
@@ -348,6 +402,29 @@ const styles = StyleSheet.create({
     color: colors.secondary,
     marginBottom: spacing.sm,
   },
+  pressed: {
+    opacity: 0.7,
+  },
+  followersRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    backgroundColor: colors.muted,
+    borderRadius: borderRadius.lg,
+    marginBottom: spacing.sm,
+  },
+  followersCount: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.foreground,
+    marginRight: spacing.xs,
+  },
+  followersLabel: {
+    fontSize: 14,
+    color: colors.secondary,
+  },
   roleBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -379,28 +456,38 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: spacing.sm,
   },
+  faceTagInfo: {
+    flex: 1,
+    marginRight: -8,
+  },
   faceTagLabel: {
-    fontSize: 12,
+    fontSize: 11,
+    fontWeight: '600',
     color: colors.secondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
     marginBottom: 4,
   },
   faceTag: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '700',
     color: colors.accent,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   faceTagActions: {
     flexDirection: 'row',
-    gap: spacing.sm,
+    gap: 8,
+    marginTop: 8,
   },
   iconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: colors.accent + '15',
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: colors.card,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.accent + '30',
   },
   faceTagHint: {
     fontSize: 13,

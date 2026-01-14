@@ -19,6 +19,7 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { UsernameSelector } from '@/components/auth';
 import { registerSchema, type RegisterInput } from '@/lib/validations/auth';
 import { register as registerUser } from '../actions';
 import { cn } from '@/lib/utils';
@@ -29,6 +30,7 @@ export default function RegisterPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [previewFaceTag, setPreviewFaceTag] = useState<string | null>(null);
 
   const {
     register,
@@ -43,6 +45,7 @@ export default function RegisterPage() {
       password: '',
       confirmPassword: '',
       displayName: '',
+      username: '',
       userType: undefined,
       acceptTerms: false,
     },
@@ -199,6 +202,22 @@ export default function RegisterPage() {
                 autoComplete="name"
               />
             </div>
+          </div>
+
+          {/* Username / FaceTag */}
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-2">
+              Choose your FaceTag
+            </label>
+            <UsernameSelector
+              value={watch('username') || ''}
+              onChange={(value) => setValue('username', value, { shouldValidate: true })}
+              onFaceTagChange={setPreviewFaceTag}
+              disabled={isLoading}
+            />
+            {errors.username && (
+              <p className="mt-1.5 text-xs text-destructive">{errors.username.message}</p>
+            )}
           </div>
 
           {/* Email */}

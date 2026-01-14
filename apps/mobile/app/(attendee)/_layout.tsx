@@ -4,15 +4,62 @@
  * Bottom tab navigation for attendees (Photo Passport).
  */
 
+import { useEffect } from 'react';
 import { Tabs } from 'expo-router';
-import { Image, Scan, Calendar, Bell, User } from 'lucide-react-native';
+import { Image, Scan, Calendar, Bell, User, Archive } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Platform } from 'react-native';
+import { Platform, View, Text, StyleSheet } from 'react-native';
 
 import { colors, fontSize } from '@/lib/theme';
+import { useNotificationsStore } from '@/stores/notifications-store';
+import { useAuthStore } from '@/stores/auth-store';
+
+// Notification badge component
+function NotificationBadge({ count }: { count: number }) {
+  if (count === 0) return null;
+  
+  return (
+    <View style={badgeStyles.container}>
+      <Text style={badgeStyles.text}>
+        {count > 99 ? '99+' : count}
+      </Text>
+    </View>
+  );
+}
+
+const badgeStyles = StyleSheet.create({
+  container: {
+    position: 'absolute',
+    top: -4,
+    right: -8,
+    backgroundColor: '#ef4444',
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 2,
+    borderColor: colors.background,
+  },
+  text: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+});
 
 export default function AttendeeLayout() {
   const insets = useSafeAreaInsets();
+  const { profile } = useAuthStore();
+  const { unreadCount, fetchNotifications } = useNotificationsStore();
+  
+  // Fetch notifications on mount
+  useEffect(() => {
+    if (profile?.id) {
+      fetchNotifications(profile.id);
+    }
+  }, [profile?.id]);
   
   // Calculate proper tab bar height with safe area
   const tabBarHeight = Platform.select({
@@ -81,7 +128,12 @@ export default function AttendeeLayout() {
         name="notifications"
         options={{
           title: 'Alerts',
-          tabBarIcon: ({ color, size }) => <Bell size={22} color={color} />,
+          tabBarIcon: ({ color, size }) => (
+            <View>
+              <Bell size={22} color={color} />
+              <NotificationBadge count={unreadCount} />
+            </View>
+          ),
         }}
       />
       <Tabs.Screen
@@ -89,6 +141,14 @@ export default function AttendeeLayout() {
         options={{
           title: 'Profile',
           tabBarIcon: ({ color, size }) => <User size={22} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="vault"
+        options={{
+          title: 'Vault',
+          href: null, // Hide from tab bar, accessible via navigation
+          tabBarIcon: ({ color, size }) => <Archive size={22} color={color} />,
         }}
       />
     </Tabs>

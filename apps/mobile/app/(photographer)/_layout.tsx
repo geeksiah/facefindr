@@ -89,6 +89,12 @@ export default function PhotographerLayout() {
           tabBarIcon: ({ color }) => <User size={22} color={color} />,
         }}
       />
+      <Tabs.Screen
+        name="notifications"
+        options={{
+          href: null, // Hide from tab bar, accessible via navigation
+        }}
+      />
     </Tabs>
   );
 }

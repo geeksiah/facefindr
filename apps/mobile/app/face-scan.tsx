@@ -1,7 +1,7 @@
 /**
  * Face Scan Screen
  * 
- * Camera-based face scanning with guided instructions.
+ * Camera-based face scanning with 5-position guided capture.
  */
 
 import { useState, useRef, useEffect } from 'react';
@@ -10,7 +10,7 @@ import {
   Text,
   StyleSheet,
   SafeAreaView,
-  TouchableOpacity,
+  Pressable,
   Alert,
   ActivityIndicator,
   Image,
@@ -20,7 +20,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as FileSystem from 'expo-file-system';
-import { ArrowLeft, Camera, RefreshCw, Check, X } from 'lucide-react-native';
+import { ArrowLeft, RefreshCw, Check, X, Camera as CameraIcon } from 'lucide-react-native';
 
 import { Button, Card } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
@@ -30,12 +30,27 @@ import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const PHOTO_SIZE = (SCREEN_WIDTH - spacing.lg * 2 - spacing.sm * 2) / 3;
 
+// 5 head positions for accurate face matching
+const HEAD_POSITIONS = [
+  { id: 'front', label: 'Front', instruction: 'Look straight ahead' },
+  { id: 'left', label: 'Left', instruction: 'Turn slightly left' },
+  { id: 'right', label: 'Right', instruction: 'Turn slightly right' },
+  { id: 'up', label: 'Up', instruction: 'Tilt head up slightly' },
+  { id: 'down', label: 'Down', instruction: 'Tilt head down slightly' },
+];
+
 interface MatchedPhoto {
   id: string;
   thumbnailUrl: string;
   eventName: string;
   similarity: number;
   price: number;
+}
+
+interface CapturedPosition {
+  id: string;
+  uri: string;
+  base64: string;
 }
 
 type ScanStep = 'consent' | 'capture' | 'processing' | 'results' | 'error';
@@ -48,7 +63,8 @@ export default function FaceScanScreen() {
   
   const [permission, requestPermission] = useCameraPermissions();
   const [step, setStep] = useState<ScanStep>('consent');
-  const [capturedImage, setCapturedImage] = useState<string | null>(params.imageUri || null);
+  const [currentPositionIndex, setCurrentPositionIndex] = useState(0);
+  const [capturedPositions, setCapturedPositions] = useState<CapturedPosition[]>([]);
   const [matchedPhotos, setMatchedPhotos] = useState<MatchedPhoto[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -57,15 +73,16 @@ export default function FaceScanScreen() {
   // If image was passed in, skip to processing
   useEffect(() => {
     if (params.imageUri) {
-      setCapturedImage(params.imageUri);
       setStep('processing');
-      processImage(params.imageUri);
+      processSingleImage(params.imageUri);
     }
   }, [params.imageUri]);
 
   const handleConsent = () => {
     setStep('capture');
   };
+
+  const currentPosition = HEAD_POSITIONS[currentPositionIndex];
 
   const takePicture = async () => {
     if (!cameraRef.current) return;
@@ -76,10 +93,24 @@ export default function FaceScanScreen() {
         base64: true,
       });
 
-      if (photo?.uri) {
-        setCapturedImage(photo.uri);
-        setStep('processing');
-        await processImage(photo.uri);
+      if (photo?.uri && photo?.base64) {
+        const newCapture: CapturedPosition = {
+          id: currentPosition.id,
+          uri: photo.uri,
+          base64: photo.base64,
+        };
+
+        const updatedCaptures = [...capturedPositions, newCapture];
+        setCapturedPositions(updatedCaptures);
+
+        // Move to next position or process
+        if (currentPositionIndex < HEAD_POSITIONS.length - 1) {
+          setCurrentPositionIndex(currentPositionIndex + 1);
+        } else {
+          // All positions captured, process
+          setStep('processing');
+          await processAllImages(updatedCaptures);
+        }
       }
     } catch (err) {
       console.error('Error taking picture:', err);
@@ -87,25 +118,20 @@ export default function FaceScanScreen() {
     }
   };
 
-  const processImage = async (imageUri: string) => {
+  const processSingleImage = async (imageUri: string) => {
     setIsProcessing(true);
     setErrorMessage(null);
 
     try {
-      // Read image as base64
       const base64 = await FileSystem.readAsStringAsync(imageUri, {
         encoding: FileSystem.EncodingType.Base64,
       });
 
-      // Get API URL from env
       const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
 
-      // Call face matching API
       const response = await fetch(`${apiUrl}/api/face/match`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           imageBase64: base64,
           eventId: params.eventId || null,
@@ -119,22 +145,7 @@ export default function FaceScanScreen() {
       }
 
       const data = await response.json();
-
-      if (data.matches && data.matches.length > 0) {
-        setMatchedPhotos(
-          data.matches.map((match: any) => ({
-            id: match.mediaId,
-            thumbnailUrl: match.thumbnailUrl,
-            eventName: match.eventName,
-            similarity: match.similarity,
-            price: match.price || 0,
-          }))
-        );
-        setStep('results');
-      } else {
-        setErrorMessage('No photos found matching your face. Try a different angle or event.');
-        setStep('error');
-      }
+      handleMatchResults(data);
     } catch (err: any) {
       console.error('Face matching error:', err);
       setErrorMessage(err.message || 'Something went wrong. Please try again.');
@@ -144,8 +155,66 @@ export default function FaceScanScreen() {
     }
   };
 
+  const processAllImages = async (captures: CapturedPosition[]) => {
+    setIsProcessing(true);
+    setErrorMessage(null);
+
+    try {
+      const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+
+      // Use the front-facing image as primary
+      const frontCapture = captures.find(c => c.id === 'front') || captures[0];
+
+      const response = await fetch(`${apiUrl}/api/face/match`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: frontCapture.base64,
+          additionalImages: captures
+            .filter(c => c.id !== 'front')
+            .map(c => ({ position: c.id, base64: c.base64 })),
+          eventId: params.eventId || null,
+          attendeeId: profile?.id,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Face matching failed');
+      }
+
+      const data = await response.json();
+      handleMatchResults(data);
+    } catch (err: any) {
+      console.error('Face matching error:', err);
+      setErrorMessage(err.message || 'Something went wrong. Please try again.');
+      setStep('error');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleMatchResults = (data: any) => {
+    if (data.matches && data.matches.length > 0) {
+      setMatchedPhotos(
+        data.matches.map((match: any) => ({
+          id: match.mediaId,
+          thumbnailUrl: match.thumbnailUrl,
+          eventName: match.eventName,
+          similarity: match.similarity,
+          price: match.price || 0,
+        }))
+      );
+      setStep('results');
+    } else {
+      setErrorMessage('No photos found matching your face. Try a different angle or event.');
+      setStep('error');
+    }
+  };
+
   const retryCapture = () => {
-    setCapturedImage(null);
+    setCapturedPositions([]);
+    setCurrentPositionIndex(0);
     setMatchedPhotos([]);
     setErrorMessage(null);
     setStep('capture');
@@ -153,6 +222,39 @@ export default function FaceScanScreen() {
 
   const toggleCameraFacing = () => {
     setFacing((current) => (current === 'front' ? 'back' : 'front'));
+  };
+
+  const handleCancelCapture = () => {
+    Alert.alert(
+      'Cancel Scan?',
+      'Are you sure you want to cancel? Your progress will be lost.',
+      [
+        { text: 'Continue Scanning', style: 'cancel' },
+        {
+          text: 'Cancel',
+          style: 'destructive',
+          onPress: () => router.back(),
+        },
+      ]
+    );
+  };
+
+  const handleCancelSearch = () => {
+    Alert.alert(
+      'Cancel Search?',
+      'Are you sure you want to stop searching? You can always try again later.',
+      [
+        { text: 'Keep Searching', style: 'cancel' },
+        {
+          text: 'Yes, Cancel',
+          style: 'destructive',
+          onPress: () => {
+            setIsProcessing(false);
+            router.back();
+          },
+        },
+      ]
+    );
   };
 
   // Permission not determined
@@ -169,7 +271,9 @@ export default function FaceScanScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.permissionContainer}>
-          <Camera size={64} color={colors.secondary} />
+          <View style={styles.iconContainer}>
+            <CameraIcon size={48} color={colors.accent} />
+          </View>
           <Text style={styles.permissionTitle}>Camera Access Required</Text>
           <Text style={styles.permissionText}>
             We need camera access to scan your face and find your photos.
@@ -190,22 +294,24 @@ export default function FaceScanScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <Pressable 
+            onPress={() => router.back()} 
+            style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
+          >
             <ArrowLeft size={24} color={colors.foreground} />
-          </TouchableOpacity>
+          </Pressable>
           <Text style={styles.headerTitle}>Face Scan</Text>
           <View style={{ width: 44 }} />
         </View>
 
         <ScrollView contentContainerStyle={styles.consentContent}>
           <View style={styles.iconContainer}>
-            <Camera size={48} color={colors.accent} />
+            <CameraIcon size={48} color={colors.accent} />
           </View>
 
           <Text style={styles.consentTitle}>Find Your Photos</Text>
           <Text style={styles.consentDescription}>
-            We'll use face recognition to find photos of you from events. Your privacy is important
-            to us.
+            We'll capture your face from 5 angles for accurate matching. Your privacy is our priority.
           </Text>
 
           <Card style={styles.privacyCard}>
@@ -234,15 +340,18 @@ export default function FaceScanScreen() {
             I Agree, Start Scanning
           </Button>
 
-          <TouchableOpacity onPress={() => router.back()} style={styles.cancelButton}>
+          <Pressable 
+            onPress={() => router.back()} 
+            style={({ pressed }) => [styles.cancelButton, pressed && styles.pressed]}
+          >
             <Text style={styles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
+          </Pressable>
         </ScrollView>
       </SafeAreaView>
     );
   }
 
-  // Camera capture screen
+  // Camera capture screen with position guide
   if (step === 'capture') {
     return (
       <View style={styles.cameraContainer}>
@@ -252,29 +361,86 @@ export default function FaceScanScreen() {
           facing={facing}
         >
           <SafeAreaView style={styles.cameraOverlay}>
+            {/* Header */}
             <View style={styles.cameraHeader}>
-              <TouchableOpacity onPress={() => router.back()} style={styles.cameraBackButton}>
+              <Pressable 
+                onPress={handleCancelCapture} 
+                style={({ pressed }) => [styles.cameraBackButton, pressed && { opacity: 0.7 }]}
+              >
                 <ArrowLeft size={24} color="#fff" />
-              </TouchableOpacity>
-              <Text style={styles.cameraTitle}>Position your face</Text>
-              <TouchableOpacity onPress={toggleCameraFacing} style={styles.cameraFlipButton}>
+              </Pressable>
+              <View style={styles.positionProgress}>
+                <Text style={styles.positionProgressText}>
+                  {currentPositionIndex + 1} / {HEAD_POSITIONS.length}
+                </Text>
+              </View>
+              <Pressable 
+                onPress={toggleCameraFacing} 
+                style={({ pressed }) => [styles.cameraFlipButton, pressed && { opacity: 0.7 }]}
+              >
                 <RefreshCw size={24} color="#fff" />
-              </TouchableOpacity>
+              </Pressable>
             </View>
 
-            {/* Face guide oval */}
+            {/* Position indicators */}
+            <View style={styles.positionIndicators}>
+              {HEAD_POSITIONS.map((pos, index) => (
+                <View 
+                  key={pos.id}
+                  style={[
+                    styles.positionDot,
+                    index < currentPositionIndex && styles.positionDotCompleted,
+                    index === currentPositionIndex && styles.positionDotActive,
+                  ]}
+                />
+              ))}
+            </View>
+
+            {/* Face guide */}
             <View style={styles.faceGuideContainer}>
-              <View style={styles.faceGuide} />
+              <View style={styles.faceGuide}>
+                {/* Head illustration based on current position */}
+                <View style={[
+                  styles.headOval,
+                  currentPosition.id === 'left' && { transform: [{ rotate: '-15deg' }] },
+                  currentPosition.id === 'right' && { transform: [{ rotate: '15deg' }] },
+                  currentPosition.id === 'up' && { transform: [{ translateY: -10 }] },
+                  currentPosition.id === 'down' && { transform: [{ translateY: 10 }] },
+                ]} />
+              </View>
+              
+              <View style={styles.instructionBadge}>
+                <Text style={styles.positionLabel}>{currentPosition.label}</Text>
+              </View>
               <Text style={styles.faceGuideText}>
-                Center your face in the oval
+                {currentPosition.instruction}
               </Text>
             </View>
 
+            {/* Captured thumbnails */}
+            {capturedPositions.length > 0 && (
+              <View style={styles.capturedThumbnails}>
+                {capturedPositions.map((capture) => (
+                  <Image
+                    key={capture.id}
+                    source={{ uri: capture.uri }}
+                    style={styles.capturedThumb}
+                  />
+                ))}
+              </View>
+            )}
+
             {/* Capture button */}
             <View style={styles.captureContainer}>
-              <TouchableOpacity onPress={takePicture} style={styles.captureButton}>
+              <Pressable 
+                onPress={takePicture} 
+                style={({ pressed }) => [
+                  styles.captureButton,
+                  pressed && styles.captureButtonPressed,
+                ]}
+              >
                 <View style={styles.captureButtonInner} />
-              </TouchableOpacity>
+              </Pressable>
             </View>
           </SafeAreaView>
         </CameraView>
@@ -282,43 +448,28 @@ export default function FaceScanScreen() {
     );
   }
 
-  const handleCancelSearch = () => {
-    Alert.alert(
-      'Cancel Search?',
-      'Are you sure you want to stop searching? You can always try again later.',
-      [
-        { text: 'Keep Searching', style: 'cancel' },
-        {
-          text: 'Yes, Cancel',
-          style: 'destructive',
-          onPress: () => {
-            setIsProcessing(false);
-            router.back();
-          },
-        },
-      ]
-    );
-  };
-
   // Processing screen
   if (step === 'processing') {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.processingContainer}>
-          {capturedImage && (
-            <Image source={{ uri: capturedImage }} style={styles.processingImage} />
+          {capturedPositions.length > 0 && capturedPositions[0].uri && (
+            <Image source={{ uri: capturedPositions[0].uri }} style={styles.processingImage} />
           )}
           <ActivityIndicator size="large" color={colors.accent} style={{ marginTop: spacing.lg }} />
           <Text style={styles.processingTitle}>Searching for your photos...</Text>
           <Text style={styles.processingText}>
-            This may take a few moments
+            Analyzing {capturedPositions.length > 0 ? `${capturedPositions.length} captures` : 'your photo'}
           </Text>
-          <TouchableOpacity
-            style={styles.cancelSearchButton}
+          <Pressable
+            style={({ pressed }) => [
+              styles.cancelSearchButton,
+              pressed && styles.pressed,
+            ]}
             onPress={handleCancelSearch}
           >
             <Text style={styles.cancelSearchText}>Cancel</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
       </SafeAreaView>
     );
@@ -329,9 +480,12 @@ export default function FaceScanScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <Pressable 
+            onPress={() => router.back()} 
+            style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
+          >
             <ArrowLeft size={24} color={colors.foreground} />
-          </TouchableOpacity>
+          </Pressable>
           <Text style={styles.headerTitle}>Face Scan</Text>
           <View style={{ width: 44 }} />
         </View>
@@ -357,9 +511,12 @@ export default function FaceScanScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <Pressable 
+          onPress={() => router.back()} 
+          style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
+        >
           <ArrowLeft size={24} color={colors.foreground} />
-        </TouchableOpacity>
+        </Pressable>
         <Text style={styles.headerTitle}>Your Photos</Text>
         <View style={{ width: 44 }} />
       </View>
@@ -369,16 +526,22 @@ export default function FaceScanScreen() {
           <Text style={styles.resultsCount}>
             Found {matchedPhotos.length} photo{matchedPhotos.length !== 1 ? 's' : ''}
           </Text>
-          <TouchableOpacity onPress={retryCapture}>
+          <Pressable 
+            onPress={retryCapture}
+            style={({ pressed }) => pressed && styles.pressed}
+          >
             <Text style={styles.scanAgain}>Scan Again</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
 
         <View style={styles.photoGrid}>
           {matchedPhotos.map((photo) => (
-            <TouchableOpacity
+            <Pressable
               key={photo.id}
-              style={styles.photoItem}
+              style={({ pressed }) => [
+                styles.photoItem,
+                pressed && styles.pressed,
+              ]}
               onPress={() => router.push(`/photo/${photo.id}`)}
             >
               <Image source={{ uri: photo.thumbnailUrl }} style={styles.photoImage} />
@@ -387,7 +550,7 @@ export default function FaceScanScreen() {
                   <Text style={styles.priceText}>${photo.price.toFixed(2)}</Text>
                 </View>
               )}
-            </TouchableOpacity>
+            </Pressable>
           ))}
         </View>
 
@@ -433,6 +596,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.muted,
   },
+  pressed: {
+    opacity: 0.7,
+    transform: [{ scale: 0.98 }],
+  },
   headerTitle: {
     fontSize: fontSize.lg,
     fontWeight: '600',
@@ -443,6 +610,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.xl,
+  },
+  iconContainer: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: colors.accent + '20',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    marginBottom: spacing.lg,
   },
   permissionTitle: {
     fontSize: fontSize.xl,
@@ -459,19 +636,9 @@ const styles = StyleSheet.create({
   consentContent: {
     padding: spacing.lg,
   },
-  iconContainer: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: colors.accent + '20',
-    alignItems: 'center',
-    justifyContent: 'center',
-    alignSelf: 'center',
-    marginBottom: spacing.lg,
-  },
   consentTitle: {
-    fontSize: fontSize['2xl'],
-    fontWeight: 'bold',
+    fontSize: 24,
+    fontWeight: '700',
     color: colors.foreground,
     textAlign: 'center',
   },
@@ -506,6 +673,7 @@ const styles = StyleSheet.create({
   cancelButton: {
     alignItems: 'center',
     marginTop: spacing.lg,
+    paddingVertical: spacing.sm,
   },
   cancelText: {
     fontSize: fontSize.base,
@@ -537,8 +705,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cameraTitle: {
-    fontSize: fontSize.lg,
+  positionProgress: {
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  positionProgressText: {
+    fontSize: 14,
     fontWeight: '600',
     color: '#fff',
   },
@@ -550,24 +724,78 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  positionIndicators: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: spacing.md,
+  },
+  positionDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  positionDotActive: {
+    backgroundColor: colors.accent,
+    width: 24,
+  },
+  positionDotCompleted: {
+    backgroundColor: '#10b981',
+  },
   faceGuideContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
   faceGuide: {
-    width: 250,
-    height: 320,
-    borderRadius: 125,
+    width: 220,
+    height: 280,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headOval: {
+    width: 200,
+    height: 260,
+    borderRadius: 100,
     borderWidth: 3,
     borderColor: colors.accent,
     borderStyle: 'dashed',
   },
-  faceGuideText: {
-    fontSize: fontSize.base,
-    color: '#fff',
+  instructionBadge: {
+    backgroundColor: colors.accent,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
     marginTop: spacing.md,
+  },
+  positionLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  faceGuideText: {
+    fontSize: 16,
+    color: '#fff',
+    marginTop: spacing.sm,
     textAlign: 'center',
+  },
+  capturedThumbnails: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    position: 'absolute',
+    bottom: 140,
+    left: 0,
+    right: 0,
+    paddingHorizontal: spacing.lg,
+  },
+  capturedThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#10b981',
   },
   captureContainer: {
     alignItems: 'center',
@@ -580,6 +808,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.3)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  captureButtonPressed: {
+    transform: [{ scale: 0.95 }],
   },
   captureButtonInner: {
     width: 64,
@@ -613,6 +844,8 @@ const styles = StyleSheet.create({
     marginTop: spacing.xl,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.lg,
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.destructive + '10',
   },
   cancelSearchText: {
     fontSize: fontSize.base,

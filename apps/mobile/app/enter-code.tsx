@@ -33,8 +33,8 @@ export default function EnterCodeScreen() {
   const inputRefs = useRef<(TextInput | null)[]>([]);
 
   const handleCodeChange = (value: string, index: number) => {
-    // Allow only alphanumeric
-    const sanitized = value.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    // Allow only digits
+    const sanitized = value.replace(/[^0-9]/g, '');
     
     if (sanitized.length > 1) {
       // Handle paste
@@ -136,7 +136,7 @@ export default function EnterCodeScreen() {
 
           <Text style={styles.title}>Enter Event Code</Text>
           <Text style={styles.subtitle}>
-            Enter the 6-character code from your event invitation
+            Enter the 6-digit code from your event invitation
           </Text>
 
           {/* Code Input */}
@@ -155,7 +155,7 @@ export default function EnterCodeScreen() {
                 onKeyPress={({ nativeEvent }) => handleKeyPress(nativeEvent.key, index)}
                 maxLength={CODE_LENGTH}
                 autoCapitalize="characters"
-                keyboardType="default"
+                keyboardType="number-pad"
                 textContentType="oneTimeCode"
                 autoFocus={index === 0}
               />
@@ -183,7 +183,7 @@ export default function EnterCodeScreen() {
 
           <TouchableOpacity
             style={styles.qrOption}
-            onPress={() => router.push('/scan')}
+            onPress={() => router.push('/qr-scanner')}
           >
             <Text style={styles.qrText}>Scan QR Code Instead</Text>
           </TouchableOpacity>

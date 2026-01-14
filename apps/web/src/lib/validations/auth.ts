@@ -23,6 +23,11 @@ export const registerSchema = z
       .string()
       .min(2, 'Display name must be at least 2 characters')
       .max(50, 'Display name must be less than 50 characters'),
+    username: z
+      .string()
+      .min(4, 'Username must be at least 4 characters')
+      .max(8, 'Username must be at most 8 characters')
+      .regex(/^[a-z][a-z0-9]*$/, 'Username must start with a letter and contain only letters/numbers'),
     userType: z.enum(['photographer', 'attendee'], {
       required_error: 'Please select an account type',
     }),
