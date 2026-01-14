@@ -335,23 +335,23 @@ CREATE TRIGGER trigger_generate_attendee_face_tag
 -- Migrate attendees with existing face_tags
 INSERT INTO username_registry (username, sequence_number, user_id, user_type, face_tag)
 SELECT 
-    LOWER(LEFT(REGEXP_REPLACE(REPLACE(face_tag, '@', ''), '[^a-zA-Z0-9]', '', 'g'), 8)) as username,
-    ROW_NUMBER() OVER (PARTITION BY LOWER(LEFT(REGEXP_REPLACE(REPLACE(face_tag, '@', ''), '[^a-zA-Z0-9]', '', 'g'), 8)) ORDER BY created_at) as sequence_number,
-    user_id,
+    LOWER(LEFT(REGEXP_REPLACE(REPLACE(a.face_tag, '@', ''), '[^a-zA-Z0-9]', '', 'g'), 8)) as username,
+    ROW_NUMBER() OVER (PARTITION BY LOWER(LEFT(REGEXP_REPLACE(REPLACE(a.face_tag, '@', ''), '[^a-zA-Z0-9]', '', 'g'), 8)) ORDER BY a.created_at) as sequence_number,
+    a.user_id,
     'attendee',
-    face_tag
-FROM attendees
-WHERE face_tag IS NOT NULL AND face_tag != ''
+    a.face_tag
+FROM attendees a
+WHERE a.face_tag IS NOT NULL AND a.face_tag != ''
 ON CONFLICT (face_tag) DO NOTHING;
 
 -- Migrate photographers with existing face_tags
 INSERT INTO username_registry (username, sequence_number, user_id, user_type, face_tag)
 SELECT 
-    LOWER(LEFT(REGEXP_REPLACE(REPLACE(face_tag, '@', ''), '[^a-zA-Z0-9]', '', 'g'), 8)) as username,
-    ROW_NUMBER() OVER (PARTITION BY LOWER(LEFT(REGEXP_REPLACE(REPLACE(face_tag, '@', ''), '[^a-zA-Z0-9]', '', 'g'), 8)) ORDER BY created_at) as sequence_number,
-    user_id,
+    LOWER(LEFT(REGEXP_REPLACE(REPLACE(p.face_tag, '@', ''), '[^a-zA-Z0-9]', '', 'g'), 8)) as username,
+    ROW_NUMBER() OVER (PARTITION BY LOWER(LEFT(REGEXP_REPLACE(REPLACE(p.face_tag, '@', ''), '[^a-zA-Z0-9]', '', 'g'), 8)) ORDER BY p.created_at) as sequence_number,
+    p.user_id,
     'photographer',
-    face_tag
-FROM photographers
-WHERE face_tag IS NOT NULL AND face_tag != ''
+    p.face_tag
+FROM photographers p
+WHERE p.face_tag IS NOT NULL AND p.face_tag != ''
 ON CONFLICT (face_tag) DO NOTHING;
