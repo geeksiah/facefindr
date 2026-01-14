@@ -44,19 +44,65 @@ This document outlines all the controls and features needed for the FaceFindr ad
 ```
 
 ### Fee Configuration
-- Platform fee percentage (default: 15%)
+- Platform fee percentage (varies by plan)
 - Instant payout fee percentage (default: 1%)
 - Provider-specific overrides
-
-### Limits
-- Max photos per event (default: 500)
-- Max events per free tier (default: 3)
-- Face recognition ops per event (default: 2000)
 
 ### Currencies
 - List of supported currencies
 - Default currency by country
 - Exchange rate source (if needed)
+
+---
+
+## 2.5 Subscription Plans Management
+
+### Plan Features (Editable per plan)
+
+| Feature | Free | Starter | Pro | Studio |
+|---------|------|---------|-----|--------|
+| Active Events | 3 | 10 | Unlimited | Unlimited |
+| Photos/Event | 100 | 500 | 2,000 | 5,000 |
+| Face Ops/Event | 500 | 2,000 | 10,000 | 50,000 |
+| Storage | 5GB | 25GB | 100GB | 500GB |
+| **Platform Fee** | **20%** | **15%** | **10%** | **8%** |
+| Custom Watermark | No | Yes | Yes | Yes |
+| Custom Branding | No | No | Yes | Yes |
+| Live Event Mode | No | No | Yes | Yes |
+| Advanced Analytics | No | Yes | Yes | Yes |
+| API Access | No | No | Yes | Yes |
+| Priority Support | No | Yes | Yes | Dedicated |
+| Team Members | 1 | 1 | 3 | 10 |
+| White Label | No | No | No | Yes |
+| **Print Commission** | **15%** | **20%** | **25%** | **30%** |
+| Price/Month | $0 | $9.99 | $29.99 | $79.99 |
+| Price/Year | $0 | $79.90 | $239.90 | $639.90 |
+
+### Revenue Strategy
+
+1. **Free Tier (20% fee)**
+   - Generous limits attract users
+   - Higher platform fee captures revenue from sales
+   - Users who sell more will upgrade to reduce fees
+
+2. **Paid Tiers (15%/10%/8% fee)**
+   - Lower fees incentivize upgrades
+   - Subscription revenue + reduced fees = win-win
+   - More features unlock at higher tiers
+
+3. **Print Products**
+   - Platform handles fulfillment (zero effort for photographer)
+   - Photographer earns commission on each sale
+   - Higher plans = higher commission (15% → 30%)
+   - Photographer can add markup for extra earnings
+
+### Admin Controls for Subscriptions
+- View all subscriptions
+- Cancel/refund subscription
+- Apply promotional discount
+- Extend trial period
+- Force plan upgrade/downgrade
+- View subscription revenue metrics
 
 ---
 
