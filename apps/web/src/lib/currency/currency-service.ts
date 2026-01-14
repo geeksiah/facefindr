@@ -41,32 +41,64 @@ let currencyCache: Map<string, Currency> | null = null;
 let currencyCacheTime = 0;
 const CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
+// Default currencies (fallback when database is empty)
+const DEFAULT_CURRENCIES: Currency[] = [
+  { code: 'USD', name: 'US Dollar', symbol: '$', symbolPosition: 'before', decimalPlaces: 2, countries: ['US'] },
+  { code: 'EUR', name: 'Euro', symbol: '€', symbolPosition: 'before', decimalPlaces: 2, countries: ['DE', 'FR', 'IT', 'ES', 'NL'] },
+  { code: 'GBP', name: 'British Pound', symbol: '£', symbolPosition: 'before', decimalPlaces: 2, countries: ['GB'] },
+  { code: 'GHS', name: 'Ghana Cedi', symbol: '₵', symbolPosition: 'before', decimalPlaces: 2, countries: ['GH'] },
+  { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', symbolPosition: 'before', decimalPlaces: 2, countries: ['NG'] },
+  { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', symbolPosition: 'before', decimalPlaces: 2, countries: ['KE'] },
+  { code: 'ZAR', name: 'South African Rand', symbol: 'R', symbolPosition: 'before', decimalPlaces: 2, countries: ['ZA'] },
+  { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$', symbolPosition: 'before', decimalPlaces: 2, countries: ['CA'] },
+  { code: 'AUD', name: 'Australian Dollar', symbol: 'A$', symbolPosition: 'before', decimalPlaces: 2, countries: ['AU'] },
+  { code: 'JPY', name: 'Japanese Yen', symbol: '¥', symbolPosition: 'before', decimalPlaces: 0, countries: ['JP'] },
+  { code: 'INR', name: 'Indian Rupee', symbol: '₹', symbolPosition: 'before', decimalPlaces: 2, countries: ['IN'] },
+  { code: 'UGX', name: 'Ugandan Shilling', symbol: 'USh', symbolPosition: 'before', decimalPlaces: 0, countries: ['UG'] },
+  { code: 'TZS', name: 'Tanzanian Shilling', symbol: 'TSh', symbolPosition: 'before', decimalPlaces: 0, countries: ['TZ'] },
+  { code: 'RWF', name: 'Rwandan Franc', symbol: 'FRw', symbolPosition: 'before', decimalPlaces: 0, countries: ['RW'] },
+  { code: 'XOF', name: 'West African CFA', symbol: 'CFA', symbolPosition: 'after', decimalPlaces: 0, countries: ['SN', 'CI', 'BF', 'ML'] },
+  { code: 'XAF', name: 'Central African CFA', symbol: 'FCFA', symbolPosition: 'after', decimalPlaces: 0, countries: ['CM', 'GA', 'CG'] },
+];
+
 export async function getSupportedCurrencies(): Promise<Map<string, Currency>> {
   const now = Date.now();
   
-  if (currencyCache && (now - currencyCacheTime) < CACHE_TTL) {
+  if (currencyCache && currencyCache.size > 0 && (now - currencyCacheTime) < CACHE_TTL) {
     return currencyCache;
   }
 
-  const supabase = createServiceClient();
-  const { data } = await supabase
-    .from('supported_currencies')
-    .select('*')
-    .eq('is_active', true)
-    .order('display_order');
-
   currencyCache = new Map();
-  
-  if (data) {
-    for (const row of data) {
-      currencyCache.set(row.code, {
-        code: row.code,
-        name: row.name,
-        symbol: row.symbol,
-        symbolPosition: row.symbol_position,
-        decimalPlaces: row.decimal_places,
-        countries: row.countries,
-      });
+
+  try {
+    const supabase = createServiceClient();
+    const { data, error } = await supabase
+      .from('supported_currencies')
+      .select('*')
+      .eq('is_active', true)
+      .order('display_order');
+
+    if (!error && data && data.length > 0) {
+      for (const row of data) {
+        currencyCache.set(row.code, {
+          code: row.code,
+          name: row.name,
+          symbol: row.symbol,
+          symbolPosition: row.symbol_position || 'before',
+          decimalPlaces: row.decimal_places || 2,
+          countries: row.countries || [],
+        });
+      }
+    } else {
+      // Use default currencies as fallback
+      for (const currency of DEFAULT_CURRENCIES) {
+        currencyCache.set(currency.code, currency);
+      }
+    }
+  } catch {
+    // Use default currencies on error
+    for (const currency of DEFAULT_CURRENCIES) {
+      currencyCache.set(currency.code, currency);
     }
   }
   

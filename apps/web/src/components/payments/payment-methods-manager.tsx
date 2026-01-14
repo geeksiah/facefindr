@@ -356,19 +356,74 @@ function AddPaymentMethodModal({ onClose, onAdd, initialType }: AddPaymentMethod
   const [providers, setProviders] = useState<MobileMoneyProvider[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<string>('');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [loadingProviders, setLoadingProviders] = useState(false);
+  const [selectedCountry, setSelectedCountry] = useState('GH');
 
-  // PayPal form state
-  const [paypalEmail, setPaypalEmail] = useState('');
+  // Country options for mobile money
+  const countryOptions = [
+    { code: 'GH', name: 'Ghana' },
+    { code: 'NG', name: 'Nigeria' },
+    { code: 'KE', name: 'Kenya' },
+    { code: 'UG', name: 'Uganda' },
+    { code: 'TZ', name: 'Tanzania' },
+    { code: 'ZA', name: 'South Africa' },
+    { code: 'RW', name: 'Rwanda' },
+    { code: 'ZM', name: 'Zambia' },
+    { code: 'CM', name: 'Cameroon' },
+    { code: 'SN', name: 'Senegal' },
+    { code: 'CI', name: 'Côte d\'Ivoire' },
+  ];
 
   // Fetch mobile money providers
   useEffect(() => {
     if (type === 'mobile_money') {
-      fetch('/api/payment-methods?type=providers&country=GH')
+      setLoadingProviders(true);
+      fetch(`/api/payment-methods?type=providers&country=${selectedCountry}`)
         .then(res => res.json())
-        .then(data => setProviders(data.providers || []))
-        .catch(console.error);
+        .then(data => {
+          const fetchedProviders = data.providers || [];
+          // If no providers from DB, use fallback
+          if (fetchedProviders.length === 0) {
+            setProviders(getFallbackProviders(selectedCountry));
+          } else {
+            setProviders(fetchedProviders);
+          }
+        })
+        .catch(() => {
+          setProviders(getFallbackProviders(selectedCountry));
+        })
+        .finally(() => setLoadingProviders(false));
     }
-  }, [type]);
+  }, [type, selectedCountry]);
+
+  // Fallback providers if database isn't set up yet
+  function getFallbackProviders(country: string): MobileMoneyProvider[] {
+    const fallbackMap: Record<string, MobileMoneyProvider[]> = {
+      GH: [
+        { providerCode: 'mtn_gh', providerName: 'MTN Mobile Money', countryCode: 'GH', supportsNameVerification: true },
+        { providerCode: 'vodafone_gh', providerName: 'Vodafone Cash', countryCode: 'GH', supportsNameVerification: true },
+        { providerCode: 'airteltigo_gh', providerName: 'AirtelTigo Money', countryCode: 'GH', supportsNameVerification: true },
+      ],
+      NG: [
+        { providerCode: 'opay_ng', providerName: 'OPay', countryCode: 'NG', supportsNameVerification: false },
+        { providerCode: 'palmpay_ng', providerName: 'PalmPay', countryCode: 'NG', supportsNameVerification: false },
+        { providerCode: 'paga_ng', providerName: 'Paga', countryCode: 'NG', supportsNameVerification: false },
+      ],
+      KE: [
+        { providerCode: 'mpesa_ke', providerName: 'M-Pesa', countryCode: 'KE', supportsNameVerification: true },
+        { providerCode: 'airtel_ke', providerName: 'Airtel Money', countryCode: 'KE', supportsNameVerification: false },
+      ],
+      UG: [
+        { providerCode: 'mtn_ug', providerName: 'MTN Mobile Money', countryCode: 'UG', supportsNameVerification: true },
+        { providerCode: 'airtel_ug', providerName: 'Airtel Money', countryCode: 'UG', supportsNameVerification: false },
+      ],
+      TZ: [
+        { providerCode: 'mpesa_tz', providerName: 'M-Pesa', countryCode: 'TZ', supportsNameVerification: true },
+        { providerCode: 'tigopesa_tz', providerName: 'Tigo Pesa', countryCode: 'TZ', supportsNameVerification: false },
+      ],
+    };
+    return fallbackMap[country] || [];
+  }
 
   const handleSelectType = (selectedType: 'card' | 'mobile_money' | 'paypal') => {
     setType(selectedType);
@@ -409,29 +464,9 @@ function AddPaymentMethodModal({ onClose, onAdd, initialType }: AddPaymentMethod
       }
 
       if (type === 'paypal') {
-        if (!paypalEmail) {
-          setError('Please enter your PayPal email');
-          return;
-        }
-
-        const response = await fetch('/api/payment-methods', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'paypal',
-            email: paypalEmail,
-            setAsDefault: true,
-          }),
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-          setError(data.error);
-          return;
-        }
-
-        onAdd(data.paymentMethod);
+        // Redirect to PayPal OAuth flow
+        window.location.href = '/api/payment-methods/connect-paypal';
+        return;
       }
 
       if (type === 'card') {
@@ -531,6 +566,31 @@ function AddPaymentMethodModal({ onClose, onAdd, initialType }: AddPaymentMethod
               {/* Mobile Money Form */}
               {type === 'mobile_money' && (
                 <div className="space-y-4">
+                  {/* Country Selection */}
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Country
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={selectedCountry}
+                        onChange={(e) => {
+                          setSelectedCountry(e.target.value);
+                          setSelectedProvider('');
+                        }}
+                        className="w-full appearance-none rounded-xl border border-border bg-background px-4 py-3 pr-10 text-foreground focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 transition-all duration-200"
+                      >
+                        {countryOptions.map((c) => (
+                          <option key={c.code} value={c.code}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-secondary pointer-events-none" />
+                    </div>
+                  </div>
+
+                  {/* Provider Selection */}
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">
                       Provider
@@ -539,19 +599,32 @@ function AddPaymentMethodModal({ onClose, onAdd, initialType }: AddPaymentMethod
                       <select
                         value={selectedProvider}
                         onChange={(e) => setSelectedProvider(e.target.value)}
-                        className="w-full appearance-none rounded-xl border border-border bg-background px-4 py-3 pr-10 text-foreground focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 transition-all duration-200"
+                        disabled={loadingProviders}
+                        className="w-full appearance-none rounded-xl border border-border bg-background px-4 py-3 pr-10 text-foreground focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 transition-all duration-200 disabled:opacity-50"
                       >
-                        <option value="">Select provider</option>
+                        <option value="">
+                          {loadingProviders ? 'Loading...' : 'Select provider'}
+                        </option>
                         {providers.map((p) => (
                           <option key={p.providerCode} value={p.providerCode}>
                             {p.providerName}
                           </option>
                         ))}
                       </select>
-                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-secondary pointer-events-none" />
+                      {loadingProviders ? (
+                        <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-secondary pointer-events-none animate-spin" />
+                      ) : (
+                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-secondary pointer-events-none" />
+                      )}
                     </div>
+                    {providers.length === 0 && !loadingProviders && (
+                      <p className="text-sm text-secondary mt-2">
+                        No providers available for this country yet.
+                      </p>
+                    )}
                   </div>
 
+                  {/* Phone Number */}
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">
                       Phone Number
@@ -569,17 +642,18 @@ function AddPaymentMethodModal({ onClose, onAdd, initialType }: AddPaymentMethod
 
               {/* PayPal Form */}
               {type === 'paypal' && (
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">
-                    PayPal Email
-                  </label>
-                  <input
-                    type="email"
-                    value={paypalEmail}
-                    onChange={(e) => setPaypalEmail(e.target.value)}
-                    placeholder="your@email.com"
-                    className="w-full rounded-xl border border-border bg-background px-4 py-3 text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 transition-all duration-200"
-                  />
+                <div className="text-center py-4">
+                  <div className="flex h-16 w-16 mx-auto items-center justify-center rounded-2xl bg-blue-600/10 text-blue-600 mb-4">
+                    <svg className="h-8 w-8" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M7.076 21.337H2.47a.641.641 0 0 1-.633-.74L4.944.901C5.026.382 5.474 0 5.998 0h7.46c2.57 0 4.578.543 5.69 1.81 1.01 1.15 1.304 2.42 1.012 4.287-.023.143-.047.288-.077.437-.983 5.05-4.349 6.797-8.647 6.797h-2.19c-.524 0-.968.382-1.05.9l-1.12 7.106z"/>
+                    </svg>
+                  </div>
+                  <p className="text-secondary mb-2">
+                    Connect your PayPal account securely.
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    You will be redirected to PayPal to authorize.
+                  </p>
                 </div>
               )}
 

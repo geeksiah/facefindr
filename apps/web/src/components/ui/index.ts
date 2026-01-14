@@ -7,3 +7,4 @@ export { Switch } from './switch';
 export { ToastProvider, useToast, ConfirmDialog, useConfirm } from './toast';
 export { OfflineDetector } from './offline-detector';
 export { CurrencySwitcher } from './currency-switcher';
+export { RouteProgress } from './route-progress';

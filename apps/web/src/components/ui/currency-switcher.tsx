@@ -89,10 +89,19 @@ export function CurrencySwitcher({ className, variant = 'default' }: CurrencySwi
     setIsOpen(false);
   };
 
+  // Get current currency with proper symbol fallback
+  const getCurrencySymbol = (code: string): string => {
+    const symbols: Record<string, string> = {
+      USD: '$', EUR: '€', GBP: '£', GHS: '₵', NGN: '₦',
+      KES: 'KSh', ZAR: 'R', CAD: 'C$', AUD: 'A$', JPY: '¥',
+    };
+    return symbols[code] || code;
+  };
+
   const currentCurrency = currencies.find(c => c.code === currencyCode) || {
     code: currencyCode,
     name: currencyCode,
-    symbol: currencyCode,
+    symbol: getCurrencySymbol(currencyCode),
   };
 
   if (variant === 'compact') {
