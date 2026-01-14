@@ -54,17 +54,12 @@ export async function GET(request: NextRequest) {
     }
 
     // Save to database
-    await supabase.from('user_payment_methods').insert({
+    await supabase.from('payment_methods').insert({
       user_id: user.id,
       method_type: 'paypal',
       display_name: `PayPal (${userInfo.email})`,
-      provider_account_id: userInfo.user_id,
-      provider_email: userInfo.email,
-      provider_data: {
-        email: userInfo.email,
-        name: userInfo.name,
-        payer_id: userInfo.payer_id,
-      },
+      paypal_email: userInfo.email,
+      paypal_payer_id: userInfo.payer_id,
       is_default: false,
       status: 'verified',
     });

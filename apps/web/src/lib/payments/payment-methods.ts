@@ -298,7 +298,7 @@ export async function addMobileMoney(
 
     // Check if already exists
     const { data: existing } = await supabase
-      .from('user_payment_methods')
+      .from('payment_methods')
       .select('id')
       .eq('user_id', userId)
       .eq('mobile_money_provider', params.providerCode)
@@ -331,14 +331,14 @@ export async function addMobileMoney(
     // If setting as default, clear other defaults first
     if (params.setAsDefault) {
       await supabase
-        .from('user_payment_methods')
+        .from('payment_methods')
         .update({ is_default: false })
         .eq('user_id', userId);
     }
 
     // Insert payment method
     const { data, error } = await supabase
-      .from('user_payment_methods')
+      .from('payment_methods')
       .insert({
         user_id: userId,
         method_type: 'mobile_money',
