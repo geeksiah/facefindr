@@ -205,6 +205,39 @@ export async function addCard(userId: string, params: AddCardParams): Promise<Pa
 }
 
 // ============================================
+// FALLBACK MOBILE MONEY PROVIDERS
+// ============================================
+
+interface FallbackProvider {
+  provider_code: string;
+  provider_name: string;
+  country_code: string;
+  number_length: number;
+  number_prefix: string;
+  supports_name_verification: boolean;
+}
+
+const FALLBACK_PROVIDERS: FallbackProvider[] = [
+  // Ghana
+  { provider_code: 'mtn_gh', provider_name: 'MTN Mobile Money', country_code: 'GH', number_length: 10, number_prefix: '024,054,055,059', supports_name_verification: true },
+  { provider_code: 'vodafone_gh', provider_name: 'Vodafone Cash', country_code: 'GH', number_length: 10, number_prefix: '020,050', supports_name_verification: true },
+  { provider_code: 'airteltigo_gh', provider_name: 'AirtelTigo Money', country_code: 'GH', number_length: 10, number_prefix: '027,026,057,056', supports_name_verification: true },
+  // Nigeria
+  { provider_code: 'opay_ng', provider_name: 'OPay', country_code: 'NG', number_length: 11, number_prefix: '', supports_name_verification: false },
+  { provider_code: 'palmpay_ng', provider_name: 'PalmPay', country_code: 'NG', number_length: 11, number_prefix: '', supports_name_verification: false },
+  // Kenya
+  { provider_code: 'mpesa_ke', provider_name: 'M-Pesa', country_code: 'KE', number_length: 10, number_prefix: '07,01', supports_name_verification: true },
+  // Uganda
+  { provider_code: 'mtn_ug', provider_name: 'MTN Mobile Money', country_code: 'UG', number_length: 10, number_prefix: '077,078', supports_name_verification: true },
+  // Tanzania
+  { provider_code: 'mpesa_tz', provider_name: 'M-Pesa', country_code: 'TZ', number_length: 10, number_prefix: '067,065', supports_name_verification: true },
+];
+
+function getFallbackProvider(providerCode: string): FallbackProvider | null {
+  return FALLBACK_PROVIDERS.find(p => p.provider_code === providerCode) || null;
+}
+
+// ============================================
 // ADD MOBILE MONEY
 // ============================================
 
@@ -215,13 +248,29 @@ export async function addMobileMoney(
   const supabase = createServiceClient();
 
   try {
-    // Get provider info
-    const { data: provider } = await supabase
+    // Get provider info from database first, then fallback
+    let provider: FallbackProvider | null = null;
+    
+    const { data: dbProvider } = await supabase
       .from('mobile_money_providers')
       .select('*')
       .eq('provider_code', params.providerCode)
       .eq('is_active', true)
       .single();
+
+    if (dbProvider) {
+      provider = {
+        provider_code: dbProvider.provider_code,
+        provider_name: dbProvider.provider_name,
+        country_code: dbProvider.country_code,
+        number_length: dbProvider.number_length || 10,
+        number_prefix: dbProvider.number_prefix || '',
+        supports_name_verification: dbProvider.supports_name_verification || false,
+      };
+    } else {
+      // Use fallback providers
+      provider = getFallbackProvider(params.providerCode);
+    }
 
     if (!provider) {
       return { success: false, error: 'Invalid mobile money provider' };
@@ -229,20 +278,27 @@ export async function addMobileMoney(
 
     // Validate phone number format
     const cleanNumber = params.phoneNumber.replace(/\D/g, '');
-    if (cleanNumber.length !== provider.number_length) {
-      return { success: false, error: `Phone number must be ${provider.number_length} digits` };
+    
+    // Allow some flexibility in number length (9-12 digits)
+    if (cleanNumber.length < 9 || cleanNumber.length > 12) {
+      return { success: false, error: 'Phone number must be 9-12 digits' };
     }
 
-    // Check prefix
-    const prefixes = provider.number_prefix.split(',');
-    const hasValidPrefix = prefixes.some((prefix: string) => cleanNumber.startsWith(prefix));
-    if (prefixes.length > 0 && prefixes[0] !== '' && !hasValidPrefix) {
-      return { success: false, error: 'Invalid phone number for this provider' };
+    // Check prefix (optional validation)
+    if (provider.number_prefix) {
+      const prefixes = provider.number_prefix.split(',').filter(p => p.trim());
+      if (prefixes.length > 0) {
+        const hasValidPrefix = prefixes.some((prefix: string) => cleanNumber.startsWith(prefix.trim()));
+        if (!hasValidPrefix) {
+          // Warn but don't block - prefixes may not be exhaustive
+          console.warn(`Phone ${cleanNumber} doesn't match expected prefixes for ${provider.provider_code}`);
+        }
+      }
     }
 
     // Check if already exists
     const { data: existing } = await supabase
-      .from('payment_methods')
+      .from('user_payment_methods')
       .select('id')
       .eq('user_id', userId)
       .eq('mobile_money_provider', params.providerCode)
@@ -254,12 +310,12 @@ export async function addMobileMoney(
       return { success: true, paymentMethod: pm || undefined };
     }
 
-    // Verify with provider if supported
+    // Verify with provider API and get account name
     let accountName: string | undefined;
     let verified = false;
 
     if (provider.supports_name_verification) {
-      const verifyResult = await verifyMobileMoneyAccount(cleanNumber, params.providerCode);
+      const verifyResult = await verifyMobileMoneyAccount(cleanNumber, params.providerCode, provider.country_code);
       if (verifyResult.success) {
         accountName = verifyResult.accountName;
         verified = true;
@@ -268,19 +324,21 @@ export async function addMobileMoney(
 
     // Mask number for display
     const maskedNumber = cleanNumber.slice(0, 3) + '***' + cleanNumber.slice(-3);
-    const displayName = `${provider.provider_name} ${maskedNumber}`;
+    const displayName = accountName 
+      ? `${provider.provider_name} - ${accountName}`
+      : `${provider.provider_name} ${maskedNumber}`;
 
     // If setting as default, clear other defaults first
     if (params.setAsDefault) {
       await supabase
-        .from('payment_methods')
+        .from('user_payment_methods')
         .update({ is_default: false })
         .eq('user_id', userId);
     }
 
     // Insert payment method
     const { data, error } = await supabase
-      .from('payment_methods')
+      .from('user_payment_methods')
       .insert({
         user_id: userId,
         method_type: 'mobile_money',
@@ -306,33 +364,97 @@ export async function addMobileMoney(
     };
   } catch (error) {
     console.error('Add mobile money error:', error);
-    return { success: false, error: 'Failed to add mobile money' };
+    return { success: false, error: 'Failed to add mobile money. Please try again.' };
   }
 }
 
 // ============================================
-// VERIFY MOBILE MONEY ACCOUNT
+// VERIFY MOBILE MONEY ACCOUNT (Flutterwave API)
 // ============================================
 
-async function verifyMobileMoneyAccount(
+export async function verifyMobileMoneyAccount(
+  phoneNumber: string,
+  providerCode: string,
+  countryCode: string = 'GH'
+): Promise<{ success: boolean; accountName?: string; error?: string }> {
+  const flutterwaveSecretKey = process.env.FLUTTERWAVE_SECRET_KEY;
+  
+  if (!flutterwaveSecretKey) {
+    console.warn('Flutterwave not configured for mobile money verification');
+    return { success: false, error: 'Verification not available' };
+  }
+
+  try {
+    // Map provider to Flutterwave network code
+    const networkMapping: Record<string, { network: string; country: string }> = {
+      'mtn_gh': { network: 'MTN', country: 'GH' },
+      'vodafone_gh': { network: 'VODAFONE', country: 'GH' },
+      'airteltigo_gh': { network: 'TIGO', country: 'GH' },
+      'mtn_ug': { network: 'MTN', country: 'UG' },
+      'airtel_ug': { network: 'AIRTEL', country: 'UG' },
+      'mpesa_ke': { network: 'MPESA', country: 'KE' },
+      'airtel_ke': { network: 'AIRTEL', country: 'KE' },
+      'mtn_rw': { network: 'MTN', country: 'RW' },
+      'mpesa_tz': { network: 'VODACOM', country: 'TZ' },
+      'mtn_zm': { network: 'MTN', country: 'ZM' },
+    };
+
+    const mapping = networkMapping[providerCode];
+    if (!mapping) {
+      return { success: false, error: 'Provider verification not supported' };
+    }
+
+    // Use Flutterwave's BVN/Account verification endpoint
+    // For mobile money, they use the transfer validation endpoint
+    const response = await fetch('https://api.flutterwave.com/v3/accounts/resolve', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${flutterwaveSecretKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        account_number: phoneNumber,
+        account_bank: mapping.network,
+        country: mapping.country,
+        type: 'mobilemoney',
+      }),
+    });
+
+    const data = await response.json();
+
+    if (data.status === 'success' && data.data?.account_name) {
+      return {
+        success: true,
+        accountName: data.data.account_name,
+      };
+    }
+
+    // If Flutterwave doesn't support this, try Paystack (for Nigeria/Ghana banks)
+    return await verifyWithPaystack(phoneNumber, providerCode);
+
+  } catch (error) {
+    console.error('Mobile money verification error:', error);
+    return { success: false, error: 'Verification failed' };
+  }
+}
+
+// Fallback to Paystack for account resolution
+async function verifyWithPaystack(
   phoneNumber: string,
   providerCode: string
 ): Promise<{ success: boolean; accountName?: string }> {
-  // Use Paystack's resolve account API
   const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
   
   if (!paystackSecretKey) {
-    console.warn('Paystack not configured for mobile money verification');
     return { success: false };
   }
 
   try {
-    // Map provider to Paystack bank code
+    // Paystack bank codes for mobile money
     const bankCodes: Record<string, string> = {
-      'mtn_momo_gh': 'MTN',
-      'vodafone_cash_gh': 'VOD',
-      'airteltigo_money_gh': 'ATL',
-      'mtn_momo_ng': 'MTN',
+      'mtn_gh': 'MTN',
+      'vodafone_gh': 'VOD',
+      'airteltigo_gh': 'ATL',
     };
 
     const bankCode = bankCodes[providerCode];

@@ -358,6 +358,9 @@ function AddPaymentMethodModal({ onClose, onAdd, initialType }: AddPaymentMethod
   const [phoneNumber, setPhoneNumber] = useState('');
   const [loadingProviders, setLoadingProviders] = useState(false);
   const [selectedCountry, setSelectedCountry] = useState('GH');
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verifiedName, setVerifiedName] = useState<string | null>(null);
+  const [verificationError, setVerificationError] = useState<string | null>(null);
 
   // Country options for mobile money
   const countryOptions = [
@@ -429,6 +432,46 @@ function AddPaymentMethodModal({ onClose, onAdd, initialType }: AddPaymentMethod
     setType(selectedType);
     setStep('form');
     setError(null);
+    setVerifiedName(null);
+    setVerificationError(null);
+  };
+
+  // Verify mobile money account
+  const handleVerifyAccount = async () => {
+    if (!selectedProvider || !phoneNumber) {
+      setVerificationError('Please select a provider and enter phone number');
+      return;
+    }
+
+    setIsVerifying(true);
+    setVerificationError(null);
+    setVerifiedName(null);
+
+    try {
+      const response = await fetch('/api/payment-methods/verify-momo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phoneNumber,
+          providerCode: selectedProvider,
+          countryCode: selectedCountry,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success && data.verified && data.accountName) {
+        setVerifiedName(data.accountName);
+      } else if (data.success && !data.verified) {
+        setVerificationError('Account verification not available for this provider. You can still add the account.');
+      } else {
+        setVerificationError(data.error || 'Could not verify account');
+      }
+    } catch {
+      setVerificationError('Verification failed. Please try again.');
+    } finally {
+      setIsVerifying(false);
+    }
   };
 
   const handleSubmit = async () => {
@@ -449,6 +492,7 @@ function AddPaymentMethodModal({ onClose, onAdd, initialType }: AddPaymentMethod
             type: 'mobile_money',
             providerCode: selectedProvider,
             phoneNumber,
+            accountName: verifiedName, // Include verified name
             setAsDefault: true,
           }),
         });
@@ -624,19 +668,62 @@ function AddPaymentMethodModal({ onClose, onAdd, initialType }: AddPaymentMethod
                     )}
                   </div>
 
-                  {/* Phone Number */}
+                  {/* Phone Number with Verify Button */}
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">
                       Phone Number
                     </label>
-                    <input
-                      type="tel"
-                      value={phoneNumber}
-                      onChange={(e) => setPhoneNumber(e.target.value)}
-                      placeholder="024 XXX XXXX"
-                      className="w-full rounded-xl border border-border bg-background px-4 py-3 text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 transition-all duration-200"
-                    />
+                    <div className="flex gap-2">
+                      <input
+                        type="tel"
+                        value={phoneNumber}
+                        onChange={(e) => {
+                          setPhoneNumber(e.target.value);
+                          setVerifiedName(null);
+                          setVerificationError(null);
+                        }}
+                        placeholder="0XX XXX XXXX"
+                        className="flex-1 rounded-xl border border-border bg-background px-4 py-3 text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 transition-all duration-200"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleVerifyAccount}
+                        disabled={isVerifying || !selectedProvider || !phoneNumber || phoneNumber.length < 9}
+                        className="px-4 py-3 rounded-xl bg-accent/10 text-accent font-medium hover:bg-accent/20 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                      >
+                        {isVerifying ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Check className="h-4 w-4" />
+                        )}
+                        Verify
+                      </button>
+                    </div>
+                    <p className="text-xs text-secondary mt-1.5">
+                      Click Verify to confirm account holder name
+                    </p>
                   </div>
+
+                  {/* Verified Name Display */}
+                  {verifiedName && (
+                    <div className="flex items-center gap-3 p-4 rounded-xl bg-success/10 border border-success/20 animate-in slide-in-from-top-2 duration-200">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-success/20">
+                        <Check className="h-5 w-5 text-success" />
+                      </div>
+                      <div>
+                        <p className="text-sm text-secondary">Account Holder</p>
+                        <p className="font-semibold text-foreground">{verifiedName}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Verification Error/Warning */}
+                  {verificationError && !verifiedName && (
+                    <div className="flex items-start gap-2 p-3 rounded-xl bg-warning/10 border border-warning/20 text-sm animate-in slide-in-from-top-2 duration-200">
+                      <AlertCircle className="h-4 w-4 text-warning flex-shrink-0 mt-0.5" />
+                      <span className="text-foreground">{verificationError}</span>
+                    </div>
+                  )}
                 </div>
               )}
 
