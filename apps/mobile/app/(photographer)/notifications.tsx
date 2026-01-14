@@ -90,9 +90,43 @@ export default function NotificationsScreen() {
     }
   };
 
+  // Initial fetch and realtime subscription
   useEffect(() => {
     loadNotifications();
-  }, []);
+
+    // Subscribe to realtime updates
+    if (!profile?.id) return;
+    
+    const channel = supabase
+      .channel(`photographer-notifications:${profile.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${profile.id}`,
+        },
+        (payload) => {
+          // Add new notification at the top
+          const newNotification: Notification = {
+            id: payload.new.id,
+            type: payload.new.type || 'system',
+            title: payload.new.title || '',
+            message: payload.new.message || '',
+            isRead: payload.new.is_read || false,
+            createdAt: payload.new.created_at,
+            data: payload.new.data,
+          };
+          setNotifications((prev) => [newNotification, ...prev]);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [profile?.id]);
 
   const handleRefresh = () => {
     setIsRefreshing(true);

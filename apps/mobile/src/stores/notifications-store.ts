@@ -1,11 +1,12 @@
 /**
  * Notifications Store
  * 
- * Manages notification state and unread counts.
+ * Manages notification state and unread counts with realtime support.
  */
 
 import { create } from 'zustand';
 import { supabase } from '@/lib/supabase';
+import { RealtimeChannel } from '@supabase/supabase-js';
 
 export interface Notification {
   id: string;
@@ -21,6 +22,7 @@ interface NotificationsState {
   notifications: Notification[];
   unreadCount: number;
   isLoading: boolean;
+  realtimeChannel: RealtimeChannel | null;
   
   // Actions
   fetchNotifications: (userId: string) => Promise<void>;
@@ -28,12 +30,15 @@ interface NotificationsState {
   markAllAsRead: (userId: string) => Promise<void>;
   clearNotifications: () => void;
   addNotification: (notification: Notification) => void;
+  subscribeToRealtime: (userId: string) => void;
+  unsubscribeFromRealtime: () => void;
 }
 
 export const useNotificationsStore = create<NotificationsState>((set, get) => ({
   notifications: [],
   unreadCount: 0,
   isLoading: false,
+  realtimeChannel: null,
 
   fetchNotifications: async (userId: string) => {
     set({ isLoading: true });
@@ -118,5 +123,47 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
     const updated = [notification, ...notifications];
     const unreadCount = updated.filter(n => !n.read).length;
     set({ notifications: updated, unreadCount });
+  },
+
+  subscribeToRealtime: (userId: string) => {
+    const { realtimeChannel, addNotification } = get();
+    
+    // Don't subscribe twice
+    if (realtimeChannel) return;
+
+    const channel = supabase
+      .channel(`notifications:${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          const newNotification: Notification = {
+            id: payload.new.id,
+            type: payload.new.type || 'system',
+            title: payload.new.title || payload.new.subject || '',
+            message: payload.new.message || payload.new.body || '',
+            data: payload.new.data || payload.new.metadata,
+            read: payload.new.read || !payload.new.read_at,
+            createdAt: payload.new.created_at,
+          };
+          addNotification(newNotification);
+        }
+      )
+      .subscribe();
+
+    set({ realtimeChannel: channel });
+  },
+
+  unsubscribeFromRealtime: () => {
+    const { realtimeChannel } = get();
+    if (realtimeChannel) {
+      supabase.removeChannel(realtimeChannel);
+      set({ realtimeChannel: null });
+    }
   },
 }));

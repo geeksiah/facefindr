@@ -143,8 +143,22 @@ export default async function DashboardPage() {
     return null;
   }
 
+  // Get user's event IDs first
+  const { data: userEvents } = await supabase
+    .from('events')
+    .select('id')
+    .eq('photographer_id', user.id);
+  
+  const eventIds = userEvents?.map((e) => e.id) || [];
+
+  // Calculate date ranges for month comparison
+  const now = new Date();
+  const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+
   // Fetch dashboard stats
-  const [eventsResult, photosResult, transactionsResult] = await Promise.all([
+  const [eventsResult, photosResult, transactionsResult, lastMonthTransactions] = await Promise.all([
     supabase
       .from('events')
       .select('id, name, event_date, status, media(id)', { count: 'exact' })
@@ -154,22 +168,19 @@ export default async function DashboardPage() {
     supabase
       .from('media')
       .select('id', { count: 'exact' })
-      .in(
-        'event_id',
-        (await supabase.from('events').select('id').eq('photographer_id', user.id)).data?.map(
-          (e) => e.id
-        ) || []
-      ),
+      .in('event_id', eventIds.length > 0 ? eventIds : ['00000000-0000-0000-0000-000000000000']),
     supabase
       .from('transactions')
-      .select('gross_amount, net_amount')
+      .select('gross_amount, net_amount, created_at')
       .eq('status', 'succeeded')
-      .in(
-        'event_id',
-        (await supabase.from('events').select('id').eq('photographer_id', user.id)).data?.map(
-          (e) => e.id
-        ) || []
-      ),
+      .in('event_id', eventIds.length > 0 ? eventIds : ['00000000-0000-0000-0000-000000000000']),
+    supabase
+      .from('transactions')
+      .select('net_amount')
+      .eq('status', 'succeeded')
+      .in('event_id', eventIds.length > 0 ? eventIds : ['00000000-0000-0000-0000-000000000000'])
+      .gte('created_at', lastMonthStart.toISOString())
+      .lt('created_at', lastMonthEnd.toISOString()),
   ]);
 
   // Calculate stats
@@ -178,6 +189,28 @@ export default async function DashboardPage() {
   const totalPhotos = photosResult.count || 0;
   const totalRevenue =
     transactionsResult.data?.reduce((sum, t) => sum + (t.net_amount || 0), 0) || 0;
+
+  // Calculate this month's revenue
+  const thisMonthRevenue = transactionsResult.data
+    ?.filter((t) => new Date(t.created_at) >= thisMonthStart)
+    .reduce((sum, t) => sum + (t.net_amount || 0), 0) || 0;
+
+  // Calculate last month's revenue
+  const lastMonthRevenue = lastMonthTransactions.data
+    ?.reduce((sum, t) => sum + (t.net_amount || 0), 0) || 0;
+
+  // Calculate percentage change
+  let revenueChange: string | undefined;
+  let changeType: 'positive' | 'negative' | 'neutral' | undefined;
+  
+  if (lastMonthRevenue > 0) {
+    const changePercent = ((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100;
+    revenueChange = `${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(1)}%`;
+    changeType = changePercent >= 0 ? 'positive' : 'negative';
+  } else if (thisMonthRevenue > 0) {
+    revenueChange = 'New';
+    changeType = 'positive';
+  }
 
   // Format recent events
   const recentEvents: RecentEvent[] =
@@ -225,8 +258,8 @@ export default async function DashboardPage() {
         <StatCard
           title="Total Revenue"
           value={`$${(totalRevenue / 100).toFixed(2)}`}
-          change="+12%"
-          changeType="positive"
+          change={revenueChange}
+          changeType={changeType}
           icon={DollarSign}
         />
       </div>

@@ -10,9 +10,12 @@
   "scripts": {
     "dev": "turbo run dev",
     "dev:web": "turbo run dev --filter=@facefind/web",
-    "dev:mobile": "turbo run dev --filter=@facefind/mobile",
+    "dev:admin": "turbo run dev --filter=@facefind/admin",
+    "dev:mobile": "cd apps/mobile && npx expo start",
+    "dev:all": "turbo run dev --filter=@facefind/web --filter=@facefind/admin",
     "build": "turbo run build",
     "build:web": "turbo run build --filter=@facefind/web",
+    "build:admin": "turbo run build --filter=@facefind/admin",
     "lint": "turbo run lint",
     "lint:fix": "turbo run lint:fix",
     "type-check": "turbo run type-check",
