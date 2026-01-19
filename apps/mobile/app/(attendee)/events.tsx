@@ -26,7 +26,7 @@ import {
   MapPin,
   Image as ImageIcon,
   Camera,
-  Sparkles,
+  Gift,
   Clock,
   X,
   Filter,
@@ -36,6 +36,8 @@ import { Button } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { useRealtimeSubscription } from '@/hooks/use-realtime';
+import { getCoverImageUrl } from '@/lib/storage-urls';
 
 const { width } = Dimensions.get('window');
 const FEATURED_CARD_WIDTH = width - spacing.lg * 2;
@@ -64,7 +66,8 @@ export default function MyEventsScreen() {
 
   const loadEvents = async () => {
     try {
-      const { data, error } = await supabase
+      // Load events user has joined
+      const { data: joinedEvents, error: joinedError } = await supabase
         .from('event_attendees')
         .select(`
           event:event_id (
@@ -78,17 +81,73 @@ export default function MyEventsScreen() {
         .eq('attendee_id', profile?.id)
         .order('created_at', { ascending: false });
 
-      if (!error && data) {
-        setEvents(
-          data.map((item: any) => ({
-            id: item.event?.id,
-            name: item.event?.name,
-            coverImageUrl: item.event?.cover_image_url,
-            eventDate: item.event?.event_date,
-            location: item.event?.location,
-            photoCount: 0,
-          }))
-        );
+      // Load publicly listed events
+      const { data: publicEvents, error: publicError } = await supabase
+        .from('events')
+        .select('id, name, cover_image_url, event_date, location')
+        .eq('is_publicly_listed', true)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      const joinedEventsList = (joinedEvents || []).map((item: any) => ({
+        id: item.event?.id,
+        name: item.event?.name,
+        coverImageUrl: item.event?.cover_image_url
+          ? getCoverImageUrl(item.event.cover_image_url)
+          : null,
+        eventDate: item.event?.event_date,
+        location: item.event?.location,
+        photoCount: 0,
+      }));
+
+      const publicEventsList = (publicEvents || []).map((item: any) => ({
+        id: item.id,
+        name: item.name,
+        coverImageUrl: item.cover_image_url
+          ? getCoverImageUrl(item.cover_image_url)
+          : null,
+        eventDate: item.event_date,
+        location: item.location,
+        photoCount: 0,
+      }));
+
+      // Combine and deduplicate by event ID
+      const allEventsMap = new Map<string, Event>();
+      [...joinedEventsList, ...publicEventsList].forEach(event => {
+        if (event.id && !allEventsMap.has(event.id)) {
+          allEventsMap.set(event.id, event);
+        }
+      });
+
+      const mergedEvents = Array.from(allEventsMap.values());
+      mergedEvents.forEach((event) => {
+        if (event.coverImageUrl) {
+          Image.prefetch(event.coverImageUrl);
+        }
+      });
+      const eventsWithCounts = await Promise.all(
+        mergedEvents.map(async (event) => {
+          if (!event.id) return event;
+          const { count } = await supabase
+            .from('photo_drop_matches')
+            .select('id', { count: 'exact', head: true })
+            .eq('event_id', event.id)
+            .eq('attendee_id', profile?.id);
+          return {
+            ...event,
+            photoCount: count || 0,
+          };
+        })
+      );
+
+      setEvents(eventsWithCounts);
+
+      if (joinedError) {
+        console.error('Error loading joined events:', joinedError);
+      }
+      if (publicError) {
+        console.error('Error loading public events:', publicError);
       }
     } catch (err) {
       console.error('Error loading events:', err);
@@ -101,6 +160,22 @@ export default function MyEventsScreen() {
   useEffect(() => {
     loadEvents();
   }, []);
+
+  // Subscribe to real-time updates for events
+  useRealtimeSubscription({
+    table: 'events',
+    onChange: () => {
+      loadEvents();
+    },
+  });
+
+  useRealtimeSubscription({
+    table: 'photo_drop_matches',
+    filter: profile?.id ? `attendee_id=eq.${profile.id}` : undefined,
+    onChange: () => {
+      loadEvents();
+    },
+  });
 
   const handleRefresh = () => {
     setIsRefreshing(true);
@@ -174,7 +249,7 @@ export default function MyEventsScreen() {
       {featuredEvent && (
         <View style={styles.featuredSection}>
           <View style={styles.sectionHeader}>
-            <Sparkles size={16} color={colors.accent} />
+            <Gift size={16} color={colors.accent} />
             <Text style={styles.sectionTitle}>Most Recent</Text>
           </View>
           <TouchableOpacity

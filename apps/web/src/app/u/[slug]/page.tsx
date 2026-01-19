@@ -1,9 +1,5 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useParams } from 'next/navigation';
-import Image from 'next/image';
-import Link from 'next/link';
 import {
   User,
   Share2,
@@ -13,9 +9,14 @@ import {
   X,
   Download,
 } from 'lucide-react';
+import Image from 'next/image';
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
+import { useState, useEffect, useRef } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Logo } from '@/components/ui/logo';
+import { QRCodeWithLogo, downloadQRCodeWithLogo } from '@/components/ui/qr-code-with-logo';
 
 interface AttendeeProfile {
   id: string;
@@ -35,7 +36,8 @@ export default function AttendeeProfilePage() {
   const [error, setError] = useState<string | null>(null);
   const [showQRCode, setShowQRCode] = useState(false);
   const [copied, setCopied] = useState(false);
-
+  const qrCodeValue = typeof window !== 'undefined' ? `${window.location.href}?app=1` : '';
+  const qrCodeRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     loadProfile();
   }, [slug]);
@@ -85,8 +87,6 @@ export default function AttendeeProfilePage() {
       </div>
     );
   }
-
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(window.location.href + '?app=1')}&size=512x512&margin=2`;
 
   return (
     <div className="min-h-screen bg-background">
@@ -158,7 +158,21 @@ export default function AttendeeProfilePage() {
       {/* QR Code Modal */}
       {showQRCode && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          className="fixed z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100vw',
+            width: '100dvw',
+            height: '100vh',
+            height: '100dvh',
+            margin: 0,
+            padding: 0,
+          }}
           onClick={() => setShowQRCode(false)}
         >
           <div
@@ -172,22 +186,25 @@ export default function AttendeeProfilePage() {
               </button>
             </div>
             
-            <div className="bg-white p-4 rounded-xl mb-4">
-              <img src={qrCodeUrl} alt="Profile QR Code" className="w-full" />
+            <div className="bg-white p-4 rounded-xl mb-4 flex items-center justify-center">
+              <QRCodeWithLogo ref={qrCodeRef} value={qrCodeValue} size={220} />
             </div>
             
             <p className="text-sm text-secondary text-center mb-4">
               Scan to view this profile in the FaceFindr app
             </p>
             
-            <a
-              href={qrCodeUrl.replace('size=512x512', 'size=1024x1024') + '&download=1'}
-              download={`${profile.display_name}-qr-code.png`}
+            <button
+              onClick={async () => {
+                if (qrCodeRef.current) {
+                  await downloadQRCodeWithLogo(qrCodeRef.current, `${profile.display_name}-qr-code.png`);
+                }
+              }}
               className="flex items-center justify-center gap-2 w-full py-2 px-4 bg-muted rounded-xl text-foreground hover:bg-muted/70 transition-colors"
             >
               <Download className="h-4 w-4" />
               Download QR Code
-            </a>
+            </button>
           </div>
         </div>
       )}

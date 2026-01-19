@@ -1,8 +1,5 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import Image from 'next/image';
-import Link from 'next/link';
 import {
   Calendar,
   MapPin,
@@ -12,6 +9,9 @@ import {
   ChevronRight,
   QrCode,
 } from 'lucide-react';
+import Image from 'next/image';
+import Link from 'next/link';
+import { useState, useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -54,6 +54,56 @@ export default function MyEventsPage() {
 
     fetchEvents();
   }, []);
+
+  // Also fetch publicly listed events when searching
+  useEffect(() => {
+    if (searchQuery.trim().length > 0) {
+      const fetchPublicEvents = async () => {
+        try {
+          const supabase = (await import('@/lib/supabase/client')).createClient();
+          const { data: publicEvents } = await supabase
+            .from('events')
+            .select('id, name, event_date, location, cover_image_url, status, photographers(display_name)')
+            .eq('is_publicly_listed', true)
+            .eq('status', 'active')
+            .ilike('name', `%${searchQuery}%`)
+            .order('created_at', { ascending: false })
+            .limit(20);
+
+          if (publicEvents) {
+            const formattedPublicEvents = publicEvents.map((event: any) => ({
+              id: event.id,
+              name: event.name,
+              date: event.event_date
+                ? new Date(event.event_date).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                  })
+                : 'No date',
+              location: event.location,
+              coverImage: event.cover_image_url,
+              photographerName: event.photographers?.display_name || 'Unknown',
+              totalPhotos: 0,
+              matchedPhotos: 0,
+              status: 'active' as const,
+            }));
+
+            // Merge with existing events, avoiding duplicates
+            setEvents(prev => {
+              const existingIds = new Set(prev.map(e => e.id));
+              const newEvents = formattedPublicEvents.filter(e => !existingIds.has(e.id));
+              return [...prev, ...newEvents];
+            });
+          }
+        } catch (error) {
+          console.error('Failed to fetch public events:', error);
+        }
+      };
+
+      fetchPublicEvents();
+    }
+  }, [searchQuery]);
 
   const handleJoinEvent = async () => {
     if (!accessCode.trim()) return;

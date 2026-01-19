@@ -28,12 +28,17 @@ import {
   QrCode,
   Clock,
   Archive,
+  Gift,
+  User,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { SkeletonStats, SkeletonPhotoGrid, Skeleton } from '@/components/ui';
+import { useRealtimeSubscription } from '@/hooks/use-realtime';
+import { getThumbnailUrl } from '@/lib/storage-urls';
 
 const { width } = Dimensions.get('window');
 const PHOTO_SIZE = (width - spacing.lg * 2 - spacing.sm * 2) / 3;
@@ -74,6 +79,7 @@ export default function MyPhotosScreen() {
           media:media_id (
             id,
             thumbnail_path,
+            storage_path,
             event_id,
             events:event_id (name, event_date)
           ),
@@ -84,13 +90,22 @@ export default function MyPhotosScreen() {
         .limit(50);
 
       if (!error && data) {
-        const photosData = data.map((item: any) => ({
-          id: item.media?.id,
-          thumbnailUrl: item.media?.thumbnail_path,
-          eventName: item.media?.events?.name,
-          eventId: item.media?.event_id,
-          createdAt: item.created_at,
-        }));
+        const photosData = await Promise.all(
+          data.map(async (item: any) => {
+            const thumbnailUrl = await getThumbnailUrl(
+              item.media?.thumbnail_path || null,
+              item.media?.storage_path || null
+            );
+
+            return {
+              id: item.media?.id,
+              thumbnailUrl: thumbnailUrl || '',
+              eventName: item.media?.events?.name,
+              eventId: item.media?.event_id,
+              createdAt: item.created_at,
+            };
+          })
+        );
         setPhotos(photosData);
 
         // Group by event
@@ -121,6 +136,23 @@ export default function MyPhotosScreen() {
   useEffect(() => {
     loadPhotos();
   }, []);
+
+  // Subscribe to real-time updates for media
+  useRealtimeSubscription({
+    table: 'media',
+    onChange: () => {
+      loadPhotos();
+    },
+  });
+
+  // Subscribe to real-time updates for entitlements (purchased photos)
+  useRealtimeSubscription({
+    table: 'entitlements',
+    filter: profile?.id ? `attendee_id=eq.${profile.id}` : undefined,
+    onChange: () => {
+      loadPhotos();
+    },
+  });
 
   const handleRefresh = () => {
     setIsRefreshing(true);
@@ -156,8 +188,35 @@ export default function MyPhotosScreen() {
     </Pressable>
   );
 
+  // Loading state with skeleton
+  if (isLoading) {
+    return (
+      <View style={styles.container}>
+        <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
+        <View style={[styles.headerWrapper, { paddingTop: insets.top }]}>
+          <View style={styles.header}>
+            <View style={styles.headerTop}>
+              <Text style={styles.title}>Photo Passport</Text>
+              <View style={styles.headerIconButton}>
+                <UserSearch size={22} color={colors.foreground} />
+              </View>
+            </View>
+          </View>
+        </View>
+        <View style={styles.loadingContainer}>
+          <SkeletonStats />
+          <Skeleton height={180} borderRadius={borderRadius.xl} style={{ marginTop: spacing.lg }} />
+          <View style={{ marginTop: spacing.lg }}>
+            <Skeleton width={100} height={20} style={{ marginBottom: spacing.md }} />
+            <SkeletonPhotoGrid count={9} />
+          </View>
+        </View>
+      </View>
+    );
+  }
+
   // Empty state
-  if (!isLoading && photos.length === 0) {
+  if (photos.length === 0) {
     return (
       <View style={styles.container}>
         <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
@@ -167,15 +226,35 @@ export default function MyPhotosScreen() {
           <View style={styles.header}>
             <View style={styles.headerTop}>
               <Text style={styles.title}>Photo Passport</Text>
-              <Pressable 
-                style={({ pressed }) => [
-                  styles.headerIconButton,
-                  pressed && styles.pressed,
-                ]}
-                onPress={() => router.push('/search')}
-              >
-                <UserSearch size={22} color={colors.foreground} />
-              </Pressable>
+              <View style={styles.headerActions}>
+                <Pressable 
+                  style={({ pressed }) => [
+                    styles.headerIconButton,
+                    pressed && styles.pressed,
+                  ]}
+                  onPress={() => router.push('/search')}
+                >
+                  <UserSearch size={22} color={colors.foreground} />
+                </Pressable>
+                <Pressable 
+                  style={({ pressed }) => [
+                    styles.avatarButton,
+                    pressed && styles.pressed,
+                  ]}
+                  onPress={() => router.push('/(attendee)/profile')}
+                >
+                  {profile?.profilePhotoUrl ? (
+                    <Image 
+                      source={{ uri: profile.profilePhotoUrl }} 
+                      style={styles.avatarImage}
+                    />
+                  ) : (
+                    <View style={styles.avatarPlaceholder}>
+                      <User size={18} color={colors.secondary} />
+                    </View>
+                  )}
+                </Pressable>
+              </View>
             </View>
           </View>
         </View>
@@ -242,6 +321,19 @@ export default function MyPhotosScreen() {
                   <Calendar size={24} color="#f59e0b" />
                 </View>
                 <Text style={styles.quickActionLabel}>Enter Code</Text>
+              </Pressable>
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.quickAction,
+                  pressed && styles.quickActionPressed,
+                ]}
+                onPress={() => router.push('/(attendee)/drop-in/upload')}
+              >
+                <View style={[styles.quickActionIcon, { backgroundColor: '#8b5cf615' }]}>
+                  <Gift size={24} color="#8b5cf6" />
+                </View>
+                <Text style={styles.quickActionLabel}>Drop-In</Text>
               </Pressable>
 
               <Pressable
@@ -448,20 +540,39 @@ const styles = StyleSheet.create({
   headerTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  headerTitleGroup: {
-    flex: 1,
+    alignItems: 'center',
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
   },
+  headerTitleGroup: {
+    flex: 1,
+  },
   headerIconButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
+    backgroundColor: colors.muted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: colors.border,
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  avatarPlaceholder: {
+    width: '100%',
+    height: '100%',
     backgroundColor: colors.muted,
     alignItems: 'center',
     justifyContent: 'center',
@@ -791,5 +902,11 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // Loading state styles
+  loadingContainer: {
+    flex: 1,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
   },
 });

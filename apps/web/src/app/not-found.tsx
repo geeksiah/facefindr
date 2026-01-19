@@ -1,7 +1,35 @@
+'use client';
+
+import { Home, ArrowLeft, LayoutDashboard } from 'lucide-react';
 import Link from 'next/link';
-import { Home, ArrowLeft, Search } from 'lucide-react';
+import { useEffect, useState } from 'react';
+
+import { createClient } from '@/lib/supabase/client';
 
 export default function NotFound() {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    async function checkAuth() {
+      try {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        setIsLoggedIn(!!user);
+      } catch (e) {
+        setIsLoggedIn(false);
+      } finally {
+        setChecking(false);
+      }
+    }
+    
+    checkAuth();
+  }, []);
+
+  const homeUrl = isLoggedIn ? '/dashboard' : '/';
+  const homeLabel = isLoggedIn ? 'Go to Dashboard' : 'Go Home';
+  const HomeIcon = isLoggedIn ? LayoutDashboard : Home;
+
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-6">
       <div className="max-w-md w-full text-center">
@@ -93,13 +121,15 @@ export default function NotFound() {
 
         {/* Actions */}
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
-          <Link
-            href="/"
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent/90"
-          >
-            <Home className="h-4 w-4" />
-            Go Home
-          </Link>
+          {!checking && (
+            <Link
+              href={homeUrl}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent/90"
+            >
+              <HomeIcon className="h-4 w-4" />
+              {homeLabel}
+            </Link>
+          )}
           <button
             onClick={() => window.history.back()}
             className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-card px-6 py-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted"

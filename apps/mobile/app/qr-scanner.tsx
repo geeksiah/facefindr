@@ -20,6 +20,7 @@ import { Camera, CameraView } from 'expo-camera';
 import { X, Flashlight, FlashlightOff, AlertCircle } from 'lucide-react-native';
 
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { buttonPress, matchFound, error as hapticError } from '@/lib/haptics';
 
 const { width, height } = Dimensions.get('window');
 const SCAN_AREA_SIZE = width * 0.7;
@@ -38,10 +39,14 @@ export default function ScanScreen() {
     })();
   }, []);
 
-  // Navigate back to attendee home - always use replace to avoid navigation issues
+  // Navigate back - use router.back() for natural navigation
   const goBack = useCallback(() => {
-    // Use replace to avoid "GO_BACK" navigation issues
-    router.replace('/(attendee)/index');
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      // Fallback to attendee home if no history
+      router.replace('/(attendee)');
+    }
   }, [router]);
 
   // Handle Android back button
@@ -58,12 +63,14 @@ export default function ScanScreen() {
     return () => backHandler.remove();
   }, [goBack, showError]);
 
-  const handleTryAgain = () => {
+  const handleTryAgain = async () => {
+    await buttonPress();
     setShowError(false);
     setScanned(false);
   };
 
-  const handleCancel = () => {
+  const handleCancel = async () => {
+    await buttonPress();
     setShowError(false);
     // Use setTimeout to ensure modal is closed before navigation
     setTimeout(() => {
@@ -71,7 +78,7 @@ export default function ScanScreen() {
     }, 100);
   };
 
-  const handleBarCodeScanned = ({ type, data }: { type: string; data: string }) => {
+  const handleBarCodeScanned = async ({ type, data }: { type: string; data: string }) => {
     if (scanned) return;
     setScanned(true);
 
@@ -92,31 +99,36 @@ export default function ScanScreen() {
       // Check for event path patterns (more lenient matching)
       if (pathParts[0] === 'e' && pathParts[1]) {
         // Event slug - /e/[slug]
-        router.replace(`/event/${pathParts[1]}`);
+        await matchFound(); // Haptic feedback for successful QR scan
+        router.replace(`/event/${pathParts[1]}` as any);
         return;
       } 
       
       if (pathParts[0] === 's' && pathParts[1]) {
         // Short code - /s/[code]
-        router.replace(`/s/${pathParts[1]}`);
+        await matchFound(); // Haptic feedback for successful QR scan
+        router.replace(`/s/${pathParts[1]}` as any);
         return;
       }
       
       if (pathParts[0] === 'event' && pathParts[1]) {
         // Direct event path - /event/[id]
-        router.replace(`/event/${pathParts[1]}`);
+        await matchFound(); // Haptic feedback for successful QR scan
+        router.replace(`/event/${pathParts[1]}` as any);
         return;
       }
       
       if (isCustomScheme && pathParts[0]) {
         // Custom scheme: facefindr://event/[id]
-        router.replace(`/event/${pathParts[0]}`);
+        await matchFound(); // Haptic feedback for successful QR scan
+        router.replace(`/event/${pathParts[0]}` as any);
         return;
       }
       
       // No valid path found
       throw new Error('Invalid QR code');
     } catch (error) {
+      await hapticError(); // Haptic feedback for error
       setShowError(true);
     }
   };

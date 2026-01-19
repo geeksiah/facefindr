@@ -2,6 +2,7 @@
  * Button Component
  * 
  * Reusable button with variants and loading state.
+ * Includes haptic feedback on press.
  */
 
 import React from 'react';
@@ -14,6 +15,7 @@ import {
   TextStyle,
 } from 'react-native';
 import { colors, borderRadius, spacing, fontSize } from '@/lib/theme';
+import { buttonPress } from '@/lib/haptics';
 
 interface ButtonProps {
   onPress: () => void;
@@ -56,9 +58,14 @@ export function Button({
     textStyle,
   ].filter(Boolean) as TextStyle[];
 
+  const handlePress = () => {
+    buttonPress(); // Trigger haptic feedback
+    onPress();
+  };
+
   return (
     <TouchableOpacity
-      onPress={onPress}
+      onPress={handlePress}
       disabled={isDisabled}
       style={buttonStyles}
       activeOpacity={0.7}

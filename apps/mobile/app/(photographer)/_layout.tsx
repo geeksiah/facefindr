@@ -5,7 +5,7 @@
  */
 
 import { Tabs } from 'expo-router';
-import { LayoutDashboard, Calendar, Upload, BarChart3, User } from 'lucide-react-native';
+import { LayoutDashboard, Calendar, Upload, BarChart3, Gift } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Platform } from 'react-native';
 
@@ -83,10 +83,16 @@ export default function PhotographerLayout() {
         }}
       />
       <Tabs.Screen
+        name="drop-in"
+        options={{
+          title: 'Drop-In',
+          tabBarIcon: ({ color }) => <Gift size={22} color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="profile"
         options={{
-          title: 'Profile',
-          tabBarIcon: ({ color }) => <User size={22} color={color} />,
+          href: null, // Hide from tab bar, accessible via navigation
         }}
       />
       <Tabs.Screen

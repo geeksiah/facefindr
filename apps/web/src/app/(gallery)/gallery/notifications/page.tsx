@@ -1,7 +1,5 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import Link from 'next/link';
 import {
   Bell,
   BellOff,
@@ -12,6 +10,8 @@ import {
   Check,
   Trash2,
 } from 'lucide-react';
+import Link from 'next/link';
+import { useState, useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';

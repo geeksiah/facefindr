@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { Bell, Plus, Send, Loader2, Trash2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+
 import { formatDateTime } from '@/lib/utils';
 
 interface Announcement {
@@ -13,14 +14,23 @@ interface Announcement {
   status: string;
   send_email: boolean;
   send_push: boolean;
+  send_sms: boolean;
+  country_code: string | null;
   sent_count: number;
   created_at: string;
   sent_at: string | null;
 }
 
+interface RegionOption {
+  region_code: string;
+  region_name: string;
+  is_active: boolean;
+}
+
 export default function AnnouncementsPage() {
   const router = useRouter();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [regions, setRegions] = useState<RegionOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
@@ -31,10 +41,13 @@ export default function AnnouncementsPage() {
     target: 'all',
     send_email: false,
     send_push: true,
+    send_sms: false,
+    country_code: '',
   });
 
   useEffect(() => {
     fetchAnnouncements();
+    fetchRegions();
   }, []);
 
   const fetchAnnouncements = async () => {
@@ -44,6 +57,14 @@ export default function AnnouncementsPage() {
       setAnnouncements(data.announcements || []);
     }
     setIsLoading(false);
+  };
+
+  const fetchRegions = async () => {
+    const response = await fetch('/api/admin/regions');
+    if (response.ok) {
+      const data = await response.json();
+      setRegions(data.regions || []);
+    }
   };
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -59,7 +80,15 @@ export default function AnnouncementsPage() {
 
       if (response.ok) {
         setShowForm(false);
-        setFormData({ title: '', content: '', target: 'all', send_email: false, send_push: true });
+        setFormData({
+          title: '',
+          content: '',
+          target: 'all',
+          send_email: false,
+          send_push: true,
+          send_sms: false,
+          country_code: '',
+        });
         fetchAnnouncements();
       }
     } catch (error) {
@@ -118,10 +147,34 @@ export default function AnnouncementsPage() {
         </button>
       </div>
 
+      {/* Info notice */}
+      <div className="rounded-xl border border-border bg-muted/50 p-4">
+        <p className="text-sm text-muted-foreground">
+          <strong>Note:</strong> Sent announcements are automatically deleted after 24 hours. 
+          Push notifications require FCM/APN configuration, and email notifications require an email provider to be set up in the Regions & Providers settings.
+        </p>
+      </div>
+
       {/* Create Form Modal */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-card border border-border rounded-xl p-6 w-full max-w-lg">
+        <div 
+          className="fixed bg-black/50 flex items-center justify-center z-50"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100vw',
+            width: '100dvw',
+            height: '100vh',
+            height: '100dvh',
+            margin: 0,
+            padding: 0,
+          }}
+        >
+          <div className="bg-card border border-border rounded-xl p-6 w-full max-w-lg mx-4 my-4">
             <h2 className="text-xl font-bold text-foreground mb-4">Create Announcement</h2>
             <form onSubmit={handleCreate} className="space-y-4">
               <div>
@@ -156,6 +209,21 @@ export default function AnnouncementsPage() {
                   <option value="attendees">Attendees Only</option>
                 </select>
               </div>
+              <div>
+                <label className="text-sm font-medium text-foreground">Country</label>
+                <select
+                  value={formData.country_code}
+                  onChange={(e) => setFormData({ ...formData, country_code: e.target.value })}
+                  className="w-full mt-1 px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
+                >
+                  <option value="">All Countries</option>
+                  {regions.map((region) => (
+                    <option key={region.region_code} value={region.region_code}>
+                      {region.region_name} ({region.region_code}){region.is_active ? '' : ' - Inactive'}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className="flex items-center gap-6">
                 <label className="flex items-center gap-2">
                   <input
@@ -174,6 +242,15 @@ export default function AnnouncementsPage() {
                     className="rounded"
                   />
                   <span className="text-sm text-foreground">Email</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.send_sms}
+                    onChange={(e) => setFormData({ ...formData, send_sms: e.target.checked })}
+                    className="rounded"
+                  />
+                  <span className="text-sm text-foreground">SMS</span>
                 </label>
               </div>
               <div className="flex justify-end gap-3 pt-4">
@@ -218,6 +295,19 @@ export default function AnnouncementsPage() {
                   <p className="text-muted-foreground mt-2">{announcement.content}</p>
                   <div className="flex items-center gap-4 mt-3 text-sm text-muted-foreground">
                     <span>Target: {announcement.target}</span>
+                    <span>
+                      Country: {announcement.country_code ? announcement.country_code : 'All'}
+                    </span>
+                    <span>
+                      Channels:{' '}
+                      {[
+                        announcement.send_push && 'Push',
+                        announcement.send_email && 'Email',
+                        announcement.send_sms && 'SMS',
+                      ]
+                        .filter(Boolean)
+                        .join(', ') || 'None'}
+                    </span>
                     <span>Created: {formatDateTime(announcement.created_at)}</span>
                     {announcement.sent_at && (
                       <span>Sent: {formatDateTime(announcement.sent_at)} ({announcement.sent_count} users)</span>

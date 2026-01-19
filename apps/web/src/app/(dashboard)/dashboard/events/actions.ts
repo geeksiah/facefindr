@@ -3,6 +3,12 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
+import {
+  checkLimit,
+  checkFeature,
+  LimitExceededError,
+  FeatureNotEnabledError,
+} from '@/lib/subscription/enforcement';
 import { createClient } from '@/lib/supabase/server';
 import {
   createEventSchema,
@@ -26,7 +32,7 @@ export async function createEvent(formData: CreateEventInput) {
     };
   }
 
-  const supabase = createClient();
+  const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -35,32 +41,40 @@ export async function createEvent(formData: CreateEventInput) {
     return { error: 'Not authenticated' };
   }
 
-  // Check subscription limits
-  const { data: subscription } = await supabase
-    .from('subscriptions')
-    .select('plan_code')
-    .eq('photographer_id', user.id)
-    .single();
-
-  const { count: eventCount } = await supabase
-    .from('events')
-    .select('id', { count: 'exact', head: true })
-    .eq('photographer_id', user.id)
-    .in('status', ['draft', 'active']);
-
-  const planLimits: Record<string, number> = {
-    free: 2,
-    starter: 5,
-    pro: 20,
-    studio: 9999,
-  };
-
-  const limit = planLimits[subscription?.plan_code || 'free'] || 2;
-
-  if ((eventCount || 0) >= limit) {
+  // ENFORCE: Check event limit using the enforcement system
+  const eventLimit = await checkLimit(user.id, 'events');
+  if (!eventLimit.allowed) {
     return {
-      error: `You've reached your event limit (${limit}). Please upgrade your plan.`,
+      error: eventLimit.message || `You've reached your event limit (${eventLimit.limit} active events). Please upgrade your plan or archive existing events.`,
+      code: 'LIMIT_EXCEEDED',
+      limitType: 'events',
+      current: eventLimit.current,
+      limit: eventLimit.limit,
     };
+  }
+
+  // ENFORCE: Check if face recognition is enabled for the plan (if user wants it)
+  if (validated.data.faceRecognitionEnabled) {
+    const canUseFaceRecognition = await checkFeature(user.id, 'face_recognition');
+    if (!canUseFaceRecognition) {
+      return {
+        error: 'Face recognition is not available on your current plan. Please upgrade to enable this feature.',
+        code: 'FEATURE_NOT_ENABLED',
+        feature: 'face_recognition',
+      };
+    }
+  }
+
+  // ENFORCE: Check if live mode is enabled for the plan (if user wants it)
+  if (validated.data.liveModeEnabled) {
+    const canUseLiveMode = await checkFeature(user.id, 'live_event_mode');
+    if (!canUseLiveMode) {
+      return {
+        error: 'Live Event Mode is not available on your current plan. Please upgrade to enable this feature.',
+        code: 'FEATURE_NOT_ENABLED',
+        feature: 'live_event_mode',
+      };
+    }
   }
 
   // Create the event
@@ -86,13 +100,66 @@ export async function createEvent(formData: CreateEventInput) {
     return { error: 'Failed to create event' };
   }
 
+  // Generate public slug immediately (not just when activated)
+  if (event) {
+    try {
+      const { data: slugData, error: slugError } = await supabase.rpc('generate_event_slug', {
+        event_name: validated.data.name,
+        event_id: event.id,
+      });
+
+      if (!slugError && slugData) {
+        await supabase
+          .from('events')
+          .update({ public_slug: slugData })
+          .eq('id', event.id);
+      } else if (slugError) {
+        // Fallback: generate slug manually if RPC fails
+        const baseSlug = validated.data.name
+          .toLowerCase()
+          .trim()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-+|-+$/g, '')
+          .substring(0, 50);
+        
+        let finalSlug = baseSlug;
+        let counter = 0;
+        
+        // Check for uniqueness
+        while (true) {
+          const { data: existing } = await supabase
+            .from('events')
+            .select('id')
+            .eq('public_slug', finalSlug)
+            .neq('id', event.id)
+            .single();
+          
+          if (!existing) break;
+          
+          counter++;
+          finalSlug = `${baseSlug}-${counter}`;
+        }
+        
+        await supabase
+          .from('events')
+          .update({ public_slug: finalSlug })
+          .eq('id', event.id);
+      }
+    } catch (err) {
+      console.error('Error generating event slug:', err);
+      // Continue without slug - it can be generated later
+    }
+  }
+
   // Create default pricing
   await supabase.from('event_pricing').insert({
     event_id: event.id,
     price_per_media: 0,
     unlock_all_price: null,
-    currency: 'USD',
+    currency: validated.data.currency || 'USD',
     is_free: true,
+    pricing_type: 'free',
+    bulk_tiers: null,
   });
 
   revalidatePath('/dashboard/events');

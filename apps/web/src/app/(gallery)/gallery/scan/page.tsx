@@ -1,8 +1,5 @@
 'use client';
 
-import { useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import {
   ArrowLeft,
   Shield,
@@ -10,9 +7,12 @@ import {
   ChevronRight,
   Check,
 } from 'lucide-react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useState, useCallback } from 'react';
 
-import { Button } from '@/components/ui/button';
 import { GuidedFaceScanner, ConsentModal, MatchResults } from '@/components/face-scan';
+import { Button } from '@/components/ui/button';
 
 type ScanStage = 'intro' | 'consent' | 'scan' | 'processing' | 'results';
 

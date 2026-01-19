@@ -4,10 +4,12 @@
  * Track page views and interactions.
  */
 
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { trackView, ViewType, DeviceType } from '@/lib/analytics';
 import crypto from 'crypto';
+
+import { NextRequest, NextResponse } from 'next/server';
+
+import { trackView, ViewType, DeviceType } from '@/lib/analytics';
+import { createClient } from '@/lib/supabase/server';
 
 // POST - Track a view
 export async function POST(request: NextRequest) {

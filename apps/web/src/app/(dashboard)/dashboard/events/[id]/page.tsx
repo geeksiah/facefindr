@@ -1,5 +1,3 @@
-import { notFound } from 'next/navigation';
-import Link from 'next/link';
 import {
   ArrowLeft,
   Calendar,
@@ -13,13 +11,17 @@ import {
   Radio,
   MoreHorizontal,
 } from 'lucide-react';
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
 
-import { createClient } from '@/lib/supabase/server';
-import { Button } from '@/components/ui/button';
-import { PhotoUploader } from '@/components/events/photo-uploader';
+import { EventDetailRealtime } from '@/components/events/event-detail-realtime';
 import { EventGallery } from '@/components/events/event-gallery';
 import { EventSettings } from '@/components/events/event-settings';
+import { PhotoUploader } from '@/components/events/photo-uploader';
 import { ShareButton } from '@/components/events/share-button';
+import { Button } from '@/components/ui/button';
+import { getCurrencySymbol } from '@/lib/currency-utils';
+import { createClient } from '@/lib/supabase/server';
 import { cn } from '@/lib/utils';
 
 interface EventPageProps {
@@ -27,32 +29,60 @@ interface EventPageProps {
 }
 
 export default async function EventPage({ params }: EventPageProps) {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
     return notFound();
   }
 
-  // Fetch event with pricing and media count
+  // Fetch event with pricing
   const { data: event, error } = await supabase
     .from('events')
     .select(`
       *,
       event_pricing(*),
-      media(id, storage_path, thumbnail_path, original_filename, file_size, created_at),
       event_access_tokens(id, token, label, created_at, expires_at, revoked_at)
     `)
     .eq('id', params.id)
     .eq('photographer_id', user.id)
     .single();
+  
+  // Fetch media separately to ensure we get all photos
+  let mediaData: any[] = [];
+  if (event) {
+    const { data: media, error: mediaError } = await supabase
+      .from('media')
+      .select('id, storage_path, thumbnail_path, original_filename, file_size, created_at')
+      .eq('event_id', params.id)
+      .eq('photographer_id', user.id)
+      .order('created_at', { ascending: false });
+    
+    if (mediaError) {
+      console.error('Error fetching media:', mediaError);
+      // Don't fail the page, just show empty list
+      mediaData = [];
+    } else if (media) {
+      mediaData = media;
+    }
+  }
 
-  if (error || !event) {
+  if (error) {
+    console.error('Event fetch error:', error);
+    // Log detailed error for debugging
+    if (error.code === 'PGRST116') {
+      // No rows returned
+      return notFound();
+    }
+    return notFound();
+  }
+
+  if (!event) {
     return notFound();
   }
 
   const pricing = event.event_pricing?.[0];
-  const mediaCount = event.media?.length || 0;
+  const mediaCount = mediaData.length;
 
   const statusColors: Record<string, string> = {
     draft: 'bg-muted text-muted-foreground',
@@ -63,6 +93,9 @@ export default async function EventPage({ params }: EventPageProps) {
 
   return (
     <div className="space-y-6">
+      {/* Realtime subscription for event updates */}
+      <EventDetailRealtime eventId={event.id} />
+      
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-4">
@@ -193,11 +226,11 @@ export default async function EventPage({ params }: EventPageProps) {
             ) : (
               <>
                 <span className="rounded-full bg-accent/10 px-3 py-1 font-medium text-accent">
-                  ${(pricing.price_per_media / 100).toFixed(2)} per photo
+                  {getCurrencySymbol(pricing.currency || 'USD')}{(pricing.price_per_media / 100).toFixed(2)} per photo
                 </span>
                 {pricing.unlock_all_price && (
                   <span className="rounded-full bg-muted px-3 py-1 font-medium text-foreground">
-                    ${(pricing.unlock_all_price / 100).toFixed(2)} unlock all
+                    {getCurrencySymbol(pricing.currency || 'USD')}{(pricing.unlock_all_price / 100).toFixed(2)} unlock all
                   </span>
                 )}
               </>
@@ -222,7 +255,7 @@ export default async function EventPage({ params }: EventPageProps) {
             </Button>
           )}
         </div>
-        <EventGallery eventId={event.id} photos={event.media || []} />
+        <EventGallery eventId={event.id} photos={mediaData} />
       </div>
     </div>
   );

@@ -6,7 +6,6 @@
  * Full list of all notifications with filters.
  */
 
-import { useState, useEffect, useCallback } from 'react';
 import { 
   Bell, 
   Check, 
@@ -21,8 +20,10 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import Link from 'next/link';
-import { Button } from '@/components/ui';
+import { useState, useEffect, useCallback } from 'react';
+
 import { DashboardBanner } from '@/components/notifications';
+import { Button } from '@/components/ui';
 
 interface Notification {
   id: string;

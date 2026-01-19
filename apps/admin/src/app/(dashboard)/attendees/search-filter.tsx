@@ -1,8 +1,8 @@
 'use client';
 
+import { Search, X } from 'lucide-react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useState, useCallback } from 'react';
-import { Search, X } from 'lucide-react';
 
 interface SearchFilterProps {
   searchParams: {

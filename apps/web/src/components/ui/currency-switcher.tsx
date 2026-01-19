@@ -6,8 +6,9 @@
  * Allows users to select their preferred currency.
  */
 
-import { useState, useEffect, useRef } from 'react';
 import { ChevronDown, Check, Loader2, Globe } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+
 import { useCurrency } from '@/components/providers';
 import { cn } from '@/lib/utils';
 

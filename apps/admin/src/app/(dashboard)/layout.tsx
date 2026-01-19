@@ -1,7 +1,8 @@
 import { redirect } from 'next/navigation';
-import { getAdminSession } from '@/lib/auth';
-import { Sidebar } from '@/components/sidebar';
+
 import { RealtimeProvider } from '@/components/realtime-provider';
+import { Sidebar } from '@/components/sidebar';
+import { getAdminSession } from '@/lib/auth';
 
 export default async function DashboardLayout({
   children,

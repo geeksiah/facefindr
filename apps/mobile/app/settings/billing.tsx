@@ -70,41 +70,78 @@ export default function BillingScreen() {
 
   const loadBillingData = async () => {
     try {
-      // Load wallet data
-      const { data: walletData } = await supabase
+      // Load wallet and balance data
+      const { data: walletRecord } = await supabase
         .from('wallets')
-        .select('balance, pending_balance, currency')
-        .eq('photographer_id', profile?.id)
-        .single();
-
-      if (walletData) {
-        setWallet({
-          balance: walletData.balance || 0,
-          pendingBalance: walletData.pending_balance || 0,
-          currency: walletData.currency || 'USD',
-        });
-      } else {
-        setWallet({ balance: 0, pendingBalance: 0, currency: 'USD' });
-      }
-
-      // Load recent transactions
-      const { data: txData } = await supabase
-        .from('transactions')
-        .select('*')
+        .select('id, preferred_currency')
         .eq('photographer_id', profile?.id)
         .order('created_at', { ascending: false })
-        .limit(10);
+        .limit(1)
+        .maybeSingle();
 
-      if (txData) {
-        setTransactions(txData.map((tx: any) => ({
-          id: tx.id,
-          type: tx.type,
-          amount: tx.amount,
-          status: tx.status,
-          description: tx.description,
-          createdAt: tx.created_at,
-        })));
+      const { data: walletBalance } = await supabase
+        .from('wallet_balances')
+        .select('available_balance, pending_payout, currency')
+        .eq('photographer_id', profile?.id)
+        .order('wallet_id', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (walletBalance) {
+        setWallet({
+          balance: walletBalance.available_balance || 0,
+          pendingBalance: walletBalance.pending_payout || 0,
+          currency: walletBalance.currency || walletRecord?.preferred_currency || 'USD',
+        });
+      } else {
+        setWallet({ balance: 0, pendingBalance: 0, currency: walletRecord?.preferred_currency || 'USD' });
       }
+
+      const walletId = walletRecord?.id;
+
+      // Load recent payouts
+      const { data: payoutData } = walletId
+        ? await supabase
+            .from('payouts')
+            .select('id, amount, status, created_at')
+            .eq('wallet_id', walletId)
+            .order('created_at', { ascending: false })
+            .limit(10)
+        : { data: [] };
+
+      // Load recent sales
+      const { data: txData } = walletId
+        ? await supabase
+            .from('transactions')
+            .select('id, gross_amount, status, created_at, events (name)')
+            .eq('wallet_id', walletId)
+            .order('created_at', { ascending: false })
+            .limit(10)
+        : { data: [] };
+
+      const sales: Transaction[] = (txData || []).map((tx: any) => ({
+        id: tx.id,
+        type: 'sale' as const,
+        amount: tx.gross_amount || 0,
+        status: (tx.status === 'succeeded' ? 'completed' : tx.status === 'pending' ? 'pending' : 'failed') as Transaction['status'],
+        description: tx.events?.name ? `Sale: ${tx.events.name}` : 'Photo sale',
+        createdAt: tx.created_at,
+      }));
+
+      const payouts: Transaction[] = (payoutData || []).map((payout: any) => ({
+        id: payout.id,
+        type: 'payout' as const,
+        amount: payout.amount || 0,
+        status: (payout.status === 'completed' ? 'completed' : payout.status === 'pending' ? 'pending' : 'failed') as Transaction['status'],
+        description: 'Payout',
+        createdAt: payout.created_at,
+      }));
+
+      const combined = [...sales, ...payouts]
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, 10);
+
+      setTransactions(combined);
     } catch (err) {
       console.error('Error loading billing data:', err);
     } finally {
@@ -113,7 +150,7 @@ export default function BillingScreen() {
   };
 
   const handleRequestPayout = () => {
-    if ((wallet?.balance || 0) < 10) {
+    if ((wallet?.balance || 0) < 1000) {
       Alert.alert(
         'Minimum Balance Required',
         'You need at least $10.00 to request a payout.'
@@ -152,7 +189,7 @@ export default function BillingScreen() {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: wallet?.currency || 'USD',
-    }).format(amount);
+    }).format(amount / 100);
   };
 
   const getTransactionIcon = (type: string) => {

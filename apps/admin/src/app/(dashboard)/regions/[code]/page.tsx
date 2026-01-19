@@ -1,8 +1,5 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter, useParams } from 'next/navigation';
-import Link from 'next/link';
 import {
   ArrowLeft,
   Save,
@@ -14,7 +11,13 @@ import {
   Phone,
   Shield,
   Check,
+  DollarSign,
+  TrendingUp,
+  Wallet,
 } from 'lucide-react';
+import Link from 'next/link';
+import { useRouter, useParams } from 'next/navigation';
+import { useState, useEffect } from 'react';
 
 interface RegionConfig {
   id: string;
@@ -41,6 +44,13 @@ interface RegionConfig {
   social_features_enabled: boolean;
   public_events_enabled: boolean;
   notes: string | null;
+  // Platform Fees & Payouts
+  platform_commission_percent: number;
+  transaction_fee_percent: number;
+  transaction_fee_fixed: number;
+  payout_minimum_threshold: number;
+  payout_fee_percent: number;
+  payout_fee_fixed: number;
 }
 
 interface SmsPreset {
@@ -205,11 +215,165 @@ export default function RegionConfigPage() {
             <label className="text-sm font-medium text-foreground">Payout Minimum (smallest unit)</label>
             <input
               type="number"
-              value={config.payout_minimum}
-              onChange={(e) => setConfig({ ...config, payout_minimum: parseInt(e.target.value) })}
+              value={config.payout_minimum || 0}
+              onChange={(e) => setConfig({ ...config, payout_minimum: parseInt(e.target.value) || 0 })}
               className="w-full mt-1 px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
             />
           </div>
+        </div>
+      </div>
+
+      {/* Platform Fees */}
+      <div className="rounded-xl border border-border bg-card p-6">
+        <h2 className="font-semibold text-foreground mb-4 flex items-center gap-2">
+          <TrendingUp className="h-5 w-5" /> Platform Fees
+        </h2>
+        <p className="text-sm text-muted-foreground mb-4">
+          Set commission and transaction fees for this region. These override the global platform defaults.
+        </p>
+        <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+          <p className="text-xs text-blue-700 dark:text-blue-300">
+            <strong>Note:</strong> Region-specific fees take precedence over Platform Settings. Leave empty to use platform defaults.
+          </p>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-3">
+          <div>
+            <label className="text-sm font-medium text-foreground">Platform Commission (%)</label>
+            <div className="relative mt-1">
+              <input
+                type="number"
+                step="1"
+                min="0"
+                max="100"
+                value={config.platform_commission_percent || 0}
+                onChange={(e) => setConfig({ ...config, platform_commission_percent: parseFloat(e.target.value) || 0 })}
+                className="w-full pl-8 pr-4 py-2 rounded-lg bg-muted border border-input text-foreground"
+              />
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">%</span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Percentage of revenue (whole number, e.g., 20 for 20%)</p>
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-foreground">Transaction Fee (%)</label>
+            <div className="relative mt-1">
+              <input
+                type="number"
+                step="1"
+                min="0"
+                max="100"
+                value={config.transaction_fee_percent || 0}
+                onChange={(e) => setConfig({ ...config, transaction_fee_percent: parseFloat(e.target.value) || 0 })}
+                className="w-full pl-8 pr-4 py-2 rounded-lg bg-muted border border-input text-foreground"
+              />
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">%</span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Percentage fee per transaction (whole number, e.g., 2 for 2%)</p>
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-foreground">Fixed Transaction Fee</label>
+            <div className="relative mt-1">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                {getCurrencySymbol(config.default_currency || 'USD')}
+              </span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={(config.transaction_fee_fixed || 0) / 100}
+                onChange={(e) => setConfig({ 
+                  ...config, 
+                  transaction_fee_fixed: Math.round(parseFloat(e.target.value || '0') * 100)
+                })}
+                className="w-full pl-10 pr-4 py-2 rounded-lg bg-muted border border-input text-foreground"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Fixed fee amount (e.g., 0.30 for {getCurrencySymbol(config.default_currency || 'USD')}0.30)</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Payout Settings */}
+      <div className="rounded-xl border border-border bg-card p-6">
+        <h2 className="font-semibold text-foreground mb-4 flex items-center gap-2">
+          <Wallet className="h-5 w-5" /> Payout Settings
+        </h2>
+        <p className="text-sm text-muted-foreground mb-4">
+          Configure payout thresholds and fees for photographers
+        </p>
+
+        <div className="grid gap-4 md:grid-cols-3">
+          <div>
+            <label className="text-sm font-medium text-foreground">Minimum Payout Threshold</label>
+            <div className="relative mt-1">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                {getCurrencySymbol(config.default_currency || 'USD')}
+              </span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={(config.payout_minimum_threshold || 0) / 100}
+                onChange={(e) => setConfig({ 
+                  ...config, 
+                  payout_minimum_threshold: Math.round(parseFloat(e.target.value || '0') * 100)
+                })}
+                className="w-full pl-10 pr-4 py-2 rounded-lg bg-muted border border-input text-foreground"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Minimum balance to request payout (e.g., 50.00 for {getCurrencySymbol(config.default_currency || 'USD')}50.00)
+            </p>
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-foreground">Payout Fee (%)</label>
+            <div className="relative mt-1">
+              <input
+                type="number"
+                step="1"
+                min="0"
+                max="100"
+                value={config.payout_fee_percent || 0}
+                onChange={(e) => setConfig({ ...config, payout_fee_percent: parseFloat(e.target.value) || 0 })}
+                className="w-full pl-8 pr-4 py-2 rounded-lg bg-muted border border-input text-foreground"
+              />
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">%</span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Percentage fee on payout amount (whole number, e.g., 1 for 1%)</p>
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-foreground">Fixed Payout Fee</label>
+            <div className="relative mt-1">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                {getCurrencySymbol(config.default_currency || 'USD')}
+              </span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={(config.payout_fee_fixed || 0) / 100}
+                onChange={(e) => setConfig({ 
+                  ...config, 
+                  payout_fee_fixed: Math.round(parseFloat(e.target.value || '0') * 100)
+                })}
+                className="w-full pl-10 pr-4 py-2 rounded-lg bg-muted border border-input text-foreground"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Fixed fee amount (e.g., 2.50 for {getCurrencySymbol(config.default_currency || 'USD')}2.50)
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 p-3 bg-muted/50 rounded-lg">
+          <p className="text-xs text-muted-foreground">
+            <strong>Note:</strong> Platform commission is calculated first, then transaction fees are applied. 
+            Payout fees are deducted when photographers request payouts.
+          </p>
         </div>
       </div>
 

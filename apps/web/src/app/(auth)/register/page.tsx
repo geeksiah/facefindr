@@ -1,8 +1,5 @@
 'use client';
 
-import { useState } from 'react';
-import Link from 'next/link';
-import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
   Eye,
@@ -16,15 +13,22 @@ import {
   CheckCircle2,
   Check,
 } from 'lucide-react';
+import Link from 'next/link';
+import { useState } from 'react';
+import { useForm } from 'react-hook-form';
 
+import { UsernameSelector } from '@/components/auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { UsernameSelector } from '@/components/auth';
-import { registerSchema, type RegisterInput } from '@/lib/validations/auth';
-import { register as registerUser } from '../actions';
+import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
+import { registerSchema, type RegisterInput } from '@/lib/validations/auth';
+
+import { register as registerUser } from '../actions';
+
 
 export default function RegisterPage() {
+  const toast = useToast();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,9 +67,11 @@ export default function RegisterPage() {
 
     if (result?.error) {
       setError(result.error);
+      toast.error('Registration Failed', result.error);
       setIsLoading(false);
     } else if (result?.success) {
       setSuccess(result.message || 'Account created successfully');
+      toast.success('Account Created', 'Please check your email to verify your account.');
       setIsLoading(false);
     }
   };

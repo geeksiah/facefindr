@@ -34,6 +34,8 @@ import { Button } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { formatPrice, getCurrencySymbol } from '@/lib/currency';
+import { getThumbnailUrl, getSignedUrl } from '@/lib/storage-urls';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -55,7 +57,7 @@ interface PhotoDetails {
 export default function PhotoViewerScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { profile } = useAuthStore();
+  const { profile, session } = useAuthStore();
 
   const [photo, setPhoto] = useState<PhotoDetails | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -102,11 +104,18 @@ export default function PhotoViewerScreen() {
           .single();
 
         if (mediaData) {
-          setPhoto({
+          // Get signed URLs for images
+          const fullUrl = await getSignedUrl('media', mediaData.storage_path);
+          const thumbnailUrl = await getThumbnailUrl(mediaData.thumbnail_path, mediaData.storage_path);
+          const watermarkedUrl = mediaData.watermarked_path 
+            ? await getSignedUrl('media', mediaData.watermarked_path)
+            : thumbnailUrl;
+
+          const photoData = {
             id: mediaData.id,
-            fullUrl: mediaData.storage_path,
-            thumbnailUrl: mediaData.thumbnail_path,
-            watermarkedUrl: mediaData.watermarked_path || mediaData.thumbnail_path,
+            fullUrl: fullUrl || '',
+            thumbnailUrl: thumbnailUrl || '',
+            watermarkedUrl: watermarkedUrl || '',
             eventName: (mediaData.event as any)?.name || 'Unknown Event',
             eventId: (mediaData.event as any)?.id,
             photographerName: (mediaData.photographer as any)?.display_name || 'Unknown',
@@ -115,7 +124,16 @@ export default function PhotoViewerScreen() {
             price: pricing?.single_photo_price || 2.99,
             currency: pricing?.currency || 'USD',
             createdAt: mediaData.created_at,
-          });
+          };
+
+          setPhoto(photoData);
+
+          // Set display URL based on ownership
+          if (photoData.isOwned) {
+            setDisplayUrl(photoData.fullUrl);
+          } else {
+            setDisplayUrl(photoData.watermarkedUrl || photoData.thumbnailUrl);
+          }
         }
       } catch (err) {
         console.error('Error loading photo:', err);
@@ -206,8 +224,26 @@ export default function PhotoViewerScreen() {
   };
 
   const toggleFavorite = async () => {
-    setIsFavorite(!isFavorite);
-    // TODO: Save to favorites in database
+    const nextValue = !isFavorite;
+    setIsFavorite(nextValue);
+
+    try {
+      const baseUrl = process.env.EXPO_PUBLIC_APP_URL || 'https://app.facefindr.com';
+      await fetch(`${baseUrl}/api/vault`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({
+          mediaId: photo?.id,
+          eventId: photo?.eventId,
+          isFavorite: nextValue,
+        }),
+      });
+    } catch (error) {
+      console.error('Failed to update favorite:', error);
+    }
   };
 
   if (isLoading) {
@@ -230,7 +266,24 @@ export default function PhotoViewerScreen() {
     );
   }
 
-  const displayUrl = photo.isOwned ? photo.fullUrl : photo.watermarkedUrl;
+  // Get signed URL for display
+  const [displayUrl, setDisplayUrl] = useState<string>('');
+
+  useEffect(() => {
+    const loadDisplayUrl = async () => {
+      if (photo) {
+        if (photo.isOwned) {
+          // Get full resolution signed URL
+          const url = await getSignedUrl('media', photo.fullUrl);
+          setDisplayUrl(url || '');
+        } else {
+          // Use watermarked or thumbnail
+          setDisplayUrl(photo.watermarkedUrl || photo.thumbnailUrl);
+        }
+      }
+    };
+    loadDisplayUrl();
+  }, [photo]);
 
   return (
     <>
@@ -266,11 +319,17 @@ export default function PhotoViewerScreen() {
 
       <View style={styles.container}>
         {/* Photo */}
-        <Image
-          source={{ uri: displayUrl }}
-          style={styles.photo}
-          resizeMode="contain"
-        />
+        {displayUrl ? (
+          <Image
+            source={{ uri: displayUrl }}
+            style={styles.photo}
+            resizeMode="contain"
+          />
+        ) : (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={colors.accent} />
+          </View>
+        )}
 
         {/* Info Overlay */}
         <View style={styles.infoOverlay}>
@@ -299,7 +358,7 @@ export default function PhotoViewerScreen() {
           ) : (
             <View style={styles.purchaseContainer}>
               <Text style={styles.priceText}>
-                ${photo.price.toFixed(2)}
+                {formatPrice(photo.price / 100, photo.currency || 'USD')}
               </Text>
               <Button
                 onPress={handlePurchase}
@@ -370,7 +429,6 @@ const styles = StyleSheet.create({
     right: 0,
     padding: spacing.lg,
     paddingBottom: spacing.xl + 20,
-    background: 'linear-gradient(transparent, rgba(0,0,0,0.8))',
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
   },
   eventInfo: {

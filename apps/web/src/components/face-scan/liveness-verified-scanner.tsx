@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useCallback } from 'react';
 import { Shield, ShieldCheck, ShieldX, Loader2, Camera } from 'lucide-react';
+import { useState, useCallback } from 'react';
 
 import { Button } from '@/components/ui/button';
+
 import { GuidedFaceScanner } from './guided-face-scanner';
 
 interface LivenessVerifiedScannerProps {

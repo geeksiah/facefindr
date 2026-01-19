@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+
 import {
   getPhotographerPayoutSettings,
   updatePhotographerPayoutSettings,
   getPayoutMinimum,
   MINIMUM_DISPLAY,
 } from '@/lib/payments/payout-config';
+import { createClient } from '@/lib/supabase/server';
 
 // GET: Fetch photographer's payout settings
 export async function GET() {

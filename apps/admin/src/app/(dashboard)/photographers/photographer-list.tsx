@@ -1,8 +1,5 @@
 'use client';
 
-import { useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
   MoreHorizontal,
   Eye,
@@ -14,6 +11,11 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
+
 import { formatDate, getInitials } from '@/lib/utils';
 
 interface Photographer {
@@ -40,16 +42,69 @@ interface PhotographerListProps {
   limit: number;
 }
 
+interface MenuState {
+  id: string;
+  top: number;
+  right: number;
+}
+
 export function PhotographerList({ photographers, total, page, limit }: PhotographerListProps) {
   const router = useRouter();
-  const [actionMenuId, setActionMenuId] = useState<string | null>(null);
+  const [activeMenu, setActiveMenu] = useState<MenuState | null>(null);
   const [isLoading, setIsLoading] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   const totalPages = Math.ceil(total / limit);
 
+  // Track if component is mounted (for portal)
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Update menu position on scroll/resize
+  useEffect(() => {
+    if (activeMenu) {
+      const updatePosition = () => {
+        const button = buttonRefs.current[activeMenu.id];
+        if (button) {
+          const rect = button.getBoundingClientRect();
+          setActiveMenu({
+            id: activeMenu.id,
+            top: rect.bottom + 4,
+            right: window.innerWidth - rect.right,
+          });
+        }
+      };
+      
+      window.addEventListener('scroll', updatePosition, true);
+      window.addEventListener('resize', updatePosition);
+      
+      return () => {
+        window.removeEventListener('scroll', updatePosition, true);
+        window.removeEventListener('resize', updatePosition);
+      };
+    }
+  }, [activeMenu?.id]);
+
+  // Open menu and calculate position
+  const openMenu = (photographerId: string) => {
+    const button = buttonRefs.current[photographerId];
+    if (button) {
+      const rect = button.getBoundingClientRect();
+      setActiveMenu({
+        id: photographerId,
+        top: rect.bottom + 4,
+        right: window.innerWidth - rect.right,
+      });
+    }
+  };
+
+  const closeMenu = () => setActiveMenu(null);
+
   const handleAction = async (photographerId: string, action: string) => {
     setIsLoading(photographerId);
-    setActionMenuId(null);
+    closeMenu();
 
     try {
       const response = await fetch(`/api/photographers/${photographerId}/${action}`, {
@@ -90,7 +145,8 @@ export function PhotographerList({ photographers, total, page, limit }: Photogra
   return (
     <div className="space-y-4">
       {/* Table */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div className="rounded-xl border border-border bg-card">
+        <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
             <tr className="border-b border-border bg-muted/50">
@@ -116,7 +172,15 @@ export function PhotographerList({ photographers, total, page, limit }: Photogra
           </thead>
           <tbody className="divide-y divide-border">
             {photographers.map((photographer) => (
-              <tr key={photographer.id} className="hover:bg-muted/30 transition-colors">
+              <tr 
+                key={photographer.id} 
+                className="hover:bg-muted/30 transition-colors cursor-pointer relative"
+                onClick={(e) => {
+                  // Don't navigate if clicking on action button
+                  if ((e.target as HTMLElement).closest('button, a')) return;
+                  window.location.href = `/photographers/${photographer.id}`;
+                }}
+              >
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
                     {photographer.profile_photo_url ? (
@@ -159,75 +223,31 @@ export function PhotographerList({ photographers, total, page, limit }: Photogra
                   {formatDate(photographer.created_at)}
                 </td>
                 <td className="px-6 py-4">
-                  <div className="flex justify-end relative">
+                  <div className="flex justify-end">
                     <button
-                      onClick={() => setActionMenuId(
-                        actionMenuId === photographer.id ? null : photographer.id
-                      )}
+                      ref={(el) => {
+                        buttonRefs.current[photographer.id] = el;
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (activeMenu?.id === photographer.id) {
+                          closeMenu();
+                        } else {
+                          openMenu(photographer.id);
+                        }
+                      }}
                       className="p-2 rounded-lg hover:bg-muted transition-colors"
                       disabled={isLoading === photographer.id}
                     >
                       <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
                     </button>
-
-                    {actionMenuId === photographer.id && (
-                      <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-border bg-card shadow-lg z-10">
-                        <div className="py-1">
-                          <Link
-                            href={`/photographers/${photographer.id}`}
-                            className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
-                          >
-                            <Eye className="h-4 w-4" />
-                            View Details
-                          </Link>
-                          {photographer.status === 'suspended' ? (
-                            <button
-                              onClick={() => handleAction(photographer.id, 'unsuspend')}
-                              className="w-full flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
-                            >
-                              <CheckCircle className="h-4 w-4" />
-                              Unsuspend
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => handleAction(photographer.id, 'suspend')}
-                              className="w-full flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
-                            >
-                              <Ban className="h-4 w-4" />
-                              Suspend
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleAction(photographer.id, 'reset-password')}
-                            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
-                          >
-                            <KeyRound className="h-4 w-4" />
-                            Reset Password
-                          </button>
-                          <button
-                            onClick={() => handleAction(photographer.id, 'send-verification')}
-                            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
-                          >
-                            <Mail className="h-4 w-4" />
-                            Send Verification
-                          </button>
-                          <hr className="my-1 border-border" />
-                          <button
-                            onClick={() => handleAction(photographer.id, 'delete')}
-                            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-500 hover:bg-muted transition-colors"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                            Delete Account
-                          </button>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Pagination */}
@@ -255,6 +275,83 @@ export function PhotographerList({ photographers, total, page, limit }: Photogra
             </Link>
           </div>
         </div>
+      )}
+
+      {/* Dropdown Menu Portal */}
+      {mounted && activeMenu && createPortal(
+        <>
+          {/* Backdrop */}
+          <div 
+            className="fixed inset-0 z-[9998]" 
+            onClick={closeMenu}
+          />
+          {/* Menu */}
+          <div 
+            className="fixed w-48 rounded-lg border border-border bg-card shadow-xl z-[9999]"
+            style={{ 
+              top: activeMenu.top, 
+              right: activeMenu.right,
+            }}
+          >
+            <div className="py-1">
+              {(() => {
+                const photographer = photographers.find(p => p.id === activeMenu.id);
+                if (!photographer) return null;
+                return (
+                  <>
+                    <Link
+                      href={`/photographers/${photographer.id}`}
+                      className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                    >
+                      <Eye className="h-4 w-4" />
+                      View Details
+                    </Link>
+                    {photographer.status === 'suspended' ? (
+                      <button
+                        onClick={() => handleAction(photographer.id, 'unsuspend')}
+                        className="w-full flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                      >
+                        <CheckCircle className="h-4 w-4" />
+                        Unsuspend
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleAction(photographer.id, 'suspend')}
+                        className="w-full flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                      >
+                        <Ban className="h-4 w-4" />
+                        Suspend
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleAction(photographer.id, 'reset-password')}
+                      className="w-full flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                    >
+                      <KeyRound className="h-4 w-4" />
+                      Reset Password
+                    </button>
+                    <button
+                      onClick={() => handleAction(photographer.id, 'send-verification')}
+                      className="w-full flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                    >
+                      <Mail className="h-4 w-4" />
+                      Send Verification
+                    </button>
+                    <hr className="my-1 border-border" />
+                    <button
+                      onClick={() => handleAction(photographer.id, 'delete')}
+                      className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-500 hover:bg-muted transition-colors"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Delete Account
+                    </button>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        </>,
+        document.body
       )}
     </div>
   );

@@ -1,4 +1,3 @@
-import { Suspense } from 'react';
 import { 
   DollarSign, 
   Users, 
@@ -9,8 +8,11 @@ import {
   ArrowUpRight,
   Loader2,
 } from 'lucide-react';
+import { Suspense } from 'react';
+
 import { supabaseAdmin } from '@/lib/supabase';
 import { formatCurrency, formatNumber, formatDateTime } from '@/lib/utils';
+
 import { RealtimeStats } from './realtime-stats';
 import { RecentActivity } from './recent-activity';
 

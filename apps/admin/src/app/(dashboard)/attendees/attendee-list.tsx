@@ -1,8 +1,5 @@
 'use client';
 
-import { useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
   MoreHorizontal,
   Eye,
@@ -14,6 +11,11 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
+
 import { formatDate, formatCurrency, getInitials } from '@/lib/utils';
 
 interface Attendee {
@@ -36,16 +38,69 @@ interface AttendeeListProps {
   limit: number;
 }
 
+interface MenuState {
+  id: string;
+  top: number;
+  right: number;
+}
+
 export function AttendeeList({ attendees, total, page, limit }: AttendeeListProps) {
   const router = useRouter();
-  const [actionMenuId, setActionMenuId] = useState<string | null>(null);
+  const [activeMenu, setActiveMenu] = useState<MenuState | null>(null);
   const [isLoading, setIsLoading] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   const totalPages = Math.ceil(total / limit);
 
+  // Track if component is mounted (for portal)
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Update menu position on scroll/resize
+  useEffect(() => {
+    if (activeMenu) {
+      const updatePosition = () => {
+        const button = buttonRefs.current[activeMenu.id];
+        if (button) {
+          const rect = button.getBoundingClientRect();
+          setActiveMenu({
+            id: activeMenu.id,
+            top: rect.bottom + 4,
+            right: window.innerWidth - rect.right,
+          });
+        }
+      };
+      
+      window.addEventListener('scroll', updatePosition, true);
+      window.addEventListener('resize', updatePosition);
+      
+      return () => {
+        window.removeEventListener('scroll', updatePosition, true);
+        window.removeEventListener('resize', updatePosition);
+      };
+    }
+  }, [activeMenu?.id]);
+
+  // Open menu and calculate position
+  const openMenu = (attendeeId: string) => {
+    const button = buttonRefs.current[attendeeId];
+    if (button) {
+      const rect = button.getBoundingClientRect();
+      setActiveMenu({
+        id: attendeeId,
+        top: rect.bottom + 4,
+        right: window.innerWidth - rect.right,
+      });
+    }
+  };
+
+  const closeMenu = () => setActiveMenu(null);
+
   const handleAction = async (attendeeId: string, action: string) => {
     setIsLoading(attendeeId);
-    setActionMenuId(null);
+    closeMenu();
 
     try {
       const response = await fetch(`/api/attendees/${attendeeId}/${action}`, {
@@ -91,7 +146,8 @@ export function AttendeeList({ attendees, total, page, limit }: AttendeeListProp
   return (
     <div className="space-y-4">
       {/* Table */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div className="rounded-xl border border-border bg-card overflow-visible">
+        <div className="overflow-x-auto overflow-y-visible">
         <table className="w-full">
           <thead>
             <tr className="border-b border-border bg-muted/50">
@@ -126,7 +182,15 @@ export function AttendeeList({ attendees, total, page, limit }: AttendeeListProp
               ) || 0;
 
               return (
-                <tr key={attendee.id} className="hover:bg-muted/30 transition-colors">
+                <tr 
+                  key={attendee.id} 
+                  className="hover:bg-muted/30 transition-colors cursor-pointer"
+                  onClick={(e) => {
+                    // Don't navigate if clicking on action button
+                    if ((e.target as HTMLElement).closest('button, a')) return;
+                    window.location.href = `/attendees/${attendee.id}`;
+                  }}
+                >
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       {attendee.profile_photo_url ? (
@@ -172,69 +236,24 @@ export function AttendeeList({ attendees, total, page, limit }: AttendeeListProp
                     {formatDate(attendee.created_at)}
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex justify-end relative">
+                    <div className="flex justify-end">
                       <button
-                        onClick={() => setActionMenuId(
-                          actionMenuId === attendee.id ? null : attendee.id
-                        )}
+                        ref={(el) => {
+                          buttonRefs.current[attendee.id] = el;
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (activeMenu?.id === attendee.id) {
+                            closeMenu();
+                          } else {
+                            openMenu(attendee.id);
+                          }
+                        }}
                         className="p-2 rounded-lg hover:bg-muted transition-colors"
                         disabled={isLoading === attendee.id}
                       >
                         <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
                       </button>
-
-                      {actionMenuId === attendee.id && (
-                        <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-border bg-card shadow-lg z-10">
-                          <div className="py-1">
-                            <Link
-                              href={`/attendees/${attendee.id}`}
-                              className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
-                            >
-                              <Eye className="h-4 w-4" />
-                              View Details
-                            </Link>
-                            {attendee.status === 'suspended' ? (
-                              <button
-                                onClick={() => handleAction(attendee.id, 'unsuspend')}
-                                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
-                              >
-                                <CheckCircle className="h-4 w-4" />
-                                Unsuspend
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => handleAction(attendee.id, 'suspend')}
-                                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
-                              >
-                                <Ban className="h-4 w-4" />
-                                Suspend
-                              </button>
-                            )}
-                            <button
-                              onClick={() => handleAction(attendee.id, 'export-data')}
-                              className="w-full flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
-                            >
-                              <Download className="h-4 w-4" />
-                              Export Data (GDPR)
-                            </button>
-                            <button
-                              onClick={() => handleAction(attendee.id, 'delete-face')}
-                              className="w-full flex items-center gap-2 px-4 py-2 text-sm text-orange-500 hover:bg-muted transition-colors"
-                            >
-                              <UserX className="h-4 w-4" />
-                              Delete Face Data
-                            </button>
-                            <hr className="my-1 border-border" />
-                            <button
-                              onClick={() => handleAction(attendee.id, 'delete')}
-                              className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-500 hover:bg-muted transition-colors"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              Delete Account
-                            </button>
-                          </div>
-                        </div>
-                      )}
                     </div>
                   </td>
                 </tr>
@@ -242,6 +261,7 @@ export function AttendeeList({ attendees, total, page, limit }: AttendeeListProp
             })}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Pagination */}
@@ -269,6 +289,83 @@ export function AttendeeList({ attendees, total, page, limit }: AttendeeListProp
             </Link>
           </div>
         </div>
+      )}
+
+      {/* Dropdown Menu Portal */}
+      {mounted && activeMenu && createPortal(
+        <>
+          {/* Backdrop */}
+          <div 
+            className="fixed inset-0 z-[9998]" 
+            onClick={closeMenu}
+          />
+          {/* Menu */}
+          <div 
+            className="fixed w-48 rounded-lg border border-border bg-card shadow-xl z-[9999]"
+            style={{ 
+              top: activeMenu.top, 
+              right: activeMenu.right,
+            }}
+          >
+            <div className="py-1">
+              {(() => {
+                const attendee = attendees.find(a => a.id === activeMenu.id);
+                if (!attendee) return null;
+                return (
+                  <>
+                    <Link
+                      href={`/attendees/${attendee.id}`}
+                      className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                    >
+                      <Eye className="h-4 w-4" />
+                      View Details
+                    </Link>
+                    {attendee.status === 'suspended' ? (
+                      <button
+                        onClick={() => handleAction(attendee.id, 'unsuspend')}
+                        className="w-full flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                      >
+                        <CheckCircle className="h-4 w-4" />
+                        Unsuspend
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleAction(attendee.id, 'suspend')}
+                        className="w-full flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                      >
+                        <Ban className="h-4 w-4" />
+                        Suspend
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleAction(attendee.id, 'export-data')}
+                      className="w-full flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                    >
+                      <Download className="h-4 w-4" />
+                      Export Data (GDPR)
+                    </button>
+                    <button
+                      onClick={() => handleAction(attendee.id, 'delete-face')}
+                      className="w-full flex items-center gap-2 px-4 py-2 text-sm text-orange-500 hover:bg-muted transition-colors"
+                    >
+                      <UserX className="h-4 w-4" />
+                      Delete Face Data
+                    </button>
+                    <hr className="my-1 border-border" />
+                    <button
+                      onClick={() => handleAction(attendee.id, 'delete')}
+                      className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-500 hover:bg-muted transition-colors"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Delete Account
+                    </button>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        </>,
+        document.body
       )}
     </div>
   );

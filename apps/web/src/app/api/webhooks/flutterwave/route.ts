@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
+import { NextResponse } from 'next/server';
+
 import { verifyWebhookSignature, verifyTransaction } from '@/lib/payments/flutterwave';
 import { createServiceClient } from '@/lib/supabase/server';
 

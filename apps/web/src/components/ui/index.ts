@@ -1,5 +1,6 @@
 export { Button, buttonVariants } from './button';
 export { Input } from './input';
+export { Select } from './select';
 export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent } from './card';
 export { ThemeToggle } from './theme-toggle';
 export { Logo, LogoIcon } from './logo';
@@ -8,3 +9,4 @@ export { ToastProvider, useToast, ConfirmDialog, useConfirm } from './toast';
 export { OfflineDetector } from './offline-detector';
 export { CurrencySwitcher } from './currency-switcher';
 export { RouteProgress } from './route-progress';
+export { Lightbox } from './lightbox';

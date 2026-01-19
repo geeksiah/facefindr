@@ -1,6 +1,3 @@
-import { supabaseAdmin } from '@/lib/supabase';
-import { formatDate } from '@/lib/utils';
-import Link from 'next/link';
 import { 
   Globe, 
   Plus, 
@@ -12,6 +9,10 @@ import {
   Mail,
   Phone,
 } from 'lucide-react';
+import Link from 'next/link';
+
+import { supabaseAdmin } from '@/lib/supabase';
+import { formatDate } from '@/lib/utils';
 
 async function getRegions() {
   const { data } = await supabaseAdmin

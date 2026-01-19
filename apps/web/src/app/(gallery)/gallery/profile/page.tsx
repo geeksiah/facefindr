@@ -1,8 +1,5 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import Image from 'next/image';
-import Link from 'next/link';
 import {
   User,
   Camera,
@@ -16,6 +13,9 @@ import {
   ChevronRight,
   AlertTriangle,
 } from 'lucide-react';
+import Image from 'next/image';
+import Link from 'next/link';
+import { useState, useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -322,8 +322,24 @@ export default function ProfilePage() {
 
       {/* Delete Face Data Confirmation */}
       {showDeleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md rounded-2xl bg-card p-6 space-y-4">
+        <div 
+          className="fixed z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100vw',
+            width: '100dvw',
+            height: '100vh',
+            height: '100dvh',
+            margin: 0,
+            padding: 0,
+          }}
+        >
+          <div className="w-full max-w-md rounded-2xl bg-card p-6 space-y-4 mx-4 my-4">
             <div className="flex items-center gap-3 text-destructive">
               <AlertTriangle className="h-6 w-6" />
               <h3 className="text-lg font-semibold">Delete Face Data?</h3>

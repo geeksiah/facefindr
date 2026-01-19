@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { 
   Receipt, 
   UserPlus, 
@@ -10,6 +9,8 @@ import {
   Clock,
   XCircle,
 } from 'lucide-react';
+import Link from 'next/link';
+
 import { formatCurrency, formatDateTime, truncate } from '@/lib/utils';
 
 interface Activity {

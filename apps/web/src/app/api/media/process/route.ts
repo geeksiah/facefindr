@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+
 import { indexFacesFromImage, isRekognitionConfigured, createEventCollection } from '@/lib/aws/rekognition';
+import { checkLimit, checkFeature, incrementFaceOps } from '@/lib/subscription/enforcement';
+import { createClient } from '@/lib/supabase/server';
 
 /**
  * POST /api/media/process
@@ -17,7 +19,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = createClient();
+    const supabase = await createClient();
 
     // Verify authentication
     const { data: { user } } = await supabase.auth.getUser();
@@ -31,7 +33,7 @@ export async function POST(request: NextRequest) {
     // Verify event ownership and face recognition is enabled
     const { data: event } = await supabase
       .from('events')
-      .select('photographer_id, face_recognition_enabled, face_ops_used, face_ops_limit')
+      .select('photographer_id, face_recognition_enabled, face_ops_used')
       .eq('id', eventId)
       .single();
 
@@ -42,7 +44,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if face recognition is enabled
+    // ENFORCE: Check if face recognition feature is enabled for the plan
+    const canUseFaceRecognition = await checkFeature(event.photographer_id, 'face_recognition');
+    if (!canUseFaceRecognition) {
+      return NextResponse.json({
+        success: false,
+        error: 'Face recognition is not available on your current plan. Please upgrade.',
+        code: 'FEATURE_NOT_ENABLED',
+        feature: 'face_recognition',
+        facesIndexed: 0,
+      }, { status: 403 });
+    }
+
+    // Check if face recognition is enabled for this event
     if (!event.face_recognition_enabled) {
       return NextResponse.json({
         success: true,
@@ -61,13 +75,18 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Check face ops quota
-    if (event.face_ops_used >= event.face_ops_limit) {
+    // ENFORCE: Check face ops limit using the enforcement system
+    const faceOpsLimit = await checkLimit(event.photographer_id, 'face_ops', eventId);
+    if (!faceOpsLimit.allowed) {
       return NextResponse.json({
         success: false,
-        error: 'Face operations quota exceeded',
+        error: faceOpsLimit.message || 'Face operations quota exceeded for this event. Please upgrade your plan.',
+        code: 'LIMIT_EXCEEDED',
+        limitType: 'face_ops',
+        current: faceOpsLimit.current,
+        limit: faceOpsLimit.limit,
         facesIndexed: 0,
-      });
+      }, { status: 403 });
     }
 
     // Get the media record
@@ -155,13 +174,15 @@ export async function POST(request: NextRequest) {
       })
       .eq('id', mediaId);
 
-    // Update face ops counter
-    await supabase
-      .from('events')
-      .update({
-        face_ops_used: event.face_ops_used + facesDetected,
-      })
-      .eq('id', eventId);
+    // ENFORCE: Increment face ops counter using the enforcement system
+    // This also validates the limit before incrementing
+    try {
+      await incrementFaceOps(eventId, facesDetected);
+    } catch (error: any) {
+      // If limit exceeded during increment, still return success for this batch
+      // but warn that future operations may be blocked
+      console.warn('Face ops limit warning:', error.message);
+    }
 
     return NextResponse.json({
       success: true,

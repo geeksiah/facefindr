@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import {
   Calendar,
   Plus,
@@ -7,11 +6,15 @@ import {
   Image,
   Eye,
   Pencil,
-  Trash2,
 } from 'lucide-react';
+import Link from 'next/link';
 
-import { createClient } from '@/lib/supabase/server';
+import { DeleteEventButton } from '@/components/events/delete-event-button';
+import { EventsListRealtime } from '@/components/events/events-list-realtime';
 import { Button } from '@/components/ui/button';
+import { getCurrencySymbol } from '@/lib/currency-utils';
+import { getCoverImageUrl } from '@/lib/storage-urls';
+import { createClient } from '@/lib/supabase/server';
 
 // ============================================
 // STATUS BADGE
@@ -40,7 +43,7 @@ function StatusBadge({ status }: { status: string }) {
 // ============================================
 
 export default async function EventsPage() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -71,6 +74,7 @@ export default async function EventsPage() {
       eventDate: event.event_date,
       status: event.status,
       isPublic: event.is_public,
+      coverImageUrl: getCoverImageUrl(event.cover_image_url || event.cover_image_path),
       photoCount: event.media?.[0]?.count || 0,
       pricing: event.event_pricing?.[0],
       createdAt: event.created_at,
@@ -78,6 +82,7 @@ export default async function EventsPage() {
 
   return (
     <div className="space-y-6">
+      <EventsListRealtime photographerId={user.id} />
       {/* Page Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -134,17 +139,25 @@ export default async function EventsPage() {
           </Button>
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {formattedEvents.map((event) => (
             <div
               key={event.id}
               className="group relative overflow-hidden rounded-xl border border-border bg-card transition-all hover:border-accent/50 hover:shadow-md"
             >
-              {/* Cover Image Placeholder */}
-              <div className="relative aspect-[16/9] bg-gradient-to-br from-accent/10 to-accent/20">
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <Calendar className="h-12 w-12 text-accent/40" />
-                </div>
+              {/* Cover Image */}
+              <div className="relative aspect-[4/3] bg-gradient-to-br from-accent/10 to-accent/20 overflow-hidden">
+                {event.coverImageUrl ? (
+                  <img
+                    src={event.coverImageUrl}
+                    alt={event.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <Calendar className="h-12 w-12 text-accent/40" />
+                  </div>
+                )}
                 {/* Status Badge */}
                 <div className="absolute right-3 top-3">
                   <StatusBadge status={event.status} />
@@ -152,23 +165,23 @@ export default async function EventsPage() {
               </div>
 
               {/* Content */}
-              <div className="p-4">
-                <h3 className="font-semibold text-foreground group-hover:text-accent">
+              <div className="p-3">
+                <h3 className="font-semibold text-sm text-foreground group-hover:text-accent line-clamp-1">
                   {event.name}
                 </h3>
                 {event.description && (
-                  <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{event.description}</p>
+                  <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">{event.description}</p>
                 )}
 
                 {/* Meta */}
-                <div className="mt-4 flex items-center gap-4 text-sm text-muted-foreground">
+                <div className="mt-2 flex flex-col gap-1.5 text-xs text-muted-foreground">
                   <div className="flex items-center gap-1">
-                    <Image className="h-4 w-4" />
+                    <Image className="h-3 w-3" />
                     <span>{event.photoCount} photos</span>
                   </div>
                   {event.eventDate && (
                     <div className="flex items-center gap-1">
-                      <Calendar className="h-4 w-4" />
+                      <Calendar className="h-3 w-3" />
                       <span>
                         {new Date(event.eventDate).toLocaleDateString('en-US', {
                           month: 'short',
@@ -180,18 +193,18 @@ export default async function EventsPage() {
                 </div>
 
                 {/* Pricing */}
-                <div className="mt-3 flex items-center gap-2">
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
                   {event.pricing?.is_free ? (
-                    <span className="rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success dark:bg-success/20">
+                    <span className="rounded-full bg-success/10 px-1.5 py-0.5 text-[10px] font-medium text-success dark:bg-success/20">
                       Free
                     </span>
                   ) : (
-                    <span className="rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent dark:bg-accent/20">
-                      ${((event.pricing?.price_per_media || 0) / 100).toFixed(2)}/photo
+                    <span className="rounded-full bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent dark:bg-accent/20">
+                      {getCurrencySymbol(event.pricing?.currency || 'USD')}{((event.pricing?.price_per_media || 0) / 100).toFixed(2)}
                     </span>
                   )}
                   {event.isPublic && (
-                    <span className="rounded-full bg-purple-500/10 px-2 py-0.5 text-xs font-medium text-purple-600 dark:text-purple-400">
+                    <span className="rounded-full bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-medium text-purple-600 dark:text-purple-400">
                       Public
                     </span>
                   )}
@@ -207,15 +220,22 @@ export default async function EventsPage() {
                   Manage Event
                 </Link>
                 <div className="flex items-center gap-1">
-                  <button className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground">
+                  <Link
+                    href={`/e/${event.id}`}
+                    target="_blank"
+                    className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    title="Preview public event page"
+                  >
                     <Eye className="h-4 w-4" />
-                  </button>
-                  <button className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground">
+                  </Link>
+                  <Link
+                    href={`/dashboard/events/${event.id}/settings`}
+                    className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    title="Edit event settings"
+                  >
                     <Pencil className="h-4 w-4" />
-                  </button>
-                  <button className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  </Link>
+                  <DeleteEventButton eventId={event.id} eventName={event.name} />
                 </div>
               </div>
             </div>

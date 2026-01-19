@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Save, Loader2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 
 interface Setting {
   key: string;
@@ -16,8 +16,6 @@ interface SettingsFormProps {
 
 const categoryLabels: Record<string, string> = {
   payouts: 'Payout Settings',
-  fees: 'Platform Fees',
-  prints: 'Print Commissions',
   general: 'General Settings',
 };
 
@@ -26,7 +24,29 @@ export function SettingsForm({ settings }: SettingsFormProps) {
   const [values, setValues] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
     Object.values(settings).flat().forEach((s) => {
-      initial[s.key] = String(s.value).replace(/"/g, '');
+      let displayValue = String(s.value).replace(/"/g, '');
+      const numValue = parseFloat(displayValue);
+      
+      // Convert from cents to decimals for display (amounts)
+      if (s.key.includes('minimum') || s.key.includes('amount') || (s.key.includes('price') && !s.key.includes('percent')) || (s.key.includes('fee') && !s.key.includes('percent') && !s.key.includes('commission')) || (s.key.includes('commission') && !s.key.includes('percent'))) {
+        if (!isNaN(numValue) && numValue > 1000) {
+          displayValue = (numValue / 100).toFixed(2);
+        } else if (!isNaN(numValue)) {
+          displayValue = numValue.toFixed(2);
+        }
+      }
+      // Convert percentages: if stored as cents (2000 = 20%), show as 20
+      else if (s.key.includes('percent') || (s.key.includes('fee') && s.key.includes('percent')) || (s.key.includes('commission') && s.key.includes('percent'))) {
+        if (!isNaN(numValue) && numValue > 100) {
+          displayValue = (numValue / 100).toFixed(0);
+        } else if (!isNaN(numValue) && numValue < 1) {
+          displayValue = (numValue * 100).toFixed(0);
+        } else if (!isNaN(numValue)) {
+          displayValue = numValue.toFixed(0);
+        }
+      }
+      
+      initial[s.key] = displayValue;
     });
     return initial;
   });
@@ -61,12 +81,29 @@ export function SettingsForm({ settings }: SettingsFormProps) {
   };
 
   const formatValue = (key: string, value: string) => {
-    if (key.includes('fee') || key.includes('commission')) {
-      return `${(parseInt(value) / 100).toFixed(2)}%`;
+    // Percentages should be whole numbers (e.g., 20 for 20%)
+    if (key.includes('fee') || key.includes('commission') || key.includes('percent')) {
+      const numValue = parseFloat(value);
+      // If stored as cents (2000), convert to percentage (20%)
+      // If stored as decimal (0.20), convert to percentage (20%)
+      // If stored as whole number (20), use as is (20%)
+      if (numValue > 100) {
+        return `${(numValue / 100).toFixed(0)}%`; // 2000 -> 20%
+      } else if (numValue < 1) {
+        return `${(numValue * 100).toFixed(0)}%`; // 0.20 -> 20%
+      } else {
+        return `${numValue.toFixed(0)}%`; // 20 -> 20%
+      }
     }
-    if (key.includes('minimum')) {
+    // Amounts should be in decimals (e.g., 20.00 for $20.00)
+    if (key.includes('minimum') || key.includes('amount') || key.includes('price')) {
+      const numValue = parseFloat(value);
       const currency = key.split('_').pop()?.toUpperCase() || 'USD';
-      return `${(parseInt(value) / 100).toFixed(2)} ${currency}`;
+      // If stored as cents (2000), convert to decimal (20.00)
+      if (numValue > 1000) {
+        return `${(numValue / 100).toFixed(2)} ${currency}`;
+      }
+      return `${numValue.toFixed(2)} ${currency}`;
     }
     return value;
   };
@@ -105,6 +142,8 @@ export function SettingsForm({ settings }: SettingsFormProps) {
                 ) : (
                   <input
                     type="number"
+                    step={setting.key.includes('percent') ? '1' : '0.01'}
+                    min="0"
                     value={values[setting.key]}
                     onChange={(e) => setValues({ ...values, [setting.key]: e.target.value })}
                     className="px-4 py-2 rounded-lg bg-muted border border-input text-foreground"

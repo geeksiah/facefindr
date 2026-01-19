@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { searchFacesByImage } from '@/lib/aws/rekognition';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // ============================================
 // PHOTO DROP NOTIFICATION API

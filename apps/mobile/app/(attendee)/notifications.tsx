@@ -25,7 +25,7 @@ import {
   CheckCircle2,
   Settings,
   Trash2,
-  Sparkles,
+  Gift,
 } from 'lucide-react-native';
 
 import { useAuthStore } from '@/stores/auth-store';
@@ -156,9 +156,9 @@ export default function NotificationsScreen() {
     markAsRead(notification.id);
 
     if (notification.type === 'photo_drop' && notification.data?.eventId) {
-      router.push(`/event/${notification.data.eventId}`);
+      router.push(`/event/${notification.data.eventId}` as any);
     } else if (notification.type === 'purchase' && notification.data?.orderId) {
-      router.push(`/order/${notification.data.orderId}`);
+      router.push(`/order/${notification.data.orderId}` as any);
     }
   };
 
@@ -220,7 +220,7 @@ export default function NotificationsScreen() {
       {/* Notification Types Legend */}
       <View style={styles.legendCard}>
         <View style={styles.legendHeader}>
-          <Sparkles size={14} color={colors.accent} />
+          <Gift size={14} color={colors.accent} />
           <Text style={styles.legendTitle}>What to expect</Text>
         </View>
         <View style={styles.legendItems}>

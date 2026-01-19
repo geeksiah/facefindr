@@ -1,4 +1,5 @@
 import { Metadata } from 'next';
+
 import { createClient } from '@/lib/supabase/server';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
@@ -16,7 +17,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const supabase = await createClient();
   
   // Try to find attendee by face_tag or public profile slug
-  let { data: attendee } = await supabase
+  const { data: attendee } = await supabase
     .from('attendees')
     .select('id, display_name, profile_photo_url, face_tag')
     .or(`face_tag.eq.${faceTag},public_profile_slug.eq.${slug}`)

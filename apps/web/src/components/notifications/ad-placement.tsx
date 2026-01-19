@@ -7,8 +7,8 @@
  * Tracks impressions and clicks automatically.
  */
 
-import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
+import { useState, useEffect } from 'react';
 
 interface AdCampaign {
   id: string;

@@ -1,11 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
 import { Check, CreditCard, Download, Sparkles, Loader2, ExternalLink } from 'lucide-react';
-import { Button, Switch, CurrencySwitcher } from '@/components/ui';
-import { useCurrency } from '@/components/providers';
-import { PaymentMethodsManager } from '@/components/payments';
+import { useState, useEffect, useCallback } from 'react';
+
 import { DashboardBanner } from '@/components/notifications';
+import { PaymentMethodsManager } from '@/components/payments';
+import { useCurrency } from '@/components/providers';
+import { Button, Switch, CurrencySwitcher } from '@/components/ui';
+import { useRealtimeSubscription } from '@/hooks/use-realtime';
 
 interface PlanPricing {
   planCode: string;
@@ -15,14 +17,23 @@ interface PlanPricing {
   annualPrice: number;
   formattedMonthly: string;
   formattedAnnual: string;
+  isPopular?: boolean;
+  displayFeatures?: string[]; // Text features from admin
   features?: {
     maxActiveEvents: number;
     maxPhotosPerEvent: number;
     maxFaceOpsPerEvent: number;
+    storageGb?: number;
+    teamMembers?: number;
     platformFeePercent: number;
     customWatermark: boolean;
+    customBranding?: boolean;
     liveEventMode: boolean;
+    advancedAnalytics?: boolean;
     apiAccess: boolean;
+    prioritySupport?: boolean;
+    whiteLabel?: boolean;
+    printProducts?: boolean;
   };
 }
 
@@ -40,45 +51,86 @@ interface PaymentMethod {
   expYear: number;
 }
 
+interface UsageData {
+  usage: {
+    activeEvents: number;
+    totalPhotos: number;
+    storageUsedGb: number;
+    teamMembers: number;
+    faceOpsUsed: number;
+  };
+  limits: {
+    maxEvents: number;
+    maxPhotosPerEvent: number;
+    maxStorageGb: number;
+    maxTeamMembers: number;
+    maxFaceOps: number;
+  };
+  percentages: {
+    events: number;
+    storage: number;
+    team: number;
+  };
+  planCode: string;
+  platformFee: number;
+}
+
 export default function BillingPage() {
   const { currencyCode, formatPrice } = useCurrency();
   const [plans, setPlans] = useState<PlanPricing[]>([]);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
-  const [usage, setUsage] = useState({ events: 0, photos: 0, faceOps: 0 });
+  const [usageData, setUsageData] = useState<UsageData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isAddingPayment, setIsAddingPayment] = useState(false);
   const [isUpgrading, setIsUpgrading] = useState<string | null>(null);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
 
-  // Load subscription data
-  useEffect(() => {
-    async function loadData() {
-      try {
-        // Load subscription pricing
-        const pricingRes = await fetch(`/api/subscriptions/pricing?currency=${currencyCode}`);
-        if (pricingRes.ok) {
-          const data = await pricingRes.json();
-          setPlans(data.plans || []);
-        }
-
-        // Load current subscription
-        const subRes = await fetch('/api/photographer/subscription');
-        if (subRes.ok) {
-          const data = await subRes.json();
-          setSubscription(data.subscription);
-          setPaymentMethod(data.paymentMethod);
-          setUsage(data.usage || { events: 0, photos: 0, faceOps: 0 });
-        }
-      } catch (error) {
-        console.error('Failed to load billing data:', error);
-      } finally {
-        setIsLoading(false);
+  // Load subscription and usage data
+  const loadData = useCallback(async () => {
+    try {
+      // Load subscription pricing
+      const pricingRes = await fetch(`/api/subscriptions/pricing?currency=${currencyCode}`);
+      if (pricingRes.ok) {
+        const data = await pricingRes.json();
+        setPlans(data.plans || []);
       }
-    }
 
-    loadData();
+      // Load current subscription
+      const subRes = await fetch('/api/photographer/subscription');
+      if (subRes.ok) {
+        const data = await subRes.json();
+        setSubscription(data.subscription);
+        setPaymentMethod(data.paymentMethod);
+      }
+
+      // Load real-time usage data
+      const usageRes = await fetch('/api/photographer/usage');
+      if (usageRes.ok) {
+        const data = await usageRes.json();
+        setUsageData(data);
+      }
+    } catch (error) {
+      console.error('Failed to load billing data:', error);
+    } finally {
+      setIsLoading(false);
+    }
   }, [currencyCode]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Subscribe to realtime updates for usage changes
+  useRealtimeSubscription({
+    table: 'events',
+    onChange: () => loadData(),
+  });
+
+  useRealtimeSubscription({
+    table: 'media',
+    onChange: () => loadData(),
+  });
 
   // Add payment method
   const handleAddPaymentMethod = async () => {
@@ -130,13 +182,19 @@ export default function BillingPage() {
     }
   };
 
-  const currentPlan = subscription?.planCode || 'free';
+  const currentPlan = usageData?.planCode || subscription?.planCode || 'free';
   const currentPlanData = plans.find(p => p.planCode === currentPlan);
-  const limits = currentPlanData?.features || {
-    maxActiveEvents: 3,
+  
+  // Use real usage data from the enforcement system
+  const usage = usageData?.usage || { activeEvents: 0, totalPhotos: 0, storageUsedGb: 0, teamMembers: 1, faceOpsUsed: 0 };
+  const limits = usageData?.limits || currentPlanData?.features || {
+    maxEvents: 3,
     maxPhotosPerEvent: 100,
-    maxFaceOpsPerEvent: 500,
+    maxStorageGb: 5,
+    maxTeamMembers: 1,
+    maxFaceOps: 500,
   };
+  const percentages = usageData?.percentages || { events: 0, storage: 0, team: 0 };
 
   if (isLoading) {
     return (
@@ -187,49 +245,73 @@ export default function BillingPage() {
           )}
         </div>
 
-        {/* Usage */}
-        <div className="mt-6 grid gap-4 sm:grid-cols-3">
+        {/* Usage - Real-time data from enforcement system */}
+        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div>
-            <p className="text-sm text-secondary">Events</p>
+            <p className="text-sm text-secondary">Active Events</p>
             <p className="text-lg font-semibold text-foreground">
-              {usage.events} / {limits.maxActiveEvents === -1 ? '∞' : limits.maxActiveEvents}
+              {usage.activeEvents} / {limits.maxEvents === -1 ? '∞' : limits.maxEvents}
             </p>
             <div className="mt-2 h-2 rounded-full bg-muted overflow-hidden">
               <div 
-                className="h-full rounded-full bg-accent transition-all" 
+                className={`h-full rounded-full transition-all ${percentages.events >= 90 ? 'bg-destructive' : percentages.events >= 70 ? 'bg-warning' : 'bg-accent'}`}
                 style={{ 
-                  width: limits.maxActiveEvents === -1 
+                  width: limits.maxEvents === -1 
                     ? '10%' 
-                    : `${Math.min((usage.events / limits.maxActiveEvents) * 100, 100)}%` 
+                    : `${Math.min(percentages.events, 100)}%` 
                 }}
               />
             </div>
+            {percentages.events >= 80 && (
+              <p className="text-xs text-warning mt-1">Approaching limit</p>
+            )}
           </div>
           <div>
-            <p className="text-sm text-secondary">Photos (per event)</p>
+            <p className="text-sm text-secondary">Storage Used</p>
             <p className="text-lg font-semibold text-foreground">
-              {usage.photos} / {limits.maxPhotosPerEvent}
+              {usage.storageUsedGb.toFixed(2)} GB / {limits.maxStorageGb} GB
             </p>
             <div className="mt-2 h-2 rounded-full bg-muted overflow-hidden">
               <div 
-                className="h-full rounded-full bg-accent transition-all" 
-                style={{ width: `${Math.min((usage.photos / limits.maxPhotosPerEvent) * 100, 100)}%` }}
+                className={`h-full rounded-full transition-all ${percentages.storage >= 90 ? 'bg-destructive' : percentages.storage >= 70 ? 'bg-warning' : 'bg-accent'}`}
+                style={{ width: `${Math.min(percentages.storage, 100)}%` }}
+              />
+            </div>
+            {percentages.storage >= 80 && (
+              <p className="text-xs text-warning mt-1">Storage almost full</p>
+            )}
+          </div>
+          <div>
+            <p className="text-sm text-secondary">Team Members</p>
+            <p className="text-lg font-semibold text-foreground">
+              {usage.teamMembers} / {limits.maxTeamMembers}
+            </p>
+            <div className="mt-2 h-2 rounded-full bg-muted overflow-hidden">
+              <div 
+                className={`h-full rounded-full transition-all ${percentages.team >= 90 ? 'bg-destructive' : percentages.team >= 70 ? 'bg-warning' : 'bg-accent'}`}
+                style={{ width: `${Math.min(percentages.team, 100)}%` }}
               />
             </div>
           </div>
           <div>
-            <p className="text-sm text-secondary">Face Operations</p>
+            <p className="text-sm text-secondary">Total Photos</p>
             <p className="text-lg font-semibold text-foreground">
-              {usage.faceOps} / {limits.maxFaceOpsPerEvent}
+              {usage.totalPhotos.toLocaleString()}
             </p>
-            <div className="mt-2 h-2 rounded-full bg-muted overflow-hidden">
-              <div 
-                className="h-full rounded-full bg-accent transition-all" 
-                style={{ width: `${Math.min((usage.faceOps / limits.maxFaceOpsPerEvent) * 100, 100)}%` }}
-              />
-            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Max {limits.maxPhotosPerEvent} per event
+            </p>
           </div>
         </div>
+
+        {/* Warning Banner if approaching limits */}
+        {(percentages.events >= 80 || percentages.storage >= 80) && (
+          <div className="mt-4 p-4 rounded-xl bg-warning/10 border border-warning/20">
+            <p className="text-sm text-warning font-medium">
+              You&apos;re approaching your plan limits. Consider upgrading to avoid interruptions.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Billing Cycle Toggle */}
@@ -258,10 +340,10 @@ export default function BillingPage() {
       </div>
 
       {/* Plans */}
-      <div className="grid gap-6 md:grid-cols-4">
+      <div className={`grid gap-6 ${plans.length <= 3 ? 'md:grid-cols-3' : 'md:grid-cols-4'}`}>
         {plans.map((plan) => {
           const isCurrentPlan = plan.planCode === currentPlan;
-          const isPopular = plan.planCode === 'pro';
+          const isPopular = plan.isPopular || plan.planCode === 'pro';
           const price = billingCycle === 'monthly' ? plan.formattedMonthly : plan.formattedAnnual;
           const features = plan.features;
 
@@ -294,7 +376,22 @@ export default function BillingPage() {
                 </span>
               </div>
               
-              {features && (
+              {/* Display features from admin (text list) */}
+              {plan.displayFeatures && plan.displayFeatures.length > 0 && (
+                <ul className="mt-6 space-y-2">
+                  {plan.displayFeatures.map((feature, idx) => (
+                    <li key={idx} className="flex items-start gap-2">
+                      <Check className={`h-4 w-4 mt-0.5 flex-shrink-0 ${isPopular ? 'text-accent' : 'text-success'}`} />
+                      <span className={`text-sm ${isPopular ? 'text-background/90' : 'text-foreground'}`}>
+                        {feature}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              
+              {/* Fallback to computed features if no display features */}
+              {(!plan.displayFeatures || plan.displayFeatures.length === 0) && features && (
                 <ul className="mt-6 space-y-2">
                   <li className="flex items-start gap-2">
                     <Check className={`h-4 w-4 mt-0.5 flex-shrink-0 ${isPopular ? 'text-accent' : 'text-success'}`} />
@@ -314,11 +411,27 @@ export default function BillingPage() {
                       {features.platformFeePercent}% platform fee
                     </span>
                   </li>
+                  {features.teamMembers && features.teamMembers > 1 && (
+                    <li className="flex items-start gap-2">
+                      <Check className={`h-4 w-4 mt-0.5 flex-shrink-0 ${isPopular ? 'text-accent' : 'text-success'}`} />
+                      <span className={`text-sm ${isPopular ? 'text-background/90' : 'text-foreground'}`}>
+                        {features.teamMembers} team members
+                      </span>
+                    </li>
+                  )}
                   {features.customWatermark && (
                     <li className="flex items-start gap-2">
                       <Check className={`h-4 w-4 mt-0.5 flex-shrink-0 ${isPopular ? 'text-accent' : 'text-success'}`} />
                       <span className={`text-sm ${isPopular ? 'text-background/90' : 'text-foreground'}`}>
                         Custom watermark
+                      </span>
+                    </li>
+                  )}
+                  {features.customBranding && (
+                    <li className="flex items-start gap-2">
+                      <Check className={`h-4 w-4 mt-0.5 flex-shrink-0 ${isPopular ? 'text-accent' : 'text-success'}`} />
+                      <span className={`text-sm ${isPopular ? 'text-background/90' : 'text-foreground'}`}>
+                        Custom branding
                       </span>
                     </li>
                   )}
@@ -330,11 +443,35 @@ export default function BillingPage() {
                       </span>
                     </li>
                   )}
+                  {features.advancedAnalytics && (
+                    <li className="flex items-start gap-2">
+                      <Check className={`h-4 w-4 mt-0.5 flex-shrink-0 ${isPopular ? 'text-accent' : 'text-success'}`} />
+                      <span className={`text-sm ${isPopular ? 'text-background/90' : 'text-foreground'}`}>
+                        Advanced analytics
+                      </span>
+                    </li>
+                  )}
                   {features.apiAccess && (
                     <li className="flex items-start gap-2">
                       <Check className={`h-4 w-4 mt-0.5 flex-shrink-0 ${isPopular ? 'text-accent' : 'text-success'}`} />
                       <span className={`text-sm ${isPopular ? 'text-background/90' : 'text-foreground'}`}>
                         API access
+                      </span>
+                    </li>
+                  )}
+                  {features.prioritySupport && (
+                    <li className="flex items-start gap-2">
+                      <Check className={`h-4 w-4 mt-0.5 flex-shrink-0 ${isPopular ? 'text-accent' : 'text-success'}`} />
+                      <span className={`text-sm ${isPopular ? 'text-background/90' : 'text-foreground'}`}>
+                        Priority support
+                      </span>
+                    </li>
+                  )}
+                  {features.whiteLabel && (
+                    <li className="flex items-start gap-2">
+                      <Check className={`h-4 w-4 mt-0.5 flex-shrink-0 ${isPopular ? 'text-accent' : 'text-success'}`} />
+                      <span className={`text-sm ${isPopular ? 'text-background/90' : 'text-foreground'}`}>
+                        White-label options
                       </span>
                     </li>
                   )}

@@ -1,8 +1,8 @@
-import { NextResponse } from 'next/server';
 import { DeleteFacesCommand } from '@aws-sdk/client-rekognition';
+import { NextResponse } from 'next/server';
 
-import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { rekognitionClient, ATTENDEE_COLLECTION_ID } from '@/lib/aws/rekognition';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // ============================================
 // DELETE ATTENDEE ACCOUNT

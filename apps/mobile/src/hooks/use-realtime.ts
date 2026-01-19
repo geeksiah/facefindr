@@ -8,7 +8,21 @@ import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
-type TableName = 'events' | 'media' | 'transactions' | 'notifications' | 'face_matches' | 'entitlements';
+type TableName =
+  | 'events'
+  | 'media'
+  | 'transactions'
+  | 'notifications'
+  | 'face_matches'
+  | 'entitlements'
+  | 'photo_drop_matches'
+  | 'drop_in_matches'
+  | 'drop_in_notifications'
+  | 'photo_vault'
+  | 'storage_subscriptions'
+  | 'storage_usage'
+  | 'storage_plans'
+  | 'platform_announcements';
 type EventType = 'INSERT' | 'UPDATE' | 'DELETE' | '*';
 
 interface RealtimeOptions {
@@ -40,7 +54,7 @@ export function useRealtimeSubscription(options: RealtimeOptions) {
 
     const newChannel = supabase
       .channel(`realtime:${table}:${filter || 'all'}`)
-      .on('postgres_changes', channelConfig, (payload) => {
+      .on('postgres_changes' as any, channelConfig, (payload: any) => {
         onChange?.(payload);
         
         switch (payload.eventType) {

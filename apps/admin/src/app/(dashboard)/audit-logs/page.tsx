@@ -1,6 +1,9 @@
+import Link from 'next/link';
+
 import { supabaseAdmin } from '@/lib/supabase';
 import { formatDateTime } from '@/lib/utils';
-import Link from 'next/link';
+
+import { FilterSelect } from './filter-select';
 
 interface SearchParams {
   action?: string;
@@ -79,47 +82,27 @@ export default async function AuditLogsPage({
 
       {/* Filters */}
       <div className="flex gap-4">
-        <select
+        <FilterSelect
+          name="action"
           defaultValue={searchParams.action}
-          onChange={(e) => {
-            const url = new URL(window.location.href);
-            if (e.target.value) {
-              url.searchParams.set('action', e.target.value);
-            } else {
-              url.searchParams.delete('action');
-            }
-            window.location.href = url.toString();
-          }}
-          className="px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
-        >
-          <option value="">All Actions</option>
-          <option value="login">Login</option>
-          <option value="logout">Logout</option>
-          <option value="user_suspend">User Suspend</option>
-          <option value="user_unsuspend">User Unsuspend</option>
-          <option value="user_delete">User Delete</option>
-          <option value="payout_process">Payout Process</option>
-          <option value="settings_update">Settings Update</option>
-        </select>
+          placeholder="All Actions"
+          options={[
+            { value: 'login', label: 'Login' },
+            { value: 'logout', label: 'Logout' },
+            { value: 'user_suspend', label: 'User Suspend' },
+            { value: 'user_unsuspend', label: 'User Unsuspend' },
+            { value: 'user_delete', label: 'User Delete' },
+            { value: 'payout_process', label: 'Payout Process' },
+            { value: 'settings_update', label: 'Settings Update' },
+          ]}
+        />
 
-        <select
+        <FilterSelect
+          name="admin"
           defaultValue={searchParams.admin}
-          onChange={(e) => {
-            const url = new URL(window.location.href);
-            if (e.target.value) {
-              url.searchParams.set('admin', e.target.value);
-            } else {
-              url.searchParams.delete('admin');
-            }
-            window.location.href = url.toString();
-          }}
-          className="px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
-        >
-          <option value="">All Admins</option>
-          {admins.map((admin) => (
-            <option key={admin.id} value={admin.id}>{admin.name}</option>
-          ))}
-        </select>
+          placeholder="All Admins"
+          options={admins.map((admin) => ({ value: admin.id, label: admin.name || admin.email }))}
+        />
       </div>
 
       {/* Logs Table */}

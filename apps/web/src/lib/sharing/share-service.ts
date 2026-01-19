@@ -5,6 +5,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
+
 import { generateQRCode, generateEventUrls, generateEmbedCode } from './qr-service';
 
 interface ShareLinkOptions {

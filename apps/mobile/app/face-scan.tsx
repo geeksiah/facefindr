@@ -21,14 +21,26 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as FileSystem from 'expo-file-system';
 import { ArrowLeft, RefreshCw, Check, X, Camera as CameraIcon } from 'lucide-react-native';
+import { SvgXml } from 'react-native-svg';
+import * as Asset from 'expo-asset';
 
 import { Button, Card } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
+import { buttonPress, faceDetected, matchFound, noMatch, error as hapticError, selection } from '@/lib/haptics';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const PHOTO_SIZE = (SCREEN_WIDTH - spacing.lg * 2 - spacing.sm * 2) / 3;
+
+// SVG asset imports - using relative paths for Expo asset loading
+const SVG_ASSETS = {
+  front: require('../assets/scan-img/straight-face.svg'),
+  left: require('../assets/scan-img/left-turn.svg'),
+  right: require('../assets/scan-img/right-turn.svg'),
+  up: require('../assets/scan-img/top-turn.svg'),
+  down: require('../assets/scan-img/bottom-turn.svg'),
+};
 
 // 5 head positions for accurate face matching
 const HEAD_POSITIONS = [
@@ -38,6 +50,110 @@ const HEAD_POSITIONS = [
   { id: 'up', label: 'Up', instruction: 'Tilt head up slightly' },
   { id: 'down', label: 'Down', instruction: 'Tilt head down slightly' },
 ];
+
+// Component to render SVG illustration for face position
+function FacePositionIllustration({ positionId }: { positionId: string }) {
+  const [svgContent, setSvgContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const svgAsset = SVG_ASSETS[positionId as keyof typeof SVG_ASSETS];
+
+  useEffect(() => {
+    if (!svgAsset) {
+      setError(true);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(false);
+    
+    // Load SVG asset
+    const asset = Asset.Asset.fromModule(svgAsset);
+    asset.downloadAsync()
+      .then(() => {
+        // Try to read from local URI first
+        if (asset.localUri) {
+          FileSystem.readAsStringAsync(asset.localUri)
+            .then(text => {
+              setSvgContent(text);
+              setLoading(false);
+            })
+            .catch(() => {
+              // Fallback to fetch if FileSystem fails
+              if (asset.uri) {
+                fetch(asset.uri)
+                  .then(res => {
+                    if (!res.ok) throw new Error('Failed to fetch SVG');
+                    return res.text();
+                  })
+                  .then(text => {
+                    setSvgContent(text);
+                    setLoading(false);
+                  })
+                  .catch(err => {
+                    console.error('Error fetching SVG:', err);
+                    setError(true);
+                    setLoading(false);
+                  });
+              } else {
+                setError(true);
+                setLoading(false);
+              }
+            });
+        } else if (asset.uri) {
+          // Fetch from remote URI
+          fetch(asset.uri)
+            .then(res => {
+              if (!res.ok) throw new Error('Failed to fetch SVG');
+              return res.text();
+            })
+            .then(text => {
+              setSvgContent(text);
+              setLoading(false);
+            })
+            .catch(err => {
+              console.error('Error fetching SVG:', err);
+              setError(true);
+              setLoading(false);
+            });
+        } else {
+          setError(true);
+          setLoading(false);
+        }
+      })
+      .catch(err => {
+        console.error('Error loading SVG asset:', err);
+        setError(true);
+        setLoading(false);
+      });
+  }, [positionId, svgAsset]);
+
+  if (loading) {
+    return (
+      <View style={{ width: 220, height: 280, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="small" color={colors.accent} />
+      </View>
+    );
+  }
+
+  if (error || !svgContent) {
+    // Fallback: Show a simple icon or placeholder
+    return (
+      <View style={{ width: 220, height: 280, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.muted, borderRadius: borderRadius.lg }}>
+        <CameraIcon size={64} color={colors.secondary} />
+      </View>
+    );
+  }
+
+  return (
+    <SvgXml 
+      xml={svgContent} 
+      width={220} 
+      height={280}
+    />
+  );
+}
 
 interface MatchedPhoto {
   id: string;
@@ -78,7 +194,8 @@ export default function FaceScanScreen() {
     }
   }, [params.imageUri]);
 
-  const handleConsent = () => {
+  const handleConsent = async () => {
+    await buttonPress();
     setStep('capture');
   };
 
@@ -94,6 +211,8 @@ export default function FaceScanScreen() {
       });
 
       if (photo?.uri && photo?.base64) {
+        await faceDetected(); // Haptic feedback when face is detected/captured
+        
         const newCapture: CapturedPosition = {
           id: currentPosition.id,
           uri: photo.uri,
@@ -114,6 +233,7 @@ export default function FaceScanScreen() {
       }
     } catch (err) {
       console.error('Error taking picture:', err);
+      await hapticError();
       Alert.alert('Error', 'Failed to capture photo. Please try again.');
     }
   };
@@ -148,6 +268,7 @@ export default function FaceScanScreen() {
       handleMatchResults(data);
     } catch (err: any) {
       console.error('Face matching error:', err);
+      await hapticError();
       setErrorMessage(err.message || 'Something went wrong. Please try again.');
       setStep('error');
     } finally {
@@ -187,6 +308,7 @@ export default function FaceScanScreen() {
       handleMatchResults(data);
     } catch (err: any) {
       console.error('Face matching error:', err);
+      await hapticError();
       setErrorMessage(err.message || 'Something went wrong. Please try again.');
       setStep('error');
     } finally {
@@ -194,8 +316,9 @@ export default function FaceScanScreen() {
     }
   };
 
-  const handleMatchResults = (data: any) => {
+  const handleMatchResults = async (data: any) => {
     if (data.matches && data.matches.length > 0) {
+      await matchFound(); // Haptic feedback for successful match
       setMatchedPhotos(
         data.matches.map((match: any) => ({
           id: match.mediaId,
@@ -207,6 +330,7 @@ export default function FaceScanScreen() {
       );
       setStep('results');
     } else {
+      await noMatch(); // Haptic feedback for no match
       setErrorMessage('No photos found matching your face. Try a different angle or event.');
       setStep('error');
     }
@@ -220,7 +344,8 @@ export default function FaceScanScreen() {
     setStep('capture');
   };
 
-  const toggleCameraFacing = () => {
+  const toggleCameraFacing = async () => {
+    await selection(); // Haptic feedback for selection change
     setFacing((current) => (current === 'front' ? 'back' : 'front'));
   };
 
@@ -400,13 +525,7 @@ export default function FaceScanScreen() {
             <View style={styles.faceGuideContainer}>
               <View style={styles.faceGuide}>
                 {/* Head illustration based on current position */}
-                <View style={[
-                  styles.headOval,
-                  currentPosition.id === 'left' && { transform: [{ rotate: '-15deg' }] },
-                  currentPosition.id === 'right' && { transform: [{ rotate: '15deg' }] },
-                  currentPosition.id === 'up' && { transform: [{ translateY: -10 }] },
-                  currentPosition.id === 'down' && { transform: [{ translateY: 10 }] },
-                ]} />
+                <FacePositionIllustration positionId={currentPosition.id} />
               </View>
               
               <View style={styles.instructionBadge}>
@@ -561,7 +680,7 @@ export default function FaceScanScreen() {
               Purchase these photos to add them to your collection and download anytime.
             </Text>
             <Button
-              onPress={() => router.push('/(attendee)/')}
+              onPress={() => router.push('/(attendee)' as any)}
               fullWidth
               style={{ marginTop: spacing.md }}
             >
@@ -753,14 +872,6 @@ const styles = StyleSheet.create({
     height: 280,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  headOval: {
-    width: 200,
-    height: 260,
-    borderRadius: 100,
-    borderWidth: 3,
-    borderColor: colors.accent,
-    borderStyle: 'dashed',
   },
   instructionBadge: {
     backgroundColor: colors.accent,

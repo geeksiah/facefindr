@@ -1,8 +1,5 @@
 'use client';
 
-import { useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
   Shield,
   Trash2,
@@ -14,10 +11,13 @@ import {
   Eye,
   UserX,
 } from 'lucide-react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 
+import { logout } from '@/app/(auth)/actions';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { logout } from '@/app/(auth)/actions';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -244,8 +244,24 @@ export default function SettingsPage() {
 
       {/* Delete Face Data Modal */}
       {showDeleteFace && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md rounded-2xl bg-card p-6 space-y-4">
+        <div 
+          className="fixed z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100vw',
+            width: '100dvw',
+            height: '100vh',
+            height: '100dvh',
+            margin: 0,
+            padding: 0,
+          }}
+        >
+          <div className="w-full max-w-md rounded-2xl bg-card p-6 space-y-4 mx-4 my-4">
             <div className="flex items-center gap-3 text-warning">
               <AlertTriangle className="h-6 w-6" />
               <h3 className="text-lg font-semibold text-foreground">Delete Face Data?</h3>
@@ -277,7 +293,23 @@ export default function SettingsPage() {
 
       {/* Delete Account Modal */}
       {showDeleteAccount && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+        <div 
+          className="fixed z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100vw',
+            width: '100dvw',
+            height: '100vh',
+            height: '100dvh',
+            margin: 0,
+            padding: 0,
+          }}
+        >
           <div className="w-full max-w-md rounded-2xl bg-card p-6 space-y-4">
             <div className="flex items-center gap-3 text-destructive">
               <AlertTriangle className="h-6 w-6" />

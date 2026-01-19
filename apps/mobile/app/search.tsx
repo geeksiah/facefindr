@@ -34,8 +34,7 @@ import {
 
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 import { useAuthStore } from '@/stores/auth-store';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
+import { supabase } from '@/lib/supabase';
 
 interface SearchResult {
   id: string;
@@ -85,10 +84,13 @@ export default function SearchScreen() {
   const loadFollowingList = async () => {
     if (!profile?.id) return;
     try {
-      const response = await fetch(`${API_URL}/api/social/follow?type=following`);
-      if (response.ok) {
-        const data = await response.json();
-        const ids = new Set(data.following?.map((f: any) => f.following_id) || []);
+      const { data, error } = await supabase
+        .from('follows')
+        .select('following_id')
+        .eq('follower_id', profile.id);
+      
+      if (!error && data) {
+        const ids = new Set<string>(data.map((f: any) => f.following_id as string));
         setFollowingIds(ids);
       }
     } catch (error) {
@@ -107,16 +109,42 @@ export default function SearchScreen() {
     setHasSearched(true);
 
     try {
-      const response = await fetch(
-        `${API_URL}/api/social/search?q=${encodeURIComponent(searchQuery)}&type=${searchType}&limit=30`
-      );
-      
-      if (response.ok) {
-        const data = await response.json();
-        setResults(data);
-      } else {
-        setResults({ photographers: [], users: [] });
+      // Clean search term (remove @ if present)
+      const searchTerm = searchQuery.replace('@', '').toLowerCase();
+      const newResults: SearchResults = { photographers: [], users: [] };
+
+      // Search photographers
+      if (searchType === 'all' || searchType === 'photographers') {
+        const { data: photographers } = await supabase
+          .from('photographers')
+          .select(`
+            id, display_name, face_tag, profile_photo_url, bio, 
+            follower_count, public_profile_slug, is_public_profile
+          `)
+          .eq('is_public_profile', true)
+          .or(`face_tag.ilike.%${searchTerm}%,display_name.ilike.%${searchTerm}%`)
+          .order('follower_count', { ascending: false })
+          .limit(30);
+
+        newResults.photographers = photographers || [];
       }
+
+      // Search users/attendees
+      if (searchType === 'all' || searchType === 'users') {
+        const { data: users } = await supabase
+          .from('attendees')
+          .select(`
+            id, display_name, face_tag, profile_photo_url, 
+            public_profile_slug, is_public_profile
+          `)
+          .eq('is_public_profile', true)
+          .or(`face_tag.ilike.%${searchTerm}%,display_name.ilike.%${searchTerm}%`)
+          .limit(30);
+
+        newResults.users = users || [];
+      }
+
+      setResults(newResults);
     } catch (error) {
       console.error('Search error:', error);
       setResults({ photographers: [], users: [] });
@@ -142,14 +170,19 @@ export default function SearchScreen() {
   };
 
   const handleFollow = async (photographerId: string) => {
+    if (!profile?.id) return;
+    
     try {
       const isCurrentlyFollowing = followingIds.has(photographerId);
       
       if (isCurrentlyFollowing) {
         // Unfollow
-        await fetch(`${API_URL}/api/social/follow?photographerId=${photographerId}`, {
-          method: 'DELETE',
-        });
+        await supabase
+          .from('follows')
+          .delete()
+          .eq('follower_id', profile.id)
+          .eq('following_id', photographerId);
+        
         setFollowingIds(prev => {
           const next = new Set(prev);
           next.delete(photographerId);
@@ -157,11 +190,13 @@ export default function SearchScreen() {
         });
       } else {
         // Follow
-        await fetch(`${API_URL}/api/social/follow`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ photographerId }),
-        });
+        await supabase
+          .from('follows')
+          .insert({
+            follower_id: profile.id,
+            following_id: photographerId,
+          });
+        
         setFollowingIds(prev => new Set(prev).add(photographerId));
       }
     } catch (error) {

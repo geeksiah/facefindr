@@ -98,6 +98,14 @@ export function usePushNotifications() {
 
       // Get Expo push token
       const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+      
+      // Skip if projectId is not configured (development mode without EAS)
+      if (!projectId) {
+        console.log('Push notifications: No EAS projectId configured, skipping registration');
+        setError('Push notifications require EAS projectId configuration');
+        return;
+      }
+
       const token = await Notifications.getExpoPushTokenAsync({
         projectId,
       });

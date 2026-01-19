@@ -5,12 +5,12 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import Stripe from 'stripe';
 
-const stripe = process.env.STRIPE_SECRET_KEY 
-  ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-12-18.acacia' })
-  : null;
+import { isFlutterwaveConfigured, initializePayment } from '@/lib/payments/flutterwave';
+import { selectPaymentGateway } from '@/lib/payments/gateway-selector';
+import { isPayPalConfigured, createOrder, getApprovalUrl } from '@/lib/payments/paypal';
+import { stripe } from '@/lib/payments/stripe';
+import { createClient } from '@/lib/supabase/server';
 
 // Plan to Stripe price ID mapping (set these in your Stripe dashboard)
 const STRIPE_PRICE_IDS: Record<string, { monthly: string; annual: string }> = {
@@ -103,34 +103,64 @@ export async function POST(request: NextRequest) {
         .eq('id', user.id);
     }
 
-    // Create checkout session
-    const session = await stripe.checkout.sessions.create({
-      customer: customerId,
-      mode: 'subscription',
-      line_items: [
-        {
-          price: priceId,
-          quantity: 1,
+    // Select payment gateway based on user preference
+    const gatewaySelection = await selectPaymentGateway({
+      userId: user.id,
+      currency: 'usd', // Subscription pricing is in USD
+    });
+
+    const selectedGateway = gatewaySelection.gateway;
+
+    // Handle Stripe
+    if (selectedGateway === 'stripe') {
+      if (!stripe) {
+        return NextResponse.json(
+          { error: 'Stripe not configured' },
+          { status: 500 }
+        );
+      }
+
+      const session = await stripe.checkout.sessions.create({
+        customer: customerId,
+        mode: 'subscription',
+        line_items: [
+          {
+            price: priceId,
+            quantity: 1,
+          },
+        ],
+        success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/billing?success=true&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/billing?canceled=true`,
+        subscription_data: {
+          metadata: {
+            photographer_id: user.id,
+            plan_code: planCode,
+          },
         },
-      ],
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/billing?success=true&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/billing?canceled=true`,
-      subscription_data: {
         metadata: {
           photographer_id: user.id,
           plan_code: planCode,
         },
-      },
-      metadata: {
-        photographer_id: user.id,
-        plan_code: planCode,
-      },
-    });
+      });
 
+      return NextResponse.json({
+        checkoutUrl: session.url,
+        sessionId: session.id,
+        gateway: selectedGateway,
+        gatewaySelection: {
+          reason: gatewaySelection.reason,
+          availableGateways: gatewaySelection.availableGateways,
+        },
+      });
+    }
+
+    // For other gateways, subscriptions might need different handling
+    // For now, return error if non-Stripe is selected (subscriptions typically use Stripe)
     return NextResponse.json({
-      checkoutUrl: session.url,
-      sessionId: session.id,
-    });
+      error: `Subscriptions are currently only available via Stripe. Please use Stripe or contact support.`,
+      suggestedGateway: 'stripe',
+      availableGateways: gatewaySelection.availableGateways,
+    }, { status: 400 });
 
   } catch (error) {
     console.error('Subscription checkout error:', error);

@@ -1,16 +1,17 @@
 'use client';
 
-import { useState } from 'react';
-import Link from 'next/link';
-import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Eye, EyeOff, Lock, AlertCircle, ArrowLeft } from 'lucide-react';
+import Link from 'next/link';
+import { useState } from 'react';
+import { useForm } from 'react-hook-form';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { resetPasswordSchema, type ResetPasswordInput } from '@/lib/validations/auth';
-import { resetPassword } from '../actions';
 import { cn } from '@/lib/utils';
+import { resetPasswordSchema, type ResetPasswordInput } from '@/lib/validations/auth';
+
+import { resetPassword } from '../actions';
 
 export default function ResetPasswordPage() {
   const [showPassword, setShowPassword] = useState(false);

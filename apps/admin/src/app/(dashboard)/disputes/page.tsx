@@ -1,7 +1,10 @@
-import { supabaseAdmin } from '@/lib/supabase';
-import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils';
 import { AlertTriangle, CheckCircle, XCircle, Clock, Eye } from 'lucide-react';
 import Link from 'next/link';
+
+import { supabaseAdmin } from '@/lib/supabase';
+import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils';
+
+import { FilterSelect } from './filter-select';
 
 interface SearchParams {
   status?: string;
@@ -81,27 +84,19 @@ export default async function DisputesPage({
 
       {/* Filters */}
       <div className="flex gap-4">
-        <select
+        <FilterSelect
+          name="status"
           defaultValue={searchParams.status}
-          onChange={(e) => {
-            const url = new URL(window.location.href);
-            if (e.target.value) {
-              url.searchParams.set('status', e.target.value);
-            } else {
-              url.searchParams.delete('status');
-            }
-            window.location.href = url.toString();
-          }}
-          className="px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
-        >
-          <option value="">All Statuses</option>
-          <option value="open">Open</option>
-          <option value="under_review">Under Review</option>
-          <option value="evidence_submitted">Evidence Submitted</option>
-          <option value="won">Won</option>
-          <option value="lost">Lost</option>
-          <option value="closed">Closed</option>
-        </select>
+          placeholder="All Statuses"
+          options={[
+            { value: 'open', label: 'Open' },
+            { value: 'under_review', label: 'Under Review' },
+            { value: 'evidence_submitted', label: 'Evidence Submitted' },
+            { value: 'won', label: 'Won' },
+            { value: 'lost', label: 'Lost' },
+            { value: 'closed', label: 'Closed' },
+          ]}
+        />
       </div>
 
       {/* Disputes List */}

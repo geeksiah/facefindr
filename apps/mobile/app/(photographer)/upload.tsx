@@ -32,7 +32,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { Camera } from 'expo-camera';
 
-import { Button } from '@/components/ui';
+// Button component replaced with custom TouchableOpacity for better control
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
@@ -183,7 +183,8 @@ export default function UploadScreen() {
       for (let i = 0; i < selectedImages.length; i++) {
         const image = selectedImages[i];
         
-        const fileName = `events/${selectedEvent.id}/${Date.now()}_${image.fileName}`;
+        // Storage path format: events/{eventId}/photos/{filename}
+        const fileName = `events/${selectedEvent.id}/photos/${Date.now()}_${image.fileName}`;
         const response = await fetch(image.uri);
         const blob = await response.blob();
 
@@ -195,16 +196,25 @@ export default function UploadScreen() {
 
         if (uploadError) {
           console.error('Upload error:', uploadError);
+          Alert.alert('Upload Error', uploadError.message || 'Failed to upload photo to storage');
           continue;
         }
 
-        await supabase.from('media').insert({
+        const { error: insertError } = await supabase.from('media').insert({
           event_id: selectedEvent.id,
           photographer_id: profile?.id,
           storage_path: fileName,
           original_filename: image.fileName,
+          media_type: 'photo',
+          mime_type: 'image/jpeg',
           file_size: image.fileSize,
         });
+
+        if (insertError) {
+          console.error('Database insert error:', insertError);
+          Alert.alert('Database Error', insertError.message || 'Failed to save photo record');
+          continue;
+        }
 
         setUploadedCount(i + 1);
         setUploadProgress(((i + 1) / selectedImages.length) * 100);
@@ -246,8 +256,9 @@ export default function UploadScreen() {
       </View>
 
       <ScrollView 
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: selectedImages.length > 0 ? 180 : insets.bottom + 40 }]}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         {/* Event Selector */}
         <View style={styles.section}>
@@ -372,7 +383,7 @@ export default function UploadScreen() {
 
       {/* Upload Footer */}
       {selectedImages.length > 0 && (
-        <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) + spacing.md }]}>
           {isUploading && (
             <View style={styles.progressContainer}>
               <View style={styles.progressBar}>
@@ -383,17 +394,17 @@ export default function UploadScreen() {
               </Text>
             </View>
           )}
-          <Button
+          <TouchableOpacity
+            style={styles.uploadButton}
             onPress={handleUpload}
-            loading={isUploading}
-            fullWidth
-            size="lg"
+            disabled={isUploading}
+            activeOpacity={0.8}
           >
             <Upload size={20} color="#fff" />
             <Text style={styles.uploadButtonText}>
               Upload {selectedImages.length} Photo{selectedImages.length !== 1 ? 's' : ''}
             </Text>
-          </Button>
+          </TouchableOpacity>
         </View>
       )}
     </View>
@@ -421,7 +432,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   scrollContent: {
-    paddingBottom: 180,
+    paddingBottom: 20,
   },
   section: {
     paddingHorizontal: spacing.lg,
@@ -614,10 +625,19 @@ const styles = StyleSheet.create({
     color: colors.secondary,
     textAlign: 'center',
   },
+  uploadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.accent,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: borderRadius.lg,
+  },
   uploadButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
-    marginLeft: spacing.sm,
   },
 });

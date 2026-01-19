@@ -1,4 +1,5 @@
 import { redirect, notFound } from 'next/navigation';
+
 import { createClient } from '@/lib/supabase/server';
 
 interface ShortLinkPageProps {

@@ -1,8 +1,5 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import Image from 'next/image';
-import Link from 'next/link';
 import {
   Scan,
   Image as ImageIcon,
@@ -15,8 +12,12 @@ import {
   Sparkles,
   Camera,
 } from 'lucide-react';
+import Image from 'next/image';
+import Link from 'next/link';
+import { useState, useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { useRealtimeSubscription } from '@/hooks/use-realtime';
 
 // ============================================
 // PHOTO PASSPORT - MAIN ATTENDEE GALLERY
@@ -55,15 +56,17 @@ export default function PhotoPassportPage() {
   const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    // TODO: Fetch matched photos from API
     const fetchPhotos = async () => {
       try {
-        // Simulating API call - replace with actual fetch
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        
-        // Check if user has scanned their face
-        setHasScanned(false); // Will be true once user scans
-        setEventGroups([]);
+        const response = await fetch('/api/attendee/matches');
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Failed to load matches');
+        }
+
+        setHasScanned(!!data.hasScanned);
+        setEventGroups(data.eventGroups || []);
       } catch (error) {
         console.error('Failed to fetch photos:', error);
       } finally {
@@ -73,6 +76,34 @@ export default function PhotoPassportPage() {
 
     fetchPhotos();
   }, []);
+
+  useRealtimeSubscription({
+    table: 'photo_drop_matches',
+    onChange: () => {
+      setIsLoading(true);
+      fetch('/api/attendee/matches')
+        .then((res) => res.json())
+        .then((data) => {
+          setHasScanned(!!data.hasScanned);
+          setEventGroups(data.eventGroups || []);
+        })
+        .finally(() => setIsLoading(false));
+    },
+  });
+
+  useRealtimeSubscription({
+    table: 'entitlements',
+    onChange: () => {
+      setIsLoading(true);
+      fetch('/api/attendee/matches')
+        .then((res) => res.json())
+        .then((data) => {
+          setHasScanned(!!data.hasScanned);
+          setEventGroups(data.eventGroups || []);
+        })
+        .finally(() => setIsLoading(false));
+    },
+  });
 
   const togglePhotoSelection = (photoId: string) => {
     setSelectedPhotos((prev) => {

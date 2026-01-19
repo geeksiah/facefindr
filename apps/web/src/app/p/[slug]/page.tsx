@@ -1,9 +1,5 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
-import Image from 'next/image';
-import Link from 'next/link';
 import {
   Camera,
   Calendar,
@@ -24,10 +20,18 @@ import {
   X,
   Download,
 } from 'lucide-react';
+import Image from 'next/image';
+import Link from 'next/link';
+import { useParams, useSearchParams } from 'next/navigation';
+import { useState, useEffect , useRef } from 'react';
 
+
+import { RatingsDisplay } from '@/components/photographer/ratings-display';
 import { Button } from '@/components/ui/button';
 import { Logo } from '@/components/ui/logo';
+import { QRCodeWithLogo, downloadQRCodeWithLogo } from '@/components/ui/qr-code-with-logo';
 import { cn } from '@/lib/utils';
+
 
 interface PhotographerProfile {
   id: string;
@@ -66,16 +70,22 @@ export default function PhotographerProfilePage() {
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [showQRCode, setShowQRCode] = useState(false);
   const [copied, setCopied] = useState(false);
+  const qrCodeRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadProfile();
-    checkFollowStatus();
     
     // Attempt deep link if app=1
     if (openInApp && profile?.id) {
       attemptDeepLink();
     }
   }, [slug]);
+
+  useEffect(() => {
+    if (profile?.id) {
+      checkFollowStatus();
+    }
+  }, [profile?.id]);
 
   async function loadProfile() {
     try {
@@ -101,8 +111,10 @@ export default function PhotographerProfilePage() {
   }
 
   async function checkFollowStatus() {
+    if (!profile?.id) return;
+    
     try {
-      const res = await fetch(`/api/social/follow?type=check&photographerId=${slug}`);
+      const res = await fetch(`/api/social/follow?type=check&photographerId=${profile.id}`);
       const data = await res.json();
       setIsFollowing(data.isFollowing);
     } catch {
@@ -132,18 +144,30 @@ export default function PhotographerProfilePage() {
     setFollowLoading(true);
     try {
       if (isFollowing) {
-        await fetch(`/api/social/follow?photographerId=${profile?.id}`, { method: 'DELETE' });
-        setIsFollowing(false);
+        const response = await fetch(`/api/social/follow?photographerId=${profile?.id}`, { method: 'DELETE' });
+        if (response.ok) {
+          setIsFollowing(false);
+          // Refresh follower count
+          if (profile) {
+            setProfile({ ...profile, follower_count: Math.max(0, (profile.follower_count || 0) - 1) });
+          }
+        }
       } else {
-        await fetch('/api/social/follow', {
+        const response = await fetch('/api/social/follow', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ photographerId: profile?.id }),
         });
-        setIsFollowing(true);
+        if (response.ok) {
+          setIsFollowing(true);
+          // Refresh follower count
+          if (profile) {
+            setProfile({ ...profile, follower_count: (profile.follower_count || 0) + 1 });
+          }
+        }
       }
-    } catch {
-      // Handle error
+    } catch (error) {
+      console.error('Follow error:', error);
     } finally {
       setFollowLoading(false);
     }
@@ -203,7 +227,8 @@ export default function PhotographerProfilePage() {
     );
   }
 
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(window.location.href + '?app=1')}&size=512x512&margin=2`;
+  // QR code value for profile sharing
+  const qrCodeValue = typeof window !== 'undefined' ? `${window.location.href}?app=1` : '';
 
   return (
     <div className="min-h-screen bg-background">
@@ -304,13 +329,19 @@ export default function PhotographerProfilePage() {
 
             {/* Stats */}
             <div className="flex items-center justify-center sm:justify-start gap-6 mt-4 text-sm">
-              <div className="text-center">
-                <p className="font-bold text-foreground">{profile.follower_count}</p>
+              <Link 
+                href={`/p/${profile.public_profile_slug || profile.id}/followers`}
+                className="text-center hover:opacity-80 transition-opacity cursor-pointer"
+              >
+                <p className="font-bold text-foreground">{profile.follower_count || 0}</p>
                 <p className="text-secondary">Followers</p>
-              </div>
+              </Link>
               <div className="text-center">
                 <p className="font-bold text-foreground">{profile.eventCount}</p>
                 <p className="text-secondary">Events</p>
+              </div>
+              <div className="text-center">
+                <RatingsDisplay photographerId={profile.id} variant="compact" />
               </div>
             </div>
 
@@ -432,7 +463,21 @@ export default function PhotographerProfilePage() {
       {/* QR Code Modal */}
       {showQRCode && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          className="fixed z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100vw',
+            width: '100dvw',
+            height: '100vh',
+            height: '100dvh',
+            margin: 0,
+            padding: 0,
+          }}
           onClick={() => setShowQRCode(false)}
         >
           <div
@@ -446,22 +491,40 @@ export default function PhotographerProfilePage() {
               </button>
             </div>
             
-            <div className="bg-white p-4 rounded-xl mb-4">
-              <img src={qrCodeUrl} alt="Profile QR Code" className="w-full" />
+            <div 
+              ref={qrCodeRef}
+              className="bg-white p-4 rounded-xl mb-4 flex items-center justify-center"
+              data-qr-container
+            >
+              <QRCodeWithLogo
+                value={typeof window !== 'undefined' ? `${window.location.href}?app=1` : ''}
+                size={256}
+                className="mx-auto"
+              />
             </div>
             
             <p className="text-sm text-secondary text-center mb-4">
               Scan this QR code to view {profile.display_name}'s profile in the FaceFindr app
             </p>
             
-            <a
-              href={qrCodeUrl.replace('size=512x512', 'size=1024x1024') + '&download=1'}
-              download={`${profile.display_name}-qr-code.png`}
+            <button
+              onClick={async () => {
+                if (!qrCodeRef.current) return;
+                try {
+                  await downloadQRCodeWithLogo(
+                    qrCodeRef.current,
+                    `${profile.display_name}-qr-code`,
+                    'png'
+                  );
+                } catch (error) {
+                  console.error('Download error:', error);
+                }
+              }}
               className="flex items-center justify-center gap-2 w-full py-2 px-4 bg-muted rounded-xl text-foreground hover:bg-muted/70 transition-colors"
             >
               <Download className="h-4 w-4" />
               Download QR Code
-            </a>
+            </button>
           </div>
         </div>
       )}

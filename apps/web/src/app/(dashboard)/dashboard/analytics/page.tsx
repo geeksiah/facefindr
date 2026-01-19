@@ -1,6 +1,5 @@
 'use client';
 
-import { useState, useEffect } from 'react';
 import { 
   BarChart3, 
   TrendingUp, 
@@ -16,9 +15,13 @@ import {
   ShoppingCart,
   Loader2,
   RefreshCw,
+  FileDown,
+  FileText,
 } from 'lucide-react';
-import { useCurrency } from '@/components/providers';
+import { useState, useEffect } from 'react';
+
 import { DashboardBanner } from '@/components/notifications';
+import { useCurrency } from '@/components/providers';
 
 interface DashboardStats {
   totalViews: number;
@@ -103,6 +106,90 @@ export default function AnalyticsPage() {
     fetchData();
   }, [timeRange]);
 
+  // Subscribe to real-time updates for transactions and events
+  useRealtimeSubscription({
+    table: 'transactions',
+    onChange: () => {
+      fetchData(true);
+    },
+  });
+
+  useRealtimeSubscription({
+    table: 'events',
+    onChange: () => {
+      fetchData(true);
+    },
+  });
+
+  // Export functions
+  const exportToCSV = () => {
+    if (!stats || !timeSeries.length) return;
+
+    const csvRows = [
+      ['Date', 'Views', 'Revenue', 'Sales', 'Downloads'],
+      ...timeSeries.map(d => [
+        new Date(d.date).toLocaleDateString(),
+        d.views.toString(),
+        (d.revenue / 100).toFixed(2),
+        d.sales.toString(),
+        d.downloads.toString(),
+      ]),
+      [],
+      ['Summary', 'Value'],
+      ['Total Views', stats.totalViews.toString()],
+      ['Unique Views', stats.uniqueViews.toString()],
+      ['Total Revenue', formatPrice(stats.totalRevenue)],
+      ['Total Sales', stats.totalSales.toString()],
+      ['Total Downloads', stats.totalDownloads.toString()],
+      ['Conversion Rate', `${stats.conversionRate.toFixed(1)}%`],
+    ];
+
+    const csvContent = csvRows.map(row => row.join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `analytics-${timeRange}-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const exportToPDF = async () => {
+    if (!stats || !timeSeries.length) return;
+
+    try {
+      const response = await fetch('/api/analytics/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          format: 'pdf',
+          timeRange,
+          stats,
+          timeSeries,
+          topEvents,
+          devices,
+          traffic,
+        }),
+      });
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `analytics-${timeRange}-${new Date().toISOString().split('T')[0]}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      }
+    } catch (error) {
+      console.error('Failed to export PDF:', error);
+    }
+  };
+
   // Calculate max for chart scaling
   const maxViews = Math.max(...timeSeries.map(d => d.views), 1);
   const maxRevenue = Math.max(...timeSeries.map(d => d.revenue), 1);
@@ -162,13 +249,29 @@ export default function AnalyticsPage() {
             Track your event performance, photo views, and revenue.
           </p>
         </div>
-        <button
-          onClick={() => fetchData(true)}
-          disabled={isRefreshing}
-          className="p-2 rounded-xl text-secondary hover:bg-muted transition-colors"
-        >
-          <RefreshCw className={`h-5 w-5 ${isRefreshing ? 'animate-spin' : ''}`} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => exportToCSV()}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground transition-colors text-sm font-medium"
+          >
+            <FileText className="h-4 w-4" />
+            Export CSV
+          </button>
+          <button
+            onClick={() => exportToPDF()}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground transition-colors text-sm font-medium"
+          >
+            <FileDown className="h-4 w-4" />
+            Export PDF
+          </button>
+          <button
+            onClick={() => fetchData(true)}
+            disabled={isRefreshing}
+            className="p-2 rounded-xl text-secondary hover:bg-muted transition-colors"
+          >
+            <RefreshCw className={`h-5 w-5 ${isRefreshing ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
       </div>
 
       {/* Time Range Selector */}

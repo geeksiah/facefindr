@@ -6,7 +6,6 @@
 
 import { create } from 'zustand';
 import { supabase, Session, User } from '@/lib/supabase';
-import { router } from 'expo-router';
 
 interface Profile {
   id: string;
@@ -37,6 +36,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   profile: null,
   isLoading: true,
   isInitialized: false,
+  
+  // Computed getters
+  get isAuthenticated() {
+    return !!get().session?.user;
+  },
+  get userType() {
+    return get().profile?.userType || null;
+  },
 
   initialize: async () => {
     try {
@@ -71,8 +78,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       supabase.auth.onAuthStateChange(async (event, session) => {
         if (event === 'SIGNED_OUT') {
           set({ session: null, user: null, profile: null });
-          // Navigate to welcome screen
-          router.replace('/');
+          // Navigation is handled by Root Layout based on state changes
         } else if (session?.user) {
           const userType = session.user.user_metadata?.user_type || 'attendee';
           const table = userType === 'photographer' ? 'photographers' : 'attendees';
@@ -150,15 +156,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       set({ isLoading: true });
       await supabase.auth.signOut();
+      // Clear local state - navigation is handled by Root Layout
       set({ session: null, user: null, profile: null, isLoading: false });
-      // Force navigation to welcome
-      router.replace('/');
     } catch (error) {
       console.error('Sign out error:', error);
-      set({ isLoading: false });
       // Still clear local state even if signout fails
-      set({ session: null, user: null, profile: null });
-      router.replace('/');
+      set({ session: null, user: null, profile: null, isLoading: false });
     }
   },
 

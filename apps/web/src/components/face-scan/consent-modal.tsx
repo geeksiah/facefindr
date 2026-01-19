@@ -1,7 +1,5 @@
 'use client';
 
-import { useState } from 'react';
-import Link from 'next/link';
 import {
   Shield,
   Lock,
@@ -10,6 +8,8 @@ import {
   CheckCircle2,
   X,
 } from 'lucide-react';
+import Link from 'next/link';
+import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 
@@ -36,13 +36,19 @@ export function ConsentModal({
       style={{
         position: 'fixed',
         inset: 0,
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
         width: '100vw',
+        width: '100dvw',
         height: '100vh',
+        height: '100dvh',
         margin: 0,
-        padding: '1rem',
+        padding: 0,
       }}
     >
-      <div className="w-full max-w-lg rounded-3xl bg-card p-6 shadow-xl animate-in fade-in zoom-in-95 duration-200">
+      <div className="w-full max-w-lg mx-4 rounded-3xl bg-card p-6 shadow-xl animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">

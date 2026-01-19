@@ -1,9 +1,5 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import Image from 'next/image';
-import Link from 'next/link';
 import {
   ArrowLeft,
   Calendar,
@@ -17,7 +13,15 @@ import {
   X,
   ZoomIn,
 } from 'lucide-react';
+import Image from 'next/image';
+import Link from 'next/link';
+import { useParams, useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
 
+import { RatingsDisplay } from '@/components/photographer/ratings-display';
+import { FollowButton } from '@/components/social/follow-button';
+import { PhotoReactions } from '@/components/social/photo-reactions';
+import { TipPhotographer } from '@/components/social/tip-photographer';
 import { Button } from '@/components/ui/button';
 
 interface EventPhoto {
@@ -35,6 +39,7 @@ interface EventDetails {
   date: string;
   location?: string;
   coverImage?: string;
+  photographerId?: string;
   photographerName: string;
   photographerAvatar?: string;
   description?: string;
@@ -57,6 +62,8 @@ export default function EventDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
   const [viewingPhoto, setViewingPhoto] = useState<EventPhoto | null>(null);
+  const [showTipModal, setShowTipModal] = useState(false);
+  const [downloadedPhoto, setDownloadedPhoto] = useState<EventPhoto | null>(null);
 
   useEffect(() => {
     const fetchEvent = async () => {
@@ -198,13 +205,33 @@ export default function EventDetailPage() {
                   {event.photographerName.charAt(0)}
                 </div>
               )}
-              <div>
+              <div className="flex-1">
                 <p className={`text-sm ${event.coverImage ? 'text-white/60' : 'text-secondary'}`}>
                   Photographed by
                 </p>
                 <p className={`font-medium ${event.coverImage ? 'text-white' : 'text-foreground'}`}>
                   {event.photographerName}
                 </p>
+                {event.photographerId && (
+                  <>
+                    <RatingsDisplay
+                      photographerId={event.photographerId}
+                      showRatingButton={true}
+                      eventId={event.id}
+                      variant="compact"
+                      className="mt-1"
+                    />
+                    <div className="mt-2">
+                      <FollowButton
+                        photographerId={event.photographerId}
+                        photographerName={event.photographerName}
+                        variant="ghost"
+                        size="sm"
+                        className={event.coverImage ? 'text-white/80 hover:text-white' : ''}
+                      />
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -304,8 +331,13 @@ export default function EventDetailPage() {
                   </div>
                 )}
 
+                {/* Reactions - Show on hover */}
+                <div className="absolute bottom-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <PhotoReactions mediaId={photo.id} variant="compact" />
+                </div>
+
                 {/* Quick Actions */}
-                <div className="absolute bottom-2 left-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="absolute bottom-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -314,12 +346,6 @@ export default function EventDetailPage() {
                     className="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-foreground shadow-sm hover:bg-white transition-colors"
                   >
                     <ZoomIn className="h-4 w-4" />
-                  </button>
-                  <button
-                    onClick={(e) => e.stopPropagation()}
-                    className="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-foreground shadow-sm hover:bg-white transition-colors"
-                  >
-                    <Heart className="h-4 w-4" />
                   </button>
                 </div>
               </div>
@@ -363,7 +389,23 @@ export default function EventDetailPage() {
 
       {/* Photo Lightbox */}
       {viewingPhoto && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4">
+        <div 
+          className="fixed z-50 flex items-center justify-center bg-black/90"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100vw',
+            width: '100dvw',
+            height: '100vh',
+            height: '100dvh',
+            margin: 0,
+            padding: 0,
+          }}
+        >
           <button
             onClick={() => setViewingPhoto(null)}
             className="absolute top-4 right-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors"
@@ -396,6 +438,44 @@ export default function EventDetailPage() {
               <Share2 className="mr-2 h-4 w-4" />
               Share
             </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Tip Modal */}
+      {showTipModal && event && downloadedPhoto && (
+        <div 
+          className="fixed z-[10000] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100vw',
+            height: '100vh',
+          }}
+          onClick={() => setShowTipModal(false)}
+        >
+          <div
+            className="bg-card rounded-2xl border border-border p-6 max-w-md w-full mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <TipPhotographer
+              photographerId={event.photographerId || event.id}
+              photographerName={event.photographerName}
+              eventId={event.id}
+              mediaId={downloadedPhoto.id}
+              onSuccess={() => {
+                setShowTipModal(false);
+                setDownloadedPhoto(null);
+              }}
+              onCancel={() => {
+                setShowTipModal(false);
+                setDownloadedPhoto(null);
+              }}
+            />
           </div>
         </div>
       )}

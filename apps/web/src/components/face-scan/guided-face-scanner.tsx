@@ -1,7 +1,5 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
-import Image from 'next/image';
 import {
   CheckCircle2,
   AlertCircle,
@@ -10,10 +8,13 @@ import {
   X,
   Camera,
 } from 'lucide-react';
+import Image from 'next/image';
+import { useState, useRef, useCallback, useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
-import { FaceGuideHead } from './face-guide-head';
 import { useConfirm } from '@/components/ui/toast';
+
+import { FaceGuideHead } from './face-guide-head';
 
 // Face position types
 type FacePosition = 'center' | 'left' | 'right' | 'up' | 'down';

@@ -1,8 +1,5 @@
 'use client';
 
-import { useState } from 'react';
-import Link from 'next/link';
-import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
   ArrowLeft,
@@ -15,13 +12,18 @@ import {
   Users,
   AlertCircle,
 } from 'lucide-react';
+import Link from 'next/link';
+import { useState } from 'react';
+import { useForm } from 'react-hook-form';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { createEventSchema, type CreateEventInput } from '@/lib/validations/event';
-import { createEvent } from '../actions';
+import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
+import { createEventSchema, type CreateEventInput } from '@/lib/validations/event';
+
+import { createEvent } from '../actions';
 
 // ============================================
 // TOGGLE SWITCH ROW COMPONENT
@@ -66,6 +68,7 @@ function ToggleSwitchRow({ enabled, onChange, label, description, icon: Icon }: 
 // ============================================
 
 export default function CreateEventPage() {
+  const toast = useToast();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -102,9 +105,13 @@ export default function CreateEventPage() {
 
     if (result?.error) {
       setError(result.error);
+      toast.error('Event Creation Failed', result.error);
       setIsLoading(false);
+    } else {
+      // Success - action redirects, but show toast briefly
+      toast.success('Event Created', 'Your event has been created successfully.');
+      // Action will handle redirect
     }
-    // If successful, the action will redirect
   };
 
   return (

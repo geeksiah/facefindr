@@ -5,6 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+
 import { createClient } from '@/lib/supabase/server';
 
 export async function GET(
@@ -12,12 +13,13 @@ export async function GET(
   { params }: { params: { slug: string } }
 ) {
   try {
-    const supabase = await createClient();
+    const supabase = createClient();
     const { slug } = params;
 
     // Determine query method
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(slug);
-    const isFaceTag = slug.includes('.');
+    // FaceTag can be @username+suffix (new) or @username1234 (legacy)
+    const isFaceTag = slug.includes('+') || /^@?[a-z0-9_]+\d{4,5}$/i.test(slug);
 
     let query = supabase
       .from('photographers')
@@ -31,7 +33,7 @@ export async function GET(
     if (isUuid) {
       query = query.eq('id', slug);
     } else if (isFaceTag) {
-      // Could be face_tag like @username.1234
+      // Could be face_tag like @username+k7x2 (new) or @username1234 (legacy)
       const tag = slug.startsWith('@') ? slug : `@${slug}`;
       query = query.eq('face_tag', tag);
     } else {

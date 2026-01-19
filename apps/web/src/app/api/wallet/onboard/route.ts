@@ -1,14 +1,15 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+
+import {
+  createSubaccount,
+  isFlutterwaveConfigured,
+} from '@/lib/payments/flutterwave';
 import {
   createConnectAccount,
   createAccountLink,
   isStripeConfigured,
 } from '@/lib/payments/stripe';
-import {
-  createSubaccount,
-  isFlutterwaveConfigured,
-} from '@/lib/payments/flutterwave';
+import { createClient } from '@/lib/supabase/server';
 
 export async function POST(request: Request) {
   try {
@@ -60,10 +61,17 @@ export async function POST(request: Request) {
       );
     }
 
-    let walletData: Record<string, unknown> = {
+    const { data: regionConfig } = await supabase
+      .from('region_config')
+      .select('default_currency')
+      .eq('region_code', String(country || '').toUpperCase())
+      .maybeSingle();
+
+    const walletData: Record<string, unknown> = {
       photographer_id: user.id,
       provider,
       country_code: country,
+      preferred_currency: regionConfig?.default_currency || 'USD',
       status: 'pending',
     };
 

@@ -5,7 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+
 import {
   getUserPaymentMethods,
   addCard,
@@ -17,6 +17,7 @@ import {
   updateSubscriptionSettings,
   getMobileMoneyProviders,
 } from '@/lib/payments/payment-methods';
+import { createClient } from '@/lib/supabase/server';
 
 // GET - Get user's payment methods and settings
 export async function GET(request: NextRequest) {

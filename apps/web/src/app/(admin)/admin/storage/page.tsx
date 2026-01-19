@@ -6,7 +6,6 @@
  * Manage storage tiers, pricing, and view analytics.
  */
 
-import { useState, useEffect, useCallback } from 'react';
 import { 
   HardDrive, 
   Plus, 
@@ -21,6 +20,8 @@ import {
   Star,
   Loader2,
 } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+
 import { toast } from '@/components/ui/toast';
 
 interface StoragePlan {

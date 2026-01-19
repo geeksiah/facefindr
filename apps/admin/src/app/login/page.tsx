@@ -1,8 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { Eye, EyeOff, Loader2, AlertCircle } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Shield, Eye, EyeOff, Loader2, AlertCircle } from 'lucide-react';
+import { useState } from 'react';
+
+import { Logo } from '@/components/logo';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -45,22 +47,31 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted/50 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted/30 p-4">
+      {/* Background Pattern */}
+      <div className="fixed inset-0 -z-10 overflow-hidden">
+        <div className="absolute -top-40 -right-40 w-80 h-80 rounded-full bg-primary/5 blur-3xl" />
+        <div className="absolute -bottom-40 -left-40 w-80 h-80 rounded-full bg-primary/5 blur-3xl" />
+      </div>
+
       <div className="w-full max-w-md">
         {/* Logo/Header */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary mb-4">
-            <Shield className="w-8 h-8 text-primary-foreground" />
+          <div className="inline-flex items-center justify-center mb-4">
+            <Logo variant="combo" size="lg" showText={true} />
           </div>
-          <h1 className="text-2xl font-bold text-foreground">Admin Portal</h1>
-          <p className="text-muted-foreground mt-1">FaceFindr Administration</p>
         </div>
 
         {/* Login Form */}
-        <div className="bg-card border border-border rounded-2xl p-8 shadow-lg">
-          <form onSubmit={handleSubmit} className="space-y-6">
+        <div className="bg-card border border-border rounded-2xl p-8 shadow-xl shadow-black/5">
+          <div className="mb-6">
+            <h1 className="text-xl font-bold text-foreground">Welcome back</h1>
+            <p className="text-sm text-muted-foreground mt-1">Sign in to access the admin dashboard</p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-5">
             {error && (
-              <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">
                 <AlertCircle className="w-4 h-4 flex-shrink-0" />
                 <span>{error}</span>
               </div>
@@ -77,7 +88,7 @@ export default function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 autoComplete="email"
-                className="w-full px-4 py-3 rounded-xl bg-muted border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                className="w-full px-4 py-3 rounded-xl bg-muted border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-colors"
                 placeholder="admin@facefindr.com"
               />
             </div>
@@ -94,7 +105,7 @@ export default function LoginPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   autoComplete="current-password"
-                  className="w-full px-4 py-3 rounded-xl bg-muted border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring pr-12"
+                  className="w-full px-4 py-3 rounded-xl bg-muted border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary pr-12 transition-colors"
                   placeholder="••••••••"
                 />
                 <button
@@ -110,7 +121,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-3 px-4 rounded-xl bg-primary text-primary-foreground font-medium hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+              className="w-full py-3 px-4 rounded-xl bg-primary text-primary-foreground font-semibold hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:ring-offset-2 focus:ring-offset-background disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 shadow-lg shadow-primary/25"
             >
               {isLoading ? (
                 <>
@@ -125,11 +136,13 @@ export default function LoginPage() {
         </div>
 
         {/* Security Notice */}
-        <p className="text-center text-xs text-muted-foreground mt-6">
-          This is a secure admin area. Unauthorized access is prohibited.
-          <br />
-          All actions are logged and monitored.
-        </p>
+        <div className="mt-6 p-4 rounded-xl bg-muted/50 border border-border">
+          <p className="text-center text-xs text-muted-foreground">
+            🔒 This is a secure admin area. Unauthorized access is prohibited.
+            <br />
+            All actions are logged and monitored.
+          </p>
+        </div>
       </div>
     </div>
   );

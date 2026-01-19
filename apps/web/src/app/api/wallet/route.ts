@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+
 import { getConnectAccount, createLoginLink, isStripeConfigured } from '@/lib/payments/stripe';
+import { createClient } from '@/lib/supabase/server';
 
 // GET: Fetch wallet details and balance
 export async function GET() {

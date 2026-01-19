@@ -5,12 +5,19 @@
  * Completely separate from Supabase Auth
  */
 
+import bcrypt from 'bcryptjs';
 import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
-import bcrypt from 'bcryptjs';
+
 import { supabaseAdmin, AdminUser, AdminRole } from './supabase';
 
-const JWT_SECRET = new TextEncoder().encode(process.env.ADMIN_JWT_SECRET);
+// Validate JWT secret exists
+const jwtSecretString = process.env.ADMIN_JWT_SECRET || 'development-secret-change-in-production';
+if (!process.env.ADMIN_JWT_SECRET && process.env.NODE_ENV === 'production') {
+  console.error('WARNING: ADMIN_JWT_SECRET not set in production!');
+}
+
+const JWT_SECRET = new TextEncoder().encode(jwtSecretString);
 const COOKIE_NAME = 'admin_session';
 const SESSION_DURATION = 8 * 60 * 60 * 1000; // 8 hours
 
@@ -73,14 +80,29 @@ export async function loginAdmin(
       .eq('email', email.toLowerCase())
       .single();
 
-    if (error || !admin) {
-      // Log failed attempt
-      await supabaseAdmin.from('admin_audit_logs').insert({
-        action: 'login',
-        details: { success: false, reason: 'user_not_found', email },
-        ip_address: ipAddress,
-        user_agent: userAgent,
-      });
+    if (error) {
+      console.error('Database error during login:', error.message);
+      
+      // Check if it's a table not found error
+      if (error.message?.includes('relation') && error.message?.includes('does not exist')) {
+        return { success: false, error: 'Admin system not initialized. Run database migrations first.' };
+      }
+      
+      // Log failed attempt (may also fail if table doesn't exist)
+      try {
+        await supabaseAdmin.from('admin_audit_logs').insert({
+          action: 'login',
+          details: { success: false, reason: 'user_not_found', email },
+          ip_address: ipAddress,
+          user_agent: userAgent,
+        });
+      } catch (logError) {
+        console.error('Could not log failed attempt:', logError);
+      }
+      return { success: false, error: 'Invalid credentials' };
+    }
+    
+    if (!admin) {
       return { success: false, error: 'Invalid credentials' };
     }
 

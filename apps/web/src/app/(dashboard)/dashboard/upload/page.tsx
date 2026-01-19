@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRealtimeSubscription } from '@/hooks/use-realtime';
 import { useRouter } from 'next/navigation';
 import { Upload, Calendar, ArrowRight, Loader2 } from 'lucide-react';
 import Link from 'next/link';
@@ -25,38 +26,73 @@ export default function UploadPage() {
 
   useEffect(() => {
     async function loadEvents() {
-      const supabase = createClient();
-      const { data: user } = await supabase.auth.getUser();
-      
-      if (!user.user) {
-        router.push('/login');
-        return;
+      try {
+        const supabase = createClient();
+        const { data: user, error: userError } = await supabase.auth.getUser();
+        
+        if (userError || !user.user) {
+          router.push('/login');
+          return;
+        }
+
+        const { data: events, error: eventsError } = await supabase
+          .from('events')
+          .select('id, name, event_date, status')
+          .eq('photographer_id', user.user.id)
+          .in('status', ['draft', 'active'])
+          .order('created_at', { ascending: false });
+
+        if (eventsError) {
+          console.error('Error loading events:', eventsError);
+          setLoading(false);
+          return;
+        }
+
+        // Get media counts separately for each event
+        if (events && events.length > 0) {
+          const eventIds = events.map(e => e.id);
+          const { data: mediaCounts } = await supabase
+            .from('media')
+            .select('event_id')
+            .in('event_id', eventIds);
+
+          // Count media per event
+          const counts = new Map<string, number>();
+          mediaCounts?.forEach((m) => {
+            counts.set(m.event_id, (counts.get(m.event_id) || 0) + 1);
+          });
+
+          setEvents(
+            events.map((e) => ({
+              id: e.id,
+              name: e.name,
+              event_date: e.event_date,
+              status: e.status,
+              media_count: counts.get(e.id) || 0,
+            }))
+          );
+        } else {
+          setEvents([]);
+        }
+      } catch (error) {
+        console.error('Error loading events:', error);
+      } finally {
+        setLoading(false);
       }
-
-      const { data: events } = await supabase
-        .from('events')
-        .select('id, name, event_date, status, media(id)')
-        .eq('photographer_id', user.user.id)
-        .in('status', ['draft', 'active'])
-        .order('created_at', { ascending: false });
-
-      if (events) {
-        setEvents(
-          events.map((e) => ({
-            id: e.id,
-            name: e.name,
-            event_date: e.event_date,
-            status: e.status,
-            media_count: Array.isArray(e.media) ? e.media.length : 0,
-          }))
-        );
-      }
-
-      setLoading(false);
     }
+  };
 
+  useEffect(() => {
     loadEvents();
   }, [router]);
+
+  // Subscribe to real-time updates for events
+  useRealtimeSubscription({
+    table: 'events',
+    onChange: () => {
+      loadEvents();
+    },
+  });
 
   if (loading) {
     return (

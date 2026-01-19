@@ -132,21 +132,21 @@ export function useNotifications() {
     switch (data.type) {
       case 'photo_drop':
         if (data.eventId) {
-          router.push(`/event/${data.eventId}`);
+          router.push(`/event/${data.eventId}` as any);
         }
         break;
       case 'purchase_complete':
-        router.push('/(attendee)/');
+        router.push('/(attendee)' as any);
         break;
       case 'payout_success':
-        router.push('/(photographer)/');
+        router.push('/(photographer)' as any);
         break;
       default:
         // Default to notifications screen
         if (profile?.userType === 'photographer') {
-          router.push('/(photographer)/');
+          router.push('/(photographer)' as any);
         } else {
-          router.push('/(attendee)/notifications');
+          router.push('/(attendee)/notifications' as any);
         }
     }
   };

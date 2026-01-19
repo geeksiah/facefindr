@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { WifiOff, RefreshCw } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 export function OfflineDetector() {
   const [isOffline, setIsOffline] = useState(false);

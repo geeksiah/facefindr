@@ -1,7 +1,7 @@
+import type { Photographer, Attendee } from '@facefind/shared/types';
+import type { User } from '@supabase/supabase-js';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { User } from '@supabase/supabase-js';
-import type { Photographer, Attendee } from '@facefind/shared/types';
 
 // ============================================
 // TYPES

@@ -1,10 +1,10 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
-import { createClient, RealtimeChannel } from '@supabase/supabase-js';
+import { createClient, RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
+import { createContext, useContext, useEffect, useState, useCallback, ReactNode, useRef } from 'react';
 
 interface RealtimeContextValue {
-  subscribe: (table: string, callback: (payload: any) => void) => () => void;
+  subscribe: (table: string, callback: (payload: unknown) => void) => () => void;
   isConnected: boolean;
 }
 
@@ -17,8 +17,8 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 export function RealtimeProvider({ children }: { children: ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
-  const [client, setClient] = useState<ReturnType<typeof createClient> | null>(null);
-  const [channels, setChannels] = useState<Map<string, RealtimeChannel>>(new Map());
+  const clientRef = useRef<SupabaseClient | null>(null);
+  const channelsRef = useRef<Map<string, RealtimeChannel>>(new Map());
 
   useEffect(() => {
     if (!supabaseUrl || !supabaseAnonKey) {
@@ -34,7 +34,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       },
     });
 
-    setClient(supabase);
+    clientRef.current = supabase;
 
     // Monitor connection status
     const channel = supabase.channel('system')
@@ -55,13 +55,14 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const subscribe = useCallback((table: string, callback: (payload: any) => void) => {
+  const subscribe = useCallback((table: string, callback: (payload: unknown) => void) => {
+    const client = clientRef.current;
     if (!client) return () => {};
 
     const channelName = `admin:${table}`;
     
     // Check if channel already exists
-    let channel = channels.get(channelName);
+    let channel = channelsRef.current.get(channelName);
     
     if (!channel) {
       channel = client
@@ -75,14 +76,14 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         )
         .subscribe();
 
-      setChannels((prev) => new Map(prev).set(channelName, channel!));
+      channelsRef.current.set(channelName, channel);
     }
 
     return () => {
       // Don't unsubscribe individual callbacks - channel stays open
       // In production, you'd track callbacks per channel
     };
-  }, [client, channels]);
+  }, []);
 
   return (
     <RealtimeContext.Provider value={{ subscribe, isConnected }}>

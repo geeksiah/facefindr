@@ -6,7 +6,7 @@
 
 import { useEffect } from 'react';
 import { Tabs } from 'expo-router';
-import { Image, Scan, Calendar, Bell, User, Archive } from 'lucide-react-native';
+import { Image, Scan, Calendar, Bell, Archive, Gift, User } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Platform, View, Text, StyleSheet } from 'react-native';
 
@@ -137,18 +137,34 @@ export default function AttendeeLayout() {
         }}
       />
       <Tabs.Screen
+        name="drop-in"
+        options={{
+          title: 'Drop-In',
+          tabBarIcon: ({ color, size }) => <Gift size={22} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="drop-in/upload"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="drop-in/discover"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
         name="profile"
         options={{
-          title: 'Profile',
-          tabBarIcon: ({ color, size }) => <User size={22} color={color} />,
+          href: null, // Hide from tab bar, accessible via header avatar
         }}
       />
       <Tabs.Screen
         name="vault"
         options={{
-          title: 'Vault',
           href: null, // Hide from tab bar, accessible via navigation
-          tabBarIcon: ({ color, size }) => <Archive size={22} color={color} />,
         }}
       />
     </Tabs>

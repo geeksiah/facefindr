@@ -1,6 +1,8 @@
-import { Suspense } from 'react';
 import { Loader2 } from 'lucide-react';
+import { Suspense } from 'react';
+
 import { supabaseAdmin } from '@/lib/supabase';
+
 import { AttendeeList } from './attendee-list';
 import { SearchFilter } from './search-filter';
 
@@ -15,43 +17,108 @@ async function getAttendees(searchParams: SearchParams) {
   const limit = 20;
   const offset = (page - 1) * limit;
 
-  let query = supabaseAdmin
-    .from('attendees')
-    .select(`
-      *,
-      entitlements (id),
-      transactions (id, gross_amount)
-    `, { count: 'exact' });
+  try {
+    let query = supabaseAdmin
+      .from('attendees')
+      .select(`
+        *,
+        entitlements (id),
+        transactions (id, gross_amount)
+      `, { count: 'exact' });
 
-  // Apply search filter
-  if (searchParams.search) {
-    const search = `%${searchParams.search}%`;
-    query = query.or(`email.ilike.${search},display_name.ilike.${search},face_tag.ilike.${search}`);
-  }
+    // Apply search filter
+    if (searchParams.search) {
+      const search = `%${searchParams.search}%`;
+      query = query.or(`email.ilike.${search},display_name.ilike.${search},face_tag.ilike.${search}`);
+    }
 
-  // Apply status filter
-  if (searchParams.status) {
-    query = query.eq('status', searchParams.status);
-  }
+    // Apply status filter
+    if (searchParams.status) {
+      query = query.eq('status', searchParams.status);
+    }
 
-  // Order and paginate
-  query = query
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1);
+    // Order and paginate
+    query = query
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
 
-  const { data, count, error } = await query;
+    const { data, count, error } = await query;
 
-  if (error) {
-    console.error('Error fetching attendees:', error);
+    if (error) {
+      console.error('Error fetching attendees with joins:', error);
+      
+      // Fallback: query without joins
+      let simpleQuery = supabaseAdmin
+        .from('attendees')
+        .select('*', { count: 'exact' });
+
+      if (searchParams.search) {
+        const search = `%${searchParams.search}%`;
+        simpleQuery = simpleQuery.or(`email.ilike.${search},display_name.ilike.${search},face_tag.ilike.${search}`);
+      }
+
+      if (searchParams.status) {
+        simpleQuery = simpleQuery.eq('status', searchParams.status);
+      }
+
+      const { data: simpleData, count: simpleCount, error: simpleError } = await simpleQuery
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+
+      if (simpleError) {
+        console.error('Error fetching attendees (simple):', simpleError);
+        return { attendees: [], total: 0, page, limit };
+      }
+
+      // Fetch related data separately
+      if (simpleData && simpleData.length > 0) {
+        const attendeeIds = simpleData.map(a => a.id);
+        
+        const [entitlementsRes, transactionsRes] = await Promise.all([
+          supabaseAdmin.from('entitlements').select('id, attendee_id').in('attendee_id', attendeeIds),
+          supabaseAdmin.from('transactions').select('id, attendee_id, gross_amount').in('attendee_id', attendeeIds),
+        ]);
+
+        const entitlementsMap = new Map<string, any[]>();
+        const transactionsMap = new Map<string, any[]>();
+
+        entitlementsRes.data?.forEach(e => {
+          if (!entitlementsMap.has(e.attendee_id)) entitlementsMap.set(e.attendee_id, []);
+          entitlementsMap.get(e.attendee_id)!.push(e);
+        });
+
+        transactionsRes.data?.forEach(t => {
+          if (!transactionsMap.has(t.attendee_id)) transactionsMap.set(t.attendee_id, []);
+          transactionsMap.get(t.attendee_id)!.push(t);
+        });
+
+        const attendeesWithJoins = simpleData.map(attendee => ({
+          ...attendee,
+          entitlements: entitlementsMap.get(attendee.id) || [],
+          transactions: transactionsMap.get(attendee.id) || [],
+        }));
+
+        return {
+          attendees: attendeesWithJoins,
+          total: simpleCount || 0,
+          page,
+          limit,
+        };
+      }
+
+      return { attendees: [], total: 0, page, limit };
+    }
+
+    return {
+      attendees: data || [],
+      total: count || 0,
+      page,
+      limit,
+    };
+  } catch (error) {
+    console.error('Error in getAttendees:', error);
     return { attendees: [], total: 0, page, limit };
   }
-
-  return {
-    attendees: data || [],
-    total: count || 0,
-    page,
-    limit,
-  };
 }
 
 export default async function AttendeesPage({

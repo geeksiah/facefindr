@@ -1,6 +1,6 @@
+import type { Database } from '@facefind/shared/types';
 import { createBrowserClient } from '@supabase/ssr';
 
-import type { Database } from '@facefind/shared/types';
 
 export function createClient() {
   return createBrowserClient<Database>(

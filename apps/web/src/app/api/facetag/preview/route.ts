@@ -2,9 +2,11 @@
  * FaceTag Preview API
  * 
  * GET - Preview what FaceTag will be generated for a username
+ * Format: @username1234 (e.g., @amara1234)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+
 import { createClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
@@ -50,7 +52,7 @@ export async function GET(request: NextRequest) {
     const supabase = await createClient();
 
     // Check if this username has any existing users
-    const { data: existingEntries, error, count } = await supabase
+    const { error, count } = await supabase
       .from('username_registry')
       .select('sequence_number', { count: 'exact' })
       .ilike('username', cleanUsername)

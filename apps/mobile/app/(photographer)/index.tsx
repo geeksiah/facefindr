@@ -42,6 +42,9 @@ import { useAuthStore } from '@/stores/auth-store';
 import { useNotificationsStore } from '@/stores/notifications-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { Skeleton, SkeletonEventCard } from '@/components/ui';
+import { getCoverImageUrl, getThumbnailUrl } from '@/lib/storage-urls';
+import { useRealtimeSubscription } from '@/hooks/use-realtime';
 
 const { width } = Dimensions.get('window');
 const PHOTO_CARD_WIDTH = width * 0.42;
@@ -90,27 +93,32 @@ export default function DashboardScreen() {
     activeEvents: 0,
     followers: 0,
   });
-  const [recentEvents, setRecentEvents] = useState<RecentEvent[]>([]);
-  const [recentPhotos, setRecentPhotos] = useState<RecentPhoto[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+      const [recentEvents, setRecentEvents] = useState<RecentEvent[]>([]);
+      const [recentPhotos, setRecentPhotos] = useState<RecentPhoto[]>([]);
+      const [isLoading, setIsLoading] = useState(true);
+      const [isRefreshing, setIsRefreshing] = useState(false);
+      const [totalEventsCount, setTotalEventsCount] = useState(0);
 
   const loadDashboardData = async () => {
     try {
-      const [eventsRes, photosRes, mediaRes, walletRes, followersRes] = await Promise.all([
+      const [eventsRes, eventsCountRes, photosRes, mediaRes, walletRes, followersRes] = await Promise.all([
         supabase
           .from('events')
-          .select('id, name, event_date, status, cover_image_path')
+          .select('id, name, event_date, status, cover_image_url')
           .eq('photographer_id', profile?.id)
           .order('created_at', { ascending: false })
           .limit(5),
+        supabase
+          .from('events')
+          .select('id', { count: 'exact', head: true })
+          .eq('photographer_id', profile?.id),
         supabase
           .from('media')
           .select('id', { count: 'exact' })
           .eq('photographer_id', profile?.id),
         supabase
           .from('media')
-          .select('id, thumbnail_path, events(name)')
+          .select('id, thumbnail_path, storage_path, events(name)')
           .eq('photographer_id', profile?.id)
           .order('created_at', { ascending: false })
           .limit(6),
@@ -126,35 +134,100 @@ export default function DashboardScreen() {
       ]);
 
       const activeEvents = eventsRes.data?.filter((e: any) => e.status === 'active').length || 0;
+      const totalEvents = eventsCountRes?.count ?? 0;
       
+      setTotalEventsCount(totalEvents);
+      
+      // Log for debugging
+      if (eventsRes.error) {
+        console.error('Error loading events:', eventsRes.error);
+      }
+      if (eventsCountRes?.error) {
+        console.error('Error counting events:', eventsCountRes.error);
+      }
+      const now = new Date();
+      const startDate = new Date();
+      startDate.setDate(now.getDate() - 30);
+      const { data: statsData } = await supabase.rpc('get_photographer_stats', {
+        p_photographer_id: profile?.id,
+        p_start_date: startDate.toISOString().split('T')[0],
+        p_end_date: now.toISOString().split('T')[0],
+      });
+      const statsRow = statsData?.[0];
+
       setStats({
         totalRevenue: walletRes.data?.balance || 0,
-        totalViews: Math.floor(Math.random() * 500) + 100,
-        totalPhotos: photosRes.count || 0,
+        totalViews: Number(statsRow?.total_views) || 0,
+        totalPhotos: Number(statsRow?.total_photos) || photosRes.count || 0,
         activeEvents,
         followers: followersRes.count || 0,
       });
 
-      setRecentEvents(
-        (eventsRes.data || []).map((e: any) => ({
-          id: e.id,
-          name: e.name,
-          photoCount: Math.floor(Math.random() * 100),
-          viewCount: Math.floor(Math.random() * 500),
-          eventDate: e.event_date,
-          status: e.status,
-          coverImage: e.cover_image_path,
-        }))
+      // Convert cover images and thumbnails to URLs, get real counts
+      const eventsData = eventsRes.data || [];
+      const eventIds = eventsData.map((e: any) => e.id);
+      const { data: eventPerformance } = await supabase
+        .from('analytics_event_performance')
+        .select('event_id, total_views')
+        .in('event_id', eventIds.length ? eventIds : ['00000000-0000-0000-0000-000000000000']);
+      const eventViewsMap = new Map(
+        (eventPerformance || []).map((row: any) => [row.event_id, row.total_views || 0])
       );
 
-      setRecentPhotos(
-        (mediaRes.data || []).map((m: any) => ({
-          id: m.id,
-          thumbnailUrl: m.thumbnail_path,
-          eventName: m.events?.name || 'Event',
-          views: Math.floor(Math.random() * 100),
-        }))
+      const recentEventsWithUrls = await Promise.all(
+        eventsData.map(async (e: any) => {
+          const coverImageUrl = getCoverImageUrl(e.cover_image_url);
+          
+          // Get real photo count for this event
+          const { count: photoCount } = await supabase
+            .from('media')
+            .select('id', { count: 'exact', head: true })
+            .eq('event_id', e.id);
+          
+          return {
+            id: e.id,
+            name: e.name,
+            photoCount: photoCount || 0,
+            viewCount: eventViewsMap.get(e.id) || 0,
+            eventDate: e.event_date,
+            status: e.status,
+            coverImage: coverImageUrl || undefined, // Convert null to undefined
+          };
+        })
       );
+      setRecentEvents(recentEventsWithUrls);
+
+      const mediaIds = (mediaRes.data || []).map((m: any) => m.id);
+      const { data: viewRows } = await supabase
+        .from('analytics_views')
+        .select('media_id')
+        .in('media_id', mediaIds.length ? mediaIds : ['00000000-0000-0000-0000-000000000000']);
+      const mediaViewCounts = new Map<string, number>();
+      (viewRows || []).forEach((row: any) => {
+        if (!row.media_id) return;
+        mediaViewCounts.set(row.media_id, (mediaViewCounts.get(row.media_id) || 0) + 1);
+      });
+
+      const recentPhotosWithUrls = await Promise.all(
+        (mediaRes.data || []).map(async (m: any) => {
+          // Get thumbnail URL - try thumbnail_path first, fallback to storage_path
+          let thumbnailUrl = null;
+          if (m.thumbnail_path) {
+            thumbnailUrl = await getThumbnailUrl(m.thumbnail_path, null);
+          }
+          if (!thumbnailUrl && m.storage_path) {
+            thumbnailUrl = await getThumbnailUrl(null, m.storage_path);
+          }
+          
+          return {
+            id: m.id,
+            thumbnailUrl: thumbnailUrl || '',
+            eventName: m.events?.name || 'Event',
+            views: mediaViewCounts.get(m.id) || 0,
+          };
+        })
+      );
+      setRecentPhotos(recentPhotosWithUrls);
     } catch (err) {
       console.error('Error loading dashboard:', err);
     } finally {
@@ -166,6 +239,32 @@ export default function DashboardScreen() {
   useEffect(() => {
     loadDashboardData();
   }, []);
+
+  // Subscribe to real-time updates for events
+  useRealtimeSubscription({
+    table: 'events',
+    filter: profile?.id ? `photographer_id=eq.${profile.id}` : undefined,
+    onChange: () => {
+      loadDashboardData();
+    },
+  });
+
+  // Subscribe to real-time updates for media
+  useRealtimeSubscription({
+    table: 'media',
+    filter: profile?.id ? `photographer_id=eq.${profile.id}` : undefined,
+    onChange: () => {
+      loadDashboardData();
+    },
+  });
+
+  // Subscribe to real-time updates for transactions
+  useRealtimeSubscription({
+    table: 'transactions',
+    onChange: () => {
+      loadDashboardData();
+    },
+  });
 
   const handleRefresh = () => {
     setIsRefreshing(true);
@@ -196,6 +295,50 @@ export default function DashboardScreen() {
       </View>
     </Pressable>
   );
+
+  // Loading state with skeleton
+  if (isLoading) {
+    return (
+      <View style={styles.container}>
+        <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
+        <View style={[styles.headerWrapper, { paddingTop: insets.top }]}>
+          <View style={styles.header}>
+            <View style={styles.headerLeft}>
+              <Skeleton width={100} height={14} />
+              <Skeleton width={150} height={24} style={{ marginTop: 4 }} />
+            </View>
+          </View>
+        </View>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          {/* Stats skeleton */}
+          <View style={styles.statsRow}>
+            {[1, 2, 3, 4].map((i) => (
+              <View key={i} style={styles.statCard}>
+                <Skeleton width={40} height={40} borderRadius={12} />
+                <Skeleton width={60} height={24} style={{ marginTop: 8 }} />
+                <Skeleton width={50} height={12} style={{ marginTop: 4 }} />
+              </View>
+            ))}
+          </View>
+          
+          {/* Quick Actions skeleton */}
+          <View style={styles.quickActionsRow}>
+            <Skeleton height={100} borderRadius={borderRadius.xl} style={{ flex: 1 }} />
+            <Skeleton height={100} borderRadius={borderRadius.xl} style={{ flex: 1 }} />
+          </View>
+          
+          {/* Recent Events skeleton */}
+          <View style={{ marginTop: spacing.lg }}>
+            <Skeleton width={120} height={20} style={{ marginBottom: spacing.md }} />
+            <View style={{ gap: spacing.md }}>
+              <SkeletonEventCard />
+              <SkeletonEventCard />
+            </View>
+          </View>
+        </ScrollView>
+      </View>
+    );
+  }
 
   const renderRecentEvent = ({ item }: { item: RecentEvent }) => (
     <Pressable
@@ -454,30 +597,42 @@ export default function DashboardScreen() {
             </TouchableOpacity>
           </View>
           
-          {recentEvents.length === 0 ? (
-            <View style={styles.emptyEvents}>
-              <View style={styles.emptyIcon}>
-                <Calendar size={32} color={colors.secondary} strokeWidth={1.5} />
-              </View>
-              <Text style={styles.emptyTitle}>No events yet</Text>
-              <Text style={styles.emptyText}>Create your first event to start uploading photos</Text>
-              <TouchableOpacity
-                style={styles.createEventBtn}
-                onPress={() => router.push('/create-event')}
-              >
-                <Plus size={18} color="#fff" />
-                <Text style={styles.createEventText}>Create Event</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <View style={styles.eventsGrid}>
-              {recentEvents.slice(0, 4).map((event) => (
-                <View key={event.id} style={styles.eventGridItem}>
-                  {renderRecentEvent({ item: event })}
+          {(() => {
+            // Only show empty state if truly no events exist (after loading)
+            // Check both totalEventsCount and recentEvents to be safe
+            if (!isLoading && totalEventsCount === 0 && recentEvents.length === 0) {
+              return (
+                <View style={styles.emptyEvents}>
+                  <View style={styles.emptyIcon}>
+                    <Calendar size={32} color={colors.secondary} strokeWidth={1.5} />
+                  </View>
+                  <Text style={styles.emptyTitle}>No events yet</Text>
+                  <Text style={styles.emptyText}>Create your first event to start uploading photos</Text>
+                  <TouchableOpacity
+                    style={styles.createEventBtn}
+                    onPress={() => router.push('/create-event')}
+                  >
+                    <Plus size={18} color="#fff" />
+                    <Text style={styles.createEventText}>Create Event</Text>
+                  </TouchableOpacity>
                 </View>
-              ))}
-            </View>
-          )}
+              );
+            }
+            // Show events if we have any, even if loading
+            if (recentEvents.length > 0) {
+              return (
+                <View style={styles.eventsGrid}>
+                  {recentEvents.slice(0, 4).map((event) => (
+                    <View key={event.id} style={styles.eventGridItem}>
+                      {renderRecentEvent({ item: event })}
+                    </View>
+                  ))}
+                </View>
+              );
+            }
+            // Don't show anything if still loading
+            return null;
+          })()}
         </View>
 
         {/* Pro Tips */}

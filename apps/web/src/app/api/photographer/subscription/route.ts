@@ -2,11 +2,13 @@
  * Photographer Subscription API
  * 
  * Get current subscription status, usage, and payment method.
+ * Returns full plan details from the modular pricing system.
  */
 
 import { NextResponse } from 'next/server';
+
+import { getUserPlan, getAllPlans, getPhotographerPlanFeatures } from '@/lib/subscription';
 import { createClient } from '@/lib/supabase/server';
-import { getPhotographerPlan, getPhotographerPlanFeatures } from '@/lib/subscription';
 
 // GET - Get subscription details
 export async function GET() {
@@ -18,9 +20,11 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Get current plan
-    const planCode = await getPhotographerPlan(user.id);
-    const features = await getPhotographerPlanFeatures(user.id);
+    // Get current plan with full details from modular system
+    const currentPlan = await getUserPlan(user.id, 'photographer');
+    
+    // Also get legacy features for backward compatibility
+    const legacyFeatures = await getPhotographerPlanFeatures(user.id);
 
     // Get subscription record
     const { data: subscription } = await supabase
@@ -77,26 +81,55 @@ export async function GET() {
       .eq('photographer_id', user.id)
       .single();
 
-    let paymentMethod = null;
+    const paymentMethod = null;
     // Note: To get actual payment method details, you'd need to call Stripe API
-    // This is a placeholder - in production, fetch from Stripe
 
+    // Build response with both new and legacy formats
     return NextResponse.json({
+      // New modular plan details
+      plan: currentPlan ? {
+        id: currentPlan.id,
+        code: currentPlan.code,
+        name: currentPlan.name,
+        description: currentPlan.description,
+        basePriceUsd: currentPlan.basePriceUsd,
+        platformFeePercent: currentPlan.platformFeePercent,
+        printCommissionPercent: currentPlan.printCommissionPercent,
+        limits: currentPlan.limits,
+        capabilities: currentPlan.capabilities,
+        displayFeatures: currentPlan.features,
+      } : null,
+      
+      // Legacy subscription format for backward compatibility
       subscription: subscription ? {
         planCode: subscription.plan_code,
         status: subscription.status,
         currentPeriodEnd: subscription.current_period_end,
       } : {
-        planCode: 'free',
+        planCode: currentPlan?.code || 'free',
         status: 'active',
         currentPeriodEnd: null,
       },
-      features,
+      
+      // Legacy features format for backward compatibility
+      features: legacyFeatures,
+      
+      // Usage stats
       usage: {
         events: eventCount || 0,
         photos: photoCount,
         faceOps: faceOpsCount,
       },
+      
+      // Limits (from new system if available, else legacy)
+      limits: currentPlan?.limits || {
+        maxActiveEvents: legacyFeatures.maxActiveEvents,
+        maxPhotosPerEvent: legacyFeatures.maxPhotosPerEvent,
+        maxFaceOpsPerEvent: legacyFeatures.maxFaceOpsPerEvent,
+        storageGb: legacyFeatures.storageGb,
+        teamMembers: legacyFeatures.teamMembers,
+      },
+      
       paymentMethod,
       hasStripeAccount: !!wallet?.stripe_account_id,
     });

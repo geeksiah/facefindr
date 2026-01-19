@@ -1,14 +1,15 @@
 'use client';
 
-import { useState } from 'react';
-import Link from 'next/link';
-import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Mail, AlertCircle, ArrowLeft, CheckCircle2 } from 'lucide-react';
+import Link from 'next/link';
+import { useState } from 'react';
+import { useForm } from 'react-hook-form';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { forgotPasswordSchema, type ForgotPasswordInput } from '@/lib/validations/auth';
+
 import { forgotPassword } from '../actions';
 
 export default function ForgotPasswordPage() {

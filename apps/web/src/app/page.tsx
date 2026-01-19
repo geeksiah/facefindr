@@ -1,7 +1,8 @@
 'use client';
 
-import Link from 'next/link';
 import { ArrowRight, Scan, Camera, Shield, Zap, Check, ChevronRight } from 'lucide-react';
+import Link from 'next/link';
+
 import { Button } from '@/components/ui/button';
 import { Logo, LogoIcon } from '@/components/ui/logo';
 

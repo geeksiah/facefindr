@@ -6,7 +6,6 @@
  * Allows users to add, manage, and select payment methods.
  */
 
-import { useState, useEffect, useCallback } from 'react';
 import { 
   CreditCard, 
   Smartphone, 
@@ -19,7 +18,10 @@ import {
   ChevronDown,
   X,
 } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+
 import { Button, Switch } from '@/components/ui';
+import { useConfirm } from '@/components/ui/toast';
 
 // ============================================
 // TYPES

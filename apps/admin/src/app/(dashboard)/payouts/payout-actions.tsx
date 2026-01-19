@@ -1,7 +1,5 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { 
   RefreshCw, 
   Pause, 
@@ -10,6 +8,8 @@ import {
   Zap,
   AlertTriangle,
 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 
 interface PayoutActionsProps {
   payoutsEnabled: boolean;

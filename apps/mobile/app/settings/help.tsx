@@ -173,7 +173,7 @@ export default function HelpScreen() {
         {/* App Info */}
         <View style={styles.appInfo}>
           <Text style={styles.appVersion}>FaceFindr v1.0.0</Text>
-          <Text style={styles.appCopyright}>© 2025 FaceFindr. All rights reserved.</Text>
+          <Text style={styles.appCopyright}>© {new Date().getFullYear()} FaceFindr. All rights reserved.</Text>
         </View>
       </ScrollView>
     </View>

@@ -1,9 +1,10 @@
 'use client';
 
+import { Activity, Zap } from 'lucide-react';
 import { useEffect, useState } from 'react';
+
 import { useRealtimeTable } from '@/components/realtime-provider';
 import { formatCurrency, formatNumber } from '@/lib/utils';
-import { Activity, Zap } from 'lucide-react';
 
 interface Stats {
   totalRevenue: number;

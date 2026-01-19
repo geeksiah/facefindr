@@ -1,130 +1,201 @@
-/**
- * Public Event API
- * 
- * Fetches event data for public viewing (no auth required).
- */
-
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { headers } from 'next/headers';
 
+import { createClient, createServiceClient } from '@/lib/supabase/server';
+
+// GET - Get public event by slug
 export async function GET(
   request: NextRequest,
   { params }: { params: { slug: string } }
 ) {
   try {
-    const supabase = await createClient();
     const { slug } = params;
     const { searchParams } = new URL(request.url);
-    const accessCode = searchParams.get('code');
+    const code = searchParams.get('code');
 
-    // Find event by slug or short link
-    const { data: event, error } = await supabase
+    // Use service client to bypass RLS completely - we'll validate access manually
+    const serviceClient = createServiceClient();
+
+    // Get event by public_slug, short_link, or id
+    // First, try to find the event regardless of status to provide better error messages
+    
+    // Check if slug is a UUID (for direct ID lookup)
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(slug);
+    
+    let eventQuery = serviceClient
       .from('events')
       .select(`
-        id, name, description, date, end_date, location, cover_image_url,
-        status, public_slug, short_link, is_publicly_listed, allow_anonymous_scan,
-        require_access_code, public_access_code, currency_code,
-        photographers (id, display_name, profile_photo_url, bio)
-      `)
-      .or(`public_slug.eq.${slug},short_link.eq.${slug}`)
-      .eq('status', 'active')
-      .single();
+        id,
+        name,
+        description,
+        event_date,
+        location,
+        cover_image_url,
+        public_slug,
+        short_link,
+        is_public,
+        is_publicly_listed,
+        allow_anonymous_scan,
+        require_access_code,
+        public_access_code,
+        photographer_id,
+        status
+      `);
+    
+    // Build the query based on slug type
+    if (isUuid) {
+      eventQuery = eventQuery.eq('id', slug);
+    } else {
+      // Try public_slug first, then short_link
+      eventQuery = eventQuery.or(`public_slug.eq.${slug},short_link.eq.${slug}`);
+    }
+    
+    const { data: eventBySlug, error: slugError } = await eventQuery.maybeSingle();
 
-    if (error || !event) {
+    // If event doesn't exist, return 404
+    if (slugError) {
+      console.error('Event query error:', slug, slugError);
+      return NextResponse.json({ error: 'Failed to load event' }, { status: 500 });
+    }
+    
+    if (!eventBySlug) {
+      console.error('Event not found by slug:', slug);
+      return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+    }
+
+    // Check if event is active (required for public access)
+    if (eventBySlug.status !== 'active') {
       return NextResponse.json(
-        { error: 'Event not found' },
-        { status: 404 }
+        { 
+          error: 'Event not active',
+          message: eventBySlug.status === 'draft' 
+            ? 'This event has not been published yet. It must be activated before it can be accessed.'
+            : `This event is ${eventBySlug.status} and cannot be accessed.`
+        },
+        { status: 403 }
       );
     }
 
+    const event = eventBySlug;
+
+    // Now get photographer details (using service client for consistency)
+    const { data: photographer } = await serviceClient
+      .from('photographers')
+      .select('id, display_name, profile_photo_url, bio')
+      .eq('id', event.photographer_id)
+      .single();
+    
+    // Get all collaborators for this event (for multi-photographer events)
+    const { data: collaborators } = await serviceClient
+      .from('event_collaborators')
+      .select(`
+        photographer_id,
+        role,
+        photographers:photographer_id (
+          id,
+          display_name,
+          profile_photo_url,
+          bio
+        )
+      `)
+      .eq('event_id', event.id)
+      .eq('status', 'accepted');
+    
+    // Build all photographers list (owner + collaborators)
+    const allPhotographers = [
+      photographer,
+      ...(collaborators || [])
+        .map((c: any) => c.photographers)
+        .filter((p: any) => p && p.id !== event.photographer_id)
+    ].filter(Boolean);
+
+    // ACCESS LOGIC (Product Design Perspective):
+    // 1. If event requires access code, validate it
+    // 2. If event is private (is_public = false) and no code provided, deny access
+    // 3. If event is public OR has valid code OR allows anonymous scan, grant access
+    
     // Check access code if required
     if (event.require_access_code) {
-      if (!accessCode || accessCode.toUpperCase() !== event.public_access_code?.toUpperCase()) {
-        return NextResponse.json({
-          error: 'access_code_required',
-          event: {
-            name: event.name,
-            cover_image_url: event.cover_image_url,
-            require_access_code: true,
+      if (!code) {
+        // Show access code entry form
+        const coverPath = event.cover_image_url?.startsWith('/')
+          ? event.cover_image_url.slice(1)
+          : event.cover_image_url;
+        const coverImageUrl = coverPath?.startsWith('http')
+          ? coverPath
+          : coverPath
+          ? serviceClient.storage.from('covers').getPublicUrl(coverPath).data.publicUrl
+          : null;
+        return NextResponse.json(
+          {
+            error: 'access_code_required',
+            event: {
+              id: event.id,
+              name: event.name,
+              require_access_code: true,
+              cover_image_url: coverImageUrl,
+            },
           },
-        }, { status: 403 });
+          { status: 403 }
+        );
+      }
+
+      // Validate access code
+      if (code.toUpperCase() !== event.public_access_code?.toUpperCase()) {
+        return NextResponse.json({ error: 'Invalid access code' }, { status: 403 });
       }
     }
 
-    // Get photos (thumbnails only for preview)
-    const { data: photos } = await supabase
-      .from('media')
-      .select('id, thumbnail_path, created_at')
-      .eq('event_id', event.id)
-      .order('created_at', { ascending: false })
-      .limit(100);
+    // For private events without code, check if anonymous scan is allowed
+    // (This allows face scanning even for private events if photographer enabled it)
+    if (!event.is_public && !event.require_access_code && !event.allow_anonymous_scan) {
+      return NextResponse.json(
+        { error: 'Event is private', message: 'This event is not publicly accessible.' },
+        { status: 403 }
+      );
+    }
 
-    // Get photo count
-    const { count: photoCount } = await supabase
+    // Get photo count only (photos are NOT returned - only visible after face scan)
+    const { count: photoCount } = await serviceClient
       .from('media')
       .select('id', { count: 'exact', head: true })
-      .eq('event_id', event.id);
+      .eq('event_id', event.id)
+      .is('deleted_at', null);
 
-    // Track visit (non-blocking)
-    trackVisit(supabase, event.id, request).catch(console.error);
+    const coverPath = event.cover_image_url?.startsWith('/')
+      ? event.cover_image_url.slice(1)
+      : event.cover_image_url;
+    const coverImageUrl = coverPath?.startsWith('http')
+      ? coverPath
+      : coverPath
+      ? serviceClient.storage.from('covers').getPublicUrl(coverPath).data.publicUrl
+      : null;
 
-    // Clean up sensitive data
-    const publicEvent = {
-      id: event.id,
-      name: event.name,
-      description: event.description,
-      date: event.date,
-      end_date: event.end_date,
-      location: event.location,
-      cover_image_url: event.cover_image_url,
-      photo_count: photoCount || 0,
-      allow_anonymous_scan: event.allow_anonymous_scan,
-      photographers: event.photographers,
-      currency_code: event.currency_code,
-    };
+    // NOTE: Photos are NOT returned in the public event response.
+    // Attendees can only see photos after using the face scanner.
+    // This ensures privacy - Attendee A cannot see Attendee B's photos.
 
     return NextResponse.json({
-      event: publicEvent,
-      photos: photos || [],
+      event: {
+        id: event.id,
+        name: event.name,
+        description: event.description,
+        date: event.event_date,
+        location: event.location,
+        cover_image_url: coverImageUrl,
+        photo_count: photoCount || 0,
+        allow_anonymous_scan: event.allow_anonymous_scan,
+        require_access_code: event.require_access_code,
+        is_public: event.is_public,
+        // Primary photographer
+        photographer: photographer,
+        // All photographers (for multi-photographer events)
+        all_photographers: allPhotographers.length > 1 ? allPhotographers : undefined,
+      },
+      // No photos returned - only visible after face scan
+      photos: [],
     });
-
   } catch (error) {
-    console.error('Public event error:', error);
-    return NextResponse.json(
-      { error: 'Failed to load event' },
-      { status: 500 }
-    );
-  }
-}
-
-async function trackVisit(supabase: any, eventId: string, request: NextRequest) {
-  try {
-    const headersList = await headers();
-    const userAgent = headersList.get('user-agent') || '';
-    const referrer = headersList.get('referer') || '';
-
-    // Parse device type
-    let deviceType = 'desktop';
-    if (/mobile/i.test(userAgent)) deviceType = 'mobile';
-    else if (/tablet|ipad/i.test(userAgent)) deviceType = 'tablet';
-
-    // Parse browser
-    let browser = 'unknown';
-    if (/chrome/i.test(userAgent) && !/edge/i.test(userAgent)) browser = 'chrome';
-    else if (/firefox/i.test(userAgent)) browser = 'firefox';
-    else if (/safari/i.test(userAgent) && !/chrome/i.test(userAgent)) browser = 'safari';
-    else if (/edge/i.test(userAgent)) browser = 'edge';
-
-    await supabase.from('event_link_analytics').insert({
-      event_id: eventId,
-      referrer,
-      user_agent: userAgent.substring(0, 500),
-      device_type: deviceType,
-      browser,
-      action: 'view',
-    });
-  } catch (e) {
-    // Non-blocking
+    console.error('Get public event error:', error);
+    return NextResponse.json({ error: 'Failed to load event' }, { status: 500 });
   }
 }

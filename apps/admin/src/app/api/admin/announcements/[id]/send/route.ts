@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+
 import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 
@@ -29,23 +30,142 @@ export async function POST(
       return NextResponse.json({ error: 'Announcement not found' }, { status: 404 });
     }
 
-    // Get target users
-    let userCount = 0;
-    
-    if (announcement.target === 'all' || announcement.target === 'photographers') {
-      const { count } = await supabaseAdmin
-        .from('photographers')
-        .select('id', { count: 'exact', head: true })
+    const targetCountry = announcement.country_code ? String(announcement.country_code).toUpperCase() : null;
+
+    const fetchTargets = async (table: 'photographers' | 'attendees') => {
+      let query = supabaseAdmin
+        .from(table)
+        .select('id, email, country_code')
         .eq('status', 'active');
-      userCount += count || 0;
+
+      if (targetCountry) {
+        query = query.eq('country_code', targetCountry);
+      }
+
+      const { data } = await query;
+      return data || [];
+    };
+
+    const [photographers, attendees] = await Promise.all([
+      announcement.target === 'all' || announcement.target === 'photographers'
+        ? fetchTargets('photographers')
+        : Promise.resolve([]),
+      announcement.target === 'all' || announcement.target === 'attendees'
+        ? fetchTargets('attendees')
+        : Promise.resolve([]),
+    ]);
+
+    const targets = [...photographers, ...attendees];
+    const userCount = targets.length;
+
+    if (userCount === 0) {
+      return NextResponse.json({ error: 'No matching users found for this announcement' }, { status: 400 });
     }
 
-    if (announcement.target === 'all' || announcement.target === 'attendees') {
-      const { count } = await supabaseAdmin
-        .from('attendees')
-        .select('id', { count: 'exact', head: true })
-        .eq('status', 'active');
-      userCount += count || 0;
+    const uniqueCountries = Array.from(
+      new Set(
+        targets
+          .map((user: any) => (user.country_code ? String(user.country_code).toUpperCase() : null))
+          .filter(Boolean)
+      )
+    ) as string[];
+
+    const { data: regionConfigs } = await supabaseAdmin
+      .from('region_config')
+      .select('region_code, email_provider, sms_provider, email_enabled, sms_enabled')
+      .in('region_code', targetCountry ? [targetCountry] : uniqueCountries);
+
+    const regionMap = new Map(
+      (regionConfigs || []).map((region: any) => [region.region_code, region])
+    );
+
+    const { data: prefs } = await supabaseAdmin
+      .from('user_notification_preferences')
+      .select('user_id, email_enabled, sms_enabled, push_enabled, phone_number, phone_verified')
+      .in('user_id', targets.map((user: any) => user.id));
+
+    const prefsMap = new Map((prefs || []).map((pref: any) => [pref.user_id, pref]));
+
+    const notifications: any[] = [];
+
+    for (const user of targets) {
+      const userPrefs = prefsMap.get(user.id) || {
+        email_enabled: true,
+        sms_enabled: false,
+        push_enabled: true,
+        phone_number: null,
+        phone_verified: false,
+      };
+
+      const userCountry = targetCountry || (user.country_code ? String(user.country_code).toUpperCase() : null);
+      const region = userCountry ? regionMap.get(userCountry) : null;
+
+      if (announcement.send_email && user.email && userPrefs.email_enabled && region?.email_enabled !== false) {
+        notifications.push({
+          user_id: user.id,
+          template_code: 'platform_announcement',
+          channel: 'email',
+          subject: announcement.title,
+          body: announcement.content,
+          variables: { title: announcement.title, content: announcement.content },
+          status: 'pending',
+          provider_used: region?.email_provider || null,
+          metadata: {
+            announcement_id: announcement.id,
+            country_code: userCountry,
+          },
+        });
+      }
+
+      if (
+        announcement.send_sms &&
+        userPrefs.sms_enabled &&
+        userPrefs.phone_verified &&
+        userPrefs.phone_number &&
+        region?.sms_enabled !== false
+      ) {
+        notifications.push({
+          user_id: user.id,
+          template_code: 'platform_announcement',
+          channel: 'sms',
+          body: announcement.content,
+          variables: { title: announcement.title, content: announcement.content },
+          status: 'pending',
+          provider_used: region?.sms_provider || null,
+          metadata: {
+            announcement_id: announcement.id,
+            country_code: userCountry,
+            phone_number: userPrefs.phone_number,
+          },
+        });
+      }
+
+      if (announcement.send_push && userPrefs.push_enabled) {
+        notifications.push({
+          user_id: user.id,
+          template_code: 'platform_announcement',
+          channel: 'push',
+          subject: announcement.title,
+          body: announcement.content,
+          variables: { title: announcement.title, content: announcement.content },
+          status: 'pending',
+          metadata: {
+            announcement_id: announcement.id,
+            country_code: userCountry,
+          },
+        });
+      }
+    }
+
+    if (notifications.length > 0) {
+      const { error: insertError } = await supabaseAdmin
+        .from('notifications')
+        .insert(notifications);
+
+      if (insertError) {
+        console.error('Announcement notification insert error:', insertError);
+        return NextResponse.json({ error: 'Failed to queue notifications' }, { status: 500 });
+      }
     }
 
     // Update announcement as sent
@@ -61,9 +181,15 @@ export async function POST(
     // In production, you would queue notifications here
     // For now, we just mark it as sent
 
-    await logAction('announcement_send', 'announcement', id, { 
+    await logAction('announcement_send', 'announcement', id, {
       target: announcement.target,
       sent_count: userCount,
+      country_code: targetCountry,
+      channels: {
+        send_email: announcement.send_email,
+        send_push: announcement.send_push,
+        send_sms: announcement.send_sms,
+      },
     });
 
     return NextResponse.json({ success: true, sent_count: userCount });

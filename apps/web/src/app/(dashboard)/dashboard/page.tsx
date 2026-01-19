@@ -1,5 +1,3 @@
-import { Suspense } from 'react';
-import Link from 'next/link';
 import {
   Calendar,
   Image,
@@ -10,9 +8,11 @@ import {
   Clock,
   Plus,
 } from 'lucide-react';
+import Link from 'next/link';
+import { Suspense } from 'react';
 
-import { createClient } from '@/lib/supabase/server';
 import { Button } from '@/components/ui/button';
+import { createClient } from '@/lib/supabase/server';
 
 // ============================================
 // STAT CARD COMPONENT

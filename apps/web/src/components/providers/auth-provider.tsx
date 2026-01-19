@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { useEffect, useRef, useCallback } from 'react';
 
-import { createClient } from '@/lib/supabase/client';
 import { useAuthStore } from '@/hooks/use-auth-store';
+import { createClient } from '@/lib/supabase/client';
 
 interface AuthProviderProps {
   children: React.ReactNode;

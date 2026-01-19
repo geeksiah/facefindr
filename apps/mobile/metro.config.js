@@ -27,4 +27,7 @@ config.resolver.unstable_enableSymlinks = true;
 // 5. Ensure pnpm .pnpm folder is resolved correctly
 config.resolver.unstable_enablePackageExports = true;
 
+// 6. Add SVG to asset extensions
+config.resolver.assetExts.push('svg');
+
 module.exports = config;

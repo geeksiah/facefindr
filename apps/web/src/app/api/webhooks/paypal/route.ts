@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
+import { NextResponse } from 'next/server';
+
 import { verifyWebhook, captureOrder } from '@/lib/payments/paypal';
 import { createServiceClient } from '@/lib/supabase/server';
 

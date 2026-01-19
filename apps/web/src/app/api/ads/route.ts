@@ -5,7 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+
 import {
   getAdForPlacement,
   trackImpression,
@@ -13,6 +13,7 @@ import {
   AdPlacementCode,
 } from '@/lib/notifications';
 import { getPhotographerPlan } from '@/lib/subscription';
+import { createClient } from '@/lib/supabase/server';
 
 // GET - Get ad for placement
 export async function GET(request: NextRequest) {

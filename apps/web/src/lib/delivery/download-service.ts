@@ -4,8 +4,9 @@
  * Handles secure downloads, entitlement checks, and download tracking.
  */
 
-import { createServiceClient } from '@/lib/supabase/server';
 import crypto from 'crypto';
+
+import { createServiceClient } from '@/lib/supabase/server';
 
 // ============================================
 // TYPES

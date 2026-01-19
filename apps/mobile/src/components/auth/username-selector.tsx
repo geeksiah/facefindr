@@ -1,8 +1,9 @@
 /**
  * Username Selector Component (Mobile)
  * 
- * Allows users to choose a 4-8 letter username and see the
- * system-generated FaceTag number in real-time.
+ * Allows users to choose a username and see the
+ * system-generated FaceTag suffix in real-time.
+ * Format: @username+suffix (e.g., @amara+k7x2)
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -15,7 +16,7 @@ import {
 } from 'react-native';
 import { AtSign, Check, X } from 'lucide-react-native';
 
-import { colors, spacing, borderRadius, fontSize } from '@/lib/theme';
+import { colors, spacing, borderRadius } from '@/lib/theme';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
 
@@ -29,7 +30,7 @@ interface UsernameSelectorProps {
 interface PreviewResult {
   valid: boolean;
   cleanedUsername: string;
-  sampleNumber?: number;
+  sampleSuffix?: string;
   previewTag?: string;
   error?: string;
   isFirstUser?: boolean;
@@ -45,7 +46,7 @@ export function UsernameSelector({
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
-  const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchPreview = useCallback(async (username: string) => {
     if (!username || username.length < 1) {
@@ -92,14 +93,13 @@ export function UsernameSelector({
   }, [value, fetchPreview]);
 
   const handleInputChange = (text: string) => {
-    // Only allow letters and numbers, limit to 8 chars
-    const cleaned = text.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8);
+    // Allow letters, numbers, and underscores, limit to 20 chars
+    const cleaned = text.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20);
     onChange(cleaned);
   };
 
   const charCount = value.length;
-  const isValidLength = charCount >= 4 && charCount <= 8;
-  const startsWithNumber = /^[0-9]/.test(value);
+  const startsWithNumberOrUnderscore = /^[0-9_]/.test(value);
 
   return (
     <View style={styles.container}>
@@ -138,13 +138,13 @@ export function UsernameSelector({
       <View style={styles.counterRow}>
         <Text style={[
           styles.counterText,
-          charCount >= 4 && charCount <= 8 && styles.counterValid,
-          charCount > 8 && styles.counterError,
+          charCount >= 3 && charCount <= 20 && styles.counterValid,
+          charCount > 20 && styles.counterError,
         ]}>
-          {charCount}/8 characters {charCount < 4 && '(min 4)'}
+          {charCount}/20 characters {charCount < 3 && '(min 3)'}
         </Text>
-        {startsWithNumber && (
-          <Text style={styles.errorText}>Cannot start with a number</Text>
+        {startsWithNumberOrUnderscore && (
+          <Text style={styles.errorText}>Must start with a letter</Text>
         )}
       </View>
 
@@ -160,20 +160,18 @@ export function UsernameSelector({
               <Text style={styles.previewLabel}>Your FaceTag will look like:</Text>
               <View style={styles.faceTagRow}>
                 <Text style={styles.faceTagUsername}>@{preview.cleanedUsername}</Text>
-                <Text style={styles.faceTagNumber}>
-                  {preview.sampleNumber}
-                </Text>
+                <Text style={styles.faceTagSuffix}>+{preview.sampleSuffix}</Text>
               </View>
               {preview.isFirstUser ? (
                 <View style={styles.firstUserBadge}>
                   <Check size={12} color="#10b981" />
                   <Text style={styles.firstUserText}>
-                    You'll be the first with this username!
+                    You&apos;ll be the first with this username!
                   </Text>
                 </View>
               ) : (
                 <Text style={styles.sequenceText}>
-                  A unique random number will be assigned to you
+                  A unique random suffix will be assigned to you
                 </Text>
               )}
             </View>
@@ -189,7 +187,7 @@ export function UsernameSelector({
             </View>
           ) : (
             <Text style={styles.hintText}>
-              Enter at least 4 characters to see your FaceTag
+              Enter at least 3 characters to see your FaceTag
             </Text>
           )}
         </View>
@@ -198,7 +196,7 @@ export function UsernameSelector({
       {/* Help Text */}
       <Text style={styles.helpText}>
         Your FaceTag is your unique identifier. Choose a memorable username 
-        (4-8 letters/numbers) and we'll add a number to make it unique.
+        (3-20 characters) and we&apos;ll add a unique suffix to make it yours.
       </Text>
     </View>
   );
@@ -287,7 +285,7 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     fontFamily: 'monospace',
   },
-  faceTagNumber: {
+  faceTagSuffix: {
     fontSize: 24,
     fontWeight: '700',
     color: colors.accent,

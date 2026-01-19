@@ -1,9 +1,5 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
-import Image from 'next/image';
-import Link from 'next/link';
 import {
   Calendar,
   MapPin,
@@ -12,21 +8,57 @@ import {
   Lock,
   ChevronRight,
   Share2,
-  Twitter,
-  Facebook,
-  MessageCircle,
-  Mail,
   Copy,
   Check,
   X,
   User,
   ImageIcon,
+  LayoutDashboard,
+  Home,
 } from 'lucide-react';
+import Image from 'next/image';
+import Link from 'next/link';
+import { useParams, useSearchParams } from 'next/navigation';
+import { useState, useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Logo } from '@/components/ui/logo';
+import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
+
+// Monochrome social icons
+const XIcon = () => (
+  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
+    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+  </svg>
+);
+
+const FacebookIcon = () => (
+  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
+    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+  </svg>
+);
+
+const WhatsAppIcon = () => (
+  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
+    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+  </svg>
+);
+
+const EmailIcon = () => (
+  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+    <rect x="2" y="4" width="20" height="16" rx="2"/>
+    <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+  </svg>
+);
+
+interface Photographer {
+  id: string;
+  display_name: string;
+  profile_photo_url?: string;
+  bio?: string;
+}
 
 interface Event {
   id: string;
@@ -39,17 +71,19 @@ interface Event {
   photo_count: number;
   allow_anonymous_scan: boolean;
   require_access_code: boolean;
-  photographers: {
-    id: string;
-    display_name: string;
-    profile_photo_url?: string;
-    bio?: string;
-  };
+  // Primary photographer (owner)
+  photographer: Photographer;
+  // All photographers (including collaborators)
+  all_photographers?: Photographer[];
+  // Employer/client info (if applicable)
+  employer_id?: string;
+  employer_name?: string;
 }
 
 interface Photo {
   id: string;
   thumbnail_path: string;
+  thumbnail_url?: string | null;
   created_at: string;
 }
 
@@ -68,6 +102,21 @@ export default function PublicEventPage() {
   const [codeError, setCodeError] = useState('');
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  // Check if user is logged in
+  useEffect(() => {
+    async function checkAuth() {
+      try {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        setIsLoggedIn(!!user);
+      } catch (e) {
+        setIsLoggedIn(false);
+      }
+    }
+    checkAuth();
+  }, []);
 
   useEffect(() => {
     loadEvent();
@@ -161,6 +210,10 @@ export default function PublicEventPage() {
   }
 
   if (error) {
+    const homeUrl = isLoggedIn ? '/dashboard' : '/';
+    const homeLabel = isLoggedIn ? 'Go to Dashboard' : 'Go Home';
+    const HomeIcon = isLoggedIn ? LayoutDashboard : Home;
+    
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-6">
         <div className="text-center max-w-md">
@@ -169,8 +222,11 @@ export default function PublicEventPage() {
           </div>
           <h1 className="text-2xl font-bold text-foreground mb-2">Event Not Found</h1>
           <p className="text-secondary mb-6">{error}</p>
-          <Link href="/">
-            <Button>Go Home</Button>
+          <Link href={homeUrl}>
+            <Button>
+              <HomeIcon className="w-4 h-4 mr-2" />
+              {homeLabel}
+            </Button>
           </Link>
         </div>
       </div>
@@ -268,28 +324,28 @@ export default function PublicEventPage() {
                       onClick={() => handleShare('twitter')}
                       className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted text-left text-foreground transition-colors"
                     >
-                      <Twitter className="h-4 w-4" />
-                      Share on Twitter
+                      <XIcon />
+                      Share on X
                     </button>
                     <button
                       onClick={() => handleShare('facebook')}
                       className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted text-left text-foreground transition-colors"
                     >
-                      <Facebook className="h-4 w-4" />
+                      <FacebookIcon />
                       Share on Facebook
                     </button>
                     <button
                       onClick={() => handleShare('whatsapp')}
                       className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted text-left text-foreground transition-colors"
                     >
-                      <MessageCircle className="h-4 w-4" />
+                      <WhatsAppIcon />
                       Share on WhatsApp
                     </button>
                     <button
                       onClick={() => handleShare('email')}
                       className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted text-left text-foreground transition-colors"
                     >
-                      <Mail className="h-4 w-4" />
+                      <EmailIcon />
                       Email Link
                     </button>
                     <div className="border-t border-border my-2" />
@@ -349,27 +405,58 @@ export default function PublicEventPage() {
               </div>
             </div>
 
-            {/* Photographer */}
-            {event?.photographers && (
-              <div className="flex items-center gap-3 p-4 bg-muted rounded-xl mb-6">
-                <div className="relative h-12 w-12 rounded-full overflow-hidden bg-secondary/20">
-                  {event.photographers.profile_photo_url ? (
-                    <Image
-                      src={event.photographers.profile_photo_url}
-                      alt={event.photographers.display_name}
-                      fill
-                      className="object-cover"
-                    />
-                  ) : (
-                    <div className="flex items-center justify-center h-full">
-                      <User className="h-6 w-6 text-secondary" />
+            {/* Photographers */}
+            {(event?.photographer || event?.all_photographers) && (
+              <div className="mb-6">
+                {/* Show all photographers if multiple */}
+                {event.all_photographers && event.all_photographers.length > 1 ? (
+                  <div className="space-y-3">
+                    <p className="text-sm font-medium text-secondary">Photographers</p>
+                    <div className="flex flex-wrap gap-3">
+                      {event.all_photographers.map((photographer) => (
+                        <div key={photographer.id} className="flex items-center gap-2 p-2 bg-muted rounded-lg">
+                          <div className="relative h-8 w-8 rounded-full overflow-hidden bg-secondary/20">
+                            {photographer.profile_photo_url ? (
+                              <Image
+                                src={photographer.profile_photo_url}
+                                alt={photographer.display_name}
+                                fill
+                                className="object-cover"
+                              />
+                            ) : (
+                              <div className="flex items-center justify-center h-full">
+                                <User className="h-4 w-4 text-secondary" />
+                              </div>
+                            )}
+                          </div>
+                          <span className="text-sm font-medium text-foreground">{photographer.display_name}</span>
+                        </div>
+                      ))}
                     </div>
-                  )}
-                </div>
-                <div className="flex-1">
-                  <p className="font-medium text-foreground">{event.photographers.display_name}</p>
-                  <p className="text-sm text-secondary">Photographer</p>
-                </div>
+                  </div>
+                ) : (
+                  /* Single photographer */
+                  <div className="flex items-center gap-3 p-4 bg-muted rounded-xl">
+                    <div className="relative h-12 w-12 rounded-full overflow-hidden bg-secondary/20">
+                      {event.photographer?.profile_photo_url ? (
+                        <Image
+                          src={event.photographer.profile_photo_url}
+                          alt={event.photographer.display_name}
+                          fill
+                          className="object-cover"
+                        />
+                      ) : (
+                        <div className="flex items-center justify-center h-full">
+                          <User className="h-6 w-6 text-secondary" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <p className="font-medium text-foreground">{event.photographer?.display_name}</p>
+                      <p className="text-sm text-secondary">Photographer</p>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -378,77 +465,55 @@ export default function PublicEventPage() {
             )}
 
             {/* CTA - Find Your Photos */}
-            <Link href={`/e/${slug}/scan`} className="block">
-              <Button size="lg" className="w-full group">
-                <Scan className="h-5 w-5 mr-2" />
-                Find Your Photos
-                <ChevronRight className="h-5 w-5 ml-2 group-hover:translate-x-1 transition-transform" />
-              </Button>
-            </Link>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Link href={`/e/${slug}/scan`} className="flex-1 sm:flex-initial">
+                <Button size="lg" className="w-full sm:w-auto sm:min-w-[200px] group">
+                  <Scan className="h-5 w-5 mr-2" />
+                  Find Your Photos
+                  <ChevronRight className="h-5 w-5 ml-2 group-hover:translate-x-1 transition-transform" />
+                </Button>
+              </Link>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Photo Gallery Preview */}
-      {photos.length > 0 && (
-        <section className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold text-foreground">Event Photos</h2>
-            <p className="text-sm text-secondary">{event?.photo_count} total</p>
+      {/* Photo Count Info - No preview, photos only visible after face scan */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+        <div className="rounded-2xl border border-border bg-card/50 p-8 text-center">
+          <div className="w-16 h-16 bg-accent/10 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Camera className="w-8 h-8 text-accent" />
           </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-4">
-            {photos.slice(0, 12).map((photo, index) => (
-              <div
-                key={photo.id}
-                className={cn(
-                  "relative aspect-square rounded-xl overflow-hidden bg-muted group cursor-pointer",
-                  index === 0 && "col-span-2 row-span-2 sm:col-span-1 sm:row-span-1"
-                )}
-              >
-                <Image
-                  src={photo.thumbnail_path}
-                  alt="Event photo"
-                  fill
-                  className="object-cover transition-transform group-hover:scale-105"
-                />
-                {/* Watermark overlay */}
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="text-white/20 text-2xl font-bold rotate-[-30deg]">
-                    FaceFindr
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {(event?.photo_count || 0) > 12 && (
-            <div className="text-center mt-8">
+          
+          {(event?.photo_count || 0) > 0 ? (
+            <>
+              <h2 className="text-xl font-semibold text-foreground mb-2">
+                {event?.photo_count?.toLocaleString()} Photos Available
+              </h2>
+              <p className="text-secondary mb-6 max-w-md mx-auto">
+                Use the face scanner to find photos of yourself. Your photos will be matched using AI-powered face recognition.
+              </p>
               <Link href={`/e/${slug}/scan`}>
-                <Button variant="outline">
-                  Scan to see all {event?.photo_count} photos
+                <Button size="lg" className="group">
+                  <Scan className="h-5 w-5 mr-2" />
+                  Find Your Photos
+                  <ChevronRight className="h-5 w-5 ml-2 group-hover:translate-x-1 transition-transform" />
                 </Button>
               </Link>
-            </div>
+            </>
+          ) : (
+            <>
+              <h2 className="text-xl font-semibold text-foreground mb-2">Photos Coming Soon</h2>
+              <p className="text-secondary mb-6">
+                The photographer is still uploading photos for this event. Check back soon!
+              </p>
+              <Button variant="outline" onClick={() => loadEvent()}>
+                Refresh
+              </Button>
+            </>
           )}
-        </section>
-      )}
-
-      {/* Empty state */}
-      {photos.length === 0 && !loading && (
-        <div className="max-w-md mx-auto px-4 py-16 text-center">
-          <div className="w-20 h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-6">
-            <Camera className="w-10 h-10 text-muted-foreground" />
-          </div>
-          <h2 className="text-xl font-semibold text-foreground mb-2">Photos Coming Soon</h2>
-          <p className="text-secondary mb-6">
-            The photographer is still uploading photos for this event. Check back soon!
-          </p>
-          <Button variant="outline" onClick={() => loadEvent()}>
-            Refresh
-          </Button>
         </div>
-      )}
+      </section>
 
       {/* Footer */}
       <footer className="border-t border-border mt-16 py-8">

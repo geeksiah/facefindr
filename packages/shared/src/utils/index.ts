@@ -3,38 +3,41 @@
  * Shared helper functions
  */
 
-import { FACETAG_SUFFIX_LENGTH, FACETAG_USERNAME_REGEX } from '../constants';
+import { FACETAG_SUFFIX_LENGTH, FACETAG_USERNAME_REGEX, PLATFORM_FEES } from '../constants';
+import type { SubscriptionPlan } from '../types';
 
 // ============================================
 // FACETAG UTILITIES
 // ============================================
 
 /**
- * Generate a random alphanumeric suffix for FaceTag
+ * Generate a random numeric suffix for FaceTag (4 digits)
  */
 export function generateFaceTagSuffix(): string {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  let suffix = '';
-  for (let i = 0; i < FACETAG_SUFFIX_LENGTH; i++) {
-    suffix += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return suffix;
+  return String(Math.floor(1000 + Math.random() * 9000));
 }
 
 /**
  * Format a FaceTag from username and suffix
+ * Format: @username1234 (e.g., @amara1234)
  */
 export function formatFaceTag(username: string, suffix: string): string {
-  return `@${username.toLowerCase()}.${suffix}`;
+  // Clean username: lowercase, alphanumeric only
+  const cleanUsername = username.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8);
+  // Suffix should be numeric (4-5 digits)
+  const cleanSuffix = suffix.replace(/[^0-9]/g, '');
+  return `@${cleanUsername}${cleanSuffix}`;
 }
 
 /**
  * Parse a FaceTag into username and suffix
+ * Format: @username1234 (numeric suffix appended)
  */
 export function parseFaceTag(faceTag: string): { username: string; suffix: string } | null {
-  const match = faceTag.match(/^@([a-zA-Z][a-zA-Z0-9_]*)\.([a-z0-9]{4})$/);
+  // Match @username followed by 4-5 digits
+  const match = faceTag.match(/^@([a-z0-9]{4,8})(\d{4,5})$/i);
   if (!match) return null;
-  return { username: match[1], suffix: match[2] };
+  return { username: match[1].toLowerCase(), suffix: match[2] };
 }
 
 /**
@@ -267,9 +270,6 @@ export function getMimeType(filename: string): string {
 // ============================================
 // PLATFORM FEE CALCULATION
 // ============================================
-
-import { PLATFORM_FEES } from '../constants';
-import type { SubscriptionPlan } from '../types';
 
 /**
  * Calculate platform fee and net amount

@@ -7,14 +7,27 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+// Support both naming conventions for flexibility
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseServiceKey) {
-  throw new Error('Missing Supabase environment variables');
+  console.error('Supabase ENV check:', {
+    hasUrl: !!supabaseUrl,
+    hasServiceKey: !!supabaseServiceKey,
+    urlEnvName: process.env.NEXT_PUBLIC_SUPABASE_URL ? 'NEXT_PUBLIC_SUPABASE_URL' : 'SUPABASE_URL',
+  });
+  throw new Error(
+    `Missing Supabase environment variables. ` +
+    `NEXT_PUBLIC_SUPABASE_URL: ${supabaseUrl ? 'set' : 'MISSING'}, ` +
+    `SUPABASE_SERVICE_ROLE_KEY: ${supabaseServiceKey ? 'set' : 'MISSING'}`
+  );
 }
 
 // Service role client - bypasses RLS, full database access
+// IMPORTANT: Service role key must start with 'eyJ' (JWT format)
+// If using anon key by mistake, RLS will still apply
+// Service role key bypasses ALL RLS policies automatically
 export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
   auth: {
     autoRefreshToken: false,

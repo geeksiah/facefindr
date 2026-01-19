@@ -1,7 +1,5 @@
 'use client';
 
-import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
   Users,
@@ -16,10 +14,20 @@ import {
   AlertTriangle,
   BarChart3,
   LogOut,
-  Shield,
   ChevronRight,
+  Sun,
+  Moon,
+  Monitor,
+  Globe,
+  DollarSign,
 } from 'lucide-react';
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
+
 import { cn } from '@/lib/utils';
+
+import { Logo } from './logo';
+import { useTheme } from './theme-provider';
 
 interface NavItem {
   label: string;
@@ -51,6 +59,7 @@ const navigation: NavGroup[] = [
   {
     label: 'Financial',
     items: [
+      { label: 'Pricing & Plans', href: '/pricing', icon: DollarSign },
       { label: 'Payouts', href: '/payouts', icon: CreditCard },
       { label: 'Transactions', href: '/transactions', icon: Receipt },
     ],
@@ -65,7 +74,7 @@ const navigation: NavGroup[] = [
   {
     label: 'Configuration',
     items: [
-      { label: 'Regions & Providers', href: '/regions', icon: Settings },
+      { label: 'Regions & Providers', href: '/regions', icon: Globe },
       { label: 'Platform Settings', href: '/settings', icon: Settings },
     ],
   },
@@ -90,6 +99,7 @@ interface SidebarProps {
 export function Sidebar({ admin }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const { theme, setTheme } = useTheme();
 
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -104,16 +114,26 @@ export function Sidebar({ admin }: SidebarProps) {
     readonly_admin: 'Read Only',
   };
 
+  const cycleTheme = () => {
+    if (theme === 'light') setTheme('dark');
+    else if (theme === 'dark') setTheme('system');
+    else setTheme('light');
+  };
+
+  const ThemeIcon = theme === 'light' ? Sun : theme === 'dark' ? Moon : Monitor;
+
   return (
     <aside className="fixed left-0 top-0 z-40 h-screen w-64 bg-card border-r border-border flex flex-col">
       {/* Logo */}
-      <div className="h-16 flex items-center gap-3 px-6 border-b border-border">
-        <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center">
-          <Shield className="w-5 h-5 text-primary-foreground" />
-        </div>
-        <div>
-          <h1 className="font-bold text-foreground">FaceFindr</h1>
-          <p className="text-xs text-muted-foreground">Admin Portal</p>
+      <div className="h-16 flex items-center gap-3 px-5 border-b border-border">
+        <Logo variant="combo" size="sm" showText={true} />
+      </div>
+
+      {/* Admin Portal Badge */}
+      <div className="px-5 py-3 border-b border-border">
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10">
+          <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+          <span className="text-xs font-semibold text-primary">Admin Portal</span>
         </div>
       </div>
 
@@ -154,6 +174,22 @@ export function Sidebar({ admin }: SidebarProps) {
         ))}
       </nav>
 
+      {/* Theme Toggle */}
+      <div className="px-4 py-3 border-t border-border">
+        <button
+          onClick={cycleTheme}
+          className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        >
+          <span className="flex items-center gap-2">
+            <ThemeIcon className="w-4 h-4" />
+            Theme
+          </span>
+          <span className="text-xs capitalize px-2 py-0.5 rounded bg-muted">
+            {theme}
+          </span>
+        </button>
+      </div>
+
       {/* User Section */}
       <div className="p-4 border-t border-border">
         <div className="flex items-center gap-3 mb-3">
@@ -169,7 +205,7 @@ export function Sidebar({ admin }: SidebarProps) {
         </div>
         <button
           onClick={handleLogout}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
         >
           <LogOut className="w-4 h-4" />
           Sign Out

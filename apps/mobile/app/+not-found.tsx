@@ -27,17 +27,18 @@ import { useAuthStore } from '@/stores/auth-store';
 export default function NotFoundScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { profile, isAuthenticated } = useAuthStore();
+  const { profile, session } = useAuthStore();
+  const isAuthenticated = !!session?.user;
 
   const goHome = () => {
     if (isAuthenticated) {
       if (profile?.userType === 'photographer') {
-        router.replace('/(photographer)');
+        router.replace('/(photographer)' as any);
       } else {
-        router.replace('/(attendee)');
+        router.replace('/(attendee)' as any);
       }
     } else {
-      router.replace('/');
+      router.replace('/' as any);
     }
   };
 

@@ -4,8 +4,9 @@
  * Manages user payment methods for subscriptions and purchases.
  */
 
-import { createServiceClient } from '@/lib/supabase/server';
 import Stripe from 'stripe';
+
+import { createServiceClient } from '@/lib/supabase/server';
 
 // ============================================
 // TYPES

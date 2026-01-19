@@ -1,4 +1,3 @@
-import { Suspense } from 'react';
 import { 
   DollarSign, 
   Clock, 
@@ -9,10 +8,13 @@ import {
   Pause,
   Play,
 } from 'lucide-react';
+import { Suspense } from 'react';
+
 import { supabaseAdmin } from '@/lib/supabase';
 import { formatCurrency, formatNumber } from '@/lib/utils';
-import { PayoutQueue } from './payout-queue';
+
 import { PayoutActions } from './payout-actions';
+import { PayoutQueue } from './payout-queue';
 
 async function getPayoutStats() {
   // Get pending balances by currency

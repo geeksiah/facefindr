@@ -4,7 +4,7 @@
  * Allows users to scan their face to find photos at events.
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -30,6 +30,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Camera } from 'expo-camera';
 
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { buttonPress } from '@/lib/haptics';
 
 const { width } = Dimensions.get('window');
 
@@ -48,6 +49,7 @@ export default function FindPhotosScreen() {
   const [isRequestingPermission, setIsRequestingPermission] = useState(false);
 
   const handleStartScan = async () => {
+    await buttonPress();
     setIsRequestingPermission(true);
     try {
       const { status } = await Camera.requestCameraPermissionsAsync();
@@ -65,11 +67,13 @@ export default function FindPhotosScreen() {
     }
   };
 
-  const handleEnterCode = () => {
+  const handleEnterCode = async () => {
+    await buttonPress();
     router.push('/enter-code');
   };
 
-  const handleScanQR = () => {
+  const handleScanQR = async () => {
+    await buttonPress();
     router.push('/qr-scanner');
   };
 
@@ -312,21 +316,22 @@ const styles = StyleSheet.create({
   },
   positionItem: {
     alignItems: 'center',
+    width: 70,
   },
   headIcon: {
-    width: 44,
-    height: 52,
-    justifyContent: 'center',
+    width: 40,
+    height: 50,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   headOval: {
-    width: 40,
-    height: 48,
-    borderRadius: 20,
+    position: 'absolute',
+    width: 36,
+    height: 46,
+    borderRadius: 18,
     borderWidth: 2,
     borderColor: colors.accent,
-    borderStyle: 'dashed',
-    position: 'absolute',
+    backgroundColor: colors.accent + '10',
   },
   headFeatures: {
     alignItems: 'center',
@@ -334,32 +339,32 @@ const styles = StyleSheet.create({
   },
   eyeRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
     marginBottom: 4,
   },
   eye: {
     width: 6,
-    height: 6,
+    height: 4,
     borderRadius: 3,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.accent,
   },
   nose: {
     width: 4,
-    height: 8,
+    height: 6,
     borderRadius: 2,
-    backgroundColor: colors.secondary,
-    marginBottom: 4,
+    backgroundColor: colors.accent + '80',
+    marginBottom: 3,
   },
   mouth: {
-    width: 12,
-    height: 4,
+    width: 10,
+    height: 3,
     borderRadius: 2,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.accent + '60',
   },
   positionLabel: {
-    fontSize: 10,
+    fontSize: 11,
     color: colors.secondary,
-    marginTop: 6,
+    marginTop: spacing.xs,
     fontWeight: '500',
   },
   positionsHint: {

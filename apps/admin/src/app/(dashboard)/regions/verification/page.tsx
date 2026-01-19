@@ -1,7 +1,5 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import Link from 'next/link';
 import {
   ArrowLeft,
   Save,
@@ -13,6 +11,8 @@ import {
   Clock,
   RefreshCw,
 } from 'lucide-react';
+import Link from 'next/link';
+import { useState, useEffect } from 'react';
 
 interface VerificationSettings {
   id: string;

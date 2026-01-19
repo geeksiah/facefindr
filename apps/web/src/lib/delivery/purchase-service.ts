@@ -4,9 +4,10 @@
  * Handles photo purchases, cart management, and order processing.
  */
 
-import { createServiceClient } from '@/lib/supabase/server';
-import { createEntitlement, Resolution } from './download-service';
 import { getPhotographerPlatformFee } from '@/lib/subscription/plans';
+import { createServiceClient } from '@/lib/supabase/server';
+
+import { createEntitlement, Resolution } from './download-service';
 
 // ============================================
 // TYPES

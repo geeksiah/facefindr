@@ -28,7 +28,11 @@ import {
   ChevronRight,
   BarChart3,
   ArrowUpRight,
+  FileDown,
+  FileText,
 } from 'lucide-react-native';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
@@ -77,40 +81,158 @@ export default function AnalyticsScreen() {
 
   const loadAnalytics = async () => {
     try {
+      setIsLoading(true);
+      
+      // Calculate date ranges based on period
+      const now = new Date();
+      let currentPeriodStart: Date;
+      let previousPeriodStart: Date;
+      let previousPeriodEnd: Date;
+      
+      switch (period) {
+        case '7d':
+          currentPeriodStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          previousPeriodStart = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+          previousPeriodEnd = currentPeriodStart;
+          break;
+        case '30d':
+          currentPeriodStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          previousPeriodStart = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+          previousPeriodEnd = currentPeriodStart;
+          break;
+        case '90d':
+          currentPeriodStart = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+          previousPeriodStart = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
+          previousPeriodEnd = currentPeriodStart;
+          break;
+        default:
+          currentPeriodStart = new Date(0);
+          previousPeriodStart = new Date(0);
+          previousPeriodEnd = new Date(0);
+      }
+      
+      // Get wallet balance (total revenue)
       const { data: wallet } = await supabase
         .from('wallets')
         .select('balance')
         .eq('photographer_id', profile?.id)
         .single();
-
-      setAnalytics({
-        totalRevenue: wallet?.balance || 0,
-        revenueChange: 12.5,
-        totalViews: 1234,
-        viewsChange: 8.3,
-        totalSales: 45,
-        salesChange: -2.1,
-        conversionRate: 3.6,
-        conversionChange: 0.5,
+      
+      // Get current period revenue
+      const { data: currentRevenueData } = await supabase
+        .from('transactions')
+        .select('net_amount')
+        .eq('photographer_id', profile?.id)
+        .eq('status', 'succeeded')
+        .gte('created_at', currentPeriodStart.toISOString());
+      
+      // Get previous period revenue
+      const { data: previousRevenueData } = await supabase
+        .from('transactions')
+        .select('net_amount')
+        .eq('photographer_id', profile?.id)
+        .eq('status', 'succeeded')
+        .gte('created_at', previousPeriodStart.toISOString())
+        .lt('created_at', previousPeriodEnd.toISOString());
+      
+      const currentRevenue = currentRevenueData?.reduce((sum, t) => sum + (t.net_amount || 0), 0) || 0;
+      const previousRevenue = previousRevenueData?.reduce((sum, t) => sum + (t.net_amount || 0), 0) || 0;
+      const revenueChange = previousRevenue > 0 
+        ? ((currentRevenue - previousRevenue) / previousRevenue) * 100 
+        : (currentRevenue > 0 ? 100 : 0);
+      
+      // Get event IDs for this photographer
+      const { data: photographerEvents } = await supabase
+        .from('events')
+        .select('id')
+        .eq('photographer_id', profile?.id);
+      
+      const eventIds = photographerEvents?.map((e: any) => e.id) || [];
+      
+      const { data: currentStats } = await supabase.rpc('get_photographer_stats', {
+        p_photographer_id: profile?.id,
+        p_start_date: currentPeriodStart.toISOString().split('T')[0],
+        p_end_date: currentPeriodEnd.toISOString().split('T')[0],
+      });
+      const { data: previousStats } = await supabase.rpc('get_photographer_stats', {
+        p_photographer_id: profile?.id,
+        p_start_date: previousPeriodStart.toISOString().split('T')[0],
+        p_end_date: previousPeriodEnd.toISOString().split('T')[0],
       });
 
-      const { data: events } = await supabase
-        .from('events')
-        .select('id, name')
-        .eq('photographer_id', profile?.id)
-        .order('created_at', { ascending: false })
-        .limit(5);
+      const currentStatsRow = currentStats?.[0];
+      const previousStatsRow = previousStats?.[0];
 
-      if (events) {
-        setTopEvents(
-          events.map((e: any) => ({
-            id: e.id,
-            name: e.name,
-            revenue: Math.random() * 500,
-            views: Math.floor(Math.random() * 1000),
-            sales: Math.floor(Math.random() * 50),
-          }))
+      const totalViews = Number(currentStatsRow?.total_views) || 0;
+      const previousViews = Number(previousStatsRow?.total_views) || 0;
+      const viewsChange = previousViews > 0
+        ? ((totalViews - previousViews) / previousViews) * 100
+        : (totalViews > 0 ? 100 : 0);
+      
+      // Get sales (from entitlements or transactions)
+      const { data: currentSalesData } = await supabase
+        .from('entitlements')
+        .select('id')
+        .in('event_id', eventIds.length > 0 ? eventIds : ['00000000-0000-0000-0000-000000000000'])
+        .gte('created_at', currentPeriodStart.toISOString());
+      
+      const { data: previousSalesData } = await supabase
+        .from('entitlements')
+        .select('id')
+        .in('event_id', eventIds.length > 0 ? eventIds : ['00000000-0000-0000-0000-000000000000'])
+        .gte('created_at', previousPeriodStart.toISOString())
+        .lt('created_at', previousPeriodEnd.toISOString());
+      
+      const totalSales = Number(currentStatsRow?.total_sales) || currentSalesData?.length || 0;
+      const previousSales = Number(previousStatsRow?.total_sales) || previousSalesData?.length || 0;
+      const salesChange = previousSales > 0 
+        ? ((totalSales - previousSales) / previousSales) * 100 
+        : (totalSales > 0 ? 100 : 0);
+      
+      // Calculate conversion rate
+      const conversionRate = Number(currentStatsRow?.conversion_rate) || (totalViews > 0 ? (totalSales / totalViews) * 100 : 0);
+      const previousConversionRate = Number(previousStatsRow?.conversion_rate) || 0;
+      const conversionChange = previousConversionRate > 0 
+        ? conversionRate - previousConversionRate 
+        : (conversionRate > 0 ? conversionRate : 0);
+      
+      const totalRevenueCents = Number(currentStatsRow?.total_revenue) || 0;
+      setAnalytics({
+        totalRevenue: totalRevenueCents / 100,
+        revenueChange: revenueChange,
+        totalViews: totalViews,
+        viewsChange: viewsChange,
+        totalSales: totalSales,
+        salesChange: salesChange,
+        conversionRate: conversionRate,
+        conversionChange: conversionChange,
+      });
+
+      // Get top events with real data
+      const { data: topEventsData } = await supabase.rpc('get_top_events', {
+        p_photographer_id: profile?.id,
+        p_limit: 5,
+        p_metric: 'views',
+      });
+
+      if (topEventsData && topEventsData.length > 0) {
+        const topEventsWithSales = await Promise.all(
+          topEventsData.map(async (event: any) => {
+            const { data: eventSalesData } = await supabase
+              .from('entitlements')
+              .select('id')
+              .eq('event_id', event.event_id);
+            const sales = eventSalesData?.length || 0;
+            return {
+              id: event.event_id,
+              name: event.event_name,
+              revenue: (event.total_revenue || 0) / 100,
+              views: event.total_views || 0,
+              sales,
+            };
+          })
         );
+        setTopEvents(topEventsWithSales);
       }
     } catch (err) {
       console.error('Error loading analytics:', err);
@@ -127,6 +249,48 @@ export default function AnalyticsScreen() {
   const handleRefresh = () => {
     setIsRefreshing(true);
     loadAnalytics();
+  };
+
+  const exportToCSV = async () => {
+    try {
+      const csvRows = [
+        ['Analytics Export', `Period: ${period}`, `Generated: ${new Date().toISOString()}`],
+        [],
+        ['Metric', 'Value', 'Change'],
+        ['Total Revenue', `$${analytics.totalRevenue.toFixed(2)}`, `${analytics.revenueChange >= 0 ? '+' : ''}${analytics.revenueChange}%`],
+        ['Total Views', analytics.totalViews.toString(), `${analytics.viewsChange >= 0 ? '+' : ''}${analytics.viewsChange}%`],
+        ['Total Sales', analytics.totalSales.toString(), `${analytics.salesChange >= 0 ? '+' : ''}${analytics.salesChange}%`],
+        ['Conversion Rate', `${analytics.conversionRate}%`, `${analytics.conversionChange >= 0 ? '+' : ''}${analytics.conversionChange}%`],
+        [],
+        ['Top Events'],
+        ['Rank', 'Event Name', 'Revenue', 'Views', 'Sales'],
+        ...topEvents.map((event, index) => [
+          (index + 1).toString(),
+          event.name,
+          `$${event.revenue.toFixed(2)}`,
+          event.views.toString(),
+          event.sales.toString(),
+        ]),
+      ];
+
+      const csvContent = csvRows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+      const fileName = `analytics-${period}-${new Date().toISOString().split('T')[0]}.csv`;
+      const fileUri = FileSystem.documentDirectory + fileName;
+
+      await FileSystem.writeAsStringAsync(fileUri, csvContent);
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'text/csv',
+          dialogTitle: 'Export Analytics',
+        });
+      } else {
+        // Fallback: copy to clipboard or show alert
+        console.log('Sharing not available');
+      }
+    } catch (error) {
+      console.error('Export error:', error);
+    }
   };
 
   const renderStatCard = (
@@ -173,6 +337,15 @@ export default function AnalyticsScreen() {
         <View>
           <Text style={styles.title}>Analytics</Text>
           <Text style={styles.subtitle}>Track your performance</Text>
+        </View>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={styles.exportButton}
+            onPress={exportToCSV}
+            activeOpacity={0.7}
+          >
+            <FileText size={18} color={colors.accent} />
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -365,6 +538,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.secondary,
     marginTop: 2,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  exportButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.muted,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   scrollContent: {
     paddingBottom: 120,

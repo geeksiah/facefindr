@@ -5,7 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+
 import {
   getSupportedCurrencies,
   getUserCurrencyPreference,
@@ -15,6 +15,7 @@ import {
   getCountryFromRequest,
   setDetectedLocation,
 } from '@/lib/currency';
+import { createClient } from '@/lib/supabase/server';
 
 // GET - Get currencies and user preference
 export async function GET(request: NextRequest) {

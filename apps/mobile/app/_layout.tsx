@@ -4,8 +4,8 @@
  * Sets up authentication, theme, and navigation.
  */
 
-import { useEffect } from 'react';
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
+import { Stack, useRouter, useSegments, useRootNavigationState } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
@@ -19,12 +19,22 @@ SplashScreen.preventAutoHideAsync();
 export default function RootLayout() {
   const router = useRouter();
   const segments = useSegments();
+  const rootNavigationState = useRootNavigationState();
   const { isLoading, isInitialized, initialize, user, profile } = useAuthStore();
+  const [navigationReady, setNavigationReady] = useState(false);
+  const hasNavigated = useRef(false);
 
   // Initialize auth on app start
   useEffect(() => {
     initialize();
   }, []);
+
+  // Track when navigation is ready
+  useEffect(() => {
+    if (rootNavigationState?.key) {
+      setNavigationReady(true);
+    }
+  }, [rootNavigationState?.key]);
 
   // Hide splash screen when initialized
   useEffect(() => {
@@ -33,30 +43,34 @@ export default function RootLayout() {
     }
   }, [isInitialized]);
 
-  // Handle auth-based routing
+  // Handle auth-based routing - only after navigation is ready
   useEffect(() => {
-    if (!isInitialized) return;
+    if (!isInitialized || !navigationReady) return;
 
     const inAuthGroup = segments[0] === '(auth)';
     const inPhotographerGroup = segments[0] === '(photographer)';
     const inAttendeeGroup = segments[0] === '(attendee)';
+    const isRootIndex = segments.length === 0 || segments[0] === undefined;
 
     if (!user) {
-      // Not signed in - go to welcome or auth
+      // Not signed in - go to welcome if on protected route
       if (inPhotographerGroup || inAttendeeGroup) {
-        router.replace('/');
+        router.replace('/' as any);
       }
+      // Reset navigation tracking when signed out
+      hasNavigated.current = false;
     } else if (profile) {
-      // Signed in with profile - route to correct dashboard
-      if (inAuthGroup || segments[0] === undefined || segments.length === 0) {
+      // Signed in with profile - route to correct dashboard (only once per session)
+      if ((inAuthGroup || isRootIndex) && !hasNavigated.current) {
+        hasNavigated.current = true;
         if (profile.userType === 'photographer') {
-          router.replace('/(photographer)/');
+          router.replace('/(photographer)' as any);
         } else {
-          router.replace('/(attendee)/');
+          router.replace('/(attendee)' as any);
         }
       }
     }
-  }, [isInitialized, user, profile, segments]);
+  }, [isInitialized, navigationReady, user, profile, segments]);
 
   // Show loading screen
   if (!isInitialized || isLoading) {
@@ -89,12 +103,40 @@ export default function RootLayout() {
           }} 
         />
         <Stack.Screen 
-          name="scan" 
+          name="qr-scanner" 
           options={{ 
             headerShown: false,
             presentation: 'fullScreenModal',
           }} 
         />
+        <Stack.Screen 
+          name="face-scan" 
+          options={{ 
+            headerShown: false,
+            presentation: 'fullScreenModal',
+          }} 
+        />
+        <Stack.Screen 
+          name="enter-code" 
+          options={{ 
+            headerShown: false,
+            presentation: 'modal',
+          }} 
+        />
+        <Stack.Screen 
+          name="search" 
+          options={{ 
+            headerShown: false,
+          }} 
+        />
+        <Stack.Screen 
+          name="create-event" 
+          options={{ 
+            headerShown: false,
+            presentation: 'modal',
+          }} 
+        />
+        <Stack.Screen name="+not-found" />
       </Stack>
     </>
   );

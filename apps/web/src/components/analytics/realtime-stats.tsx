@@ -6,8 +6,9 @@
  * Shows live analytics with real-time updates.
  */
 
-import { useState, useEffect, useCallback } from 'react';
 import { Eye, DollarSign, ShoppingCart, Users, TrendingUp } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+
 import { createClient } from '@/lib/supabase/client';
 
 interface RealtimeStats {

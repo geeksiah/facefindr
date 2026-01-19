@@ -5,13 +5,14 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+
 import {
   sendOTP,
   verifyOTP,
   getVerificationSettings,
   checkVerificationStatus,
 } from '@/lib/notifications';
+import { createClient } from '@/lib/supabase/server';
 
 // GET - Get verification settings and status
 export async function GET() {

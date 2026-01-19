@@ -6,8 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { getDigitalProducts, getEventPricing } from '@/lib/delivery';
+
 import { 
   getEffectiveCurrency, 
   getCountryFromRequest,
@@ -15,6 +14,8 @@ import {
   formatPrice,
   getCurrency,
 } from '@/lib/currency';
+import { getDigitalProducts, getEventPricing } from '@/lib/delivery';
+import { createClient } from '@/lib/supabase/server';
 
 // GET - Get digital products with optional event-specific pricing
 export async function GET(request: NextRequest) {

@@ -1,11 +1,18 @@
 'use client';
 
-import { useState, useEffect } from 'react';
 import { Image as ImageIcon, Trash2, Download, Eye, Loader2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
-import { deletePhoto, getPhotoUrl } from './actions';
+import { Lightbox } from '@/components/ui/lightbox';
+import { useToast, useConfirm } from '@/components/ui/toast';
+import { useRealtimeSubscription } from '@/hooks/use-realtime';
 import { createClient } from '@/lib/supabase/client';
+import { cn } from '@/lib/utils';
+
+import { deletePhoto, getPhotoUrl } from './actions';
+
 
 interface Photo {
   id: string;
@@ -21,30 +28,114 @@ interface EventGalleryProps {
   photos: Photo[];
 }
 
-export function EventGallery({ eventId, photos }: EventGalleryProps) {
+export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryProps) {
+  const router = useRouter();
+  const toast = useToast();
+  const { confirm, ConfirmDialog } = useConfirm();
+  const [photos, setPhotos] = useState<Photo[]>(initialPhotos);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+
+  // Update photos when initialPhotos changes
+  useEffect(() => {
+    setPhotos(initialPhotos);
+  }, [initialPhotos]);
+
+  // Subscribe to real-time photo updates
+  useRealtimeSubscription({
+    table: 'media',
+    filter: `event_id=eq.${eventId}`,
+    onInsert: (newPhoto) => {
+      setPhotos(prev => [newPhoto as Photo, ...prev]);
+    },
+    onUpdate: (updatedPhoto) => {
+      setPhotos(prev => prev.map(p => p.id === updatedPhoto.id ? updatedPhoto as Photo : p));
+    },
+    onDelete: (deletedPhoto) => {
+      setPhotos(prev => prev.filter(p => p.id !== deletedPhoto.id));
+    },
+  });
 
   useEffect(() => {
-    async function loadPhotoUrls() {
-      const supabase = createClient();
-      const urls: Record<string, string> = {};
+    let isMounted = true;
+    const abortController = new AbortController();
 
-      for (const photo of photos) {
-        const path = photo.thumbnail_path || photo.storage_path;
-        const { data } = await supabase.storage
-          .from('media')
-          .createSignedUrl(path, 3600);
-        
-        if (data?.signedUrl) {
-          urls[photo.id] = data.signedUrl;
+    async function loadPhotoUrls() {
+      try {
+        const supabase = createClient();
+        const urls: Record<string, string> = {};
+
+        // Process photos in batches to avoid overwhelming the API
+        const batchSize = 10;
+        for (let i = 0; i < photos.length; i += batchSize) {
+          if (!isMounted) break;
+          
+          const batch = photos.slice(i, i + batchSize);
+          await Promise.all(
+            batch.map(async (photo) => {
+              try {
+                const path = photo.thumbnail_path || photo.storage_path;
+                
+                // Skip if no path available
+                if (!path) {
+                  console.warn(`Photo ${photo.id} has no storage path`);
+                  return;
+                }
+                
+                // Clean path (remove leading slash if present)
+                const cleanPath = path.startsWith('/') ? path.slice(1) : path;
+                
+                const { data, error: urlError } = await supabase.storage
+                  .from('media')
+                  .createSignedUrl(cleanPath, 3600);
+                
+                if (urlError) {
+                  console.error(`Failed to create signed URL for photo ${photo.id}:`, urlError);
+                  return;
+                }
+                
+                if (data?.signedUrl && isMounted) {
+                  urls[photo.id] = data.signedUrl;
+                }
+              } catch (error) {
+                // Silently ignore individual photo errors
+                if (error instanceof Error && error.name === 'AbortError') {
+                  return;
+                }
+                console.error(`Failed to load photo ${photo.id}:`, error);
+              }
+            })
+          );
+
+          if (isMounted) {
+            setPhotoUrls((prev) => ({ ...prev, ...urls }));
+            if (i === 0) {
+              setLoading(false);
+            }
+          }
+        }
+
+        if (isMounted) {
+          setPhotoUrls(urls);
+          setLoading(false);
+        }
+      } catch (error) {
+        // Silently ignore AbortError
+        if (error instanceof Error && error.name === 'AbortError') {
+          return;
+        }
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return;
+        }
+        console.error('Error loading photo URLs:', error);
+        if (isMounted) {
+          setLoading(false);
         }
       }
-
-      setPhotoUrls(urls);
-      setLoading(false);
     }
 
     if (photos.length > 0) {
@@ -52,7 +143,22 @@ export function EventGallery({ eventId, photos }: EventGalleryProps) {
     } else {
       setLoading(false);
     }
+
+    return () => {
+      isMounted = false;
+      abortController.abort();
+    };
   }, [photos]);
+
+  // Subscribe to real-time updates for media in this event
+  useRealtimeSubscription({
+    table: 'media',
+    filter: `event_id=eq.${eventId}`,
+    onChange: () => {
+      // Reload photos when changes occur
+      router.refresh();
+    },
+  });
 
   const toggleSelect = (photoId: string) => {
     setSelectedPhotos((prev) => {
@@ -75,31 +181,92 @@ export function EventGallery({ eventId, photos }: EventGalleryProps) {
   };
 
   const handleDelete = async (photoId: string) => {
+    const confirmed = await confirm({
+      title: 'Delete Photo',
+      message: 'Are you sure you want to delete this photo? This action cannot be undone.',
+      confirmLabel: 'Delete',
+      cancelLabel: 'Cancel',
+      variant: 'destructive',
+    });
+    
+    if (!confirmed) return;
+    
     setDeletingIds((prev) => new Set(prev).add(photoId));
     
     const result = await deletePhoto(photoId, eventId);
     
     if (result.error) {
-      console.error('Delete failed:', result.error);
+      toast.error('Delete Failed', result.error);
+      setDeletingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(photoId);
+        return next;
+      });
+    } else {
+      toast.success('Photo Deleted', 'The photo has been successfully deleted.');
+      setDeletingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(photoId);
+        return next;
+      });
+      setSelectedPhotos((prev) => {
+        const next = new Set(prev);
+        next.delete(photoId);
+        return next;
+      });
+      router.refresh();
     }
-    
-    setDeletingIds((prev) => {
-      const next = new Set(prev);
-      next.delete(photoId);
-      return next;
-    });
-    
-    setSelectedPhotos((prev) => {
-      const next = new Set(prev);
-      next.delete(photoId);
-      return next;
-    });
   };
 
   const handleBulkDelete = async () => {
-    for (const photoId of selectedPhotos) {
-      await handleDelete(photoId);
+    const confirmed = await confirm({
+      title: `Delete ${selectedPhotos.size} Photos`,
+      message: `Are you sure you want to delete ${selectedPhotos.size} photo${selectedPhotos.size !== 1 ? 's' : ''}? This action cannot be undone.`,
+      confirmLabel: 'Delete All',
+      cancelLabel: 'Cancel',
+      variant: 'destructive',
+    });
+    
+    if (!confirmed) return;
+    
+    const photoIds = Array.from(selectedPhotos);
+    let successCount = 0;
+    let errorCount = 0;
+    
+    for (const photoId of photoIds) {
+      setDeletingIds((prev) => new Set(prev).add(photoId));
+      
+      const result = await deletePhoto(photoId, eventId);
+      
+      if (result.error) {
+        errorCount++;
+        toast.error('Delete Failed', result.error);
+      } else {
+        successCount++;
+      }
+      
+      setDeletingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(photoId);
+        return next;
+      });
+      
+      setSelectedPhotos((prev) => {
+        const next = new Set(prev);
+        next.delete(photoId);
+        return next;
+      });
     }
+    
+    if (successCount > 0) {
+      toast.success('Photos Deleted', `${successCount} photo${successCount !== 1 ? 's' : ''} deleted successfully.`);
+    }
+    
+    if (errorCount > 0 && successCount === 0) {
+      toast.error('Delete Failed', `Failed to delete ${errorCount} photo${errorCount !== 1 ? 's' : ''}.`);
+    }
+    
+    router.refresh();
   };
 
   const formatFileSize = (bytes: number) => {
@@ -131,8 +298,10 @@ export function EventGallery({ eventId, photos }: EventGalleryProps) {
   }
 
   return (
-    <div className="space-y-4">
-      {/* Bulk Actions */}
+    <>
+      <ConfirmDialog />
+      <div className="space-y-4">
+        {/* Bulk Actions */}
       {selectedPhotos.size > 0 && (
         <div className="flex items-center justify-between rounded-xl bg-muted p-3">
           <p className="text-sm font-medium text-foreground">
@@ -169,7 +338,17 @@ export function EventGallery({ eventId, photos }: EventGalleryProps) {
                 isSelected && 'ring-2 ring-accent ring-offset-2 ring-offset-background',
                 isDeleting && 'opacity-50 pointer-events-none'
               )}
-              onClick={() => toggleSelect(photo.id)}
+              onClick={() => {
+                // Open in lightbox on click
+                const photoIndex = photos.findIndex((p) => p.id === photo.id);
+                setLightboxIndex(photoIndex);
+                setLightboxOpen(true);
+              }}
+              onContextMenu={(e) => {
+                // Right-click for selection
+                e.preventDefault();
+                toggleSelect(photo.id);
+              }}
             >
               {url ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -212,8 +391,10 @@ export function EventGallery({ eventId, photos }: EventGalleryProps) {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    // View photo
-                    window.open(url, '_blank');
+                    // Open in lightbox
+                    const photoIndex = photos.findIndex((p) => p.id === photo.id);
+                    setLightboxIndex(photoIndex);
+                    setLightboxOpen(true);
                   }}
                   className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 transition-colors"
                 >
@@ -224,7 +405,8 @@ export function EventGallery({ eventId, photos }: EventGalleryProps) {
                     e.stopPropagation();
                     handleDelete(photo.id);
                   }}
-                  className="p-1.5 rounded-lg bg-white/20 hover:bg-destructive/80 transition-colors"
+                  disabled={isDeleting}
+                  className="p-1.5 rounded-lg bg-white/20 hover:bg-destructive/80 transition-colors disabled:opacity-50"
                 >
                   <Trash2 className="h-4 w-4 text-white" />
                 </button>
@@ -240,6 +422,19 @@ export function EventGallery({ eventId, photos }: EventGalleryProps) {
           );
         })}
       </div>
+
+      {/* Lightbox */}
+      <Lightbox
+        images={photos.map((photo, index) => ({
+          id: photo.id,
+          url: photoUrls[photo.id] || '',
+          alt: photo.original_filename || `Photo ${index + 1}`,
+        }))}
+        initialIndex={lightboxIndex}
+        isOpen={lightboxOpen}
+        onClose={() => setLightboxOpen(false)}
+      />
     </div>
+    </>
   );
 }

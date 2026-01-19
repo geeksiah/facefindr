@@ -1,8 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { IndexFacesCommand, DeleteFacesCommand, ListFacesCommand } from '@aws-sdk/client-rekognition';
+import { NextRequest, NextResponse } from 'next/server';
 
-import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { rekognitionClient, ATTENDEE_COLLECTION_ID } from '@/lib/aws/rekognition';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // ============================================
 // FACE PROFILE REFRESH API
@@ -166,6 +166,23 @@ export async function POST(request: NextRequest) {
               source: 'manual_update',
               confidence,
             });
+
+          // Mark as indexed in backfill status (if table exists)
+          try {
+            await serviceClient
+              .from('face_indexing_backfill_status')
+              .upsert({
+                attendee_id: user.id,
+                rekognition_face_id: rekognitionFaceId,
+                indexed_in_global_collection: true,
+                indexed_at: new Date().toISOString(),
+              }, {
+                onConflict: 'attendee_id,rekognition_face_id',
+              });
+          } catch (err) {
+            // Table might not exist yet, that's okay
+            console.warn('Could not update backfill status:', err);
+          }
         }
 
         results.push({ success: true, confidence });

@@ -4,8 +4,8 @@
  * Handles public profile pages and QR code generation for sharing.
  */
 
-import { createClient } from '@/lib/supabase/server';
 import { generateQRCode } from '@/lib/sharing/qr-service';
+import { createClient } from '@/lib/supabase/server';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || '';
 const APP_SCHEME = 'facefindr://';

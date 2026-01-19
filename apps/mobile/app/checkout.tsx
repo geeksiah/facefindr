@@ -128,7 +128,7 @@ export default function CheckoutScreen() {
           [
             {
               text: 'View Photos',
-              onPress: () => router.replace('/(attendee)/'),
+              onPress: () => router.replace('/(attendee)' as any),
             },
           ]
         );

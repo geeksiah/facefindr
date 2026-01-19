@@ -1,7 +1,7 @@
 'use client';
 
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import { X, CheckCircle, AlertCircle, AlertTriangle, Info } from 'lucide-react';
+import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 
 // Toast types
 type ToastType = 'success' | 'error' | 'warning' | 'info';
@@ -225,10 +225,16 @@ export function ConfirmDialog({
       style={{
         position: 'fixed',
         inset: 0,
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
         width: '100vw',
+        width: '100dvw',
         height: '100vh',
+        height: '100dvh',
         margin: 0,
-        padding: '1rem',
+        padding: 0,
       }}
     >
       {/* Backdrop */}
@@ -237,15 +243,20 @@ export function ConfirmDialog({
         style={{
           position: 'absolute',
           inset: 0,
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
           width: '100%',
           height: '100%',
           margin: 0,
+          padding: 0,
         }}
         onClick={onCancel}
       />
       
       {/* Dialog */}
-      <div className="relative bg-card border border-border rounded-2xl shadow-xl max-w-sm w-full p-6 animate-in zoom-in-95 fade-in duration-200">
+      <div className="relative bg-card border border-border rounded-2xl shadow-xl max-w-sm w-full p-6 mx-4 animate-in zoom-in-95 fade-in duration-200">
         <h3 className="text-lg font-semibold text-foreground">{title}</h3>
         <p className="mt-2 text-sm text-secondary">{message}</p>
         
@@ -312,18 +323,20 @@ export function useConfirm() {
     setDialogState((prev) => ({ ...prev, isOpen: false, resolve: null }));
   }, [dialogState.resolve]);
 
-  const ConfirmDialogComponent = (
-    <ConfirmDialog
-      isOpen={dialogState.isOpen}
-      title={dialogState.options.title}
-      message={dialogState.options.message}
-      confirmLabel={dialogState.options.confirmLabel}
-      cancelLabel={dialogState.options.cancelLabel}
-      variant={dialogState.options.variant}
-      onConfirm={handleConfirm}
-      onCancel={handleCancel}
-    />
-  );
+  function ConfirmDialogComponent() {
+    return (
+      <ConfirmDialog
+        isOpen={dialogState.isOpen}
+        title={dialogState.options.title}
+        message={dialogState.options.message}
+        confirmLabel={dialogState.options.confirmLabel}
+        cancelLabel={dialogState.options.cancelLabel}
+        variant={dialogState.options.variant}
+        onConfirm={handleConfirm}
+        onCancel={handleCancel}
+      />
+    );
+  }
 
   return { confirm, ConfirmDialog: ConfirmDialogComponent };
 }

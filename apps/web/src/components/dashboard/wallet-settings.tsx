@@ -1,6 +1,5 @@
 'use client';
 
-import { useState, useEffect } from 'react';
 import {
   CreditCard,
   Wallet,
@@ -14,9 +13,12 @@ import {
   Globe,
   Smartphone,
 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast, useConfirm } from '@/components/ui/toast';
+
 import { PayoutPreferences } from './payout-preferences';
 
 interface WalletData {

@@ -1,7 +1,9 @@
-import { supabaseAdmin } from '@/lib/supabase';
-import { RegionList } from './region-list';
 import { Globe, Plus } from 'lucide-react';
 import Link from 'next/link';
+
+import { supabaseAdmin } from '@/lib/supabase';
+
+import { RegionList } from './region-list';
 
 async function getRegions() {
   const { data: regions } = await supabaseAdmin

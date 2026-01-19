@@ -5,9 +5,10 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { generateQRCode, generateEventUrls, generateEmbedCode } from '@/lib/sharing';
+
+import { generateQRCode, generateTransparentQRCode, generateEventUrls, generateEmbedCode, shortenUrl } from '@/lib/sharing/qr-service';
 import { generateAccessCode } from '@/lib/sharing/share-service';
+import { createClient } from '@/lib/supabase/server';
 
 // GET - Get sharing info for an event
 export async function GET(
@@ -15,7 +16,7 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const supabase = await createClient();
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -55,8 +56,17 @@ export async function GET(
       event.require_access_code ? event.public_access_code : undefined
     );
 
-    // Generate QR code URL
+    // Generate shortened URL (async, non-blocking)
+    let shortUrl = urls.directUrl;
+    try {
+      shortUrl = await shortenUrl(urls.directUrl);
+    } catch (e) {
+      // Use direct URL if shortening fails
+    }
+
+    // Generate QR code URLs (with white background for display, transparent for download)
     const qrCode = await generateQRCode(urls.directUrl, { size: 512 });
+    const qrCodeTransparent = await generateTransparentQRCode(urls.directUrl, 512);
 
     // Generate embed code
     const embedCode = generateEmbedCode(event.public_slug || id);
@@ -73,8 +83,12 @@ export async function GET(
         accessCode: event.public_access_code,
         status: event.status,
       },
-      urls,
+      urls: {
+        ...urls,
+        shortUrl, // Add the TinyURL shortened link
+      },
       qrCode,
+      qrCodeTransparent, // For download
       embedCode,
       shareLinks: shareLinks || [],
     });
@@ -94,7 +108,7 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
-    const supabase = await createClient();
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -175,7 +189,7 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    const supabase = await createClient();
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -237,7 +251,7 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    const supabase = await createClient();
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {

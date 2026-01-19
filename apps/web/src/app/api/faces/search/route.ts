@@ -1,12 +1,13 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { SearchFacesByImageCommand } from '@aws-sdk/client-rekognition';
+import { NextRequest, NextResponse } from 'next/server';
 
-import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { rekognitionClient } from '@/lib/aws/rekognition';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // ============================================
 // FACE SEARCH API
 // Search for photos matching an attendee's face
+// Supports both JSON and FormData formats
 // ============================================
 
 export async function POST(request: NextRequest) {
@@ -18,14 +19,46 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { image, eventId } = await request.json();
+    let imageBuffer: Buffer;
+    let eventId: string | null = null;
 
-    if (!image) {
-      return NextResponse.json({ error: 'Image data is required' }, { status: 400 });
+    // Check content type to determine how to parse the request
+    const contentType = request.headers.get('content-type') || '';
+
+    if (contentType.includes('multipart/form-data')) {
+      // Handle FormData (from web scan page)
+      const formData = await request.formData();
+      eventId = formData.get('eventId') as string | null;
+      
+      // Get the first image from form data
+      let imageFile: File | null = null;
+      for (const [key, value] of formData.entries()) {
+        if (key.startsWith('image') && value instanceof File) {
+          imageFile = value;
+          break;
+        }
+      }
+
+      if (!imageFile) {
+        return NextResponse.json({ error: 'Image file is required' }, { status: 400 });
+      }
+
+      // Convert File to Buffer
+      const arrayBuffer = await imageFile.arrayBuffer();
+      imageBuffer = Buffer.from(arrayBuffer);
+    } else {
+      // Handle JSON (from gallery scan page and mobile)
+      const body = await request.json();
+      const { image } = body;
+      eventId = body.eventId || null;
+
+      if (!image) {
+        return NextResponse.json({ error: 'Image data is required' }, { status: 400 });
+      }
+
+      // Convert base64 to buffer
+      imageBuffer = Buffer.from(image, 'base64');
     }
-
-    // Convert base64 to buffer
-    const imageBuffer = Buffer.from(image, 'base64');
 
     const serviceClient = createServiceClient();
     const matches: Array<{

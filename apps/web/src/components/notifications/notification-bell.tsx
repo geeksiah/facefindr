@@ -7,10 +7,12 @@
  * Uses real-time updates for new notifications.
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
 import { Bell, Check, CheckCheck, X, ExternalLink, Loader2 } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
 import Link from 'next/link';
+import { useState, useEffect, useCallback, useRef } from 'react';
+
+import { createClient } from '@/lib/supabase/client';
+
 
 interface Notification {
   id: string;

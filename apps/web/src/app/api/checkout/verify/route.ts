@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { getCheckoutSession } from '@/lib/payments/stripe';
+
 import { verifyTransactionByRef } from '@/lib/payments/flutterwave';
 import { getOrder } from '@/lib/payments/paypal';
+import { getCheckoutSession } from '@/lib/payments/stripe';
+import { createClient } from '@/lib/supabase/server';
 
 export async function GET(request: Request) {
   try {

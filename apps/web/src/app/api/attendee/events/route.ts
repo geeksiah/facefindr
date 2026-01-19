@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // ============================================
 // GET ATTENDEE'S EVENTS
@@ -9,7 +9,7 @@ import { createClient } from '@/lib/supabase/server';
 
 export async function GET() {
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -70,8 +70,74 @@ export async function GET() {
     processEvents(consents);
     processEvents(entitlements);
 
+    // Also fetch publicly listed events
+    const { data: publicEvents } = await supabase
+      .from('events')
+      .select(`
+        id,
+        name,
+        event_date,
+        location,
+        cover_image_url,
+        status,
+        is_publicly_listed,
+        photographers (
+          display_name
+        )
+      `)
+      .eq('is_publicly_listed', true)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    // Add publicly listed events to the map
+    if (publicEvents) {
+      for (const event of publicEvents) {
+        if (!eventMap.has(event.id)) {
+          eventMap.set(event.id, {
+            ...event,
+            photographers: event.photographers || null,
+          });
+        }
+      }
+    }
+
+    const serviceClient = createServiceClient();
+    const attendeeId = user.id;
+    const matchesRes = await serviceClient
+      .from('photo_drop_matches')
+      .select('event_id')
+      .eq('attendee_id', attendeeId);
+    const matchCounts = new Map<string, number>();
+    (matchesRes.data || []).forEach((row: any) => {
+      if (!row.event_id) return;
+      matchCounts.set(row.event_id, (matchCounts.get(row.event_id) || 0) + 1);
+    });
+
+    const rawEvents = Array.from(eventMap.values());
+    const totalPhotoCounts = await Promise.all(
+      rawEvents.map(async (event: any) => {
+        const { count } = await serviceClient
+          .from('media')
+          .select('id', { count: 'exact', head: true })
+          .eq('event_id', event.id);
+        return { eventId: event.id, count: count || 0 };
+      })
+    );
+    const totalCountMap = new Map(totalPhotoCounts.map((row) => [row.eventId, row.count]));
+
     // Format events
-    const events = Array.from(eventMap.values()).map((event: any) => ({
+    const events = rawEvents.map((event: any) => {
+      const coverPath = event.cover_image_url?.startsWith('/')
+        ? event.cover_image_url.slice(1)
+        : event.cover_image_url;
+      const coverImage = coverPath?.startsWith('http')
+        ? coverPath
+        : coverPath
+        ? serviceClient.storage.from('covers').getPublicUrl(coverPath).data.publicUrl
+        : null;
+
+      return {
       id: event.id,
       name: event.name,
       date: event.event_date
@@ -82,12 +148,13 @@ export async function GET() {
           })
         : 'No date',
       location: event.location,
-      coverImage: event.cover_image_url,
+      coverImage: coverImage,
       photographerName: event.photographers?.display_name || 'Unknown',
-      totalPhotos: 0, // Will be populated when we have face matching
-      matchedPhotos: 0,
+      totalPhotos: totalCountMap.get(event.id) || 0,
+      matchedPhotos: matchCounts.get(event.id) || 0,
       status: event.status === 'active' ? 'active' : event.status === 'closed' ? 'closed' : 'expired',
-    }));
+      };
+    });
 
     // Sort by date (most recent first)
     events.sort((a, b) => {

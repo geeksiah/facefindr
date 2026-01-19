@@ -1,11 +1,11 @@
-import { Metadata } from 'next';
-import { redirect } from 'next/navigation';
-import Link from 'next/link';
 import { QrCode, ArrowRight, User } from 'lucide-react';
+import { Metadata } from 'next';
+import Link from 'next/link';
+import { redirect } from 'next/navigation';
 
-import { createClient } from '@/lib/supabase/server';
 import { Button } from '@/components/ui/button';
 import { Logo } from '@/components/ui/logo';
+import { createClient } from '@/lib/supabase/server';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 

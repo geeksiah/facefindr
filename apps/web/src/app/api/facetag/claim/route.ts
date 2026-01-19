@@ -2,9 +2,11 @@
  * FaceTag Claim API
  * 
  * POST - Claim a FaceTag for the authenticated user
+ * Format: @username1234 (e.g., @amara1234)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+
 import { createClient } from '@/lib/supabase/server';
 
 export async function POST(request: NextRequest) {
@@ -118,12 +120,9 @@ export async function POST(request: NextRequest) {
       // Handle race condition - someone else claimed this number
       if (insertError.code === '23505') {
         // Retry with a new random number
-        let retryNumber: number;
-        let retryTag: string;
-        
         for (let i = 0; i < 10; i++) {
-          retryNumber = Math.floor(1000 + Math.random() * 9000);
-          retryTag = `@${cleanUsername}${retryNumber}`;
+          const retryNumber = Math.floor(1000 + Math.random() * 9000);
+          const retryTag = `@${cleanUsername}${retryNumber}`;
           
           const { error: retryError } = await supabase
             .from('username_registry')

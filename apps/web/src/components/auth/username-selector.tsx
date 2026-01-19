@@ -5,10 +5,12 @@
  * 
  * Allows users to choose a 4-8 letter username and see the
  * system-generated FaceTag number in real-time.
+ * Format: @username1234 (e.g., @amara1234)
  */
 
+import { Check, X, Loader2, AtSign } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
-import { Check, X, Loader2, AtSign, Hash } from 'lucide-react';
+
 import { useDebounce } from '@/hooks/use-debounce';
 
 interface UsernameSelectorProps {
@@ -80,7 +82,6 @@ export function UsernameSelector({
   };
 
   const charCount = value.length;
-  const isValidLength = charCount >= 4 && charCount <= 8;
   const startsWithNumber = /^[0-9]/.test(value);
 
   return (
@@ -155,7 +156,7 @@ export function UsernameSelector({
               {preview.isFirstUser ? (
                 <div className="flex items-center gap-1 text-xs text-green-600">
                   <Check className="h-3 w-3" />
-                  <span>You'll be the first with this username!</span>
+                  <span>You&apos;ll be the first with this username!</span>
                 </div>
               ) : (
                 <div className="text-xs text-secondary">
@@ -184,7 +185,7 @@ export function UsernameSelector({
       {/* Help Text */}
       <p className="text-xs text-secondary">
         Your FaceTag is your unique identifier. Choose a memorable username (4-8 letters/numbers) 
-        and we'll add a number to make it unique.
+        and we&apos;ll add a number to make it unique.
       </p>
     </div>
   );

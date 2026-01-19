@@ -15,6 +15,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
+
 import { formatCurrency, formatNumber } from '@/lib/utils';
 
 interface AnalyticsData {

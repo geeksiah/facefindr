@@ -1,10 +1,13 @@
 'use client';
 
+import { Upload, X, CheckCircle, AlertCircle, Loader2, Image } from 'lucide-react';
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Upload, X, CheckCircle, AlertCircle, Loader2, Image } from 'lucide-react';
+
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
+
 import { uploadPhotos } from './actions';
 
 interface PhotoUploaderProps {
@@ -22,6 +25,7 @@ interface UploadFile {
 }
 
 export function PhotoUploader({ eventId, onUploadComplete }: PhotoUploaderProps) {
+  const toast = useToast();
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
 
@@ -87,6 +91,7 @@ export function PhotoUploader({ eventId, onUploadComplete }: PhotoUploaderProps)
                 : f
             )
           );
+          toast.error('Upload Failed', result.error || `Failed to upload ${uploadFile.file.name}`);
         } else {
           setFiles((prev) =>
             prev.map((f) =>
@@ -95,6 +100,7 @@ export function PhotoUploader({ eventId, onUploadComplete }: PhotoUploaderProps)
                 : f
             )
           );
+          toast.success('Photo Uploaded', `${uploadFile.file.name} uploaded successfully.`);
         }
       } catch (error) {
         setFiles((prev) =>
@@ -104,10 +110,17 @@ export function PhotoUploader({ eventId, onUploadComplete }: PhotoUploaderProps)
               : f
           )
         );
+        toast.error('Upload Failed', `Failed to upload ${uploadFile.file.name}`);
       }
     }
 
     setIsUploading(false);
+    
+    const successCount = files.filter((f) => f.status === 'success').length;
+    if (successCount > 0) {
+      toast.success('Upload Complete', `${successCount} photo${successCount > 1 ? 's' : ''} uploaded successfully.`);
+    }
+    
     onUploadComplete?.();
   };
 

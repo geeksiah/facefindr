@@ -5,8 +5,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+
 import { getCart, addToCart, removeFromCart, clearCart, getCartTotal } from '@/lib/delivery';
+import { createClient } from '@/lib/supabase/server';
 
 // GET - Get cart contents
 export async function GET() {

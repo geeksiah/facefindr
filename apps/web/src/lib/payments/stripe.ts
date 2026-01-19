@@ -14,7 +14,8 @@ export const stripe = stripeSecretKey
     })
   : null;
 
-// Platform fee percentage (e.g., 15% = 0.15)
+// Platform fee percentage (DEPRECATED - use fee-calculator.ts instead)
+// This is kept for backwards compatibility but should not be used
 const PLATFORM_FEE_PERCENT = 0.15;
 
 export function isStripeConfigured(): boolean {
@@ -127,11 +128,13 @@ export async function createCheckoutSession({
   successUrl,
   cancelUrl,
   metadata = {},
-}: CreateCheckoutParams): Promise<Stripe.Checkout.Session> {
+  platformFee: providedPlatformFee,
+}: CreateCheckoutParams & { platformFee?: number }): Promise<Stripe.Checkout.Session> {
   if (!stripe) throw new Error('Stripe is not configured');
 
   const totalAmount = items.reduce((sum, item) => sum + item.amount * item.quantity, 0);
-  const platformFee = Math.round(totalAmount * PLATFORM_FEE_PERCENT);
+  // Use provided platform fee if available, otherwise fallback to deprecated calculation
+  const platformFee = providedPlatformFee ?? Math.round(totalAmount * PLATFORM_FEE_PERCENT);
 
   const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = items.map((item) => ({
     price_data: {

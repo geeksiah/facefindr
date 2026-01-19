@@ -5,6 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+
 import { createClient } from '@/lib/supabase/server';
 
 // POST - Follow a photographer
@@ -146,10 +147,43 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ following: data || [], total: count || 0 });
     }
 
-    if (type === 'followers' && photographerId) {
-      // Get followers of a photographer (photographer only sees their own)
-      if (photographerId !== user.id) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    if (type === 'followers') {
+      // Get followers for a photographer (either by ID or current user)
+      let targetPhotographerId = photographerId;
+      
+      // If no photographerId provided, get current user's followers (for photographers)
+      if (!targetPhotographerId) {
+        const { data: photographer } = await supabase
+          .from('photographers')
+          .select('id')
+          .eq('user_id', user.id)
+          .single();
+        
+        if (!photographer) {
+          return NextResponse.json({ error: 'Not a photographer' }, { status: 403 });
+        }
+        targetPhotographerId = photographer.id;
+      } else {
+        // Check if photographer exists and profile is public
+        const { data: photographer } = await supabase
+          .from('photographers')
+          .select('id, is_public_profile, public_profile_slug, user_id')
+          .or(`id.eq.${targetPhotographerId},public_profile_slug.eq.${targetPhotographerId}`)
+          .single();
+
+        if (!photographer) {
+          return NextResponse.json({ error: 'Photographer not found' }, { status: 404 });
+        }
+
+        // Allow access if:
+        // 1. User is viewing their own followers, OR
+        // 2. Photographer profile is public
+        const isOwnProfile = user && photographer.user_id === user.id;
+        if (!isOwnProfile && !photographer.is_public_profile) {
+          return NextResponse.json({ error: 'Profile is private' }, { status: 403 });
+        }
+        
+        targetPhotographerId = photographer.id;
       }
 
       const { data, count } = await supabase
@@ -157,16 +191,31 @@ export async function GET(request: NextRequest) {
         .select(`
           id,
           follower_id,
+          notify_new_event,
+          notify_photo_drop,
           created_at,
           attendees!follows_follower_id_fkey (
-            id, display_name, face_tag, profile_photo_url
+            id, display_name, face_tag, profile_photo_url, email
           )
         `, { count: 'exact' })
-        .eq('following_id', photographerId)
+        .eq('following_id', targetPhotographerId)
         .eq('status', 'active')
         .order('created_at', { ascending: false });
 
-      return NextResponse.json({ followers: data || [], total: count || 0 });
+      // Calculate stats for photographer's own followers
+      const now = new Date();
+      const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      
+      const stats = {
+        total: count || 0,
+        newThisWeek: (data || []).filter(f => new Date(f.created_at) > weekAgo).length,
+        newThisMonth: (data || []).filter(f => new Date(f.created_at) > monthAgo).length,
+        withEventNotifications: (data || []).filter(f => f.notify_new_event).length,
+        withPhotoNotifications: (data || []).filter(f => f.notify_photo_drop).length,
+      };
+
+      return NextResponse.json({ followers: data || [], total: count || 0, stats });
     }
 
     return NextResponse.json({ error: 'Invalid request' }, { status: 400 });

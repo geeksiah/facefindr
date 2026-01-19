@@ -1,8 +1,5 @@
 'use client';
 
-import { useState } from 'react';
-import Image from 'next/image';
-import Link from 'next/link';
 import {
   CheckCircle2,
   ChevronRight,
@@ -12,6 +9,9 @@ import {
   MapPin,
   Sparkles,
 } from 'lucide-react';
+import Image from 'next/image';
+import Link from 'next/link';
+import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 

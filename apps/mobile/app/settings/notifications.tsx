@@ -22,12 +22,14 @@ import { usePushNotifications } from '@/hooks';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { updateHapticPreferenceCache } from '@/lib/haptics';
 
 interface NotificationSettings {
   photoDrops: boolean;
   purchases: boolean;
   promotions: boolean;
   reminders: boolean;
+  hapticFeedback: boolean;
 }
 
 export default function NotificationSettingsScreen() {
@@ -41,6 +43,7 @@ export default function NotificationSettingsScreen() {
     purchases: true,
     promotions: false,
     reminders: true,
+    hapticFeedback: true,
   });
   const [isLoading, setIsLoading] = useState(false);
 
@@ -62,6 +65,7 @@ export default function NotificationSettingsScreen() {
           purchases: data.purchases ?? true,
           promotions: data.promotions ?? false,
           reminders: data.reminders ?? true,
+          hapticFeedback: data.haptic_feedback_enabled ?? true,
         });
       }
     } catch (err) {
@@ -73,13 +77,23 @@ export default function NotificationSettingsScreen() {
     setSettings((prev) => ({ ...prev, [key]: value }));
 
     try {
+      // Map camelCase to snake_case for database
+      const dbKey = key === 'hapticFeedback' 
+        ? 'haptic_feedback_enabled'
+        : key.replace(/([A-Z])/g, '_$1').toLowerCase();
+      
       await supabase
-        .from('notification_preferences')
+        .from('user_notification_preferences')
         .upsert({
           user_id: profile?.id,
-          [key.replace(/([A-Z])/g, '_$1').toLowerCase()]: value,
+          [dbKey]: value,
           updated_at: new Date().toISOString(),
         });
+
+      // Update haptic preference cache if haptic feedback setting changed
+      if (key === 'hapticFeedback') {
+        await updateHapticPreferenceCache(value);
+      }
     } catch (err) {
       console.error('Error saving notification setting:', err);
     }
@@ -183,6 +197,26 @@ export default function NotificationSettingsScreen() {
               />
             </View>
           ))}
+        </View>
+
+        {/* Haptic Feedback Toggle */}
+        <Text style={styles.sectionTitle}>Feedback</Text>
+        
+        <View style={styles.optionsCard}>
+          <View style={styles.optionRow}>
+            <View style={styles.optionInfo}>
+              <Text style={styles.optionTitle}>Haptic Feedback</Text>
+              <Text style={styles.optionDescription}>
+                Enable vibration feedback for button presses and interactions
+              </Text>
+            </View>
+            <Switch
+              value={settings.hapticFeedback}
+              onValueChange={(value) => updateSetting('hapticFeedback', value)}
+              trackColor={{ false: colors.muted, true: colors.accent + '50' }}
+              thumbColor={settings.hapticFeedback ? colors.accent : colors.secondary}
+            />
+          </View>
         </View>
 
         {/* Test Notification */}

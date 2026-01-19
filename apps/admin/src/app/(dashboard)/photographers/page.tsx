@@ -1,6 +1,8 @@
-import { Suspense } from 'react';
 import { Search, Filter, Loader2 } from 'lucide-react';
+import { Suspense } from 'react';
+
 import { supabaseAdmin } from '@/lib/supabase';
+
 import { PhotographerList } from './photographer-list';
 import { SearchFilter } from './search-filter';
 

@@ -31,7 +31,7 @@ import {
   Grid3X3,
   List,
   ArrowUpRight,
-  Sparkles,
+  Gift,
 } from 'lucide-react-native';
 
 import { useAuthStore } from '@/stores/auth-store';
@@ -43,6 +43,7 @@ const PHOTO_SIZE = (width - spacing.lg * 2 - spacing.sm * 2) / 3;
 interface VaultPhoto {
   id: string;
   thumbnail_path: string;
+  thumbnailUrl?: string | null;
   title: string;
   is_favorite: boolean;
   events?: { name: string };
@@ -70,12 +71,12 @@ interface StoragePlan {
   is_popular: boolean;
 }
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
+const API_URL = process.env.EXPO_PUBLIC_APP_URL || 'https://app.facefindr.com';
 
 export default function VaultScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { profile } = useAuthStore();
+  const { profile, session } = useAuthStore();
 
   const [photos, setPhotos] = useState<VaultPhoto[]>([]);
   const [usage, setUsage] = useState<StorageUsage | null>(null);
@@ -87,7 +88,13 @@ export default function VaultScreen() {
 
   const loadVaultData = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/vault`);
+      const response = await fetch(`${API_URL}/api/vault`, {
+        headers: session?.access_token
+          ? {
+              Authorization: `Bearer ${session.access_token}`,
+            }
+          : undefined,
+      });
       if (response.ok) {
         const data = await response.json();
         setPhotos(data.photos || []);
@@ -140,8 +147,8 @@ export default function VaultScreen() {
       ]}
       onPress={() => router.push(`/photo/${item.id}`)}
     >
-      {item.thumbnail_path ? (
-        <Image source={{ uri: item.thumbnail_path }} style={styles.photoImage} />
+      {item.thumbnailUrl || item.thumbnail_path ? (
+        <Image source={{ uri: item.thumbnailUrl || item.thumbnail_path }} style={styles.photoImage} />
       ) : (
         <View style={[styles.photoImage, styles.photoPlaceholder]}>
           <ImageIcon size={24} color={colors.secondary} />
@@ -221,7 +228,7 @@ export default function VaultScreen() {
               >
                 {plan.is_popular && (
                   <View style={styles.popularBadge}>
-                    <Sparkles size={10} color="#fff" />
+                    <Gift size={10} color="#fff" />
                     <Text style={styles.popularBadgeText}>Popular</Text>
                   </View>
                 )}

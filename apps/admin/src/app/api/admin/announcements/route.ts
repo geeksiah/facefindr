@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+
 import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 
@@ -9,6 +10,16 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    // First, delete sent announcements older than 24 hours (auto-cleanup)
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    
+    await supabaseAdmin
+      .from('platform_announcements')
+      .delete()
+      .eq('status', 'sent')
+      .lt('sent_at', twentyFourHoursAgo);
+
+    // Fetch remaining announcements
     const { data } = await supabaseAdmin
       .from('platform_announcements')
       .select('*')
@@ -33,7 +44,14 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { title, content, target, send_email, send_push } = body;
+    const { title, content, target, send_email, send_push, send_sms, country_code } = body;
+
+    if (!send_email && !send_push && !send_sms) {
+      return NextResponse.json(
+        { error: 'Select at least one channel (email, push, or SMS)' },
+        { status: 400 }
+      );
+    }
 
     const { data, error } = await supabaseAdmin
       .from('platform_announcements')
@@ -43,6 +61,8 @@ export async function POST(request: NextRequest) {
         target,
         send_email,
         send_push,
+        send_sms,
+        country_code: country_code ? country_code.toUpperCase() : null,
         status: 'draft',
         created_by: session.adminId,
       })
@@ -51,7 +71,12 @@ export async function POST(request: NextRequest) {
 
     if (error) throw error;
 
-    await logAction('announcement_create', 'announcement', data.id, { title, target });
+    await logAction('announcement_create', 'announcement', data.id, {
+      title,
+      target,
+      country_code: country_code ? country_code.toUpperCase() : null,
+      channels: { send_email, send_push, send_sms },
+    });
 
     return NextResponse.json({ success: true, announcement: data });
   } catch (error) {

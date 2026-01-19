@@ -1,9 +1,5 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useParams, useSearchParams, useRouter } from 'next/navigation';
-import Image from 'next/image';
-import Link from 'next/link';
 import {
   ArrowLeft,
   Camera,
@@ -18,10 +14,14 @@ import {
   Share2,
   Loader2,
 } from 'lucide-react';
+import Image from 'next/image';
+import Link from 'next/link';
+import { useParams, useSearchParams, useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
 
+import { GuidedFaceScanner } from '@/components/face-scan/guided-face-scanner';
 import { Button } from '@/components/ui/button';
 import { Logo } from '@/components/ui/logo';
-import { GuidedFaceScanner } from '@/components/face-scan/guided-face-scanner';
 import { useConfirm } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
 
@@ -87,17 +87,32 @@ export default function PublicEventScanPage() {
     }
   }
 
-  async function handleScanComplete(images: Blob[]) {
+  // Convert base64 data URL to Blob
+  function dataURLtoBlob(dataURL: string): Blob {
+    const arr = dataURL.split(',');
+    const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new Blob([u8arr], { type: mime });
+  }
+
+  async function handleScanComplete(images: string[]) {
     setScanning(true);
     setShowScanner(false);
     setError(null);
 
     try {
       // Create form data with captured images
+      // Convert base64 data URLs to Blobs
       const formData = new FormData();
       formData.append('eventId', event.id);
-      images.forEach((img, i) => {
-        formData.append(`image_${i}`, img, `face_${i}.jpg`);
+      images.forEach((imgDataUrl, i) => {
+        const blob = dataURLtoBlob(imgDataUrl);
+        formData.append(`image_${i}`, blob, `face_${i}.jpg`);
       });
 
       const res = await fetch('/api/faces/search', {

@@ -1,8 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { IndexFacesCommand, SearchFacesByImageCommand } from '@aws-sdk/client-rekognition';
+import { NextRequest, NextResponse } from 'next/server';
 
-import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { rekognitionClient, ATTENDEE_COLLECTION_ID } from '@/lib/aws/rekognition';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // ============================================
 // FACE REGISTRATION API
@@ -40,12 +40,14 @@ export async function POST(request: NextRequest) {
 
     // Convert base64 to buffer (use primary image for initial registration)
     const imageBuffer = Buffer.from(primaryImage, 'base64');
+    const imageBytes = new Uint8Array(imageBuffer);
 
-    // Check if face can be detected
+    // Index face in global collection for drop-in matching
+    // This ensures the face can be found by drop-in photos
     const indexCommand = new IndexFacesCommand({
       CollectionId: ATTENDEE_COLLECTION_ID,
-      Image: { Bytes: imageBuffer },
-      ExternalImageId: user.id,
+      Image: { Bytes: imageBytes },
+      ExternalImageId: user.id, // Use user ID as external ID for easy lookup
       MaxFaces: 1,
       QualityFilter: 'HIGH',
       DetectionAttributes: ['ALL'],
@@ -110,10 +112,11 @@ export async function POST(request: NextRequest) {
     for (let i = 0; i < additionalImages.length; i++) {
       try {
         const additionalBuffer = Buffer.from(additionalImages[i], 'base64');
+        const additionalBytes = new Uint8Array(additionalBuffer);
         const additionalCommand = new IndexFacesCommand({
           CollectionId: ATTENDEE_COLLECTION_ID,
-          Image: { Bytes: additionalBuffer },
-          ExternalImageId: `${user.id}_angle_${i + 1}`,
+          Image: { Bytes: additionalBytes },
+          ExternalImageId: `${user.id}_angle_${i + 1}`, // Index in global collection for drop-in
           MaxFaces: 1,
           QualityFilter: 'MEDIUM', // Less strict for angled faces
           DetectionAttributes: ['DEFAULT'],
@@ -137,6 +140,23 @@ export async function POST(request: NextRequest) {
         // Continue even if additional images fail
         console.warn(`Failed to index additional face angle ${i + 1}:`, err);
       }
+    }
+
+    // Mark as indexed in backfill status (if table exists)
+    try {
+      await serviceClient
+        .from('face_indexing_backfill_status')
+        .upsert({
+          attendee_id: user.id,
+          rekognition_face_id: rekognitionFaceId,
+          indexed_in_global_collection: true,
+          indexed_at: new Date().toISOString(),
+        }, {
+          onConflict: 'attendee_id,rekognition_face_id',
+        });
+    } catch (err) {
+      // Table might not exist yet, that's okay
+      console.warn('Could not update backfill status:', err);
     }
 
     // Search for matching photos across all events

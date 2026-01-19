@@ -1,5 +1,3 @@
-import { redirect } from 'next/navigation';
-import Link from 'next/link';
 import {
   User,
   Camera,
@@ -7,19 +5,27 @@ import {
   Scan,
   Image as ImageIcon,
   Bell,
+  Users,
+  CreditCard,
+  Lock,
+  Zap,
+  LayoutDashboard,
 } from 'lucide-react';
+import Link from 'next/link';
+import { redirect } from 'next/navigation';
 
-import { createClient } from '@/lib/supabase/server';
+import { LogoutButton } from '@/components/auth/logout-button';
+import { GallerySearch } from '@/components/gallery';
 import { Logo } from '@/components/ui/logo';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
-import { LogoutButton } from '@/components/auth/logout-button';
+import { createClient } from '@/lib/supabase/server';
 
 export default async function GalleryLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
@@ -42,12 +48,17 @@ export default async function GalleryLayout({
 
   // Navigation items - desktop sidebar shows all, mobile shows first 5
   const navItems = [
-    { href: '/gallery', label: 'My Photos', icon: ImageIcon },
+    { href: '/gallery', label: 'Dashboard', icon: LayoutDashboard },
+    { href: '/gallery/photos', label: 'My Photos', icon: ImageIcon },
     { href: '/gallery/scan', label: 'Find Photos', icon: Scan },
     { href: '/gallery/events', label: 'My Events', icon: Camera },
+    { href: '/gallery/vault', label: 'Photo Vault', icon: Lock },
+    { href: '/gallery/drop-in', label: 'Drop-In', icon: Zap },
+    { href: '/gallery/following', label: 'Following', icon: Users },
     { href: '/gallery/notifications', label: 'Notifications', icon: Bell },
-    { href: '/gallery/settings', label: 'Settings', icon: Settings }, // Settings in mobile bottom nav
-    { href: '/gallery/profile', label: 'Profile', icon: User }, // Profile only in sidebar
+    { href: '/gallery/billing', label: 'Billing', icon: CreditCard },
+    { href: '/gallery/settings', label: 'Settings', icon: Settings },
+    { href: '/gallery/profile', label: 'Profile', icon: User },
   ];
 
   return (
@@ -61,7 +72,7 @@ export default async function GalleryLayout({
 
         {/* User Profile Card */}
         <div className="border-b border-border p-4">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 mb-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent text-white font-semibold">
               {profile?.display_name?.charAt(0).toUpperCase() || 'U'}
             </div>
@@ -74,6 +85,8 @@ export default async function GalleryLayout({
               )}
             </div>
           </div>
+          {/* Search */}
+          <GallerySearch />
         </div>
 
         {/* Navigation */}

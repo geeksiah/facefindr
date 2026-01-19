@@ -1,7 +1,5 @@
 'use client';
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
   Calendar,
@@ -14,13 +12,17 @@ import {
   X,
   Menu,
   Sparkles,
+  Users,
+  UserPlus,
 } from 'lucide-react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 
-import { cn } from '@/lib/utils';
 import { logout } from '@/app/(auth)/actions';
 import { Logo } from '@/components/ui/logo';
 import { useConfirm } from '@/components/ui/toast';
+import { cn } from '@/lib/utils';
 
 // ============================================
 // TYPES
@@ -55,6 +57,9 @@ const mainNavigation: NavItem[] = [
   { name: 'Events', href: '/dashboard/events', icon: Calendar },
   { name: 'Upload', href: '/dashboard/upload', icon: Upload },
   { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
+  { name: 'Drop-In', href: '/dashboard/drop-in/discover', icon: Sparkles },
+  { name: 'Followers', href: '/dashboard/followers', icon: Users },
+  { name: 'Connections', href: '/dashboard/connections', icon: UserPlus },
 ];
 
 const accountNavigation: NavItem[] = [

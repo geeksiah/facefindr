@@ -1,5 +1,3 @@
-import { notFound } from 'next/navigation';
-import Link from 'next/link';
 import { 
   ArrowLeft, 
   Mail, 
@@ -10,6 +8,9 @@ import {
   CheckCircle,
   XCircle,
 } from 'lucide-react';
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+
 import { supabaseAdmin } from '@/lib/supabase';
 import { formatDate, formatDateTime, formatCurrency, getInitials } from '@/lib/utils';
 
@@ -22,8 +23,7 @@ async function getPhotographer(id: string) {
         *
       ),
       wallets (
-        *,
-        wallet_balances (*)
+        *
       ),
       events (
         id,
@@ -81,9 +81,10 @@ async function getPhotographer(id: string) {
 export default async function PhotographerDetailPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
-  const photographer = await getPhotographer(params.id);
+  const { id } = await params;
+  const photographer = await getPhotographer(id);
 
   if (!photographer) {
     notFound();
@@ -94,7 +95,17 @@ export default async function PhotographerDetailPage({
     0
   ) || 0;
 
-  const balance = photographer.wallets?.[0]?.wallet_balances?.[0]?.available_balance || 0;
+  // Get wallet balance from view
+  const walletId = photographer.wallets?.[0]?.id;
+  let balance = 0;
+  if (walletId) {
+    const { data: walletBalance } = await supabaseAdmin
+      .from('wallet_balances')
+      .select('available_balance')
+      .eq('wallet_id', walletId)
+      .single();
+    balance = walletBalance?.available_balance || 0;
+  }
 
   return (
     <div className="space-y-6">

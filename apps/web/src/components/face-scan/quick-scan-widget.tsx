@@ -1,7 +1,5 @@
 'use client';
 
-import { useState, useRef } from 'react';
-import Image from 'next/image';
 import {
   Camera,
   Upload,
@@ -9,8 +7,11 @@ import {
   AlertCircle,
   Sparkles,
 } from 'lucide-react';
+import Image from 'next/image';
+import { useState, useRef } from 'react';
 
 import { Button } from '@/components/ui/button';
+
 import { ConsentModal } from './consent-modal';
 
 interface QuickScanWidgetProps {

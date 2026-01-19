@@ -1,7 +1,9 @@
 'use client';
 
-import { useEffect } from 'react';
-import { RefreshCw, Home, AlertTriangle } from 'lucide-react';
+import { RefreshCw, Home, AlertTriangle, LayoutDashboard } from 'lucide-react';
+import { useEffect, useState } from 'react';
+
+import { createClient } from '@/lib/supabase/client';
 
 export default function Error({
   error,
@@ -10,10 +12,32 @@ export default function Error({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [checking, setChecking] = useState(true);
+
   useEffect(() => {
     // Log the error to an error reporting service
     console.error('Application error:', error);
+    
+    // Check if user is logged in
+    async function checkAuth() {
+      try {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        setIsLoggedIn(!!user);
+      } catch (e) {
+        setIsLoggedIn(false);
+      } finally {
+        setChecking(false);
+      }
+    }
+    
+    checkAuth();
   }, [error]);
+
+  const homeUrl = isLoggedIn ? '/dashboard' : '/';
+  const homeLabel = isLoggedIn ? 'Go to Dashboard' : 'Go Home';
+  const HomeIcon = isLoggedIn ? LayoutDashboard : Home;
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-6">
@@ -48,13 +72,15 @@ export default function Error({
             <RefreshCw className="h-4 w-4" />
             Try Again
           </button>
-          <a
-            href="/"
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-card px-6 py-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
-          >
-            <Home className="h-4 w-4" />
-            Go Home
-          </a>
+          {!checking && (
+            <a
+              href={homeUrl}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-card px-6 py-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
+            >
+              <HomeIcon className="h-4 w-4" />
+              {homeLabel}
+            </a>
+          )}
         </div>
 
         {/* Help text */}

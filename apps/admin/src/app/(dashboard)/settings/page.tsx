@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/lib/supabase';
+
 import { SettingsForm } from './settings-form';
 
 async function getSettings() {
@@ -32,8 +33,14 @@ export default async function SettingsPage() {
       <div>
         <h1 className="text-2xl font-bold text-foreground">Platform Settings</h1>
         <p className="text-muted-foreground mt-1">
-          Configure platform-wide settings, fees, and limits
+          Configure global platform defaults, limits, and system-wide settings. These serve as fallback values that can be overridden by region-specific settings.
         </p>
+        <div className="mt-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+          <p className="text-sm text-blue-700 dark:text-blue-300">
+            <strong>Note:</strong> Platform Settings are global defaults. For region-specific overrides (fees, providers, verification), use{' '}
+            <a href="/regions" className="underline font-medium">Regions & Providers</a>.
+          </p>
+        </div>
       </div>
 
       <SettingsForm settings={settings} />

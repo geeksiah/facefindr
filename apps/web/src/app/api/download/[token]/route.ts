@@ -5,6 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+
 import { validateAndUseToken, getSignedDownloadUrl } from '@/lib/delivery';
 
 export async function GET(

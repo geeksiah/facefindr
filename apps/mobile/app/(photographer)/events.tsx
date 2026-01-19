@@ -27,13 +27,15 @@ import {
   TrendingUp,
   Eye,
   ChevronRight,
-  Sparkles,
+  Gift,
 } from 'lucide-react-native';
 
 import { Button, Card } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { getCoverImageUrl } from '@/lib/storage-urls';
+import { useRealtimeSubscription } from '@/hooks/use-realtime';
 
 interface Event {
   id: string;
@@ -79,17 +81,52 @@ export default function EventsScreen() {
       const { data, error } = await query;
 
       if (!error && data) {
-        setEvents(
-          data.map((e: any) => ({
-            id: e.id,
-            name: e.name,
-            coverImageUrl: e.cover_image_url,
-            eventDate: e.event_date,
-            status: e.status,
-            photoCount: e.photo_count || 0,
-            attendeeCount: e.attendee_count || 0,
-          }))
+        // Process events and get cover image URLs
+        const processedEvents = await Promise.all(
+          data.map(async (e: any) => {
+            let coverImageUrl = null;
+            
+            // Try to get cover image URL
+            if (e.cover_image_url) {
+              // If it's already a full URL, use it
+              if (e.cover_image_url.startsWith('http://') || e.cover_image_url.startsWith('https://')) {
+                coverImageUrl = e.cover_image_url;
+              } else {
+                // Otherwise, get public URL from covers bucket
+                coverImageUrl = getCoverImageUrl(e.cover_image_url);
+              }
+            }
+            if (coverImageUrl) {
+              Image.prefetch(coverImageUrl);
+            }
+            
+            // Get real photo count for this event
+            // Since this is the photographer's own event, count all non-deleted photos
+            const { count: photoCount } = await supabase
+              .from('media')
+              .select('id', { count: 'exact', head: true })
+              .eq('event_id', e.id)
+              .is('deleted_at', null);
+
+            // Get real attendee count for this event
+            const { count: attendeeCount } = await supabase
+              .from('event_attendees')
+              .select('id', { count: 'exact', head: true })
+              .eq('event_id', e.id);
+
+            return {
+              id: e.id,
+              name: e.name,
+              coverImageUrl,
+              eventDate: e.event_date,
+              status: e.status,
+              photoCount: photoCount || 0,
+              attendeeCount: attendeeCount || 0,
+            };
+          })
         );
+        
+        setEvents(processedEvents);
       }
     } catch (err) {
       console.error('Error loading events:', err);
@@ -102,6 +139,15 @@ export default function EventsScreen() {
   useEffect(() => {
     loadEvents();
   }, [filter]);
+
+  // Subscribe to realtime updates for events
+  useRealtimeSubscription({
+    table: 'events',
+    filter: profile?.id ? `photographer_id=eq.${profile.id}` : undefined,
+    onChange: () => {
+      loadEvents();
+    },
+  });
 
   const handleRefresh = () => {
     setIsRefreshing(true);
@@ -203,7 +249,7 @@ export default function EventsScreen() {
       {featuredEvent && (
         <View style={styles.featuredSection}>
           <View style={styles.sectionHeader}>
-            <Sparkles size={14} color={colors.accent} />
+            <Gift size={14} color={colors.accent} />
             <Text style={styles.sectionTitle}>Recent Event</Text>
           </View>
           <TouchableOpacity
@@ -338,7 +384,7 @@ export default function EventsScreen() {
           />
         }
         ListHeaderComponent={events.length > 0 ? ListHeader : null}
-        ListEmptyComponent={!isLoading ? EmptyState : null}
+        ListEmptyComponent={!isLoading && events.length === 0 ? EmptyState : null}
         showsVerticalScrollIndicator={false}
       />
     </View>

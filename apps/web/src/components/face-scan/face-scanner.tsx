@@ -1,7 +1,5 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
-import Image from 'next/image';
 import {
   Camera,
   Upload,
@@ -12,6 +10,8 @@ import {
   X,
   FlipHorizontal,
 } from 'lucide-react';
+import Image from 'next/image';
+import { useState, useRef, useCallback, useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
 

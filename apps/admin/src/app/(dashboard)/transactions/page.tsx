@@ -1,8 +1,10 @@
-import { Suspense } from 'react';
 import { Loader2 } from 'lucide-react';
+import { Suspense } from 'react';
+
 import { supabaseAdmin } from '@/lib/supabase';
-import { TransactionList } from './transaction-list';
+
 import { SearchFilter } from './search-filter';
+import { TransactionList } from './transaction-list';
 
 interface SearchParams {
   search?: string;

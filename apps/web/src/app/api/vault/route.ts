@@ -7,11 +7,18 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+
+import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const authHeader = request.headers.get('authorization');
+    const accessToken = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : null;
+    const supabase = accessToken
+      ? createClientWithAccessToken(accessToken)
+      : await createClient();
     
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
@@ -89,8 +96,31 @@ export async function GET(request: NextRequest) {
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
+    const photosWithUrls = await Promise.all(
+      (photos || []).map(async (photo: any) => {
+        const rawThumbnailPath = photo.thumbnail_path || photo.file_path;
+        const thumbnailPath = rawThumbnailPath?.startsWith('/') ? rawThumbnailPath.slice(1) : rawThumbnailPath;
+        const filePath = photo.file_path?.startsWith('/') ? photo.file_path.slice(1) : photo.file_path;
+
+        const [thumbnailUrl, fileUrl] = await Promise.all([
+          thumbnailPath
+            ? supabase.storage.from('media').createSignedUrl(thumbnailPath, 3600)
+            : Promise.resolve({ data: null }),
+          filePath
+            ? supabase.storage.from('media').createSignedUrl(filePath, 3600)
+            : Promise.resolve({ data: null }),
+        ]);
+
+        return {
+          ...photo,
+          thumbnailUrl: thumbnailUrl?.data?.signedUrl || null,
+          fileUrl: fileUrl?.data?.signedUrl || null,
+        };
+      })
+    );
+
     return NextResponse.json({
-      photos: photos || [],
+      photos: photosWithUrls,
       totalPhotos: count || 0,
       page,
       totalPages: Math.ceil((count || 0) / limit),
@@ -126,7 +156,13 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const authHeader = request.headers.get('authorization');
+    const accessToken = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : null;
+    const supabase = accessToken
+      ? createClientWithAccessToken(accessToken)
+      : await createClient();
     
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
@@ -134,11 +170,11 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { mediaId, eventId, albumId, title } = body;
+    const { mediaId, eventId, albumId, title, isFavorite, dropInPhotoId } = body;
 
-    if (!mediaId) {
+    if (!mediaId && !dropInPhotoId) {
       return NextResponse.json(
-        { error: 'Media ID is required' },
+        { error: 'Media ID or Drop-In Photo ID is required' },
         { status: 400 }
       );
     }
@@ -157,48 +193,136 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if already in vault
-    const { data: existing } = await supabase
-      .from('photo_vault')
-      .select('id')
-      .eq('user_id', user.id)
-      .eq('media_id', mediaId)
-      .single();
+    let existing = null;
+    if (mediaId) {
+      const { data } = await supabase
+        .from('photo_vault')
+        .select('id, is_favorite')
+        .eq('user_id', user.id)
+        .eq('media_id', mediaId)
+        .single();
+      existing = data;
+    }
 
     if (existing) {
+      if (typeof isFavorite === 'boolean') {
+        const { data: updated, error: updateError } = await supabase
+          .from('photo_vault')
+          .update({ is_favorite: isFavorite })
+          .eq('id', existing.id)
+          .select()
+          .single();
+
+        if (updateError) {
+          return NextResponse.json({ error: 'Failed to update favorite' }, { status: 500 });
+        }
+
+        return NextResponse.json({ photo: updated });
+      }
+
       return NextResponse.json(
         { error: 'Photo already in vault' },
         { status: 400 }
       );
     }
 
-    // Get media details
-    const { data: media } = await supabase
-      .from('media')
-      .select('file_path, thumbnail_path, original_filename, file_size_bytes, event_id')
-      .eq('id', mediaId)
-      .single();
+    let vaultInsert: any = {
+      user_id: user.id,
+      album_id: albumId,
+      title: title,
+      is_favorite: !!isFavorite,
+    };
 
-    if (!media) {
-      return NextResponse.json(
-        { error: 'Media not found' },
-        { status: 404 }
-      );
+    if (mediaId) {
+      const { data: media } = await supabase
+        .from('media')
+        .select('storage_path, thumbnail_path, original_filename, file_size, event_id')
+        .eq('id', mediaId)
+        .single();
+
+      if (!media) {
+        return NextResponse.json(
+          { error: 'Media not found' },
+          { status: 404 }
+        );
+      }
+
+      vaultInsert = {
+        ...vaultInsert,
+        media_id: mediaId,
+        event_id: eventId || media.event_id,
+        file_path: media.storage_path,
+        thumbnail_path: media.thumbnail_path,
+        original_filename: media.original_filename,
+        file_size_bytes: media.file_size || 0,
+      };
+    }
+
+    if (dropInPhotoId) {
+      const serviceClient = createServiceClient();
+      const { data: dropInPhoto } = await serviceClient
+        .from('drop_in_photos')
+        .select('id, storage_path, thumbnail_path, original_filename, file_size, uploader_id')
+        .eq('id', dropInPhotoId)
+        .single();
+
+      if (!dropInPhoto) {
+        return NextResponse.json({ error: 'Drop-in photo not found' }, { status: 404 });
+      }
+
+      const { data: existingDropIn } = await supabase
+        .from('photo_vault')
+        .select('id, is_favorite')
+        .eq('user_id', user.id)
+        .eq('file_path', dropInPhoto.storage_path)
+        .single();
+
+      if (existingDropIn) {
+        if (typeof isFavorite === 'boolean') {
+          const { data: updated, error: updateError } = await supabase
+            .from('photo_vault')
+            .update({ is_favorite: isFavorite })
+            .eq('id', existingDropIn.id)
+            .select()
+            .single();
+
+          if (updateError) {
+            return NextResponse.json({ error: 'Failed to update favorite' }, { status: 500 });
+          }
+
+          return NextResponse.json({ photo: updated });
+        }
+
+        return NextResponse.json(
+          { error: 'Photo already in vault' },
+          { status: 400 }
+        );
+      }
+
+      const { data: match } = await serviceClient
+        .from('drop_in_matches')
+        .select('id')
+        .eq('drop_in_photo_id', dropInPhotoId)
+        .eq('matched_attendee_id', user.id)
+        .single();
+
+      if (!match && dropInPhoto.uploader_id !== user.id) {
+        return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+      }
+
+      vaultInsert = {
+        ...vaultInsert,
+        file_path: dropInPhoto.storage_path,
+        thumbnail_path: dropInPhoto.thumbnail_path,
+        original_filename: dropInPhoto.original_filename,
+        file_size_bytes: dropInPhoto.file_size || 0,
+      };
     }
 
     // Add to vault
     const { data: vaultPhoto, error } = await supabase
       .from('photo_vault')
-      .insert({
-        user_id: user.id,
-        media_id: mediaId,
-        event_id: eventId || media.event_id,
-        file_path: media.file_path,
-        thumbnail_path: media.thumbnail_path,
-        original_filename: media.original_filename,
-        file_size_bytes: media.file_size_bytes || 0,
-        album_id: albumId,
-        title: title,
-      })
+      .insert(vaultInsert)
       .select()
       .single();
 

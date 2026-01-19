@@ -50,7 +50,7 @@ export async function login(formData: LoginInput) {
     };
   }
 
-  const supabase = createClient();
+  const supabase = await createClient();
   
   const { error } = await supabase.auth.signInWithPassword({
     email: validated.data.email,
@@ -82,7 +82,7 @@ export async function register(formData: RegisterInput) {
     };
   }
 
-  const supabase = createClient();
+  const supabase = await createClient();
   const serviceClient = createServiceClient();
   
   // Sign up the user with Supabase Auth
@@ -175,7 +175,7 @@ export async function forgotPassword(formData: ForgotPasswordInput) {
     };
   }
 
-  const supabase = createClient();
+  const supabase = await createClient();
   
   const { error } = await supabase.auth.resetPasswordForEmail(validated.data.email, {
     redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/reset-password`,
@@ -204,7 +204,7 @@ export async function resetPassword(formData: ResetPasswordInput) {
     };
   }
 
-  const supabase = createClient();
+  const supabase = await createClient();
   
   const { error } = await supabase.auth.updateUser({
     password: validated.data.password,
@@ -219,11 +219,82 @@ export async function resetPassword(formData: ResetPasswordInput) {
 }
 
 // ============================================
+// SOCIAL LOGIN ACTIONS
+// ============================================
+
+export async function signInWithGoogle(userType: 'photographer' | 'attendee' = 'attendee') {
+  const supabase = await createClient();
+  
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback?user_type=${userType}`,
+      queryParams: {
+        access_type: 'offline',
+        prompt: 'consent',
+      },
+    },
+  });
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  if (data.url) {
+    redirect(data.url);
+  }
+
+  return { error: 'Failed to initialize Google sign-in' };
+}
+
+export async function signInWithGitHub(userType: 'photographer' | 'attendee' = 'attendee') {
+  const supabase = await createClient();
+  
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'github',
+    options: {
+      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback?user_type=${userType}`,
+    },
+  });
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  if (data.url) {
+    redirect(data.url);
+  }
+
+  return { error: 'Failed to initialize GitHub sign-in' };
+}
+
+export async function signInWithApple(userType: 'photographer' | 'attendee' = 'attendee') {
+  const supabase = await createClient();
+  
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'apple',
+    options: {
+      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback?user_type=${userType}`,
+    },
+  });
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  if (data.url) {
+    redirect(data.url);
+  }
+
+  return { error: 'Failed to initialize Apple sign-in' };
+}
+
+// ============================================
 // LOGOUT ACTION
 // ============================================
 
 export async function logout() {
-  const supabase = createClient();
+  const supabase = await createClient();
   await supabase.auth.signOut();
   revalidatePath('/', 'layout');
   redirect('/');
@@ -234,7 +305,7 @@ export async function logout() {
 // ============================================
 
 export async function getCurrentUser() {
-  const supabase = createClient();
+  const supabase = await createClient();
   
   const { data: { user }, error } = await supabase.auth.getUser();
   

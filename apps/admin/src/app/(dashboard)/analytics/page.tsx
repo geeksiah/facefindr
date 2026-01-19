@@ -1,4 +1,3 @@
-import { Suspense } from 'react';
 import { 
   DollarSign, 
   TrendingUp, 
@@ -7,8 +6,11 @@ import {
   Download,
   Loader2,
 } from 'lucide-react';
+import { Suspense } from 'react';
+
 import { supabaseAdmin } from '@/lib/supabase';
 import { formatCurrency, formatNumber, formatDate } from '@/lib/utils';
+
 import { AnalyticsCharts } from './charts';
 import { ExportButton } from './export-button';
 

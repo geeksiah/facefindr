@@ -1,8 +1,5 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { useSearchParams } from 'next/navigation';
-import Image from 'next/image';
 import { 
   User, 
   Lock, 
@@ -23,12 +20,15 @@ import {
   Phone,
   AlertCircle,
 } from 'lucide-react';
+import Image from 'next/image';
+import { useSearchParams } from 'next/navigation';
+import { useState, useEffect, useRef } from 'react';
 
+import { WalletSettings } from '@/components/dashboard/wallet-settings';
+import { useToast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { WalletSettings } from '@/components/dashboard/wallet-settings';
-import { useToast } from '@/components/ui';
 
 interface Profile {
   id: string;
