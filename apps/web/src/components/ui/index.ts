@@ -10,3 +10,4 @@ export { OfflineDetector } from './offline-detector';
 export { CurrencySwitcher } from './currency-switcher';
 export { RouteProgress } from './route-progress';
 export { Lightbox } from './lightbox';
+export { ErrorBoundary, withErrorBoundary } from './error-boundary';

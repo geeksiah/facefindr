@@ -12,6 +12,7 @@ import {
   getVerificationSettings,
   checkVerificationStatus,
 } from '@/lib/notifications';
+import { checkRateLimit, getClientIP, rateLimitHeaders, rateLimits } from '@/lib/rate-limit';
 import { createClient } from '@/lib/supabase/server';
 
 // GET - Get verification settings and status
@@ -49,6 +50,16 @@ export async function GET() {
 
 // POST - Send or verify OTP
 export async function POST(request: NextRequest) {
+  // Rate limiting for auth operations
+  const clientIP = getClientIP(request);
+  const rateLimit = checkRateLimit(clientIP, rateLimits.auth);
+  if (!rateLimit.success) {
+    return NextResponse.json(
+      { error: 'Too many attempts. Please try again later.' },
+      { status: 429, headers: rateLimitHeaders(rateLimit) }
+    );
+  }
+
   try {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();

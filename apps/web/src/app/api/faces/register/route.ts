@@ -2,6 +2,7 @@ import { IndexFacesCommand, SearchFacesByImageCommand } from '@aws-sdk/client-re
 import { NextRequest, NextResponse } from 'next/server';
 
 import { rekognitionClient, ATTENDEE_COLLECTION_ID } from '@/lib/aws/rekognition';
+import { checkRateLimit, getClientIP, rateLimitHeaders, rateLimits } from '@/lib/rate-limit';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // ============================================
@@ -11,8 +12,18 @@ import { createClient, createServiceClient } from '@/lib/supabase/server';
 // ============================================
 
 export async function POST(request: NextRequest) {
+  // Rate limiting for face operations
+  const clientIP = getClientIP(request);
+  const rateLimit = checkRateLimit(clientIP, rateLimits.faceOps);
+  if (!rateLimit.success) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please try again later.' },
+      { status: 429, headers: rateLimitHeaders(rateLimit) }
+    );
+  }
+
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {

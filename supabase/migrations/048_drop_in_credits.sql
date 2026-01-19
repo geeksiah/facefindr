@@ -1,5 +1,6 @@
 -- Migration: 048_drop_in_credits
 -- Description: Implement Drop-in as pay-as-you-go credits system
+-- Note: drop_in_matches already exists from migration 039, so we use attendee_id instead
 
 -- ============================================
 -- ADD DROP-IN CREDITS TO ATTENDEES
@@ -42,7 +43,7 @@ ON CONFLICT (code) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS drop_in_credit_purchases (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    attendee_id UUID NOT NULL REFERENCES attendees(id) ON DELETE CASCADE,
     pack_id UUID REFERENCES drop_in_credit_packs(id),
     credits_purchased INTEGER NOT NULL,
     credits_remaining INTEGER NOT NULL,
@@ -55,8 +56,8 @@ CREATE TABLE IF NOT EXISTS drop_in_credit_purchases (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_credit_purchases_user ON drop_in_credit_purchases(user_id);
-CREATE INDEX idx_credit_purchases_status ON drop_in_credit_purchases(status);
+CREATE INDEX IF NOT EXISTS idx_credit_purchases_attendee ON drop_in_credit_purchases(attendee_id);
+CREATE INDEX IF NOT EXISTS idx_credit_purchases_status ON drop_in_credit_purchases(status);
 
 -- ============================================
 -- DROP-IN CREDIT USAGE LOG
@@ -64,7 +65,7 @@ CREATE INDEX idx_credit_purchases_status ON drop_in_credit_purchases(status);
 
 CREATE TABLE IF NOT EXISTS drop_in_credit_usage (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    attendee_id UUID NOT NULL REFERENCES attendees(id) ON DELETE CASCADE,
     purchase_id UUID REFERENCES drop_in_credit_purchases(id),
     action VARCHAR(100) NOT NULL, -- 'external_search', 'gift_notification', etc.
     credits_used INTEGER DEFAULT 1,
@@ -72,8 +73,8 @@ CREATE TABLE IF NOT EXISTS drop_in_credit_usage (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_credit_usage_user ON drop_in_credit_usage(user_id);
-CREATE INDEX idx_credit_usage_action ON drop_in_credit_usage(action);
+CREATE INDEX IF NOT EXISTS idx_credit_usage_attendee ON drop_in_credit_usage(attendee_id);
+CREATE INDEX IF NOT EXISTS idx_credit_usage_action ON drop_in_credit_usage(action);
 
 -- ============================================
 -- DROP-IN SEARCHES TABLE
@@ -81,7 +82,7 @@ CREATE INDEX idx_credit_usage_action ON drop_in_credit_usage(action);
 
 CREATE TABLE IF NOT EXISTS drop_in_searches (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    attendee_id UUID NOT NULL REFERENCES attendees(id) ON DELETE CASCADE,
     search_type VARCHAR(50) NOT NULL, -- 'contacts', 'external'
     status VARCHAR(50) DEFAULT 'pending', -- pending, processing, completed, failed
     match_count INTEGER DEFAULT 0,
@@ -92,16 +93,16 @@ CREATE TABLE IF NOT EXISTS drop_in_searches (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_drop_in_searches_user ON drop_in_searches(user_id);
-CREATE INDEX idx_drop_in_searches_status ON drop_in_searches(status);
+CREATE INDEX IF NOT EXISTS idx_drop_in_searches_attendee ON drop_in_searches(attendee_id);
+CREATE INDEX IF NOT EXISTS idx_drop_in_searches_status ON drop_in_searches(status);
 
 -- ============================================
--- DROP-IN MATCHES TABLE
+-- DROP-IN SEARCH RESULTS TABLE (different from drop_in_matches in 039)
 -- ============================================
 
-CREATE TABLE IF NOT EXISTS drop_in_matches (
+CREATE TABLE IF NOT EXISTS drop_in_search_results (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    attendee_id UUID NOT NULL REFERENCES attendees(id) ON DELETE CASCADE,
     search_id UUID REFERENCES drop_in_searches(id) ON DELETE CASCADE,
     media_id UUID REFERENCES media(id) ON DELETE SET NULL,
     source VARCHAR(50) DEFAULT 'facefindr', -- 'facefindr', 'external'
@@ -112,15 +113,15 @@ CREATE TABLE IF NOT EXISTS drop_in_matches (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_drop_in_matches_user ON drop_in_matches(user_id);
-CREATE INDEX idx_drop_in_matches_search ON drop_in_matches(search_id);
+CREATE INDEX IF NOT EXISTS idx_drop_in_search_results_attendee ON drop_in_search_results(attendee_id);
+CREATE INDEX IF NOT EXISTS idx_drop_in_search_results_search ON drop_in_search_results(search_id);
 
 -- ============================================
 -- FUNCTION: Use Drop-in Credits
 -- ============================================
 
 CREATE OR REPLACE FUNCTION use_drop_in_credits(
-    p_user_id UUID,
+    p_attendee_id UUID,
     p_action VARCHAR(100),
     p_credits_needed INTEGER DEFAULT 1,
     p_metadata JSONB DEFAULT NULL
@@ -133,7 +134,7 @@ BEGIN
     -- Find an active purchase with remaining credits
     SELECT id, credits_remaining, expires_at INTO v_purchase
     FROM drop_in_credit_purchases
-    WHERE user_id = p_user_id
+    WHERE attendee_id = p_attendee_id
       AND status = 'active'
       AND credits_remaining >= p_credits_needed
       AND (expires_at IS NULL OR expires_at > NOW())
@@ -158,11 +159,11 @@ BEGIN
     -- Update total credits on attendee
     UPDATE attendees
     SET drop_in_credits = drop_in_credits - p_credits_needed
-    WHERE id = p_user_id;
+    WHERE id = p_attendee_id;
     
     -- Log usage
-    INSERT INTO drop_in_credit_usage (user_id, purchase_id, action, credits_used, metadata)
-    VALUES (p_user_id, v_purchase.id, p_action, p_credits_needed, p_metadata);
+    INSERT INTO drop_in_credit_usage (attendee_id, purchase_id, action, credits_used, metadata)
+    VALUES (p_attendee_id, v_purchase.id, p_action, p_credits_needed, p_metadata);
     
     RETURN TRUE;
 END;
@@ -173,7 +174,7 @@ $$ LANGUAGE plpgsql;
 -- ============================================
 
 CREATE OR REPLACE FUNCTION add_drop_in_credits(
-    p_user_id UUID,
+    p_attendee_id UUID,
     p_pack_code VARCHAR(50),
     p_payment_intent_id VARCHAR(255)
 )
@@ -199,10 +200,10 @@ BEGIN
     
     -- Create purchase record
     INSERT INTO drop_in_credit_purchases (
-        user_id, pack_id, credits_purchased, credits_remaining,
+        attendee_id, pack_id, credits_purchased, credits_remaining,
         amount_paid, currency, payment_intent_id, expires_at
     ) VALUES (
-        p_user_id, v_pack.id, v_pack.credits, v_pack.credits,
+        p_attendee_id, v_pack.id, v_pack.credits, v_pack.credits,
         v_pack.price_cents, v_pack.currency, p_payment_intent_id, v_expires_at
     )
     RETURNING id INTO v_purchase_id;
@@ -210,7 +211,7 @@ BEGIN
     -- Update total credits on attendee
     UPDATE attendees
     SET drop_in_credits = drop_in_credits + v_pack.credits
-    WHERE id = p_user_id;
+    WHERE id = p_attendee_id;
     
     RETURN v_purchase_id;
 END;
@@ -220,7 +221,7 @@ $$ LANGUAGE plpgsql;
 -- FUNCTION: Get Drop-in Credit Balance
 -- ============================================
 
-CREATE OR REPLACE FUNCTION get_drop_in_balance(p_user_id UUID)
+CREATE OR REPLACE FUNCTION get_drop_in_balance(p_attendee_id UUID)
 RETURNS TABLE (
     total_credits INTEGER,
     expiring_soon INTEGER,
@@ -236,7 +237,7 @@ BEGIN
         ), 0)::INTEGER AS expiring_soon,
         MIN(CASE WHEN expires_at IS NOT NULL THEN expires_at END) AS next_expiry
     FROM drop_in_credit_purchases
-    WHERE user_id = p_user_id
+    WHERE attendee_id = p_attendee_id
       AND status = 'active'
       AND credits_remaining > 0
       AND (expires_at IS NULL OR expires_at > NOW());
@@ -251,42 +252,48 @@ ALTER TABLE drop_in_credit_packs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE drop_in_credit_purchases ENABLE ROW LEVEL SECURITY;
 ALTER TABLE drop_in_credit_usage ENABLE ROW LEVEL SECURITY;
 ALTER TABLE drop_in_searches ENABLE ROW LEVEL SECURITY;
-ALTER TABLE drop_in_matches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE drop_in_search_results ENABLE ROW LEVEL SECURITY;
 
 -- Credit packs are readable by all
+DROP POLICY IF EXISTS "Credit packs are viewable by all" ON drop_in_credit_packs;
 CREATE POLICY "Credit packs are viewable by all"
     ON drop_in_credit_packs FOR SELECT
     TO authenticated
     USING (is_active = TRUE);
 
 -- Users can only see their own purchases
-CREATE POLICY "Users can view own purchases"
+DROP POLICY IF EXISTS "Users can view own credit purchases" ON drop_in_credit_purchases;
+CREATE POLICY "Users can view own credit purchases"
     ON drop_in_credit_purchases FOR SELECT
     TO authenticated
-    USING (user_id = auth.uid());
+    USING (attendee_id = auth.uid());
 
 -- Users can only see their own usage
-CREATE POLICY "Users can view own usage"
+DROP POLICY IF EXISTS "Users can view own credit usage" ON drop_in_credit_usage;
+CREATE POLICY "Users can view own credit usage"
     ON drop_in_credit_usage FOR SELECT
     TO authenticated
-    USING (user_id = auth.uid());
+    USING (attendee_id = auth.uid());
 
 -- Users can only see their own searches
-CREATE POLICY "Users can view own searches"
+DROP POLICY IF EXISTS "Users can view own drop-in searches" ON drop_in_searches;
+CREATE POLICY "Users can view own drop-in searches"
     ON drop_in_searches FOR SELECT
     TO authenticated
-    USING (user_id = auth.uid());
+    USING (attendee_id = auth.uid());
 
-CREATE POLICY "Users can create own searches"
+DROP POLICY IF EXISTS "Users can create own drop-in searches" ON drop_in_searches;
+CREATE POLICY "Users can create own drop-in searches"
     ON drop_in_searches FOR INSERT
     TO authenticated
-    WITH CHECK (user_id = auth.uid());
+    WITH CHECK (attendee_id = auth.uid());
 
--- Users can only see their own matches
-CREATE POLICY "Users can view own matches"
-    ON drop_in_matches FOR SELECT
+-- Users can only see their own search results
+DROP POLICY IF EXISTS "Users can view own search results" ON drop_in_search_results;
+CREATE POLICY "Users can view own search results"
+    ON drop_in_search_results FOR SELECT
     TO authenticated
-    USING (user_id = auth.uid());
+    USING (attendee_id = auth.uid());
 
 -- ============================================
 -- CRON JOB: Expire old credit purchases
@@ -312,7 +319,7 @@ COMMENT ON TABLE drop_in_credit_packs IS 'Predefined credit pack options for pur
 COMMENT ON TABLE drop_in_credit_purchases IS 'User credit purchases with remaining balance';
 COMMENT ON TABLE drop_in_credit_usage IS 'Log of credit consumption';
 COMMENT ON TABLE drop_in_searches IS 'Drop-in search requests and their status';
-COMMENT ON TABLE drop_in_matches IS 'Photos matched via drop-in searches';
+COMMENT ON TABLE drop_in_search_results IS 'Photos matched via drop-in searches (pay-as-you-go results)';
 COMMENT ON FUNCTION use_drop_in_credits IS 'Consume credits for an action, returns false if insufficient';
 COMMENT ON FUNCTION add_drop_in_credits IS 'Add credits from a pack purchase, returns purchase ID';
 COMMENT ON FUNCTION get_drop_in_balance IS 'Get user credit balance summary';

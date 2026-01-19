@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 
 import { getEffectiveCurrency } from '@/lib/currency/currency-service';
@@ -17,9 +17,20 @@ import {
   createCheckoutSession,
   isStripeConfigured,
 } from '@/lib/payments/stripe';
+import { checkRateLimit, getClientIP, rateLimitHeaders, rateLimits } from '@/lib/rate-limit';
 import { createClient } from '@/lib/supabase/server';
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  // Rate limiting for checkout
+  const clientIP = getClientIP(request);
+  const rateLimit = checkRateLimit(clientIP, rateLimits.api);
+  if (!rateLimit.success) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please try again later.' },
+      { status: 429, headers: rateLimitHeaders(rateLimit) }
+    );
+  }
+
   try {
     const supabase = await createClient();
     const {
