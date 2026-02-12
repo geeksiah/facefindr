@@ -17,7 +17,6 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.facefindr.app",
-      "usePrecompiledReactNative": false,
       "infoPlist": {
         "NSCameraUsageDescription": "FaceFindr uses your camera to scan your face and find photos of you at events.",
         "NSPhotoLibraryUsageDescription": "FaceFindr uses your photo library to upload photos or use a photo for face scanning.",
@@ -30,7 +29,6 @@
         "backgroundColor": "#0ea5e9"
       },
       "package": "com.facefindr.app",
-      "usePrecompiledReactNative": false,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
@@ -81,6 +79,6 @@
         "projectId": "ef810b0d-4af3-4b68-9c0c-ebb0bdcf8e22"
       }
     },
-    "owner": "facefindr"
+    "owner": "facefindr-app"
   }
 }

@@ -19,7 +19,7 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { ArrowLeft, RefreshCw, Check, X, Camera as CameraIcon } from 'lucide-react-native';
 import { SvgXml } from 'react-native-svg';
 import * as Asset from 'expo-asset';
