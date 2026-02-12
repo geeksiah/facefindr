@@ -412,43 +412,59 @@ export function WalletSettings() {
                   </select>
                 </div>
 
-                <Input
-                  label="Business Name (Optional)"
-                  value={formData.businessName}
-                  onChange={(e) => setFormData({ ...formData, businessName: e.target.value })}
-                  placeholder="Your photography business"
-                />
+                <div>
+                  <label className="text-sm font-medium text-foreground mb-1 block">
+                    Business Name (Optional)
+                  </label>
+                  <Input
+                    value={formData.businessName}
+                    onChange={(e) => setFormData({ ...formData, businessName: e.target.value })}
+                    placeholder="Your photography business"
+                  />
+                </div>
 
                 {/* Flutterwave specific fields */}
                 {newWalletProvider === 'flutterwave' && (
                   <>
-                    <Input
-                      label="Bank Code"
-                      value={formData.accountBank}
-                      onChange={(e) => setFormData({ ...formData, accountBank: e.target.value })}
-                      placeholder="e.g., 044 for Access Bank"
-                      required
-                    />
-                    <Input
-                      label="Account Number"
-                      value={formData.accountNumber}
-                      onChange={(e) => setFormData({ ...formData, accountNumber: e.target.value })}
-                      placeholder="Your bank account number"
-                      required
-                    />
+                    <div>
+                      <label className="text-sm font-medium text-foreground mb-1 block">
+                        Bank Code
+                      </label>
+                      <Input
+                        value={formData.accountBank}
+                        onChange={(e) => setFormData({ ...formData, accountBank: e.target.value })}
+                        placeholder="e.g., 044 for Access Bank"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-foreground mb-1 block">
+                        Account Number
+                      </label>
+                      <Input
+                        value={formData.accountNumber}
+                        onChange={(e) => setFormData({ ...formData, accountNumber: e.target.value })}
+                        placeholder="Your bank account number"
+                        required
+                      />
+                    </div>
                   </>
                 )}
 
                 {/* PayPal specific fields */}
                 {newWalletProvider === 'paypal' && (
-                  <Input
-                    label="PayPal Email"
-                    type="email"
-                    value={formData.paypalEmail}
-                    onChange={(e) => setFormData({ ...formData, paypalEmail: e.target.value })}
-                    placeholder="your@email.com"
-                    required
-                  />
+                  <div>
+                    <label className="text-sm font-medium text-foreground mb-1 block">
+                      PayPal Email
+                    </label>
+                    <Input
+                      type="email"
+                      value={formData.paypalEmail}
+                      onChange={(e) => setFormData({ ...formData, paypalEmail: e.target.value })}
+                      placeholder="your@email.com"
+                      required
+                    />
+                  </div>
                 )}
 
                 {/* Mobile Money specific fields */}
@@ -468,14 +484,18 @@ export function WalletSettings() {
                         <option value="AIRTEL">AirtelTigo Money</option>
                       </select>
                     </div>
-                    <Input
-                      label="Mobile Number"
-                      type="tel"
-                      value={formData.momoNumber}
-                      onChange={(e) => setFormData({ ...formData, momoNumber: e.target.value })}
-                      placeholder="0241234567"
-                      required
-                    />
+                    <div>
+                      <label className="text-sm font-medium text-foreground mb-1 block">
+                        Mobile Number
+                      </label>
+                      <Input
+                        type="tel"
+                        value={formData.momoNumber}
+                        onChange={(e) => setFormData({ ...formData, momoNumber: e.target.value })}
+                        placeholder="0241234567"
+                        required
+                      />
+                    </div>
                     <p className="text-xs text-muted-foreground">
                       Payouts will be sent directly to this mobile money wallet. No business registration required.
                     </p>
@@ -538,7 +558,7 @@ export function WalletSettings() {
       )}
 
       {/* Confirm Dialog */}
-      {ConfirmDialog}
+      <ConfirmDialog />
     </div>
   );
 }

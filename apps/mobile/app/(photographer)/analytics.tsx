@@ -86,27 +86,32 @@ export default function AnalyticsScreen() {
       // Calculate date ranges based on period
       const now = new Date();
       let currentPeriodStart: Date;
+      let currentPeriodEnd: Date;
       let previousPeriodStart: Date;
       let previousPeriodEnd: Date;
       
       switch (period) {
         case '7d':
           currentPeriodStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          currentPeriodEnd = now;
           previousPeriodStart = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
           previousPeriodEnd = currentPeriodStart;
           break;
         case '30d':
           currentPeriodStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          currentPeriodEnd = now;
           previousPeriodStart = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
           previousPeriodEnd = currentPeriodStart;
           break;
         case '90d':
           currentPeriodStart = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+          currentPeriodEnd = now;
           previousPeriodStart = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
           previousPeriodEnd = currentPeriodStart;
           break;
         default:
           currentPeriodStart = new Date(0);
+          currentPeriodEnd = now;
           previousPeriodStart = new Date(0);
           previousPeriodEnd = new Date(0);
       }

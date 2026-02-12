@@ -158,7 +158,7 @@ export default function NotificationsScreen() {
     markAsRead(notification.id);
 
     if (notification.type === 'sale' && notification.data?.orderId) {
-      router.push(`/order/${notification.data.orderId}`);
+      router.push('/settings/billing');
     } else if (notification.type === 'event' && notification.data?.eventId) {
       router.push(`/event/${notification.data.eventId}`);
     } else if (notification.type === 'follower' && notification.data?.userId) {

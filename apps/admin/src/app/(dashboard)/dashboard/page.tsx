@@ -163,10 +163,20 @@ async function getRecentActivity() {
       .limit(5),
   ]);
 
+  const normalizedTransactions = (transactions.data || []).map((t: any) => ({
+    ...t,
+    events: Array.isArray(t.events) ? t.events[0] || null : t.events || null,
+  }));
+
+  const normalizedPayouts = (payouts.data || []).map((p: any) => ({
+    ...p,
+    wallets: Array.isArray(p.wallets) ? p.wallets[0] || null : p.wallets || null,
+  }));
+
   return {
-    transactions: transactions.data || [],
+    transactions: normalizedTransactions,
     newUsers: newUsers.data || [],
-    payouts: payouts.data || [],
+    payouts: normalizedPayouts,
   };
 }
 

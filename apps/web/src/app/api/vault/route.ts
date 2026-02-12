@@ -193,7 +193,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if already in vault
-    let existing = null;
+    let existing: any = null;
     if (mediaId) {
       const { data } = await supabase
         .from('photo_vault')
@@ -201,7 +201,7 @@ export async function POST(request: NextRequest) {
         .eq('user_id', user.id)
         .eq('media_id', mediaId)
         .single();
-      existing = data;
+      existing = data as any;
     }
 
     if (existing) {

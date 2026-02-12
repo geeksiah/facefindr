@@ -22,6 +22,7 @@ import { useState, useEffect } from 'react';
 
 import { DashboardBanner } from '@/components/notifications';
 import { useCurrency } from '@/components/providers';
+import { useRealtimeSubscription } from '@/hooks/use-realtime';
 
 interface DashboardStats {
   totalViews: number;

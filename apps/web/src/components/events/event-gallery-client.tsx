@@ -205,7 +205,6 @@ export function EventGalleryClient({ eventId, photos, photoUrls: initialPhotoUrl
                 onClick={() => toggleSelect(photo.id)}
               >
                 {url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={url}
                     alt={photo.original_filename || 'Photo'}

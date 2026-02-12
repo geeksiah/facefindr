@@ -5,21 +5,6 @@ import { useState, useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
 
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-
 interface RefreshStatus {
   needsRefresh: boolean;
   reason: string | null;
@@ -196,18 +181,22 @@ export function FaceRefreshPrompt({ onRefresh, onDismiss, showInline = false }: 
   }
 
   // Dialog version
-  return (
-    <Dialog open={showDialog} onOpenChange={setShowDialog}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
+  return showDialog ? (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/50"
+        aria-label="Close dialog"
+        onClick={() => setShowDialog(false)}
+      />
+      <div className="relative w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl">
+        <div className="mb-4">
           <div className="flex items-center gap-3">
             {content.icon}
-            <DialogTitle>{content.title}</DialogTitle>
+            <h3 className="text-lg font-semibold text-foreground">{content.title}</h3>
           </div>
-          <DialogDescription className="pt-2">
-            {content.description}
-          </DialogDescription>
-        </DialogHeader>
+          <p className="pt-2 text-sm text-secondary">{content.description}</p>
+        </div>
 
         <div className="space-y-4 py-4">
           {/* Confidence indicator */}
@@ -233,28 +222,32 @@ export function FaceRefreshPrompt({ onRefresh, onDismiss, showInline = false }: 
           {/* Appearance change selector */}
           <div className="text-sm text-gray-600">
             <p className="mb-2">Has your appearance changed?</p>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="w-full justify-between">
+            <div className="relative">
+              <select
+                defaultValue=""
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 pr-8 text-sm text-foreground"
+                onChange={(e) => {
+                  if (e.target.value) {
+                    handleAppearanceChange(e.target.value);
+                    e.currentTarget.value = '';
+                  }
+                }}
+              >
+                <option value="" disabled>
                   Select a change
-                  <ChevronDown className="h-4 w-4 ml-2" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-full">
+                </option>
                 {APPEARANCE_CHANGES.map((change) => (
-                  <DropdownMenuItem
-                    key={change.value}
-                    onClick={() => handleAppearanceChange(change.value)}
-                  >
+                  <option key={change.value} value={change.value}>
                     {change.label}
-                  </DropdownMenuItem>
+                  </option>
                 ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            </div>
           </div>
         </div>
 
-        <DialogFooter className="flex-col sm:flex-row gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           <Button onClick={onRefresh} className="flex-1">
             <Camera className="h-4 w-4 mr-2" />
             Update Photo
@@ -281,8 +274,8 @@ export function FaceRefreshPrompt({ onRefresh, onDismiss, showInline = false }: 
               Remind Me Later
             </Button>
           )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
+        </div>
+      </div>
+    </div>
+  ) : null;
 }

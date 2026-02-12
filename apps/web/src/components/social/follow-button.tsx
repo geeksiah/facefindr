@@ -27,6 +27,7 @@ export function FollowButton({
   onFollowChange,
   className,
 }: FollowButtonProps) {
+  const buttonSize = size === 'md' ? 'default' : size;
   const supabase = createClient();
   const [isFollowing, setIsFollowing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -135,7 +136,7 @@ export function FollowButton({
     return (
       <Button
         variant={variant}
-        size={size}
+        size={buttonSize}
         disabled
         className={className}
       >
@@ -151,7 +152,7 @@ export function FollowButton({
         onClick={handleToggleFollow}
         disabled={isToggling}
         variant={isFollowing ? 'outline' : variant}
-        size={size}
+        size={buttonSize}
       >
         {isToggling ? (
           <Loader2 className="h-4 w-4 mr-2 animate-spin" />

@@ -50,7 +50,7 @@ export default function RootLayout() {
     const inAuthGroup = segments[0] === '(auth)';
     const inPhotographerGroup = segments[0] === '(photographer)';
     const inAttendeeGroup = segments[0] === '(attendee)';
-    const isRootIndex = segments.length === 0 || segments[0] === undefined;
+    const isRootIndex = segments[0] === undefined;
 
     if (!user) {
       // Not signed in - go to welcome if on protected route

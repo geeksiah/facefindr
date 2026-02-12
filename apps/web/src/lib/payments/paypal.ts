@@ -5,7 +5,16 @@
  * Documentation: https://developer.paypal.com/docs/api/orders/v2/
  */
 
-import { Client, Environment, OrdersController, PaymentsController, LogLevel } from '@paypal/paypal-server-sdk';
+import {
+  Client,
+  Environment,
+  OrdersController,
+  PaymentsController,
+  LogLevel,
+  CheckoutPaymentIntent,
+  OrderApplicationContextLandingPage,
+  OrderApplicationContextUserAction,
+} from '@paypal/paypal-server-sdk';
 
 const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID;
 const PAYPAL_CLIENT_SECRET = process.env.PAYPAL_CLIENT_SECRET;
@@ -51,7 +60,7 @@ export function getPayPalClientId(): string | undefined {
 // ============================================
 
 export interface CreateOrderParams {
-  eventId: string;
+  eventId: string | null;
   eventName: string;
   items: Array<{
     name: string;
@@ -61,7 +70,7 @@ export interface CreateOrderParams {
     mediaIds?: string[];
   }>;
   currency: string;
-  photographerPayPalEmail: string;
+  photographerPayPalEmail: string | null;
   returnUrl: string;
   cancelUrl: string;
   metadata?: Record<string, string>;
@@ -89,15 +98,15 @@ export async function createOrder(params: CreateOrderParams): Promise<PayPalOrde
   // Convert cents to dollars string with 2 decimal places
   const formatAmount = (cents: number) => (cents / 100).toFixed(2);
 
-  const { body } = await ordersController.ordersCreate({
+  const { body } = await ordersController.createOrder({
     body: {
-      intent: 'CAPTURE',
+      intent: CheckoutPaymentIntent.Capture,
       purchaseUnits: [
         {
-          referenceId: params.eventId,
+          referenceId: params.eventId || 'drop-in',
           description: `Photos from ${params.eventName}`,
           customId: JSON.stringify({
-            event_id: params.eventId,
+            event_id: params.eventId || 'drop-in',
             ...params.metadata,
           }),
           amount: {
@@ -120,7 +129,7 @@ export async function createOrder(params: CreateOrderParams): Promise<PayPalOrde
             },
           })),
           payee: {
-            emailAddress: params.photographerPayPalEmail,
+            emailAddress: params.photographerPayPalEmail || '',
           },
           paymentInstruction: {
             platformFees: [
@@ -136,8 +145,8 @@ export async function createOrder(params: CreateOrderParams): Promise<PayPalOrde
       ],
       applicationContext: {
         brandName: 'FaceFindr',
-        landingPage: 'NO_PREFERENCE',
-        userAction: 'PAY_NOW',
+        landingPage: OrderApplicationContextLandingPage.NoPreference,
+        userAction: OrderApplicationContextUserAction.PayNow,
         returnUrl: params.returnUrl,
         cancelUrl: params.cancelUrl,
       },
@@ -190,7 +199,7 @@ export async function captureOrder(orderId: string): Promise<CapturedOrder> {
     throw new Error('PayPal is not configured');
   }
 
-  const { body } = await ordersController.ordersCapture({
+  const { body } = await ordersController.captureOrder({
     id: orderId,
     prefer: 'return=representation',
   });
@@ -209,7 +218,7 @@ export async function getOrder(orderId: string): Promise<PayPalOrder> {
     throw new Error('PayPal is not configured');
   }
 
-  const { body } = await ordersController.ordersGet({
+  const { body } = await ordersController.getOrder({
     id: orderId,
   });
 
@@ -244,7 +253,7 @@ export async function refundCapture(
     throw new Error('PayPal is not configured');
   }
 
-  const { body } = await paymentsController.capturesRefund({
+  const { body } = await paymentsController.refundCapturedPayment({
     captureId,
     body: amount && currency
       ? {

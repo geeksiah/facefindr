@@ -53,10 +53,12 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
       setPhotos(prev => [newPhoto as Photo, ...prev]);
     },
     onUpdate: (updatedPhoto) => {
-      setPhotos(prev => prev.map(p => p.id === updatedPhoto.id ? updatedPhoto as Photo : p));
+      const photo = updatedPhoto as Photo;
+      setPhotos(prev => prev.map(p => p.id === photo.id ? photo : p));
     },
     onDelete: (deletedPhoto) => {
-      setPhotos(prev => prev.filter(p => p.id !== deletedPhoto.id));
+      const photo = deletedPhoto as { id: string };
+      setPhotos(prev => prev.filter(p => p.id !== photo.id));
     },
   });
 
@@ -351,7 +353,6 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
               }}
             >
               {url ? (
-                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={url}
                   alt={photo.original_filename || 'Photo'}

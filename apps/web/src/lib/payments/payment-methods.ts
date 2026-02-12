@@ -80,7 +80,7 @@ function getStripe(): Stripe {
     if (!secretKey) {
       throw new Error('Stripe secret key not configured');
     }
-    stripeClient = new Stripe(secretKey, { apiVersion: '2024-06-20' });
+    stripeClient = new Stripe(secretKey, { apiVersion: '2023-10-16' });
   }
   return stripeClient;
 }

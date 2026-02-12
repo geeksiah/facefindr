@@ -38,7 +38,8 @@ async function getPayoutStats() {
 
   balances?.forEach((b) => {
     const currency = b.currency || 'USD';
-    const provider = b.wallets?.provider || 'stripe';
+    const wallet = Array.isArray(b.wallets) ? b.wallets[0] : b.wallets;
+    const provider = wallet?.provider || 'stripe';
     
     byCurrency[currency] = (byCurrency[currency] || 0) + b.available_balance;
     byProvider[provider] = (byProvider[provider] || 0) + b.available_balance;

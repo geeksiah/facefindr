@@ -96,7 +96,7 @@ export async function calculateFees(params: CalculateFeesParams): Promise<FeeCal
   // Step 5: Get region config if available
   let transactionFeeRate = 0;
   let transactionFeeFixed = 0;
-  let regionCommissionRate = null;
+  let regionCommissionRate: number | null = null;
 
   if (regionCode) {
     const { data: regionConfig } = await supabase

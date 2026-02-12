@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 
-import { toast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 
 interface StoragePlan {
   id: string;
@@ -62,6 +62,7 @@ interface Analytics {
 }
 
 export default function AdminStoragePage() {
+  const toast = useToast();
   const [plans, setPlans] = useState<StoragePlan[]>([]);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [isLoading, setIsLoading] = useState(true);

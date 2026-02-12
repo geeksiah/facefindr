@@ -273,7 +273,7 @@ export default function PhotographerProfileScreen() {
           {currentUser?.id !== photographer.id && (
             <Button
               onPress={handleFollow}
-              variant={isFollowing ? 'outline' : 'default'}
+              variant={isFollowing ? 'outline' : 'primary'}
               fullWidth
             >
               <Heart

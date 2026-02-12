@@ -21,6 +21,7 @@ import {
   getPhotographerPayoutSettings,
   areAutoPayoutsEnabled,
   PayoutFrequency,
+  DEFAULT_PAYOUT_MINIMUMS,
 } from './payout-config';
 import {
   getProviderMinimum,
@@ -219,7 +220,7 @@ export interface BatchPayoutResult {
 }
 
 export async function processPendingPayouts(
-  triggerType: 'daily' | 'weekly' | 'monthly' | 'threshold'
+  triggerType: 'daily' | 'weekly' | 'monthly' | 'threshold' | 'scheduled'
 ): Promise<BatchPayoutResult> {
   const supabase = createServiceClient();
   const results: BatchPayoutResult = {
@@ -291,6 +292,10 @@ export async function processPendingPayouts(
         case 'threshold':
           // Threshold payouts apply to everyone (as a fallback)
           shouldProcess = true;
+          break;
+        case 'scheduled':
+          // Manual admin batch for all scheduled users (ignore day matching)
+          shouldProcess = frequency === 'daily' || frequency === 'weekly' || frequency === 'monthly';
           break;
       }
 
@@ -371,7 +376,7 @@ export interface PayoutSettings {
 
 export const DEFAULT_PAYOUT_SETTINGS: PayoutSettings = {
   mode: 'threshold',
-  threshold: PAYOUT_CONFIG.MIN_THRESHOLD,
+  threshold: DEFAULT_PAYOUT_MINIMUMS.USD,
   minimumPayout: 1000, // $10
   autoPayoutEnabled: true,
 };

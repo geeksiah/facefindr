@@ -220,7 +220,7 @@ export async function POST(request: NextRequest) {
           customerEmail: user.email || '',
           eventId: null, // Drop-in not tied to event
           eventName: 'Drop-In Photo Upload',
-          photographerSubaccountId: null, // Platform payment
+          photographerId: null, // Platform payment
           metadata: {
             type: 'drop_in_upload',
             attendee_id: attendee.id,

@@ -60,11 +60,15 @@ interface UsageData {
     faceOpsUsed: number;
   };
   limits: {
-    maxEvents: number;
+    maxEvents?: number;
+    maxActiveEvents?: number;
     maxPhotosPerEvent: number;
-    maxStorageGb: number;
-    maxTeamMembers: number;
-    maxFaceOps: number;
+    maxStorageGb?: number;
+    storageGb?: number;
+    maxTeamMembers?: number;
+    teamMembers?: number;
+    maxFaceOps?: number;
+    maxFaceOpsPerEvent?: number;
   };
   percentages: {
     events: number;
@@ -187,12 +191,19 @@ export default function BillingPage() {
   
   // Use real usage data from the enforcement system
   const usage = usageData?.usage || { activeEvents: 0, totalPhotos: 0, storageUsedGb: 0, teamMembers: 1, faceOpsUsed: 0 };
-  const limits = usageData?.limits || currentPlanData?.features || {
-    maxEvents: 3,
+  const limitsRaw: any = usageData?.limits || currentPlanData?.features || {
+    maxActiveEvents: 3,
     maxPhotosPerEvent: 100,
-    maxStorageGb: 5,
-    maxTeamMembers: 1,
-    maxFaceOps: 500,
+    storageGb: 5,
+    teamMembers: 1,
+    maxFaceOpsPerEvent: 500,
+  };
+  const limits = {
+    maxActiveEvents: limitsRaw.maxActiveEvents ?? limitsRaw.maxEvents ?? 3,
+    maxPhotosPerEvent: limitsRaw.maxPhotosPerEvent ?? 100,
+    maxStorageGb: limitsRaw.maxStorageGb ?? limitsRaw.storageGb ?? 5,
+    maxTeamMembers: limitsRaw.maxTeamMembers ?? limitsRaw.teamMembers ?? 1,
+    maxFaceOps: limitsRaw.maxFaceOps ?? limitsRaw.maxFaceOpsPerEvent ?? 500,
   };
   const percentages = usageData?.percentages || { events: 0, storage: 0, team: 0 };
 
@@ -250,13 +261,13 @@ export default function BillingPage() {
           <div>
             <p className="text-sm text-secondary">Active Events</p>
             <p className="text-lg font-semibold text-foreground">
-              {usage.activeEvents} / {limits.maxEvents === -1 ? '∞' : limits.maxEvents}
+              {usage.activeEvents} / {limits.maxActiveEvents === -1 ? 'Unlimited' : limits.maxActiveEvents}
             </p>
             <div className="mt-2 h-2 rounded-full bg-muted overflow-hidden">
               <div 
                 className={`h-full rounded-full transition-all ${percentages.events >= 90 ? 'bg-destructive' : percentages.events >= 70 ? 'bg-warning' : 'bg-accent'}`}
                 style={{ 
-                  width: limits.maxEvents === -1 
+                  width: limits.maxActiveEvents === -1 
                     ? '10%' 
                     : `${Math.min(percentages.events, 100)}%` 
                 }}
@@ -541,3 +552,4 @@ export default function BillingPage() {
     </div>
   );
 }
+

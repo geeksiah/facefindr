@@ -81,7 +81,7 @@ export interface FullPlanDetails extends SubscriptionPlan {
 // CACHE
 // ============================================
 
-let plansCache: Map<string, FullPlanDetails> = new Map();
+const plansCache: Map<string, FullPlanDetails> = new Map();
 let plansCacheTime = 0;
 const PLANS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 

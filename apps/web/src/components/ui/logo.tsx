@@ -3,7 +3,6 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { useTheme } from 'next-themes';
-import { useEffect, useState } from 'react';
 
 import { cn } from '@/lib/utils';
 
@@ -29,15 +28,8 @@ export function Logo({
   showText = true,
 }: LogoProps) {
   const { resolvedTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
   const dimension = sizes[size][variant];
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  // Use light mode as default during SSR
-  const isDark = mounted && resolvedTheme === 'dark';
+  const isDark = resolvedTheme === 'dark';
   
   // Dark mode = use "-dark" variants (light colored logos for dark backgrounds)
   // Light mode = use regular variants (dark colored logos for light backgrounds)
@@ -123,13 +115,7 @@ export function Logo({
 // Simple icon-only component for smaller uses
 export function LogoIcon({ size = 36, className }: { size?: number; className?: string }) {
   const { resolvedTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  const isDark = mounted && resolvedTheme === 'dark';
+  const isDark = resolvedTheme === 'dark';
   const iconSrc = isDark ? '/assets/logos/icon-dark.svg' : '/assets/logos/icon.svg';
 
   return (

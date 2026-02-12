@@ -185,8 +185,7 @@ export function TipPhotographer({
       <Button
         onClick={handleTip}
         disabled={!selectedAmount || selectedAmount < 200 || loading}
-        fullWidth
-        className="gap-2"
+        className="w-full gap-2"
       >
         {loading ? (
           <>

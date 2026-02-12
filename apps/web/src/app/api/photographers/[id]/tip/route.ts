@@ -253,7 +253,7 @@ export async function POST(
         customerEmail: user.email || '',
         eventId: eventId || photographerId,
         eventName: `Tip to ${photographer.display_name}`,
-        photographerSubaccountId: wallet.flutterwave_subaccount_id,
+        photographerId,
         metadata: {
           wallet_id: wallet.id,
           tip_id: tip.id,

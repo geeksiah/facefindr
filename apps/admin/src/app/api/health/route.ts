@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { createServiceClient } from '@/lib/supabase';
+import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -24,8 +24,7 @@ export async function GET() {
 
   // Check database connection
   try {
-    const supabase = createServiceClient();
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('photographers')
       .select('id')
       .limit(1);

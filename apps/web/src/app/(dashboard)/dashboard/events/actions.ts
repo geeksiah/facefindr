@@ -179,7 +179,7 @@ export async function updateEvent(eventId: string, formData: UpdateEventInput) {
     };
   }
 
-  const supabase = createClient();
+  const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -233,7 +233,7 @@ export async function updateEventStatus(
   eventId: string,
   status: 'draft' | 'active' | 'closed' | 'archived'
 ) {
-  const supabase = createClient();
+  const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -287,7 +287,7 @@ export async function updateEventPricing(eventId: string, formData: EventPricing
     };
   }
 
-  const supabase = createClient();
+  const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -333,7 +333,7 @@ export async function updateEventPricing(eventId: string, formData: EventPricing
 // ============================================
 
 export async function deleteEvent(eventId: string) {
-  const supabase = createClient();
+  const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -371,7 +371,7 @@ export async function deleteEvent(eventId: string) {
 // ============================================
 
 export async function generateAccessToken(eventId: string, label?: string) {
-  const supabase = createClient();
+  const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();

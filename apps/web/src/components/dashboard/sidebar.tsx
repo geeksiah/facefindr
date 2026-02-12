@@ -163,7 +163,7 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
     );
   };
 
-  const SidebarContent = () => (
+  const renderSidebarContent = () => (
     <div className="flex h-full flex-col">
       {/* Logo */}
       <div className="flex h-16 items-center px-6">
@@ -276,16 +276,16 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
         >
           <X className="h-5 w-5" />
         </button>
-        <SidebarContent />
+        {renderSidebarContent()}
       </aside>
 
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 border-r border-border bg-card lg:block">
-        <SidebarContent />
+        {renderSidebarContent()}
       </aside>
 
       {/* Logout Confirmation Dialog */}
-      {ConfirmDialog}
+      <ConfirmDialog />
     </>
   );
 }

@@ -24,6 +24,9 @@ export async function POST(request: NextRequest) {
     if (!webhookSecret) {
       return NextResponse.json({ error: 'Webhook secret not configured' }, { status: 500 });
     }
+    if (!stripe) {
+      return NextResponse.json({ error: 'Stripe client not configured' }, { status: 500 });
+    }
 
     let event: Stripe.Event;
 

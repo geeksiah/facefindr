@@ -1,17 +1,16 @@
 'use client';
 
 import { useEffect, useCallback, useState } from 'react';
-import { useRouter } from 'next/navigation';
 
 /**
  * Hook to warn users about unsaved changes when navigating away
- * 
+ *
  * Usage:
  * const { setHasChanges, confirmNavigation, UnsavedChangesDialog } = useUnsavedChanges();
- * 
+ *
  * // Mark form as dirty
  * setHasChanges(true);
- * 
+ *
  * // Check before programmatic navigation
  * const canNavigate = await confirmNavigation();
  * if (canNavigate) router.push('/somewhere');
@@ -70,7 +69,7 @@ export function useUnsavedChanges(message?: string) {
 
   // Dialog component
   const UnsavedChangesDialog = showDialog ? (
-    <div 
+    <div
       className="z-[100] flex items-center justify-center"
       style={{
         position: 'fixed',

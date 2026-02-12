@@ -98,7 +98,7 @@ export default function AttendeeLayout() {
           marginBottom: -2,
         },
         // Add content padding to avoid overlap with tab bar
-        sceneContainerStyle: {
+        sceneStyle: {
           paddingBottom: tabBarHeight,
         },
       }}

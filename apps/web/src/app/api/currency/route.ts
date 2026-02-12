@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
       : 'USD';
     
     // If logged in, update detected location and get preference
-    let preference = null;
+    let preference: Awaited<ReturnType<typeof getUserCurrencyPreference>> | null = null;
     let effectiveCurrency = detectedCurrency;
     
     if (user) {

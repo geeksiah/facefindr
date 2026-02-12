@@ -61,7 +61,7 @@ export function LogoutButton({
         {showIcon && <LogOut className="h-5 w-5" />}
         {showLabel && <span>{isLoading ? 'Signing out...' : label}</span>}
       </button>
-      {ConfirmDialog}
+      <ConfirmDialog />
     </>
   );
 }

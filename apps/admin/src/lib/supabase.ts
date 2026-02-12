@@ -28,7 +28,7 @@ if (!supabaseUrl || !supabaseServiceKey) {
 // IMPORTANT: Service role key must start with 'eyJ' (JWT format)
 // If using anon key by mistake, RLS will still apply
 // Service role key bypasses ALL RLS policies automatically
-export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+export const supabaseAdmin = createClient(supabaseUrl!, supabaseServiceKey!, {
   auth: {
     autoRefreshToken: false,
     persistSession: false,
@@ -37,7 +37,7 @@ export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
 
 // Realtime client for subscriptions
 export function createRealtimeClient() {
-  return createClient(supabaseUrl, supabaseServiceKey, {
+  return createClient(supabaseUrl!, supabaseServiceKey!, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,

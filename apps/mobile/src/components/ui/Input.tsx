@@ -12,6 +12,8 @@ import {
   StyleSheet,
   TouchableOpacity,
   TextInputProps,
+  StyleProp,
+  TextStyle,
 } from 'react-native';
 import { Eye, EyeOff } from 'lucide-react-native';
 import { colors, borderRadius, spacing, fontSize } from '@/lib/theme';
@@ -34,6 +36,9 @@ export function Input({
 }: InputProps) {
   const [showPassword, setShowPassword] = useState(false);
   const isPassword = secureTextEntry !== undefined;
+  const hasLeftIcon = Boolean(leftIcon);
+  const hasRightAccessory = Boolean(rightIcon) || isPassword;
+  const inputStyle = style as StyleProp<TextStyle>;
 
   return (
     <View style={styles.container}>
@@ -43,9 +48,9 @@ export function Input({
         <TextInput
           style={[
             styles.input,
-            leftIcon && styles.inputWithLeftIcon,
-            (rightIcon || isPassword) && styles.inputWithRightIcon,
-            style,
+            hasLeftIcon ? styles.inputWithLeftIcon : undefined,
+            hasRightAccessory ? styles.inputWithRightIcon : undefined,
+            inputStyle,
           ]}
           placeholderTextColor={colors.secondary}
           secureTextEntry={isPassword && !showPassword}

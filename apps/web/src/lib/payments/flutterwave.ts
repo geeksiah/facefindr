@@ -108,9 +108,9 @@ export interface InitializePaymentParams {
   customerEmail: string;
   customerName?: string;
   customerPhone?: string;
-  eventId: string;
+  eventId: string | null;
   eventName: string;
-  photographerId: string;
+  photographerId: string | null;
   paymentOptions?: string; // 'card,mobilemoney,ussd,banktransfer'
   metadata?: Record<string, string>;
 }
@@ -146,8 +146,8 @@ export async function initializePayment(
       },
       payment_options: params.paymentOptions || 'card,mobilemoney,banktransfer',
       meta: {
-        event_id: params.eventId,
-        photographer_id: params.photographerId,
+        event_id: params.eventId || 'drop-in',
+        photographer_id: params.photographerId || '',
         platform_fee_percent: PLATFORM_FEE_PERCENT,
         ...params.metadata,
       },

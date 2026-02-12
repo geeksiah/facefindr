@@ -49,7 +49,7 @@ export default function PhotographerLayout() {
         tabBarIconStyle: {
           marginBottom: -2,
         },
-        sceneContainerStyle: {
+        sceneStyle: {
           paddingBottom: tabBarHeight,
         },
       }}

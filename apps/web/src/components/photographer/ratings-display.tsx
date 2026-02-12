@@ -240,7 +240,7 @@ export function RatingsDisplay({
             <div className="flex gap-2">
               <Button
                 variant="ghost"
-                fullWidth
+                className="w-full"
                 onClick={() => setShowRatingModal(false)}
               >
                 Cancel

@@ -15,7 +15,6 @@ import {
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
-import { Button } from '@/components/ui/button';
 import { supabaseAdmin } from '@/lib/supabase';
 import { formatDate, formatCurrency, formatNumber } from '@/lib/utils';
 
@@ -72,12 +71,13 @@ export default async function EventDetailPage({ params }: EventPageProps) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" asChild>
-            <Link href={`/events/${event.id}/settings`}>
-              <Settings className="h-4 w-4 mr-2" />
-              Settings
-            </Link>
-          </Button>
+          <Link
+            href={`/events/${event.id}/settings`}
+            className="inline-flex items-center rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted transition-colors"
+          >
+            <Settings className="h-4 w-4 mr-2" />
+            Settings
+          </Link>
         </div>
       </div>
 

@@ -38,7 +38,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 
     // Monitor connection status
     const channel = supabase.channel('system')
-      .on('system', { event: '*' }, (payload) => {
+      .on('system', { event: '*' }, (payload: any) => {
         if (payload.event === 'connected') {
           setIsConnected(true);
         } else if (payload.event === 'disconnected') {
@@ -110,7 +110,7 @@ export function useRealtimeTable<T>(
   const { subscribe } = useRealtime();
 
   useEffect(() => {
-    const unsubscribe = subscribe(table, (payload) => {
+    const unsubscribe = subscribe(table, (payload: any) => {
       switch (payload.eventType) {
         case 'INSERT':
           onInsert?.(payload.new as T);

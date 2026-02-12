@@ -573,7 +573,7 @@ export function GuidedFaceScanner({
       <canvas ref={canvasRef} className="hidden" />
 
       {/* Cancel Confirmation Dialog */}
-      {ConfirmDialog}
+      <ConfirmDialog />
     </div>
   );
 }

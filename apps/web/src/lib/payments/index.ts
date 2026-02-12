@@ -7,9 +7,9 @@
  * - PayPal (Global, PayPal balance & Cards)
  */
 
-export * from './stripe';
-export * from './flutterwave';
-export * from './paypal';
+export * as stripePayments from './stripe';
+export * as flutterwavePayments from './flutterwave';
+export * as paypalPayments from './paypal';
 export * from './payout-minimums';
 export * from './payout-service';
 export * from './payment-methods';

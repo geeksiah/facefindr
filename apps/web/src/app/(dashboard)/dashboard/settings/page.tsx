@@ -461,13 +461,11 @@ export default function SettingsPage() {
             <h2 className="font-semibold text-foreground mb-4">Basic Information</h2>
             <div className="grid gap-4 sm:grid-cols-2">
               <Input
-                label="Display Name"
                 value={profileForm.displayName}
                 onChange={(e) => setProfileForm(prev => ({ ...prev, displayName: e.target.value }))}
                 placeholder="Your name"
               />
               <Input
-                label="Business Name"
                 value={profileForm.businessName}
                 onChange={(e) => setProfileForm(prev => ({ ...prev, businessName: e.target.value }))}
                 placeholder="Studio or business name"
@@ -485,7 +483,6 @@ export default function SettingsPage() {
               <div className="flex items-center gap-2">
                 <MapPin className="h-4 w-4 text-secondary" />
                 <Input
-                  label="Location"
                   value={profileForm.location}
                   onChange={(e) => setProfileForm(prev => ({ ...prev, location: e.target.value }))}
                   placeholder="City, Country"
@@ -495,7 +492,6 @@ export default function SettingsPage() {
               <div className="flex items-center gap-2">
                 <Phone className="h-4 w-4 text-secondary" />
                 <Input
-                  label="Phone"
                   value={profileForm.phone}
                   onChange={(e) => setProfileForm(prev => ({ ...prev, phone: e.target.value }))}
                   placeholder="+1 234 567 8900"

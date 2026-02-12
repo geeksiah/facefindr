@@ -9,7 +9,7 @@
 import { Check, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 
@@ -19,16 +19,7 @@ export default function DropInSuccessPage() {
   const sessionId = searchParams.get('session_id');
   const [processing, setProcessing] = useState(true);
 
-  useEffect(() => {
-    // Verify payment and trigger processing
-    if (sessionId) {
-      verifyPayment();
-    } else {
-      setProcessing(false);
-    }
-  }, [sessionId]);
-
-  const verifyPayment = async () => {
+  const verifyPayment = useCallback(async () => {
     try {
       // Payment is verified via webhook, but we can check status here
       // For now, just wait a moment for webhook to process
@@ -39,7 +30,16 @@ export default function DropInSuccessPage() {
       console.error('Payment verification error:', error);
       setProcessing(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    // Verify payment and trigger processing
+    if (sessionId) {
+      verifyPayment();
+    } else {
+      setProcessing(false);
+    }
+  }, [sessionId, verifyPayment]);
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6">

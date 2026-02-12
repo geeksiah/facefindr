@@ -350,7 +350,7 @@ interface AddPaymentMethodModalProps {
 
 function AddPaymentMethodModal({ onClose, onAdd, initialType }: AddPaymentMethodModalProps) {
   const [step, setStep] = useState<'select' | 'form'>(initialType ? 'form' : 'select');
-  const [type, setType] = useState<'card' | 'mobile_money' | 'paypal' | null>(initialType);
+  const [type, setType] = useState<'card' | 'mobile_money' | 'paypal' | null>(initialType ?? null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { confirm, ConfirmDialog } = useConfirm();
@@ -815,7 +815,7 @@ function AddPaymentMethodModal({ onClose, onAdd, initialType }: AddPaymentMethod
       </div>
 
       {/* Confirmation Dialog */}
-      {ConfirmDialog}
+      <ConfirmDialog />
     </div>
   );
 }

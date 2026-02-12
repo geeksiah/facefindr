@@ -13,16 +13,10 @@ import { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 
 export function RouteProgress() {
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  usePathname();
+  useSearchParams();
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState(0);
-
-  useEffect(() => {
-    // Reset on route change complete
-    setIsLoading(false);
-    setProgress(0);
-  }, [pathname, searchParams]);
 
   useEffect(() => {
     let progressInterval: NodeJS.Timeout;
@@ -53,6 +47,15 @@ export function RouteProgress() {
                 return prev + Math.random() * 15;
               });
             }, 200);
+
+            // Auto-complete and hide
+            setTimeout(() => {
+              setProgress(100);
+              setTimeout(() => {
+                setIsLoading(false);
+                setProgress(0);
+              }, 250);
+            }, 900);
           }
         }
       }

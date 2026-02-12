@@ -104,7 +104,7 @@ export async function POST(
 
         // Send verification email via Supabase Auth
         const { error } = await supabaseAdmin.auth.admin.generateLink({
-          type: 'signup',
+          type: 'magiclink',
           email: photographer.email,
         });
 

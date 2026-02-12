@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
 
     if (format === 'csv') {
       // CSV export
-      const csvRows = [
+      const csvRows: string[][] = [
         ['Analytics Export', `Time Range: ${timeRange}`, `Generated: ${new Date().toISOString()}`],
         [],
         ['Summary Statistics', 'Value'],
@@ -58,7 +58,9 @@ export async function POST(request: NextRequest) {
         ['Tablet', devices.tablet.toString(), `${((devices.tablet / (devices.mobile + devices.desktop + devices.tablet)) * 100).toFixed(1)}%`],
       ];
 
-      const csvContent = csvRows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+      const csvContent = csvRows
+        .map((row: string[]) => row.map((cell: string) => `"${cell}"`).join(','))
+        .join('\n');
       return new NextResponse(csvContent, {
         headers: {
           'Content-Type': 'text/csv;charset=utf-8',

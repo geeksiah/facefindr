@@ -12,6 +12,8 @@ export async function GET(request: NextRequest) {
   if (code) {
     const supabase = await createClient();
     const serviceClient = createServiceClient();
+    const adminDb = serviceClient as any;
+    const userDb = supabase as any;
     
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     
@@ -43,7 +45,7 @@ export async function GET(request: NextRequest) {
         
         // Check if profile exists, create if not (for OAuth users)
         if (userType === 'photographer') {
-          const { data: existingProfile } = await supabase
+          const { data: existingProfile } = await userDb
             .from('photographers')
             .select('id')
             .eq('id', user.id)
@@ -59,7 +61,7 @@ export async function GET(request: NextRequest) {
             // Generate username from display name
             const username = displayName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15);
             
-            await serviceClient.from('photographers').insert({
+            await adminDb.from('photographers').insert({
               id: user.id,
               user_id: user.id,
               email: user.email,
@@ -71,14 +73,14 @@ export async function GET(request: NextRequest) {
             });
             
             // Create free subscription
-            await serviceClient.from('subscriptions').insert({
+            await adminDb.from('subscriptions').insert({
               photographer_id: user.id,
               plan_code: 'free',
               status: 'active',
             });
           } else {
             // Update existing profile
-            await supabase
+            await userDb
               .from('photographers')
               .update({ 
                 email_verified: true,
@@ -88,7 +90,7 @@ export async function GET(request: NextRequest) {
               .eq('id', user.id);
           }
         } else {
-          const { data: existingProfile } = await supabase
+          const { data: existingProfile } = await userDb
             .from('attendees')
             .select('id')
             .eq('id', user.id)
@@ -103,7 +105,7 @@ export async function GET(request: NextRequest) {
             
             const username = displayName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15);
             
-            await serviceClient.from('attendees').insert({
+            await adminDb.from('attendees').insert({
               id: user.id,
               user_id: user.id,
               email: user.email,
@@ -114,7 +116,7 @@ export async function GET(request: NextRequest) {
               email_verified: true,
             });
           } else {
-            await supabase
+            await userDb
               .from('attendees')
               .update({ 
                 email_verified: true,

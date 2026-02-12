@@ -9,7 +9,7 @@ if (!stripeSecretKey) {
 
 export const stripe = stripeSecretKey
   ? new Stripe(stripeSecretKey, {
-      apiVersion: '2024-12-18.acacia',
+      apiVersion: '2023-10-16',
       typescript: true,
     })
   : null;
@@ -142,7 +142,7 @@ export async function createCheckoutSession({
       product_data: {
         name: item.name,
         description: item.description,
-        metadata: item.mediaIds ? { media_ids: item.mediaIds.join(',') } : {},
+        ...(item.mediaIds ? { metadata: { media_ids: item.mediaIds.join(',') } } : {}),
       },
       unit_amount: item.amount,
     },

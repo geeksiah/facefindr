@@ -12,6 +12,13 @@ import { ATTENDEE_COLLECTION_ID } from '@/lib/aws/rekognition';
 import { indexAttendeeFace , ensureAttendeeCollection } from '@/lib/aws/rekognition-drop-in';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
+interface BackfillResultItem {
+  attendeeId: string;
+  rekognitionFaceId: string;
+  status: 'indexed' | 'error';
+  error?: string;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const supabase = createServiceClient();
@@ -49,7 +56,7 @@ export async function POST(request: NextRequest) {
     // Ensure global collection exists
     await ensureAttendeeCollection();
 
-    const results = [];
+    const results: BackfillResultItem[] = [];
     let successCount = 0;
     let errorCount = 0;
 

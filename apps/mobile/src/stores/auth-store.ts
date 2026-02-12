@@ -21,6 +21,8 @@ interface AuthState {
   session: Session | null;
   user: User | null;
   profile: Profile | null;
+  isAuthenticated: boolean;
+  userType: 'photographer' | 'attendee' | null;
   isLoading: boolean;
   isInitialized: boolean;
   initialize: () => Promise<void>;

@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
         .select('attendee_id, rekognition_face_id')
         .eq('is_primary', true);
 
-      const faceProfileMap = new Map(
+      const faceProfileMap: Map<string, string> = new Map(
         faceProfiles?.map((fp: any) => [fp.rekognition_face_id, fp.attendee_id]) || []
       );
 

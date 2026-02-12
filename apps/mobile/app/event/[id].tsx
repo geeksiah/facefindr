@@ -698,7 +698,7 @@ export default function EventDetailScreen() {
           Image.prefetch(coverImageUrl);
         }
 
-        const isOwner = userType === 'photographer' && profile?.id && profile.id === photographerId;
+        const isOwner = Boolean(userType === 'photographer' && profile?.id === photographerId);
         setIsOwnEvent(isOwner);
 
         const pricing = Array.isArray(eventData.event_pricing) ? eventData.event_pricing[0] : eventData.event_pricing;

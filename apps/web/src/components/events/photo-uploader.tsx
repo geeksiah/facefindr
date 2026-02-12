@@ -210,7 +210,6 @@ export function PhotoUploader({ eventId, onUploadComplete }: PhotoUploaderProps)
                 key={file.id}
                 className="relative aspect-square rounded-lg overflow-hidden bg-muted group"
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={file.preview}
                   alt={file.file.name}

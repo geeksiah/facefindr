@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Eye, EyeOff, Mail, Lock, AlertCircle, CheckCircle2 } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useForm } from 'react-hook-form';
 
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,14 @@ import { loginSchema, type LoginInput } from '@/lib/validations/auth';
 import { login, signInWithGoogle } from '../actions';
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="animate-fade-in" />}>
+      <LoginPageContent />
+    </Suspense>
+  );
+}
+
+function LoginPageContent() {
   const searchParams = useSearchParams();
   const message = searchParams.get('message');
   const toast = useToast();

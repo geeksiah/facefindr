@@ -460,7 +460,7 @@ export default function PublicEventScanPage() {
       </main>
 
       {/* Confirmation Dialog */}
-      {ConfirmDialog}
+      <ConfirmDialog />
     </div>
   );
 }

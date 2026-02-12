@@ -9,25 +9,7 @@ import { useEffect, useState, useRef } from 'react';
 
 import { createClient } from '@/lib/supabase/client';
 
-type TableName =
-  | 'events'
-  | 'media'
-  | 'transactions'
-  | 'notifications'
-  | 'face_matches'
-  | 'entitlements'
-  | 'photo_drop_matches'
-  | 'drop_in_matches'
-  | 'drop_in_notifications'
-  | 'photo_vault'
-  | 'storage_subscriptions'
-  | 'storage_usage'
-  | 'storage_plans'
-  | 'platform_announcements'
-  | 'follows'
-  | 'photographer_connections'
-  | 'attendees'
-  | 'photographers';
+type TableName = string;
 type EventType = 'INSERT' | 'UPDATE' | 'DELETE' | '*';
 
 interface RealtimeOptions {
@@ -45,11 +27,14 @@ interface RealtimeOptions {
  */
 export function useRealtimeSubscription(options: RealtimeOptions) {
   const [isConnected, setIsConnected] = useState(false);
+  const [channel, setChannel] = useState<RealtimeChannel | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   // Store callbacks in refs to avoid dependency issues
   const callbacksRef = useRef(options);
-  callbacksRef.current = options;
+  useEffect(() => {
+    callbacksRef.current = options;
+  }, [options]);
 
   useEffect(() => {
     const { table, event = '*', filter } = options;
@@ -103,6 +88,7 @@ export function useRealtimeSubscription(options: RealtimeOptions) {
         });
 
       channelRef.current = newChannel;
+      setChannel(newChannel);
     } catch (err) {
       // Silently ignore AbortError
       if (err instanceof Error && err.name === 'AbortError') {
@@ -123,11 +109,12 @@ export function useRealtimeSubscription(options: RealtimeOptions) {
           // Ignore cleanup errors
         }
         channelRef.current = null;
+        setChannel(null);
       }
     };
   }, [options.table, options.filter, options.event]);
 
-  return { isConnected, channel: channelRef.current };
+  return { isConnected, channel };
 }
 
 /**

@@ -44,7 +44,9 @@ export default async function EventSettingsPage({ params }: EventSettingsPagePro
     face_recognition_enabled: event.face_recognition_enabled || false,
     live_mode_enabled: event.live_mode_enabled || false,
     watermark_enabled: event.watermark_enabled || false,
-    pricing_type: pricing?.is_free ? 'free' : (pricing?.bulk_tiers && pricing.bulk_tiers.length > 0 ? 'bulk' : 'per_photo'),
+    pricing_type: (pricing?.is_free
+      ? 'free'
+      : (pricing?.bulk_tiers && pricing.bulk_tiers.length > 0 ? 'bulk' : 'per_photo')) as 'free' | 'per_photo' | 'bulk',
     price_per_photo: pricing?.price_per_media || 0,
     unlock_all_price: pricing?.unlock_all_price || null,
     bulk_tiers: pricing?.bulk_tiers || [],

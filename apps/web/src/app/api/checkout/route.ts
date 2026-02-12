@@ -356,7 +356,7 @@ export async function POST(request: NextRequest) {
         customerEmail: email || '',
         eventId,
         eventName: event.name,
-        photographerSubaccountId: wallet.flutterwave_subaccount_id,
+        photographerId: event.photographer_id,
         metadata: {
           wallet_id: wallet.id,
           media_ids: mediaIds?.join(',') || 'all',

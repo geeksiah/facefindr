@@ -177,7 +177,6 @@ export default function DropInDiscoverPage() {
             >
               {photo.thumbnailUrl ? (
                 <div className="relative aspect-square">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={photo.thumbnailUrl}
                     alt="Drop-in photo"
@@ -249,7 +248,6 @@ export default function DropInDiscoverPage() {
           >
             {selectedPhoto.thumbnailUrl && (
               <>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={selectedPhoto.thumbnailUrl}
                   alt="Drop-in photo"

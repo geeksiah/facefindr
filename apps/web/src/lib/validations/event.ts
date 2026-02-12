@@ -16,6 +16,7 @@ export const createEventSchema = z.object({
   faceRecognitionEnabled: z.boolean().default(true),
   liveModeEnabled: z.boolean().default(false),
   attendeeAccessEnabled: z.boolean().default(true),
+  currency: z.enum(['USD', 'EUR', 'GBP']).default('USD'),
 });
 
 export const updateEventSchema = createEventSchema.partial();

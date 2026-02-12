@@ -28,8 +28,8 @@ export async function GET() {
     // Enrich with provider-specific data
     const enrichedWallets = await Promise.all(
       (wallets || []).map(async (wallet) => {
-        let providerDetails = null;
-        let dashboardUrl = null;
+        let providerDetails: any = null;
+        let dashboardUrl: string | null = null;
 
         if (wallet.provider === 'stripe' && wallet.stripe_account_id && isStripeConfigured()) {
           try {

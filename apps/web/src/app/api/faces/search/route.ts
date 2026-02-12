@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
             .select('id, thumbnail_path, storage_path')
             .in('id', mediaIds);
 
-          const mediaMap = new Map(mediaItems?.map(m => [m.id, m]) || []);
+          const mediaMap = new Map<string, any>((mediaItems as any[] | undefined)?.map((m: any) => [m.id, m]) || []);
 
           for (const match of searchResult.FaceMatches) {
             const mediaItem = mediaMap.get(match.Face?.ExternalImageId || '');
@@ -160,7 +160,7 @@ export async function POST(request: NextRequest) {
                 .select('id, thumbnail_path, storage_path')
                 .in('id', mediaIds);
 
-              const mediaMap = new Map(mediaItems?.map(m => [m.id, m]) || []);
+              const mediaMap = new Map<string, any>((mediaItems as any[] | undefined)?.map((m: any) => [m.id, m]) || []);
 
               for (const match of searchResult.FaceMatches) {
                 const mediaItem = mediaMap.get(match.Face?.ExternalImageId || '');

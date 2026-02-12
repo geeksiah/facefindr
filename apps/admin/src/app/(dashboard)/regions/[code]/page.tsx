@@ -19,6 +19,20 @@ import Link from 'next/link';
 import { useRouter, useParams } from 'next/navigation';
 import { useState, useEffect } from 'react';
 
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: '$',
+  EUR: 'EUR ',
+  GBP: 'GBP ',
+  NGN: 'NGN ',
+  GHS: 'GHS ',
+  KES: 'KES ',
+  ZAR: 'ZAR ',
+};
+
+function getCurrencySymbol(currencyCode: string): string {
+  return CURRENCY_SYMBOLS[currencyCode?.toUpperCase()] ?? `${currencyCode?.toUpperCase() || 'USD'} `;
+}
+
 interface RegionConfig {
   id: string;
   region_code: string;

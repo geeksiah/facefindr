@@ -3,8 +3,6 @@
 import { X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 
-import { cn } from '@/lib/utils';
-
 interface LightboxProps {
   images: Array<{ id: string; url: string; alt?: string }>;
   initialIndex?: number;
@@ -45,10 +43,6 @@ export function Lightbox({ images, initialIndex = 0, isOpen, onClose, showReacti
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose, goToPrevious, goToNext]);
 
-  if (!isOpen || images.length === 0) return null;
-
-  const currentImage = images[currentIndex];
-
   // Prevent body scroll when lightbox is open and ensure edge-to-edge
   useEffect(() => {
     if (isOpen) {
@@ -65,6 +59,10 @@ export function Lightbox({ images, initialIndex = 0, isOpen, onClose, showReacti
       };
     }
   }, [isOpen]);
+
+  if (!isOpen || images.length === 0) return null;
+
+  const currentImage = images[currentIndex];
 
   return (
     <div

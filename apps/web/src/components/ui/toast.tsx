@@ -238,7 +238,8 @@ export function ConfirmDialog({
       }}
     >
       {/* Backdrop */}
-      <div
+      <button
+        type="button"
         className="bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
         style={{
           position: 'absolute',
@@ -251,16 +252,11 @@ export function ConfirmDialog({
           height: '100%',
           margin: 0,
           padding: 0,
+          border: 0,
+          backgroundColor: 'transparent',
         }}
-        role="button"
-        tabIndex={0}
         aria-label="Close dialog"
         onClick={onCancel}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') {
-            onCancel();
-          }
-        }}
       />
       
       {/* Dialog */}
@@ -321,15 +317,15 @@ export function useConfirm() {
     });
   }, []);
 
-  const handleConfirm = useCallback(() => {
+  const handleConfirm = () => {
     dialogState.resolve?.(true);
     setDialogState((prev) => ({ ...prev, isOpen: false, resolve: null }));
-  }, [dialogState.resolve]);
+  };
 
-  const handleCancel = useCallback(() => {
+  const handleCancel = () => {
     dialogState.resolve?.(false);
     setDialogState((prev) => ({ ...prev, isOpen: false, resolve: null }));
-  }, [dialogState.resolve]);
+  };
 
   function ConfirmDialogComponent() {
     return (

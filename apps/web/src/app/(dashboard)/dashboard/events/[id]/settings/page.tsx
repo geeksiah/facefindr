@@ -49,6 +49,7 @@ interface EventSettings {
   status: string;
   is_public: boolean;
   is_publicly_listed: boolean;
+  include_in_public_profile?: boolean;
   allow_anonymous_scan: boolean;
   require_access_code: boolean;
   public_access_code: string;
@@ -58,6 +59,7 @@ interface EventSettings {
   // Pricing
   pricing_type: 'free' | 'per_photo' | 'bulk';
   price_per_photo: number;
+  unlock_all_price?: number | null;
   bulk_tiers: BulkTier[];
   currency_code: string;
 }

@@ -276,8 +276,9 @@ export default function PhotosPage() {
       {/* Lightbox */}
       {selectedPhoto !== null && (
         <Lightbox
-          images={photos.map(p => p.fullUrl)}
+          images={photos.map((p) => ({ id: p.id, url: p.fullUrl, alt: p.eventName }))}
           initialIndex={selectedPhoto}
+          isOpen={selectedPhoto !== null}
           onClose={() => setSelectedPhoto(null)}
         />
       )}

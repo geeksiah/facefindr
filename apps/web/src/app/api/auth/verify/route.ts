@@ -22,7 +22,7 @@ export async function GET() {
     const { data: { user } } = await supabase.auth.getUser();
 
     const settings = await getVerificationSettings();
-    let status = null;
+    let status: Awaited<ReturnType<typeof checkVerificationStatus>> | null = null;
 
     if (user) {
       status = await checkVerificationStatus(user.id);
@@ -129,7 +129,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Get updated status
-      let status = null;
+      let status: Awaited<ReturnType<typeof checkVerificationStatus>> | null = null;
       if (user) {
         status = await checkVerificationStatus(user.id);
       }
