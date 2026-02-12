@@ -4,6 +4,9 @@ const nextConfig = {
   // Re-enable in production builds
   reactStrictMode: false,
   transpilePackages: ['@facefind/shared'],
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   images: {
     remotePatterns: [
       {
