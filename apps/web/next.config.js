@@ -1,115 +1,56 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Enable standalone output for Docker deployment
-  output: 'standalone',
-  
-  // Re-enable in production for proper behavior
-  reactStrictMode: process.env.NODE_ENV === 'production',
-  
-  // Transpile shared package
+  reactStrictMode: true,
+
   transpilePackages: ['@facefind/shared'],
-<<<<<<< HEAD
-  
-  // Image optimization
-=======
+
   eslint: {
     ignoreDuringBuilds: true,
   },
->>>>>>> b674fa4e7d027eb795cd8bdd1de9563db95c80d1
+
   images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: '*.supabase.co',
-      },
-      {
-        protocol: 'https',
-        hostname: '*.supabase.in',
-      },
-    ],
-  },
-  
-  // Security headers
+  remotePatterns: [
+    {
+      protocol: 'https',
+      hostname: 'mqndxshevzmxizvsbjua.supabase.co',
+      pathname: '/storage/v1/object/**',
+    },
+  ],
+},
+
   async headers() {
     return [
       {
         source: '/:path*',
         headers: [
-          {
-            key: 'X-Frame-Options',
-            value: 'DENY',
-          },
-          {
-            key: 'X-Content-Type-Options',
-            value: 'nosniff',
-          },
-          {
-            key: 'Referrer-Policy',
-            value: 'strict-origin-when-cross-origin',
-          },
-          {
-            key: 'X-XSS-Protection',
-            value: '1; mode=block',
-          },
-          {
-            key: 'Permissions-Policy',
-            value: 'camera=(self), microphone=(), geolocation=(self)',
-          },
-        ],
-      },
-      // CORS for API routes
-      {
-        source: '/api/:path*',
-        headers: [
-          {
-            key: 'Access-Control-Allow-Origin',
-            value: process.env.NEXT_PUBLIC_APP_URL || '*',
-          },
-          {
-            key: 'Access-Control-Allow-Methods',
-            value: 'GET, POST, PUT, DELETE, OPTIONS',
-          },
-          {
-            key: 'Access-Control-Allow-Headers',
-            value: 'Content-Type, Authorization',
-          },
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          // Enable mic if you do audio features:
+          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(self), geolocation=(self)' },
         ],
       },
     ];
   },
-  
-  // Redirects
+
   async redirects() {
     return [
-      {
-        source: '/dashboard',
-        destination: '/dashboard/events',
-        permanent: false,
-      },
+      { source: '/dashboard', destination: '/dashboard/events', permanent: false },
     ];
   },
-  
-  // Webpack configuration
+
   webpack: (config, { isServer }) => {
-    // Handle node modules that need special treatment
     if (!isServer) {
-      config.resolve.fallback = {
-        ...config.resolve.fallback,
-        fs: false,
-        net: false,
-        tls: false,
-      };
+      config.resolve.fallback = { ...config.resolve.fallback, fs: false, net: false, tls: false };
     }
     return config;
   },
-  
-  // Experimental features
+
   experimental: {
-    // Enable server actions
     serverActions: {
       allowedOrigins: [
         'localhost:3000',
-        process.env.NEXT_PUBLIC_APP_URL?.replace(/^https?:\/\//, '') || '',
+        process.env.NEXT_PUBLIC_APP_URL?.replace(/^https?:\/\//, ''),
       ].filter(Boolean),
     },
   },
