@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { validateAndUseToken, getSignedDownloadUrl } from '@/lib/delivery';
+import { validateAndUseToken, getSignedDownloadUrl } from '@/lib/delivery/download-service';
 
 export async function GET(
   request: NextRequest,
