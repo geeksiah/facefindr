@@ -1,7 +1,7 @@
 'use client';
 
 import { X, CheckCircle, AlertCircle, AlertTriangle, Info } from 'lucide-react';
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useMemo, ReactNode } from 'react';
 
 // Toast types
 type ToastType = 'success' | 'error' | 'warning' | 'info';
@@ -39,10 +39,10 @@ export function useToast() {
 }
 
 interface ToastProviderProps {
-  children: ReactNode;
+  readonly children: ReactNode;
 }
 
-export function ToastProvider({ children }: ToastProviderProps) {
+export function ToastProvider({ children }: Readonly<ToastProviderProps>) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const removeToast = useCallback((id: string) => {
@@ -95,10 +95,13 @@ export function ToastProvider({ children }: ToastProviderProps) {
     [addToast]
   );
 
+  const value = useMemo(
+    () => ({ toasts, addToast, removeToast, success, error, warning, info }),
+    [toasts, addToast, removeToast, success, error, warning, info]
+  );
+
   return (
-    <ToastContext.Provider
-      value={{ toasts, addToast, removeToast, success, error, warning, info }}
-    >
+    <ToastContext.Provider value={value}>
       {children}
       <ToastContainer toasts={toasts} removeToast={removeToast} />
     </ToastContext.Provider>
@@ -107,11 +110,11 @@ export function ToastProvider({ children }: ToastProviderProps) {
 
 // Toast Container
 interface ToastContainerProps {
-  toasts: Toast[];
-  removeToast: (id: string) => void;
+  readonly toasts: Toast[];
+  readonly removeToast: (id: string) => void;
 }
 
-function ToastContainer({ toasts, removeToast }: ToastContainerProps) {
+function ToastContainer({ toasts, removeToast }: Readonly<ToastContainerProps>) {
   if (toasts.length === 0) return null;
 
   return (
@@ -125,11 +128,11 @@ function ToastContainer({ toasts, removeToast }: ToastContainerProps) {
 
 // Individual Toast
 interface ToastItemProps {
-  toast: Toast;
-  onDismiss: () => void;
+  readonly toast: Toast;
+  readonly onDismiss: () => void;
 }
 
-function ToastItem({ toast, onDismiss }: ToastItemProps) {
+function ToastItem({ toast, onDismiss }: Readonly<ToastItemProps>) {
   const icons = {
     success: CheckCircle,
     error: AlertCircle,
@@ -197,14 +200,14 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
 
 // Confirmation Dialog (replaces window.confirm)
 interface ConfirmDialogProps {
-  isOpen: boolean;
-  title: string;
-  message: string;
-  confirmLabel?: string;
-  cancelLabel?: string;
-  variant?: 'default' | 'destructive';
-  onConfirm: () => void;
-  onCancel: () => void;
+  readonly isOpen: boolean;
+  readonly title: string;
+  readonly message: string;
+  readonly confirmLabel?: string;
+  readonly cancelLabel?: string;
+  readonly variant?: 'default' | 'destructive';
+  readonly onConfirm: () => void;
+  readonly onCancel: () => void;
 }
 
 export function ConfirmDialog({
@@ -216,11 +219,10 @@ export function ConfirmDialog({
   variant = 'default',
   onConfirm,
   onCancel,
-}: ConfirmDialogProps) {
+}: Readonly<ConfirmDialogProps>) {
   if (!isOpen) return null;
-
   return (
-    <div 
+    <div
       className="z-[100] flex items-center justify-center"
       style={{
         position: 'fixed',
@@ -229,9 +231,7 @@ export function ConfirmDialog({
         left: 0,
         right: 0,
         bottom: 0,
-        width: '100vw',
         width: '100dvw',
-        height: '100vh',
         height: '100dvh',
         margin: 0,
         padding: 0,
@@ -252,7 +252,15 @@ export function ConfirmDialog({
           margin: 0,
           padding: 0,
         }}
+        role="button"
+        tabIndex={0}
+        aria-label="Close dialog"
         onClick={onCancel}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') {
+            onCancel();
+          }
+        }}
       />
       
       {/* Dialog */}
