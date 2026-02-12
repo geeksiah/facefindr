@@ -64,6 +64,7 @@ export default function PhotoViewerScreen() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [isPurchasing, setIsPurchasing] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
+  const [displayUrl, setDisplayUrl] = useState<string>('');
 
   useEffect(() => {
     const loadPhoto = async () => {
@@ -246,6 +247,22 @@ export default function PhotoViewerScreen() {
     }
   };
 
+  useEffect(() => {
+    const loadDisplayUrl = async () => {
+      if (photo) {
+        if (photo.isOwned) {
+          // Get full resolution signed URL
+          const url = await getSignedUrl('media', photo.fullUrl);
+          setDisplayUrl(url || '');
+        } else {
+          // Use watermarked or thumbnail
+          setDisplayUrl(photo.watermarkedUrl || photo.thumbnailUrl);
+        }
+      }
+    };
+    loadDisplayUrl();
+  }, [photo]);
+
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
@@ -265,25 +282,6 @@ export default function PhotoViewerScreen() {
       </SafeAreaView>
     );
   }
-
-  // Get signed URL for display
-  const [displayUrl, setDisplayUrl] = useState<string>('');
-
-  useEffect(() => {
-    const loadDisplayUrl = async () => {
-      if (photo) {
-        if (photo.isOwned) {
-          // Get full resolution signed URL
-          const url = await getSignedUrl('media', photo.fullUrl);
-          setDisplayUrl(url || '');
-        } else {
-          // Use watermarked or thumbnail
-          setDisplayUrl(photo.watermarkedUrl || photo.thumbnailUrl);
-        }
-      }
-    };
-    loadDisplayUrl();
-  }, [photo]);
 
   return (
     <>

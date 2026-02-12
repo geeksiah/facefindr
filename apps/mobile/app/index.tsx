@@ -5,7 +5,7 @@
  * sophisticated design, and smooth user experience.
  */
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -312,8 +312,8 @@ export default function WelcomeScreen() {
   const insets = useSafeAreaInsets();
   const [activeIndex, setActiveIndex] = useState(0);
   const flatListRef = useRef<FlatList>(null);
-  const scrollX = useRef(new Animated.Value(0)).current;
-  const floatAnim = useRef(new Animated.Value(0)).current;
+  const scrollX = useMemo(() => new Animated.Value(0), []);
+  const floatAnim = useMemo(() => new Animated.Value(0), []);
   const autoScrollTimer = useRef<ReturnType<typeof setInterval>>();
 
   // Smooth floating animation

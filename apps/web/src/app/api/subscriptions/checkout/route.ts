@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getAppUrl } from '@/lib/env';
 import { isFlutterwaveConfigured, initializePayment } from '@/lib/payments/flutterwave';
 import { selectPaymentGateway } from '@/lib/payments/gateway-selector';
 import { isPayPalConfigured, createOrder, getApprovalUrl } from '@/lib/payments/paypal';
@@ -32,6 +33,7 @@ const STRIPE_PRICE_IDS: Record<string, { monthly: string; annual: string }> = {
 
 export async function POST(request: NextRequest) {
   try {
+    const appUrl = getAppUrl();
     if (!stripe) {
       return NextResponse.json(
         { error: 'Stripe not configured' },
@@ -131,8 +133,8 @@ export async function POST(request: NextRequest) {
             quantity: 1,
           },
         ],
-        success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/billing?success=true&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/billing?canceled=true`,
+        success_url: `${appUrl}/dashboard/billing?success=true&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${appUrl}/dashboard/billing?canceled=true`,
         subscription_data: {
           metadata: {
             photographer_id: user.id,

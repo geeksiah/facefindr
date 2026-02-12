@@ -92,7 +92,31 @@ export const env = validateEnv();
 
 // Type-safe getters for commonly used env vars
 export function getAppUrl(): string {
-  return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  if (process.env.NEXT_PUBLIC_APP_URL) {
+    return process.env.NEXT_PUBLIC_APP_URL;
+  }
+
+  if (process.env.NEXT_PUBLIC_SITE_URL) {
+    return process.env.NEXT_PUBLIC_SITE_URL;
+  }
+
+  if (typeof window === 'undefined' && process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
+  }
+
+  return 'http://localhost:3000';
+}
+
+export function getAdminAppUrl(): string {
+  if (process.env.NEXT_PUBLIC_ADMIN_APP_URL) {
+    return process.env.NEXT_PUBLIC_ADMIN_APP_URL;
+  }
+
+  if (process.env.ADMIN_APP_URL) {
+    return process.env.ADMIN_APP_URL;
+  }
+
+  return 'http://localhost:3001';
 }
 
 export function getSupabaseUrl(): string {

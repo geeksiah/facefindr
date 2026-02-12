@@ -34,6 +34,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const PHOTO_SIZE = (SCREEN_WIDTH - spacing.lg * 2 - spacing.sm * 2) / 3;
 
 // SVG asset imports - using relative paths for Expo asset loading
+/* eslint-disable @typescript-eslint/no-require-imports */
 const SVG_ASSETS = {
   front: require('../assets/scan-img/straight-face.svg'),
   left: require('../assets/scan-img/left-turn.svg'),
@@ -41,6 +42,7 @@ const SVG_ASSETS = {
   up: require('../assets/scan-img/top-turn.svg'),
   down: require('../assets/scan-img/bottom-turn.svg'),
 };
+/* eslint-enable @typescript-eslint/no-require-imports */
 
 // 5 head positions for accurate face matching
 const HEAD_POSITIONS = [

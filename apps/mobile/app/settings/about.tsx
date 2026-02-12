@@ -31,6 +31,8 @@ import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 
 const APP_URL = process.env.EXPO_PUBLIC_APP_URL || 'https://example.com';
 const SUPPORT_EMAIL = process.env.EXPO_PUBLIC_SUPPORT_EMAIL || 'support@example.com';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const APP_ICON = require('../../assets/logos/app-icon-512.png');
 
 export default function AboutScreen() {
   const router = useRouter();
@@ -96,7 +98,7 @@ export default function AboutScreen() {
         {/* App Logo & Info */}
         <View style={styles.logoSection}>
           <Image
-            source={require('../../assets/logos/app-icon-512.png')}
+            source={APP_ICON}
             style={styles.appIcon}
           />
           <Text style={styles.appName}>FaceFindr</Text>

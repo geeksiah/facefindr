@@ -3,6 +3,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Eye, EyeOff, Lock, AlertCircle, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 
@@ -14,10 +15,15 @@ import { resetPasswordSchema, type ResetPasswordInput } from '@/lib/validations/
 import { resetPassword } from '../actions';
 
 export default function ResetPasswordPage() {
+  const searchParams = useSearchParams();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const fromAdmin = searchParams.get('from') === 'admin';
+  const backToLoginHref = fromAdmin
+    ? `${process.env.NEXT_PUBLIC_ADMIN_APP_URL || 'http://localhost:3001'}/login`
+    : '/login';
 
   const {
     register,
@@ -176,7 +182,7 @@ export default function ResetPasswordPage() {
 
       {/* Back to Login */}
       <Link
-        href="/login"
+        href={backToLoginHref}
         className="mt-8 flex items-center justify-center gap-2 text-sm font-medium text-secondary hover:text-foreground transition-colors"
       >
         <ArrowLeft className="h-4 w-4" />

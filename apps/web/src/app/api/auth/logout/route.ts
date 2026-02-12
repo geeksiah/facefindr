@@ -8,19 +8,21 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 
+import { getAppUrl } from '@/lib/env';
 import { createClient } from '@/lib/supabase/server';
 
 export async function GET() {
+  const appUrl = getAppUrl();
   try {
     const supabase = await createClient();
     await supabase.auth.signOut();
     
     // Redirect to home page
-    return NextResponse.redirect(new URL('/', process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'));
+    return NextResponse.redirect(new URL('/', appUrl));
   } catch (error) {
     console.error('Logout error:', error);
     // Still redirect even on error
-    return NextResponse.redirect(new URL('/', process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'));
+    return NextResponse.redirect(new URL('/', appUrl));
   }
 }
 

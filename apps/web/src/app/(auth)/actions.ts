@@ -1,8 +1,10 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
+import { getAdminAppUrl, getAppUrl } from '@/lib/env';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 import {
   loginSchema,
@@ -74,6 +76,7 @@ export async function login(formData: LoginInput) {
 // ============================================
 
 export async function register(formData: RegisterInput) {
+  const appUrl = getAppUrl();
   const validated = registerSchema.safeParse(formData);
   
   if (!validated.success) {
@@ -91,7 +94,7 @@ export async function register(formData: RegisterInput) {
     email: validated.data.email,
     password: validated.data.password,
     options: {
-      emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback`,
+      emailRedirectTo: `${appUrl}/auth/callback`,
       data: {
         display_name: validated.data.displayName,
         user_type: validated.data.userType,
@@ -168,6 +171,7 @@ export async function register(formData: RegisterInput) {
 // ============================================
 
 export async function forgotPassword(formData: ForgotPasswordInput) {
+  const appUrl = getAppUrl();
   const validated = forgotPasswordSchema.safeParse(formData);
   
   if (!validated.success) {
@@ -179,7 +183,7 @@ export async function forgotPassword(formData: ForgotPasswordInput) {
   const supabase = await createClient();
   
   const { error } = await supabase.auth.resetPasswordForEmail(validated.data.email, {
-    redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/reset-password`,
+    redirectTo: `${appUrl}/reset-password`,
   });
 
   if (error) {
@@ -216,7 +220,21 @@ export async function resetPassword(formData: ResetPasswordInput) {
   }
 
   revalidatePath('/', 'layout');
-  redirect('/login?message=Password updated successfully');
+  const referer = headers().get('referer');
+  let fromAdmin = false;
+  if (referer) {
+    try {
+      fromAdmin = new URL(referer).searchParams.get('from') === 'admin';
+    } catch {
+      fromAdmin = false;
+    }
+  }
+  const successMessage = '?message=Password updated successfully';
+  const destination = fromAdmin
+    ? `${getAdminAppUrl()}/login${successMessage}`
+    : `/login${successMessage}`;
+
+  redirect(destination);
 }
 
 // ============================================
@@ -224,12 +242,13 @@ export async function resetPassword(formData: ResetPasswordInput) {
 // ============================================
 
 export async function signInWithGoogle(userType: 'photographer' | 'attendee' = 'attendee') {
+  const appUrl = getAppUrl();
   const supabase = await createClient();
   
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback?user_type=${userType}`,
+      redirectTo: `${appUrl}/auth/callback?user_type=${userType}`,
       queryParams: {
         access_type: 'offline',
         prompt: 'consent',
@@ -249,12 +268,13 @@ export async function signInWithGoogle(userType: 'photographer' | 'attendee' = '
 }
 
 export async function signInWithGitHub(userType: 'photographer' | 'attendee' = 'attendee') {
+  const appUrl = getAppUrl();
   const supabase = await createClient();
   
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'github',
     options: {
-      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback?user_type=${userType}`,
+      redirectTo: `${appUrl}/auth/callback?user_type=${userType}`,
     },
   });
 
@@ -270,12 +290,13 @@ export async function signInWithGitHub(userType: 'photographer' | 'attendee' = '
 }
 
 export async function signInWithApple(userType: 'photographer' | 'attendee' = 'attendee') {
+  const appUrl = getAppUrl();
   const supabase = await createClient();
   
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'apple',
     options: {
-      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback?user_type=${userType}`,
+      redirectTo: `${appUrl}/auth/callback?user_type=${userType}`,
     },
   });
 

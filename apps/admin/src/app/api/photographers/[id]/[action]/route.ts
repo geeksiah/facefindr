@@ -2,12 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
+import { getWebAppUrl } from '@/lib/urls';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string; action: string } }
 ) {
   try {
+    const webAppUrl = getWebAppUrl();
+
     const session = await getAdminSession();
     if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -80,6 +83,9 @@ export async function POST(
         const { error } = await supabaseAdmin.auth.admin.generateLink({
           type: 'recovery',
           email: photographer.email,
+          options: {
+            redirectTo: `${webAppUrl}/reset-password?from=admin`,
+          },
         });
 
         if (error) {
@@ -106,6 +112,9 @@ export async function POST(
         const { error } = await supabaseAdmin.auth.admin.generateLink({
           type: 'magiclink',
           email: photographer.email,
+          options: {
+            redirectTo: `${webAppUrl}/auth/callback`,
+          },
         });
 
         if (error) {

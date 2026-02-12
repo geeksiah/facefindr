@@ -4,7 +4,7 @@
  * Reusable shimmer/skeleton placeholders for loading states.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo } from 'react';
 import { View, StyleSheet, Animated, Easing, ViewStyle, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -26,7 +26,7 @@ export function Skeleton({
   borderRadius: br = 8,
   style 
 }: SkeletonProps) {
-  const shimmerValue = useRef(new Animated.Value(0)).current;
+  const shimmerValue = useMemo(() => new Animated.Value(0), []);
 
   useEffect(() => {
     Animated.loop(

@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 
+import { getAppUrl } from '@/lib/env';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
@@ -41,6 +42,7 @@ interface ShippingAddress {
  */
 export async function POST(request: NextRequest) {
   try {
+    const appUrl = getAppUrl();
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
@@ -152,8 +154,8 @@ export async function POST(request: NextRequest) {
         order_id: orderId,
         order_number: order?.order_number || '',
       },
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/prints/success?order=${orderId}`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/prints/cart`,
+      success_url: `${appUrl}/prints/success?order=${orderId}`,
+      cancel_url: `${appUrl}/prints/cart`,
     });
 
     // Update order with Stripe session ID

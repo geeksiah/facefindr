@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 
 import { getEffectiveCurrency } from '@/lib/currency/currency-service';
+import { getAppUrl } from '@/lib/env';
 import { calculateFees, calculateBulkPrice } from '@/lib/payments/fee-calculator';
 import {
   initializePayment,
@@ -297,7 +298,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const baseUrl = getAppUrl();
     const txRef = uuidv4();
 
     // Determine customer email

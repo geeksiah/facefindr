@@ -19,8 +19,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import { captureRef } from 'react-native-view-shot';
-import Svg, { Rect } from 'react-native-svg';
-import { SvgXml } from 'react-native-svg';
+import Svg, { Rect, SvgXml } from 'react-native-svg';
 
 import { Button, Card } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
