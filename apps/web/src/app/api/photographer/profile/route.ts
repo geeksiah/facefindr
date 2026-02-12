@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Photographer Profile API
  * 
@@ -137,3 +139,4 @@ export async function PUT(request: NextRequest) {
     );
   }
 }
+

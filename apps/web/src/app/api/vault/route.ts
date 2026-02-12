@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Photo Vault API
  * 
@@ -386,3 +388,4 @@ export async function DELETE(request: NextRequest) {
     );
   }
 }
+

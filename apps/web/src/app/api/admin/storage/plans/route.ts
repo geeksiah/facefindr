@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Admin Storage Plans Management API
  * 
@@ -262,3 +264,4 @@ export async function DELETE(request: NextRequest) {
     );
   }
 }
+

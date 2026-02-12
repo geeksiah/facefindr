@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Subscription Pricing API
  * 
@@ -108,3 +110,4 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+

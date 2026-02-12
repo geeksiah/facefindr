@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Photographer Rating Stats API
  * 
@@ -68,3 +70,4 @@ export async function GET(
     );
   }
 }
+

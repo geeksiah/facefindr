@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Follow Preferences API
  * 
@@ -54,3 +56,4 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to update preferences' }, { status: 500 });
   }
 }
+

@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Logout API Route
  * 
@@ -25,3 +27,4 @@ export async function GET() {
 export async function POST() {
   return GET();
 }
+

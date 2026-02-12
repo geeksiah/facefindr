@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Purchases API
  * 
@@ -31,3 +33,4 @@ export async function GET() {
     );
   }
 }
+

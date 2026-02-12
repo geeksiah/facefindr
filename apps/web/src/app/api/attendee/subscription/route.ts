@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Attendee Subscription Management API
  * 
@@ -195,3 +197,4 @@ export async function DELETE(request: NextRequest) {
     );
   }
 }
+

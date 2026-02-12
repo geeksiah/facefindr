@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Tip Photographer API
  * 
@@ -422,3 +424,4 @@ export async function GET(
     );
   }
 }
+

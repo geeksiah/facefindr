@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Verification API
  * 
@@ -154,3 +156,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+

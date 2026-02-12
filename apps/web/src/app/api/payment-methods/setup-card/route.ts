@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Card Setup API
  * 
@@ -80,3 +82,4 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL('/dashboard/billing?error=setup_failed', request.url));
   }
 }
+

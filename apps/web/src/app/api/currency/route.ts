@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Currency API
  * 
@@ -114,3 +116,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+

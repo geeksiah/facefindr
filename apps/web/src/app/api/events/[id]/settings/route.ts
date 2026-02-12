@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Event Settings API
  */
@@ -206,3 +208,4 @@ export async function PUT(
     );
   }
 }
+

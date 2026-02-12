@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Drop-In Payment Webhook
  * 
@@ -149,3 +151,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+

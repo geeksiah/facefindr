@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Photographer Subscription API
  * 
@@ -142,3 +144,4 @@ export async function GET() {
     );
   }
 }
+

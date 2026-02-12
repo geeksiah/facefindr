@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Vault Subscription API
  * 
@@ -127,3 +129,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+

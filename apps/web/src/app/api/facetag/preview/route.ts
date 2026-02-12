@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * FaceTag Preview API
  * 
@@ -88,3 +90,4 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+

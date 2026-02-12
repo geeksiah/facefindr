@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import { NextResponse } from 'next/server';
 
 import { getConnectAccount, createLoginLink, isStripeConfigured } from '@/lib/payments/stripe';
@@ -158,3 +160,4 @@ export async function DELETE(request: Request) {
     );
   }
 }
+

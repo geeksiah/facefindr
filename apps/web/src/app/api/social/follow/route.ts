@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Follow API
  * 
@@ -225,3 +227,4 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to get follows' }, { status: 500 });
   }
 }
+

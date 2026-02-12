@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
@@ -225,3 +227,4 @@ async function createEntitlements(
     await supabase.from('entitlements').insert(entitlements);
   }
 }
+

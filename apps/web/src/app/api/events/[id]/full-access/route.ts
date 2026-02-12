@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Event Full Access API
  * 
@@ -217,3 +219,4 @@ export async function DELETE(
     return NextResponse.json({ error: 'Failed to revoke access' }, { status: 500 });
   }
 }
+

@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Drop-In Discovery API
  * 
@@ -154,3 +156,4 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+

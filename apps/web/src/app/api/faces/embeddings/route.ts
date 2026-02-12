@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import { IndexFacesCommand } from '@aws-sdk/client-rekognition';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -216,3 +218,4 @@ export async function DELETE(request: NextRequest) {
     );
   }
 }
+

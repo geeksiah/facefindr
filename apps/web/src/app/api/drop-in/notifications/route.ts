@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Drop-In Notifications API
  * 
@@ -219,3 +221,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+

@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Photographer Profile Photo API
  * 
@@ -156,3 +158,4 @@ export async function DELETE() {
     );
   }
 }
+

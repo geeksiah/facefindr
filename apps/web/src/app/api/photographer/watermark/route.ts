@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Watermark Settings API
  * 
@@ -116,3 +118,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+

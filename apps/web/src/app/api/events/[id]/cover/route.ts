@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Event Cover Photo API
  */
@@ -186,3 +188,4 @@ export async function DELETE(
     );
   }
 }
+

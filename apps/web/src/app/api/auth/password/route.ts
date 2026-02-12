@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Password Change API
  * 
@@ -70,3 +72,4 @@ export async function PUT(request: NextRequest) {
     );
   }
 }
+

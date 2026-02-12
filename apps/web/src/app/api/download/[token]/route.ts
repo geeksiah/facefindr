@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Secure Download API
  * 
@@ -47,3 +49,4 @@ export async function GET(
     );
   }
 }
+

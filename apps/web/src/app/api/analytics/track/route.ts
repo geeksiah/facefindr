@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Analytics Track API
  * 
@@ -92,3 +94,4 @@ function detectDeviceType(userAgent: string): DeviceType {
   
   return 'desktop';
 }
+

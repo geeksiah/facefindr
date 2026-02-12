@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * FaceTag Claim API
  * 
@@ -185,3 +187,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+

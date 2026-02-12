@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import { NextResponse } from 'next/server';
 
 import { verifyTransactionByRef } from '@/lib/payments/flutterwave';
@@ -105,3 +107,4 @@ export async function GET(request: Request) {
     );
   }
 }
+

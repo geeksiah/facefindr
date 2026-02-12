@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * PayPal Connect API
  * 
@@ -66,3 +68,4 @@ function getPayPalAuthUrl(state: string, request: NextRequest): string {
 
   return `${baseUrl}/signin/authorize?${params.toString()}`;
 }
+

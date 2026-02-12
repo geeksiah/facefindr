@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Event Sharing API
  * 
@@ -299,3 +301,4 @@ export async function DELETE(
     );
   }
 }
+

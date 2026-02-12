@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Mobile Money Account Verification API
  * 
@@ -67,3 +69,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+

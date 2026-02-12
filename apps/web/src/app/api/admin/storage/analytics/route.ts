@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Admin Storage Analytics API
  * 
@@ -162,3 +164,4 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+

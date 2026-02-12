@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import { NextRequest, NextResponse } from 'next/server';
 
 import { createClient, createServiceClient } from '@/lib/supabase/server';
@@ -245,3 +247,4 @@ function getChangeGuidance(changeType: ChangeType, changeMode: ChangeMode): stri
 
   return guidance[changeType] + modeNote[changeMode];
 }
+

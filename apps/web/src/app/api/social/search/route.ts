@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Social Search API
  * 
@@ -63,3 +65,4 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Search failed' }, { status: 500 });
   }
 }
+

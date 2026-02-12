@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Rate Photographer API
  * 
@@ -99,3 +101,4 @@ export async function POST(
     );
   }
 }
+

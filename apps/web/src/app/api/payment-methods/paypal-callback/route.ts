@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * PayPal OAuth Callback
  * 
@@ -144,3 +146,4 @@ async function getPayPalUserInfo(accessToken: string) {
     return null;
   }
 }
+

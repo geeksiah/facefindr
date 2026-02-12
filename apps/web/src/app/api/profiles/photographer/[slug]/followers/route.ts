@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Get Photographer Followers Count
  * 
@@ -46,3 +48,4 @@ export async function GET(
     );
   }
 }
+

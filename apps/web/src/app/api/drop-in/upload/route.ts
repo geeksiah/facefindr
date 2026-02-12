@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Drop-In Photo Upload API
  * 
@@ -321,3 +323,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+

@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import { NextResponse } from 'next/server';
 
 import { createClient, createServiceClient } from '@/lib/supabase/server';
@@ -79,3 +81,4 @@ export async function GET() {
     );
   }
 }
+

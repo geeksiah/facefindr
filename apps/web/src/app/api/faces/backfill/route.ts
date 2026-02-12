@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Face Backfill API
  * 
@@ -160,3 +162,4 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+

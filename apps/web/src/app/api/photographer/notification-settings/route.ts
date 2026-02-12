@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Photographer Notification Settings API
  * 
@@ -145,3 +147,4 @@ export async function PUT(request: NextRequest) {
     );
   }
 }
+

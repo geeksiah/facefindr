@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Get My Rating API
  * 
@@ -60,3 +62,4 @@ export async function GET(
     );
   }
 }
+

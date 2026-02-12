@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Cart API
  * 
@@ -137,3 +139,4 @@ export async function DELETE(request: NextRequest) {
     );
   }
 }
+

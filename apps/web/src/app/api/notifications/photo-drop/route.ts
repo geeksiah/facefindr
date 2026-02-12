@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import { NextRequest, NextResponse } from 'next/server';
 
 import { searchFacesByImage } from '@/lib/aws/rekognition';
@@ -231,3 +233,4 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+

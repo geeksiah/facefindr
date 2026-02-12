@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Ads API
  * 
@@ -95,3 +97,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+

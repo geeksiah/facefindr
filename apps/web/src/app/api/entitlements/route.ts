@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Entitlements API
  * 
@@ -98,3 +100,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+

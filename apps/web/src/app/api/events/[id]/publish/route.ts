@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Event Publish/Unpublish API
  */
@@ -170,3 +172,4 @@ export async function DELETE(
     );
   }
 }
+

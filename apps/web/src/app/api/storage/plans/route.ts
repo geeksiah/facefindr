@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Storage Plans API
  * 
@@ -35,3 +37,4 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+

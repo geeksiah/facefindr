@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Contacts Management API
  * 
@@ -162,3 +164,4 @@ export async function DELETE(request: NextRequest) {
     );
   }
 }
+

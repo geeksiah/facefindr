@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Subscription Checkout API
  * 
@@ -170,3 +172,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+

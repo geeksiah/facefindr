@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import { NextResponse } from 'next/server';
 
 import {
@@ -113,3 +115,4 @@ export async function PUT(request: Request) {
     );
   }
 }
+

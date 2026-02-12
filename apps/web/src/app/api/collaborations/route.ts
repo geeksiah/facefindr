@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Collaborations API
  * 
@@ -139,3 +141,4 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to update collaboration' }, { status: 500 });
   }
 }
+

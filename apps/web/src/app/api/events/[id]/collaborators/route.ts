@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Event Collaborators API
  * 
@@ -426,3 +428,4 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: 'Failed to remove collaborator' }, { status: 500 });
   }
 }
+

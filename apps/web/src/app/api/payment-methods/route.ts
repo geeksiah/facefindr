@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * Payment Methods API
  * 
@@ -268,3 +270,4 @@ export async function DELETE(request: NextRequest) {
     );
   }
 }
+

@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * User/Attendee Profile API
  * 
@@ -56,3 +58,4 @@ export async function GET(
     return NextResponse.json({ error: 'Failed to load profile' }, { status: 500 });
   }
 }
+

@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import { NextRequest, NextResponse } from 'next/server';
 
 import { indexFacesFromImage, isRekognitionConfigured, createEventCollection } from '@/lib/aws/rekognition';
@@ -200,3 +202,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
