@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "buildCommand": "pnpm build",
-  "installCommand": "pnpm install",
+  "installCommand": "pnpm install --filter @facefind/admin...",
   "outputDirectory": ".next",
   "regions": ["iad1"],
   "functions": {
