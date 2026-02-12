@@ -8,8 +8,14 @@ const nextConfig = {
   
   // Transpile shared package
   transpilePackages: ['@facefind/shared'],
+<<<<<<< HEAD
   
   // Image optimization
+=======
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+>>>>>>> b674fa4e7d027eb795cd8bdd1de9563db95c80d1
   images: {
     remotePatterns: [
       {

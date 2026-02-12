@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRealtimeSubscription } from '@/hooks/use-realtime';
 import { useRouter } from 'next/navigation';
-import { Upload, Calendar, ArrowRight, Loader2 } from 'lucide-react';
+import { Calendar, ArrowRight, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 
 import { Button } from '@/components/ui/button';
@@ -24,67 +24,74 @@ export default function UploadPage() {
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    async function loadEvents() {
-      try {
-        const supabase = createClient();
-        const { data: user, error: userError } = await supabase.auth.getUser();
-        
-        if (userError || !user.user) {
-          router.push('/login');
-          return;
-        }
+  const loadEvents = useCallback(async () => {
+    setLoading(true);
 
-        const { data: events, error: eventsError } = await supabase
-          .from('events')
-          .select('id, name, event_date, status')
-          .eq('photographer_id', user.user.id)
-          .in('status', ['draft', 'active'])
-          .order('created_at', { ascending: false });
+    try {
+      const supabase = createClient();
+      const { data: userRes, error: userError } = await supabase.auth.getUser();
 
-        if (eventsError) {
-          console.error('Error loading events:', eventsError);
-          setLoading(false);
-          return;
-        }
-
-        // Get media counts separately for each event
-        if (events && events.length > 0) {
-          const eventIds = events.map(e => e.id);
-          const { data: mediaCounts } = await supabase
-            .from('media')
-            .select('event_id')
-            .in('event_id', eventIds);
-
-          // Count media per event
-          const counts = new Map<string, number>();
-          mediaCounts?.forEach((m) => {
-            counts.set(m.event_id, (counts.get(m.event_id) || 0) + 1);
-          });
-
-          setEvents(
-            events.map((e) => ({
-              id: e.id,
-              name: e.name,
-              event_date: e.event_date,
-              status: e.status,
-              media_count: counts.get(e.id) || 0,
-            }))
-          );
-        } else {
-          setEvents([]);
-        }
-      } catch (error) {
-        console.error('Error loading events:', error);
-      } finally {
-        setLoading(false);
+      if (userError || !userRes.user) {
+        router.push('/login');
+        return;
       }
+
+      const { data: eventsRes, error: eventsError } = await supabase
+        .from('events')
+        .select('id, name, event_date, status')
+        .eq('photographer_id', userRes.user.id)
+        .in('status', ['draft', 'active'])
+        .order('created_at', { ascending: false });
+
+      if (eventsError) {
+        console.error('Error loading events:', eventsError);
+        setEvents([]);
+        return;
+      }
+
+      const eventsList = eventsRes ?? [];
+
+      if (eventsList.length === 0) {
+        setEvents([]);
+        return;
+      }
+
+      // Get media counts separately for each event
+      const eventIds = eventsList.map((e) => e.id);
+      const { data: mediaCounts, error: mediaError } = await supabase
+        .from('media')
+        .select('event_id')
+        .in('event_id', eventIds);
+
+      if (mediaError) {
+        console.error('Error loading media counts:', mediaError);
+      }
+
+      const counts = new Map<string, number>();
+      mediaCounts?.forEach((m) => {
+        counts.set(m.event_id, (counts.get(m.event_id) || 0) + 1);
+      });
+
+      setEvents(
+        eventsList.map((e) => ({
+          id: e.id,
+          name: e.name,
+          event_date: e.event_date,
+          status: e.status,
+          media_count: counts.get(e.id) || 0,
+        }))
+      );
+    } catch (error) {
+      console.error('Error loading events:', error);
+      setEvents([]);
+    } finally {
+      setLoading(false);
     }
-  };
+  }, [router]);
 
   useEffect(() => {
     loadEvents();
-  }, [router]);
+  }, [loadEvents]);
 
   // Subscribe to real-time updates for events
   useRealtimeSubscription({
@@ -116,7 +123,7 @@ export default function UploadPage() {
       {!selectedEventId ? (
         <div className="space-y-4">
           <h2 className="text-lg font-semibold text-foreground">Select an Event</h2>
-          
+
           {events.length === 0 ? (
             <div className="rounded-2xl border border-border bg-card p-8 text-center">
               <div className="mx-auto rounded-2xl bg-muted p-4 w-fit mb-4">
@@ -176,19 +183,18 @@ export default function UploadPage() {
               </h2>
             </div>
             <Button variant="outline" size="sm" asChild>
-              <Link href={`/dashboard/events/${selectedEventId}`}>
-                View Event
-              </Link>
+              <Link href={`/dashboard/events/${selectedEventId}`}>View Event</Link>
             </Button>
           </div>
 
           {/* Uploader */}
           <div className="rounded-2xl border border-border bg-card p-6">
-            <PhotoUploader 
-              eventId={selectedEventId} 
+            <PhotoUploader
+              eventId={selectedEventId}
               onUploadComplete={() => {
                 // Refresh event data
                 router.refresh();
+                loadEvents();
               }}
             />
           </div>
