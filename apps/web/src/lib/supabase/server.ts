@@ -1,10 +1,10 @@
 import type { Database } from '@facefind/shared/types';
-import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 
 export function createClient(): any {
   const { cookies } = require('next/headers') as typeof import('next/headers');
+  const { createServerClient } = require('@supabase/ssr') as typeof import('@supabase/ssr');
   const cookieStore = cookies();
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -24,14 +24,14 @@ export function createClient(): any {
         get(name: string) {
           return cookieStore.get(name)?.value;
         },
-        set(name: string, value: string, options: CookieOptions) {
+        set(name: string, value: string, options: any) {
           try {
             cookieStore.set({ name, value, ...options });
           } catch {
             // Handle cookie errors in middleware
           }
         },
-        remove(name: string, options: CookieOptions) {
+        remove(name: string, options: any) {
           try {
             cookieStore.set({ name, value: '', ...options });
           } catch {
