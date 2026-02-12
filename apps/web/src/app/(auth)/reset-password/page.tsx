@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Eye, EyeOff, Lock, AlertCircle, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useForm } from 'react-hook-form';
 
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,14 @@ import { resetPasswordSchema, type ResetPasswordInput } from '@/lib/validations/
 import { resetPassword } from '../actions';
 
 export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={<div className="animate-fade-in" />}>
+      <ResetPasswordPageContent />
+    </Suspense>
+  );
+}
+
+function ResetPasswordPageContent() {
   const searchParams = useSearchParams();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
