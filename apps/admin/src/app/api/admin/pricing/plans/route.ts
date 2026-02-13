@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
+import { bumpRuntimeConfigVersion } from '@/lib/runtime-config-version';
 import { supabaseAdmin } from '@/lib/supabase';
 
 // GET - List all plans
@@ -82,6 +83,7 @@ export async function POST(request: NextRequest) {
     if (error) throw error;
 
     await logAction('plan_create', 'subscription_plan', data.id, { name, code });
+    await bumpRuntimeConfigVersion('plans', session.adminId);
 
     return NextResponse.json({ success: true, plan: data });
   } catch (error) {

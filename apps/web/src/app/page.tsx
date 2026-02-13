@@ -59,7 +59,7 @@ export default function HomePage() {
           </Link>
               </Button>
               <Button size="xl" variant="outline" asChild>
-                <Link href="/demo">Watch Demo</Link>
+                <Link href="/register">Start Free Trial</Link>
               </Button>
             </div>
 

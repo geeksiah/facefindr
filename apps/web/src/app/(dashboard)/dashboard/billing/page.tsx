@@ -8,6 +8,7 @@ import { PaymentMethodsManager } from '@/components/payments';
 import { useCurrency } from '@/components/providers';
 import { Button, Switch, CurrencySwitcher } from '@/components/ui';
 import { useRealtimeSubscription } from '@/hooks/use-realtime';
+import { useSSEWithPolling } from '@/hooks/use-sse-fallback';
 
 interface PlanPricing {
   planCode: string;
@@ -89,6 +90,7 @@ export default function BillingPage() {
   const [isAddingPayment, setIsAddingPayment] = useState(false);
   const [isUpgrading, setIsUpgrading] = useState<string | null>(null);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
+  const [lastSubscriptionVersion, setLastSubscriptionVersion] = useState(0);
 
   // Load subscription and usage data
   const loadData = useCallback(async () => {
@@ -134,6 +136,21 @@ export default function BillingPage() {
   useRealtimeSubscription({
     table: 'media',
     onChange: () => loadData(),
+  });
+
+  useSSEWithPolling<{ version?: string }>({
+    url: '/api/stream/subscriptions',
+    eventName: 'subscriptions',
+    onPoll: loadData,
+    pollIntervalMs: 20000,
+    heartbeatTimeoutMs: 35000,
+    onMessage: (payload) => {
+      const version = Number(payload.version || 0);
+      if (!version || version > lastSubscriptionVersion) {
+        setLastSubscriptionVersion(version || Date.now());
+        void loadData();
+      }
+    },
   });
 
   // Add payment method
@@ -209,8 +226,20 @@ export default function BillingPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <Loader2 className="h-8 w-8 animate-spin text-accent" />
+      <div className="space-y-8">
+        <div className="space-y-2">
+          <div className="h-8 w-32 animate-pulse rounded bg-muted" />
+          <div className="h-4 w-72 animate-pulse rounded bg-muted" />
+        </div>
+        <div className="h-56 animate-pulse rounded-2xl border border-border bg-card" />
+        <div className="h-10 w-72 animate-pulse rounded-xl bg-muted" />
+        <div className="grid gap-6 md:grid-cols-3">
+          {[0, 1, 2].map((key) => (
+            <div key={key} className="h-[34rem] animate-pulse rounded-2xl border border-border bg-card" />
+          ))}
+        </div>
+        <div className="h-56 animate-pulse rounded-2xl border border-border bg-card" />
+        <div className="h-56 animate-pulse rounded-2xl border border-border bg-card" />
       </div>
     );
   }

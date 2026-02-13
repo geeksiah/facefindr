@@ -41,6 +41,7 @@ import * as Clipboard from 'expo-clipboard';
 
 import { useAuthStore } from '@/stores/auth-store';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { alertMissingPublicAppUrl, buildPublicUrl } from '@/lib/runtime-config';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
 
@@ -67,8 +68,6 @@ export default function ProfileScreen() {
     loadFollowersCount();
   }, []);
 
-  const APP_URL = process.env.EXPO_PUBLIC_APP_URL || 'https://app.example.com';
-
   const handleCopyFaceTag = async () => {
     if (profile?.faceTag) {
       await Clipboard.setStringAsync(profile.faceTag);
@@ -77,8 +76,13 @@ export default function ProfileScreen() {
   };
 
   const handleShare = async () => {
+    const profileUrl = buildPublicUrl(`/p/${profile?.faceTag?.replace('@', '')}`);
+    if (!profileUrl) {
+      alertMissingPublicAppUrl();
+      return;
+    }
+
     try {
-      const profileUrl = `${APP_URL}/p/${profile?.faceTag?.replace('@', '')}`;
       await Share.share({
         message: `Check out my photography on FaceFindr!\n${profileUrl}`,
         url: profileUrl,
@@ -108,12 +112,18 @@ export default function ProfileScreen() {
   };
 
   const handleOpenWebDashboard = () => {
+    const dashboardUrl = buildPublicUrl('/dashboard');
+    if (!dashboardUrl) {
+      alertMissingPublicAppUrl();
+      return;
+    }
+
     Alert.alert(
       'Open Web Dashboard',
       'For advanced features like watermark settings, billing, and detailed analytics, use the web dashboard.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Open', onPress: () => Linking.openURL(`${APP_URL}/dashboard`) },
+        { text: 'Open', onPress: () => Linking.openURL(dashboardUrl) },
       ]
     );
   };

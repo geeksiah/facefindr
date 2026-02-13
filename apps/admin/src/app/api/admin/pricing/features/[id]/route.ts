@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
+import { bumpRuntimeConfigVersion } from '@/lib/runtime-config-version';
 import { supabaseAdmin } from '@/lib/supabase';
 
 interface RouteParams {
@@ -87,6 +88,7 @@ export async function PUT(
     if (error) throw error;
 
     await logAction('feature_update', 'plan_feature', id, { name });
+    await bumpRuntimeConfigVersion('pricing', session.adminId);
 
     return NextResponse.json({ success: true, feature: data });
   } catch (error) {
@@ -141,6 +143,7 @@ export async function DELETE(
       code: feature.code, 
       name: feature.name 
     });
+    await bumpRuntimeConfigVersion('pricing', session.adminId);
 
     return NextResponse.json({ success: true });
   } catch (error) {

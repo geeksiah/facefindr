@@ -36,6 +36,7 @@ import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 import { formatPrice, getCurrencySymbol } from '@/lib/currency';
 import { getThumbnailUrl, getSignedUrl } from '@/lib/storage-urls';
+import { alertMissingPublicAppUrl, buildPublicUrl, getPublicAppUrl } from '@/lib/runtime-config';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -147,11 +148,16 @@ export default function PhotoViewerScreen() {
   }, [id, profile?.id]);
 
   const handleShare = async () => {
+    const shareUrl = buildPublicUrl(`/photo/${id}`);
+    if (!shareUrl) {
+      alertMissingPublicAppUrl();
+      return;
+    }
+
     try {
-      const baseUrl = process.env.EXPO_PUBLIC_APP_URL || 'https://app.example.com';
       await Share.share({
         message: `Check out this photo from ${photo?.eventName} on FaceFindr!`,
-        url: `${baseUrl}/photo/${id}`,
+        url: shareUrl,
       });
     } catch (error) {
       console.error('Share error:', error);
@@ -229,7 +235,13 @@ export default function PhotoViewerScreen() {
     setIsFavorite(nextValue);
 
     try {
-      const baseUrl = process.env.EXPO_PUBLIC_APP_URL || 'https://app.facefindr.com';
+      const baseUrl = process.env.EXPO_PUBLIC_API_URL || getPublicAppUrl();
+      if (!baseUrl) {
+        alertMissingPublicAppUrl();
+        setIsFavorite(!nextValue);
+        return;
+      }
+
       await fetch(`${baseUrl}/api/vault`, {
         method: 'POST',
         headers: {

@@ -17,7 +17,8 @@ export async function GET(request: NextRequest) {
     
     const query = searchParams.get('q');
     const type = searchParams.get('type') || 'all'; // 'all', 'photographers', 'users'
-    const limit = parseInt(searchParams.get('limit') || '20');
+    const rawLimit = parseInt(searchParams.get('limit') || '20');
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 50) : 20;
 
     if (!query || query.length < 2) {
       return NextResponse.json({ error: 'Search query too short' }, { status: 400 });
@@ -33,14 +34,17 @@ export async function GET(request: NextRequest) {
         .from('photographers')
         .select(`
           id, display_name, face_tag, profile_photo_url, bio, 
-          follower_count, public_profile_slug, is_public_profile
+          follower_count, public_profile_slug, is_public_profile, allow_follows
         `)
         .eq('is_public_profile', true)
         .or(`face_tag.ilike.%${searchTerm}%,display_name.ilike.%${searchTerm}%`)
         .order('follower_count', { ascending: false })
         .limit(limit);
 
-      results.photographers = photographers || [];
+      results.photographers = (photographers || []).map((p: any) => ({
+        ...p,
+        userType: 'photographer',
+      }));
     }
 
     // Search users/attendees (only if they have public profiles)
@@ -55,7 +59,10 @@ export async function GET(request: NextRequest) {
         .or(`face_tag.ilike.%${searchTerm}%,display_name.ilike.%${searchTerm}%`)
         .limit(limit);
 
-      results.users = users || [];
+      results.users = (users || []).map((u: any) => ({
+        ...u,
+        userType: 'attendee',
+      }));
     }
 
     return NextResponse.json(results);

@@ -4,7 +4,6 @@ import {
   Users, 
   Calendar,
   Download,
-  Loader2,
 } from 'lucide-react';
 import { Suspense } from 'react';
 
@@ -220,8 +219,12 @@ function SummaryCard({ title, value, icon: Icon, iconColor, iconBg }: SummaryCar
 
 function ChartsLoading() {
   return (
-    <div className="flex items-center justify-center h-96 rounded-xl border border-border bg-card">
-      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+    <div className="space-y-4 rounded-xl border border-border bg-card p-6">
+      <div className="h-5 w-48 animate-pulse rounded bg-muted" />
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="h-64 animate-pulse rounded-xl border border-border bg-muted/40" />
+        <div className="h-64 animate-pulse rounded-xl border border-border bg-muted/40" />
+      </div>
     </div>
   );
 }

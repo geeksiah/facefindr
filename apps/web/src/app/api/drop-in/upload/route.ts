@@ -11,14 +11,49 @@ import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 
 import { isFlutterwaveConfigured, initializePayment } from '@/lib/payments/flutterwave';
-import { selectPaymentGateway } from '@/lib/payments/gateway-selector';
+import { GatewaySelectionError, selectPaymentGateway } from '@/lib/payments/gateway-selector';
 import { isPayPalConfigured, createOrder, getApprovalUrl } from '@/lib/payments/paypal';
 import { stripe } from '@/lib/payments/stripe';
-import { createClient, createClientWithAccessToken } from '@/lib/supabase/server';
+import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
-// Pricing constants (in cents)
-const DROP_IN_UPLOAD_FEE = 299; // $2.99
-const DROP_IN_GIFT_FEE = 499; // $4.99 (covers recipient access + unlocks message)
+async function getDropInPricing() {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from('platform_settings')
+    .select('*')
+    .in('setting_key', ['drop_in_upload_fee_cents', 'drop_in_gift_fee_cents', 'drop_in_currency']);
+
+  if (error || !data) {
+    throw new Error('Drop-in pricing settings are not configured');
+  }
+
+  const byKey = new Map<string, any>();
+  for (const row of data as any[]) {
+    const value = row.setting_value ?? row.value;
+    byKey.set(row.setting_key, value);
+  }
+
+  const uploadFee = Number(byKey.get('drop_in_upload_fee_cents'));
+  const giftFee = Number(byKey.get('drop_in_gift_fee_cents'));
+  const currencyRaw = String(byKey.get('drop_in_currency') || '').trim().toUpperCase();
+
+  if (!Number.isFinite(uploadFee) || uploadFee <= 0) {
+    throw new Error('drop_in_upload_fee_cents must be configured with a positive value');
+  }
+  if (!Number.isFinite(giftFee) || giftFee < 0) {
+    throw new Error('drop_in_gift_fee_cents must be configured');
+  }
+  if (!currencyRaw) {
+    throw new Error('drop_in_currency must be configured');
+  }
+
+  return {
+    uploadFeeCents: Math.round(uploadFee),
+    giftFeeCents: Math.round(giftFee),
+    currencyCode: currencyRaw,
+    currencyLower: currencyRaw.toLowerCase(),
+  };
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -34,6 +69,8 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    const dropInPricing = await getDropInPricing();
 
     // Get attendee profile
     const { data: attendee } = await supabase
@@ -123,10 +160,10 @@ export async function POST(request: NextRequest) {
         is_discoverable: false, // Will be set to true after payment
         discovery_scope: 'app_only', // MVP: app only, expand later
         upload_payment_status: 'pending',
-        upload_payment_amount: DROP_IN_UPLOAD_FEE,
+        upload_payment_amount: dropInPricing.uploadFeeCents,
         is_gifted: includeGift,
         gift_payment_status: includeGift ? 'pending' : null,
-        gift_payment_amount: includeGift ? DROP_IN_GIFT_FEE : null,
+        gift_payment_amount: includeGift ? dropInPricing.giftFeeCents : null,
         gift_message: includeGift && giftMessage ? giftMessage : null,
         location_lat: locationLat,
         location_lng: locationLng,
@@ -146,10 +183,26 @@ export async function POST(request: NextRequest) {
     }
 
     // Select payment gateway based on user preference and country
-    const gatewaySelection = await selectPaymentGateway({
-      userId: attendee.id,
-      currency: 'usd', // Drop-in fees are fixed in USD
-    });
+    let gatewaySelection;
+    try {
+      gatewaySelection = await selectPaymentGateway({
+        userId: attendee.id,
+        currency: dropInPricing.currencyLower,
+        productType: 'drop_in',
+      });
+    } catch (gatewayError) {
+      if (gatewayError instanceof GatewaySelectionError) {
+        return NextResponse.json(
+          {
+            error: gatewayError.message,
+            failClosed: gatewayError.failClosed,
+            code: gatewayError.code,
+          },
+          { status: 503 }
+        );
+      }
+      throw gatewayError;
+    }
 
     // Create payment intent/checkout session
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
@@ -172,23 +225,23 @@ export async function POST(request: NextRequest) {
           line_items: [
             {
               price_data: {
-                currency: 'usd',
+                currency: dropInPricing.currencyLower,
                 product_data: {
                   name: 'Drop-In Photo Upload',
                   description: 'Make your photo discoverable by premium users',
                 },
-                unit_amount: DROP_IN_UPLOAD_FEE,
+                unit_amount: dropInPricing.uploadFeeCents,
               },
               quantity: 1,
             },
             ...(includeGift ? [{
               price_data: {
-                currency: 'usd',
+                currency: dropInPricing.currencyLower,
                 product_data: {
                   name: 'Gift Access + Message',
                   description: 'Cover recipient access fee and unlock message',
                 },
-                unit_amount: DROP_IN_GIFT_FEE,
+                unit_amount: dropInPricing.giftFeeCents,
               },
               quantity: 1,
             }] : []),
@@ -213,11 +266,11 @@ export async function POST(request: NextRequest) {
           throw new Error('Flutterwave is not configured');
         }
 
-        const totalAmount = DROP_IN_UPLOAD_FEE + (includeGift ? DROP_IN_GIFT_FEE : 0);
+        const totalAmount = dropInPricing.uploadFeeCents + (includeGift ? dropInPricing.giftFeeCents : 0);
         const payment = await initializePayment({
           txRef: idempotencyKey,
           amount: totalAmount,
-          currency: 'USD',
+          currency: dropInPricing.currencyCode,
           redirectUrl: `${baseUrl}/drop-in/success?tx_ref=${idempotencyKey}&provider=flutterwave`,
           customerEmail: user.email || '',
           eventId: null, // Drop-in not tied to event
@@ -247,17 +300,17 @@ export async function POST(request: NextRequest) {
             {
               name: 'Drop-In Photo Upload',
               description: 'Make your photo discoverable by premium users',
-              amount: DROP_IN_UPLOAD_FEE,
+              amount: dropInPricing.uploadFeeCents,
               quantity: 1,
             },
             ...(includeGift ? [{
               name: 'Gift Access + Message',
               description: 'Cover recipient access fee and unlock message',
-              amount: DROP_IN_GIFT_FEE,
+              amount: dropInPricing.giftFeeCents,
               quantity: 1,
             }] : []),
           ],
-          currency: 'USD',
+          currency: dropInPricing.currencyCode,
           photographerPayPalEmail: null, // Platform payment
           returnUrl: `${baseUrl}/drop-in/success?order_id=${idempotencyKey}&provider=paypal`,
           cancelUrl: `${baseUrl}/drop-in/upload?canceled=true`,

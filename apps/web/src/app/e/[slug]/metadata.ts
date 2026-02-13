@@ -17,6 +17,9 @@ export async function generateEventMetadata(slug: string): Promise<Metadata> {
         cover_image_url,
         event_date,
         location,
+        is_public,
+        is_publicly_listed,
+        require_access_code,
         photographers (display_name, profile_photo_url)
       `)
       .or(`public_slug.eq.${slug},short_link.eq.${slug}`)
@@ -33,15 +36,28 @@ export async function generateEventMetadata(slug: string): Promise<Metadata> {
     const photographer = event.photographers as any;
     const eventUrl = `${baseUrl}/e/${slug}`;
     const coverImage = event.cover_image_url || `${baseUrl}/assets/logos/og-logo.png`;
+    const description = event.description || `Find your photos from ${event.name} on FaceFindr`;
+    const isRestricted = event.is_public === false || event.is_publicly_listed === false || event.require_access_code === true;
 
     return {
       title: event.name,
-      description: event.description || `Find your photos from ${event.name} on FaceFindr`,
+      description,
+      robots: {
+        index: !isRestricted,
+        follow: !isRestricted,
+      },
+      keywords: [
+        'FaceFindr',
+        'event photos',
+        event.name,
+        event.location || '',
+        photographer?.display_name || '',
+      ].filter(Boolean),
       openGraph: {
         type: 'website',
         url: eventUrl,
         title: event.name,
-        description: event.description || `Find your photos from ${event.name} on FaceFindr`,
+        description,
         siteName: 'FaceFindr',
         images: [
           {
@@ -56,7 +72,7 @@ export async function generateEventMetadata(slug: string): Promise<Metadata> {
       twitter: {
         card: 'summary_large_image',
         title: event.name,
-        description: event.description || `Find your photos from ${event.name} on FaceFindr`,
+        description,
         images: [coverImage],
       },
       alternates: {

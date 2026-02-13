@@ -205,37 +205,13 @@ export async function addCard(userId: string, params: AddCardParams): Promise<Pa
   }
 }
 
-// ============================================
-// FALLBACK MOBILE MONEY PROVIDERS
-// ============================================
-
-interface FallbackProvider {
+interface MobileMoneyProviderRecord {
   provider_code: string;
   provider_name: string;
   country_code: string;
   number_length: number;
   number_prefix: string;
   supports_name_verification: boolean;
-}
-
-const FALLBACK_PROVIDERS: FallbackProvider[] = [
-  // Ghana
-  { provider_code: 'mtn_gh', provider_name: 'MTN Mobile Money', country_code: 'GH', number_length: 10, number_prefix: '024,054,055,059', supports_name_verification: true },
-  { provider_code: 'vodafone_gh', provider_name: 'Vodafone Cash', country_code: 'GH', number_length: 10, number_prefix: '020,050', supports_name_verification: true },
-  { provider_code: 'airteltigo_gh', provider_name: 'AirtelTigo Money', country_code: 'GH', number_length: 10, number_prefix: '027,026,057,056', supports_name_verification: true },
-  // Nigeria
-  { provider_code: 'opay_ng', provider_name: 'OPay', country_code: 'NG', number_length: 11, number_prefix: '', supports_name_verification: false },
-  { provider_code: 'palmpay_ng', provider_name: 'PalmPay', country_code: 'NG', number_length: 11, number_prefix: '', supports_name_verification: false },
-  // Kenya
-  { provider_code: 'mpesa_ke', provider_name: 'M-Pesa', country_code: 'KE', number_length: 10, number_prefix: '07,01', supports_name_verification: true },
-  // Uganda
-  { provider_code: 'mtn_ug', provider_name: 'MTN Mobile Money', country_code: 'UG', number_length: 10, number_prefix: '077,078', supports_name_verification: true },
-  // Tanzania
-  { provider_code: 'mpesa_tz', provider_name: 'M-Pesa', country_code: 'TZ', number_length: 10, number_prefix: '067,065', supports_name_verification: true },
-];
-
-function getFallbackProvider(providerCode: string): FallbackProvider | null {
-  return FALLBACK_PROVIDERS.find(p => p.provider_code === providerCode) || null;
 }
 
 // ============================================
@@ -249,9 +225,9 @@ export async function addMobileMoney(
   const supabase = createServiceClient();
 
   try {
-    // Get provider info from database first, then fallback
-    let provider: FallbackProvider | null = null;
-    
+    // Fail-closed: provider must be admin-configured in DB.
+    let provider: MobileMoneyProviderRecord | null = null;
+
     const { data: dbProvider } = await supabase
       .from('mobile_money_providers')
       .select('*')
@@ -268,13 +244,13 @@ export async function addMobileMoney(
         number_prefix: dbProvider.number_prefix || '',
         supports_name_verification: dbProvider.supports_name_verification || false,
       };
-    } else {
-      // Use fallback providers
-      provider = getFallbackProvider(params.providerCode);
     }
 
     if (!provider) {
-      return { success: false, error: 'Invalid mobile money provider' };
+      return {
+        success: false,
+        error: 'Mobile money provider is not configured for this region. Please contact support.',
+      };
     }
 
     // Validate phone number format

@@ -3,7 +3,6 @@ import {
   Clock, 
   CheckCircle, 
   XCircle,
-  Loader2,
   RefreshCw,
   Pause,
   Play,
@@ -248,8 +247,18 @@ function StatCard({ icon: Icon, iconColor, iconBg, label, value, subtitle }: Sta
 
 function QueueLoading() {
   return (
-    <div className="flex items-center justify-center h-64 rounded-xl border border-border bg-card">
-      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="space-y-3">
+        {[0, 1, 2, 3, 4].map((key) => (
+          <div key={key} className="grid animate-pulse grid-cols-12 gap-4 border-b border-border pb-3 last:border-0">
+            <div className="col-span-3 h-4 rounded bg-muted" />
+            <div className="col-span-3 h-4 rounded bg-muted" />
+            <div className="col-span-2 h-4 rounded bg-muted" />
+            <div className="col-span-2 h-4 rounded bg-muted" />
+            <div className="col-span-2 h-4 rounded bg-muted" />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

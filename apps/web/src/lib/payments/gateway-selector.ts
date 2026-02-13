@@ -11,11 +11,28 @@
 import { createServiceClient } from '@/lib/supabase/server';
 
 export type PaymentGateway = 'stripe' | 'flutterwave' | 'paypal';
+export type PaymentProductType = 'event_checkout' | 'tip' | 'drop_in' | 'subscription' | 'attendee_subscription';
+export type RuntimeEnvironment = 'development' | 'staging' | 'production';
 
 export interface GatewaySelection {
   gateway: PaymentGateway;
   reason: string;
   availableGateways: PaymentGateway[];
+  countryCode: string;
+  productType: PaymentProductType;
+  environment: RuntimeEnvironment;
+}
+
+export class GatewaySelectionError extends Error {
+  public readonly code: string;
+  public readonly failClosed: boolean;
+
+  constructor(message: string, code: string, failClosed = true) {
+    super(message);
+    this.name = 'GatewaySelectionError';
+    this.code = code;
+    this.failClosed = failClosed;
+  }
 }
 
 /**
@@ -80,11 +97,13 @@ export async function getAvailableGateways(photographerId: string): Promise<Paym
     .eq('photographer_id', photographerId)
     .eq('status', 'active');
 
-  if (!wallets || wallets.length === 0) {
-    return ['stripe']; // Default to Stripe if no wallets configured
-  }
+  if (!wallets || wallets.length === 0) return [];
 
-  return wallets.map(w => w.provider as PaymentGateway);
+  return wallets
+    .map(w => String(w.provider || '').toLowerCase())
+    .filter((provider): provider is PaymentGateway =>
+      provider === 'stripe' || provider === 'flutterwave' || provider === 'paypal'
+    );
 }
 
 /**
@@ -95,101 +114,64 @@ export async function selectPaymentGateway(options: {
   photographerId?: string;
   currency?: string;
   countryCode?: string;
+  productType?: PaymentProductType;
+  environment?: RuntimeEnvironment;
 }): Promise<GatewaySelection> {
-  const { userId, photographerId, currency, countryCode } = options;
+  const { userId, photographerId, currency, countryCode, productType = 'event_checkout' } = options;
+  void currency;
+  const environment: RuntimeEnvironment = options.environment || (process.env.NODE_ENV === 'production' ? 'production' : 'development');
 
-  // 1. Check user's preferred gateway
-  const preferredGateway = await getUserPreferredGateway(userId);
-  if (preferredGateway) {
-    // Verify it's available for this photographer
-    if (photographerId) {
-      const available = await getAvailableGateways(photographerId);
-      if (available.includes(preferredGateway)) {
-        return {
-          gateway: preferredGateway,
-          reason: 'User preference',
-          availableGateways: available,
-        };
-      }
-    } else {
-      // For non-photographer payments (drop-in, subscriptions), check if gateway is configured
-      const isConfigured = await isGatewayConfigured(preferredGateway);
-      if (isConfigured) {
-        return {
-          gateway: preferredGateway,
-          reason: 'User preference',
-          availableGateways: [preferredGateway],
-        };
-      }
-    }
-  }
-
-  // 2. Get user's country if not provided
   const userCountry = countryCode || await getUserCountry(userId);
+  if (!userCountry) {
+    throw new GatewaySelectionError('No country available for gateway selection', 'missing_country');
+  }
 
-  // 3. Get available gateways
-  let availableGateways: PaymentGateway[] = ['stripe']; // Default
+  const regionGateways = await getConfiguredGateways(userCountry);
+  if (!regionGateways.length) {
+    throw new GatewaySelectionError(`No enabled payment gateways configured for region ${userCountry}`, 'no_region_gateways');
+  }
+
+  let availableGateways = regionGateways;
+
   if (photographerId) {
-    availableGateways = await getAvailableGateways(photographerId);
-  } else {
-    // For platform payments, check which gateways are configured
-    availableGateways = await getConfiguredGateways();
-  }
-
-  // 4. Select based on country preferences
-  if (userCountry) {
-    const countryBasedGateway = getGatewayForCountry(userCountry, availableGateways);
-    if (countryBasedGateway) {
-      return {
-        gateway: countryBasedGateway,
-        reason: `Country preference (${userCountry})`,
-        availableGateways,
-      };
+    const walletGateways = await getAvailableGateways(photographerId);
+    availableGateways = regionGateways.filter((gateway) => walletGateways.includes(gateway));
+    if (!availableGateways.length) {
+      throw new GatewaySelectionError(
+        `No shared payment gateway between region ${userCountry} and photographer wallets`,
+        'no_shared_gateway'
+      );
     }
   }
 
-  // 5. Default to first available gateway
+  const configuredGateways = await filterConfiguredGateways(availableGateways);
+  if (!configuredGateways.length) {
+    throw new GatewaySelectionError(
+      `No configured provider credentials found for region ${userCountry}`,
+      'no_provider_credentials'
+    );
+  }
+
+  const preferredGateway = await getUserPreferredGateway(userId);
+  if (preferredGateway && configuredGateways.includes(preferredGateway)) {
+    return {
+      gateway: preferredGateway,
+      reason: 'User preference',
+      availableGateways: configuredGateways,
+      countryCode: userCountry.toUpperCase(),
+      productType,
+      environment,
+    };
+  }
+
   return {
-    gateway: availableGateways[0],
-    reason: 'Default selection',
-    availableGateways,
+    gateway: configuredGateways[0],
+    reason: `Region configuration (${userCountry})`,
+    availableGateways: configuredGateways,
+    countryCode: userCountry.toUpperCase(),
+    productType,
+    environment,
   };
-}
-
-/**
- * Get recommended gateway for a country
- */
-function getGatewayForCountry(
-  countryCode: string,
-  availableGateways: PaymentGateway[]
-): PaymentGateway | null {
-  // Country-based gateway preferences
-  const countryPreferences: Record<string, PaymentGateway[]> = {
-    // African countries - prefer Flutterwave
-    GH: ['flutterwave', 'stripe', 'paypal'],
-    NG: ['flutterwave', 'stripe', 'paypal'],
-    KE: ['flutterwave', 'stripe', 'paypal'],
-    ZA: ['stripe', 'flutterwave', 'paypal'],
-    UG: ['flutterwave', 'stripe', 'paypal'],
-    TZ: ['flutterwave', 'stripe', 'paypal'],
-    // Other regions - prefer Stripe
-    US: ['stripe', 'paypal'],
-    GB: ['stripe', 'paypal'],
-    CA: ['stripe', 'paypal'],
-    AU: ['stripe', 'paypal'],
-    // Default to Stripe
-  };
-
-  const preferences = countryPreferences[countryCode.toUpperCase()] || ['stripe', 'paypal'];
-  
-  // Return first preference that's available
-  for (const gateway of preferences) {
-    if (availableGateways.includes(gateway)) {
-      return gateway;
-    }
-  }
-
-  return null;
 }
 
 /**
@@ -209,20 +191,33 @@ async function isGatewayConfigured(gateway: PaymentGateway): Promise<boolean> {
 }
 
 /**
- * Get all configured gateways
+ * Get configured gateways by country from admin-managed region config.
  */
-async function getConfiguredGateways(): Promise<PaymentGateway[]> {
-  const gateways: PaymentGateway[] = [];
-  
-  if (await isGatewayConfigured('stripe')) {
-    gateways.push('stripe');
-  }
-  if (await isGatewayConfigured('flutterwave')) {
-    gateways.push('flutterwave');
-  }
-  if (await isGatewayConfigured('paypal')) {
-    gateways.push('paypal');
+async function getConfiguredGateways(countryCode: string): Promise<PaymentGateway[]> {
+  const supabase = createServiceClient();
+  const { data } = await supabase
+    .from('region_config')
+    .select('is_active, payment_providers')
+    .eq('region_code', countryCode.toUpperCase())
+    .single();
+
+  if (!data?.is_active || !Array.isArray(data.payment_providers)) {
+    return [];
   }
 
-  return gateways.length > 0 ? gateways : ['stripe']; // Default to Stripe
+  return Array.from(
+    new Set(
+      data.payment_providers
+        .map((provider: unknown) => String(provider || '').toLowerCase())
+        .filter((provider) => provider === 'stripe' || provider === 'flutterwave' || provider === 'paypal')
+    )
+  ) as PaymentGateway[];
+}
+
+async function filterConfiguredGateways(gateways: PaymentGateway[]): Promise<PaymentGateway[]> {
+  const configured = await Promise.all(
+    gateways.map(async (gateway) => ((await isGatewayConfigured(gateway)) ? gateway : null))
+  );
+
+  return configured.filter((gateway): gateway is PaymentGateway => !!gateway);
 }

@@ -10,6 +10,17 @@ import {
 } from '@/lib/payments/payout-service';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
+async function isAdmin(supabase: any, userId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('admin_users')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('is_active', true)
+    .single();
+
+  return !!data;
+}
+
 // GET: Get payout queue and statistics
 export async function GET(request: Request) {
   try {
@@ -17,12 +28,9 @@ export async function GET(request: Request) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     
-    if (!user) {
+    if (!user || !(await isAdmin(supabase, user.id))) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-
-    // TODO: Add proper admin role check
-    // For now, check if user is a photographer (simplified)
     
     const { searchParams } = new URL(request.url);
     const view = searchParams.get('view') || 'queue';
@@ -99,7 +107,7 @@ export async function POST(request: Request) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     
-    if (!user) {
+    if (!user || !(await isAdmin(supabase, user.id))) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

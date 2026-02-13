@@ -35,8 +35,24 @@ export async function GET(request: NextRequest) {
     const type = searchParams.get('type') || 'all';
 
     if (type === 'providers') {
-      const countryCode = searchParams.get('country') || 'GH';
+      const countryCode = (searchParams.get('country') || '').toUpperCase();
+      if (!countryCode) {
+        return NextResponse.json(
+          { error: 'country query param is required', failClosed: true },
+          { status: 400 }
+        );
+      }
       const providers = await getMobileMoneyProviders(countryCode);
+      if (!providers.length) {
+        return NextResponse.json(
+          {
+            error: `No mobile money providers configured for ${countryCode}`,
+            failClosed: true,
+            providers: [],
+          },
+          { status: 503 }
+        );
+      }
       return NextResponse.json({ providers });
     }
 

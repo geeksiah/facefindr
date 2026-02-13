@@ -327,8 +327,20 @@ export default function EventSettingsPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-16">
-        <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+      <div className="mx-auto max-w-3xl space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="h-10 w-10 animate-pulse rounded-xl bg-muted" />
+            <div className="space-y-2">
+              <div className="h-8 w-48 animate-pulse rounded bg-muted" />
+              <div className="h-4 w-56 animate-pulse rounded bg-muted" />
+            </div>
+          </div>
+          <div className="h-10 w-36 animate-pulse rounded-xl bg-muted" />
+        </div>
+        {[0, 1, 2, 3].map((key) => (
+          <div key={key} className="h-72 animate-pulse rounded-2xl border border-border bg-card" />
+        ))}
       </div>
     );
   }

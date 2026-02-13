@@ -1,4 +1,3 @@
-import { Loader2 } from 'lucide-react';
 import { Suspense } from 'react';
 
 import { supabaseAdmin } from '@/lib/supabase';
@@ -159,8 +158,18 @@ export default async function AttendeesPage({
 
 function ListLoading() {
   return (
-    <div className="flex items-center justify-center h-64 rounded-xl border border-border bg-card">
-      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="space-y-3">
+        {[0, 1, 2, 3, 4, 5].map((key) => (
+          <div key={key} className="grid animate-pulse grid-cols-12 gap-4 border-b border-border pb-3 last:border-0">
+            <div className="col-span-3 h-4 rounded bg-muted" />
+            <div className="col-span-3 h-4 rounded bg-muted" />
+            <div className="col-span-2 h-4 rounded bg-muted" />
+            <div className="col-span-2 h-4 rounded bg-muted" />
+            <div className="col-span-2 h-4 rounded bg-muted" />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

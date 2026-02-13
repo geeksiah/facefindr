@@ -335,3 +335,52 @@ export interface SuccessResponse {
   success: true;
   message?: string;
 }
+
+// ============================================
+// RUNTIME CONFIG
+// ============================================
+
+export interface PlanFeature {
+  featureCode: string;
+  featureName: string;
+  featureType: 'limit' | 'boolean' | 'numeric' | 'text';
+  value: number | boolean | string;
+  category: string;
+}
+
+export interface PlanDefinition {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  planType: 'photographer' | 'drop_in';
+  isActive: boolean;
+  prices: Record<string, number>;
+  features: PlanFeature[];
+}
+
+export interface CurrencyRule {
+  code: string;
+  name: string;
+  symbol: string;
+  symbolPosition: 'before' | 'after';
+  decimalPlaces: number;
+  countries: string[];
+  isActive: boolean;
+}
+
+export interface CountryGatewayConfig {
+  countryCode: string;
+  paymentGateways: string[];
+  communicationGateways: {
+    email: { enabled: boolean; provider: string | null };
+    sms: { enabled: boolean; provider: string | null };
+    whatsapp: { enabled: boolean; provider: string | null };
+    push: { enabled: boolean; provider: string | null };
+  };
+}
+
+export interface RuntimeSettingsVersion {
+  version: string;
+  updatedAt: string;
+}

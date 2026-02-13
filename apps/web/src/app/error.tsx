@@ -12,6 +12,7 @@ export default function Error({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const supportEmail = process.env.NEXT_PUBLIC_SUPPORT_EMAIL?.trim() || null;
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [checking, setChecking] = useState(true);
 
@@ -86,9 +87,13 @@ export default function Error({
         {/* Help text */}
         <p className="mt-8 text-sm text-muted-foreground">
           If this keeps happening, please{' '}
-          <a href={`mailto:${process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'support@example.com'}`} className="text-accent hover:underline">
-            contact support
-          </a>
+          {supportEmail ? (
+            <a href={`mailto:${supportEmail}`} className="text-accent hover:underline">
+              contact support
+            </a>
+          ) : (
+            <span>contact support through your administrator</span>
+          )}
         </p>
       </div>
     </div>

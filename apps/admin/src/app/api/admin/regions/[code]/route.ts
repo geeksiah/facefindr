@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
+import { bumpRuntimeConfigVersion } from '@/lib/runtime-config-version';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export async function GET(
@@ -60,6 +61,7 @@ export async function PUT(
       region_code: params.code,
       changes: Object.keys(body),
     });
+    await bumpRuntimeConfigVersion('regions', session.adminId);
 
     return NextResponse.json({ success: true });
   } catch (error) {

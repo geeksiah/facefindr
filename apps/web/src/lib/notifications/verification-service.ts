@@ -137,9 +137,7 @@ export async function sendOTP(
         channels: ['email'],
       });
     } else {
-      // For non-logged-in users, send directly
-      // In production, use email service directly
-      console.log(`[OTP Email] Would send to ${email}: ${code}`);
+      return { success: false, error: 'Email OTP dispatch is not configured for anonymous flow' };
     }
   } else if (type === 'phone' && phone) {
     // Send SMS
@@ -154,8 +152,7 @@ export async function sendOTP(
         channels: ['sms'],
       });
     } else {
-      // For non-logged-in users, send directly via SMS provider
-      console.log(`[OTP SMS] Would send to ${phone}: ${code}`);
+      return { success: false, error: 'SMS OTP dispatch is not configured for anonymous flow' };
     }
   }
 

@@ -9,6 +9,8 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const supportEmail = process.env.NEXT_PUBLIC_SUPPORT_EMAIL?.trim() || null;
+
   return (
     <html lang="en">
       <body className="bg-[#FAFAFA] dark:bg-black min-h-screen flex items-center justify-center p-6">
@@ -46,9 +48,13 @@ export default function GlobalError({
           {/* Help text */}
           <p className="mt-8 text-sm text-gray-400">
             If this keeps happening, please try refreshing the page or{' '}
-            <a href={`mailto:${process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'support@example.com'}`} className="text-blue-500 hover:underline">
-              contact support
-            </a>
+            {supportEmail ? (
+              <a href={`mailto:${supportEmail}`} className="text-blue-500 hover:underline">
+                contact support
+              </a>
+            ) : (
+              <span>contact support through your administrator</span>
+            )}
           </p>
         </div>
       </body>

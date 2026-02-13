@@ -11,7 +11,7 @@ import { Bell, Check, CheckCheck, X, ExternalLink, Loader2 } from 'lucide-react'
 import Link from 'next/link';
 import { useState, useEffect, useCallback, useRef } from 'react';
 
-import { createClient } from '@/lib/supabase/client';
+import { useSSEWithPolling } from '@/hooks';
 
 
 interface Notification {
@@ -31,6 +31,7 @@ export function NotificationBell() {
   const [isLoading, setIsLoading] = useState(true);
   const [isMarkingAll, setIsMarkingAll] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const latestVersionRef = useRef<number>(0);
 
   // Fetch notifications
   const fetchNotifications = useCallback(async () => {
@@ -48,43 +49,57 @@ export function NotificationBell() {
     }
   }, []);
 
-  // Initial fetch and real-time subscription
+  // Initial fetch
   useEffect(() => {
     fetchNotifications();
-
-    // Subscribe to real-time updates
-    const supabase = createClient();
-    
-    const channel = supabase
-      .channel('user-notifications')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'notifications',
-        },
-        (payload) => {
-          // Add new notification to list with animation
-          const newNotification = {
-            id: payload.new.id,
-            templateCode: payload.new.template_code,
-            subject: payload.new.subject,
-            body: payload.new.body,
-            createdAt: payload.new.created_at,
-            readAt: payload.new.read_at,
-            metadata: payload.new.metadata,
-          };
-          setNotifications(prev => [newNotification, ...prev].slice(0, 10));
-          setUnreadCount(prev => prev + 1);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, [fetchNotifications]);
+
+  useSSEWithPolling<{
+    unreadCount: number;
+    notifications: Array<{
+      id: string;
+      template_code?: string;
+      templateCode?: string;
+      subject: string | null;
+      body: string;
+      created_at?: string;
+      createdAt?: string;
+      read_at?: string | null;
+      readAt?: string | null;
+      metadata?: Record<string, unknown>;
+    }>;
+    version?: string;
+  }>({
+    url: '/api/stream/notifications',
+    eventName: 'notifications',
+    onPoll: fetchNotifications,
+    pollIntervalMs: 15000,
+    heartbeatTimeoutMs: 30000,
+    onMessage: (payload) => {
+      const incomingVersion = Number(payload.version || 0);
+      if (incomingVersion && incomingVersion < latestVersionRef.current) {
+        return;
+      }
+      latestVersionRef.current = Math.max(latestVersionRef.current, incomingVersion || 0);
+
+      const mapped: Notification[] = (payload.notifications || []).map((item) => ({
+        id: item.id,
+        templateCode: item.templateCode || item.template_code || 'generic',
+        subject: item.subject,
+        body: item.body,
+        createdAt: item.createdAt || item.created_at || new Date().toISOString(),
+        readAt: item.readAt ?? item.read_at ?? null,
+        metadata: item.metadata,
+      }));
+
+      setNotifications(mapped.slice(0, 10));
+      setUnreadCount(payload.unreadCount || 0);
+      setIsLoading(false);
+    },
+    onError: () => {
+      // Polling fallback handles recovery; avoid noisy console churn here.
+    },
+  });
 
   // Close dropdown on click outside
   useEffect(() => {

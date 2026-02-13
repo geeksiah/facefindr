@@ -10,26 +10,11 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAppUrl } from '@/lib/env';
 import { isFlutterwaveConfigured, initializePayment } from '@/lib/payments/flutterwave';
-import { selectPaymentGateway } from '@/lib/payments/gateway-selector';
+import { GatewaySelectionError, selectPaymentGateway } from '@/lib/payments/gateway-selector';
 import { isPayPalConfigured, createOrder, getApprovalUrl } from '@/lib/payments/paypal';
 import { stripe } from '@/lib/payments/stripe';
+import { getPlanByCode } from '@/lib/subscription';
 import { createClient } from '@/lib/supabase/server';
-
-// Plan to Stripe price ID mapping (set these in your Stripe dashboard)
-const STRIPE_PRICE_IDS: Record<string, { monthly: string; annual: string }> = {
-  starter: {
-    monthly: process.env.STRIPE_PRICE_STARTER_MONTHLY || '',
-    annual: process.env.STRIPE_PRICE_STARTER_ANNUAL || '',
-  },
-  pro: {
-    monthly: process.env.STRIPE_PRICE_PRO_MONTHLY || '',
-    annual: process.env.STRIPE_PRICE_PRO_ANNUAL || '',
-  },
-  studio: {
-    monthly: process.env.STRIPE_PRICE_STUDIO_MONTHLY || '',
-    annual: process.env.STRIPE_PRICE_STUDIO_ANNUAL || '',
-  },
-};
 
 export async function POST(request: NextRequest) {
   try {
@@ -49,7 +34,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { planCode, billingCycle = 'monthly' } = body;
+    const { planCode, billingCycle = 'monthly', currency: requestedCurrency } = body;
 
     if (!planCode || planCode === 'free') {
       return NextResponse.json(
@@ -58,25 +43,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const priceIds = STRIPE_PRICE_IDS[planCode];
-    if (!priceIds) {
+    if (billingCycle !== 'monthly' && billingCycle !== 'annual') {
       return NextResponse.json(
-        { error: 'Plan not found' },
+        { error: 'Invalid billing cycle' },
         { status: 400 }
       );
     }
 
-    const priceId = billingCycle === 'annual' ? priceIds.annual : priceIds.monthly;
-    
-    if (!priceId) {
-      // If no Stripe price configured, return error with setup instructions
+    // Fail-closed to admin-managed plan configuration
+    const plan = await getPlanByCode(planCode, 'photographer');
+    if (!plan || !plan.isActive) {
       return NextResponse.json(
-        { 
-          error: 'Subscription pricing not configured',
-          message: 'Please set up Stripe price IDs in environment variables',
-          setupRequired: true,
-        },
-        { status: 400 }
+        { error: 'Plan is not available', failClosed: true },
+        { status: 503 }
+      );
+    }
+
+    const normalizedCurrency = String(requestedCurrency || 'USD').toUpperCase();
+    const amountInCents =
+      plan.prices?.[normalizedCurrency] ??
+      plan.prices?.USD ??
+      plan.basePriceUsd;
+
+    if (!Number.isFinite(amountInCents) || amountInCents <= 0) {
+      return NextResponse.json(
+        { error: 'Plan pricing is not configured', failClosed: true },
+        { status: 503 }
       );
     }
 
@@ -108,10 +100,26 @@ export async function POST(request: NextRequest) {
     }
 
     // Select payment gateway based on user preference
-    const gatewaySelection = await selectPaymentGateway({
-      userId: user.id,
-      currency: 'usd', // Subscription pricing is in USD
-    });
+    let gatewaySelection;
+    try {
+      gatewaySelection = await selectPaymentGateway({
+        userId: user.id,
+        currency: normalizedCurrency.toLowerCase(),
+        productType: 'subscription',
+      });
+    } catch (gatewayError) {
+      if (gatewayError instanceof GatewaySelectionError) {
+        return NextResponse.json(
+          {
+            error: gatewayError.message,
+            failClosed: gatewayError.failClosed,
+            code: gatewayError.code,
+          },
+          { status: 503 }
+        );
+      }
+      throw gatewayError;
+    }
 
     const selectedGateway = gatewaySelection.gateway;
 
@@ -129,7 +137,22 @@ export async function POST(request: NextRequest) {
         mode: 'subscription',
         line_items: [
           {
-            price: priceId,
+            price_data: {
+              currency: normalizedCurrency.toLowerCase(),
+              unit_amount: Math.round(amountInCents),
+              recurring: {
+                interval: billingCycle === 'annual' ? 'year' : 'month',
+              },
+              product_data: {
+                name: plan.name,
+                description: plan.description || `${plan.name} subscription`,
+                metadata: {
+                  plan_id: plan.id,
+                  plan_code: plan.code,
+                  plan_type: plan.planType,
+                },
+              },
+            },
             quantity: 1,
           },
         ],
@@ -138,12 +161,20 @@ export async function POST(request: NextRequest) {
         subscription_data: {
           metadata: {
             photographer_id: user.id,
-            plan_code: planCode,
+            plan_code: plan.code,
+            plan_id: plan.id,
+            billing_cycle: billingCycle,
+            pricing_currency: normalizedCurrency,
+            pricing_amount_cents: String(Math.round(amountInCents)),
           },
         },
         metadata: {
           photographer_id: user.id,
-          plan_code: planCode,
+          plan_code: plan.code,
+          plan_id: plan.id,
+          billing_cycle: billingCycle,
+          pricing_currency: normalizedCurrency,
+          pricing_amount_cents: String(Math.round(amountInCents)),
         },
       });
 

@@ -961,8 +961,19 @@ export default function PricingPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <div className="h-8 w-40 animate-pulse rounded bg-muted" />
+            <div className="h-4 w-80 animate-pulse rounded bg-muted" />
+          </div>
+          <div className="h-10 w-36 animate-pulse rounded-xl bg-muted" />
+        </div>
+        <div className="h-12 w-full animate-pulse rounded-xl bg-muted" />
+        <div className="grid gap-6 md:grid-cols-2">
+          <div className="h-[32rem] animate-pulse rounded-xl border border-border bg-card" />
+          <div className="h-[32rem] animate-pulse rounded-xl border border-border bg-card" />
+        </div>
       </div>
     );
   }

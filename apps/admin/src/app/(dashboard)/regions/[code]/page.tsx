@@ -43,9 +43,13 @@ interface RegionConfig {
   sms_provider: string | null;
   sms_provider_config: Record<string, any>;
   sms_enabled: boolean;
+  whatsapp_enabled: boolean;
+  whatsapp_provider: string | null;
   email_provider: string;
   email_provider_config: Record<string, any>;
   email_enabled: boolean;
+  push_enabled: boolean;
+  push_provider: string | null;
   phone_verification_enabled: boolean;
   phone_verification_required: boolean;
   email_verification_enabled: boolean;
@@ -73,6 +77,20 @@ interface SmsPreset {
   supported_regions: string[];
   config_schema: any;
 }
+
+const WHATSAPP_PROVIDER_OPTIONS = [
+  { value: 'twilio', label: 'Twilio WhatsApp' },
+  { value: 'meta_cloud_api', label: 'Meta WhatsApp Cloud API' },
+  { value: 'messagebird', label: 'MessageBird WhatsApp' },
+  { value: 'africas_talking', label: "Africa's Talking WhatsApp" },
+];
+
+const PUSH_PROVIDER_OPTIONS = [
+  { value: 'expo', label: 'Expo Push' },
+  { value: 'fcm', label: 'Firebase Cloud Messaging (FCM)' },
+  { value: 'apns', label: 'Apple Push Notification Service (APNs)' },
+  { value: 'onesignal', label: 'OneSignal' },
+];
 
 export default function RegionConfigPage() {
   const router = useRouter();
@@ -132,8 +150,20 @@ export default function RegionConfigPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="h-10 w-10 animate-pulse rounded-xl bg-muted" />
+            <div className="space-y-2">
+              <div className="h-8 w-64 animate-pulse rounded bg-muted" />
+              <div className="h-4 w-56 animate-pulse rounded bg-muted" />
+            </div>
+          </div>
+          <div className="h-10 w-36 animate-pulse rounded-xl bg-muted" />
+        </div>
+        {[0, 1, 2, 3, 4].map((key) => (
+          <div key={key} className="h-48 animate-pulse rounded-xl border border-border bg-card" />
+        ))}
       </div>
     );
   }
@@ -480,6 +510,98 @@ export default function RegionConfigPage() {
             <option value="postmark">Postmark</option>
             <option value="resend">Resend</option>
             <option value="smtp">Custom SMTP</option>
+          </select>
+        </div>
+      </div>
+
+      {/* WhatsApp Configuration */}
+      <div className="rounded-xl border border-border bg-card p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-semibold text-foreground flex items-center gap-2">
+            <MessageSquare className="h-5 w-5" /> WhatsApp Provider
+          </h2>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={config.whatsapp_enabled}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  whatsapp_enabled: e.target.checked,
+                  whatsapp_provider: e.target.checked ? config.whatsapp_provider : null,
+                })
+              }
+              className="rounded"
+            />
+            <span className="text-foreground">Enabled</span>
+          </label>
+        </div>
+
+        <div>
+          <label className="text-sm font-medium text-foreground">Provider</label>
+          <select
+            value={config.whatsapp_provider || ''}
+            onChange={(e) =>
+              setConfig({
+                ...config,
+                whatsapp_provider: e.target.value || null,
+              })
+            }
+            className="w-full mt-1 px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
+            disabled={!config.whatsapp_enabled}
+          >
+            <option value="">Select Provider</option>
+            {WHATSAPP_PROVIDER_OPTIONS.map((provider) => (
+              <option key={provider.value} value={provider.value}>
+                {provider.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Push Configuration */}
+      <div className="rounded-xl border border-border bg-card p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-semibold text-foreground flex items-center gap-2">
+            <Phone className="h-5 w-5" /> Push Provider
+          </h2>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={config.push_enabled}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  push_enabled: e.target.checked,
+                  push_provider: e.target.checked ? config.push_provider : null,
+                })
+              }
+              className="rounded"
+            />
+            <span className="text-foreground">Enabled</span>
+          </label>
+        </div>
+
+        <div>
+          <label className="text-sm font-medium text-foreground">Provider</label>
+          <select
+            value={config.push_provider || ''}
+            onChange={(e) =>
+              setConfig({
+                ...config,
+                push_provider: e.target.value || null,
+              })
+            }
+            className="w-full mt-1 px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
+            disabled={!config.push_enabled}
+          >
+            <option value="">Select Provider</option>
+            {PUSH_PROVIDER_OPTIONS.map((provider) => (
+              <option key={provider.value} value={provider.value}>
+                {provider.label}
+              </option>
+            ))}
           </select>
         </div>
       </div>

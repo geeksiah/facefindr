@@ -152,8 +152,20 @@ export default function GeoRestrictionPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="h-10 w-10 animate-pulse rounded-xl bg-muted" />
+            <div className="space-y-2">
+              <div className="h-8 w-56 animate-pulse rounded bg-muted" />
+              <div className="h-4 w-72 animate-pulse rounded bg-muted" />
+            </div>
+          </div>
+          <div className="h-10 w-36 animate-pulse rounded-xl bg-muted" />
+        </div>
+        {[0, 1, 2].map((key) => (
+          <div key={key} className="h-56 animate-pulse rounded-xl border border-border bg-card" />
+        ))}
       </div>
     );
   }

@@ -14,6 +14,7 @@ import {
   Image,
   Linking,
   Platform,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -28,9 +29,9 @@ import {
 } from 'lucide-react-native';
 
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { alertMissingPublicAppUrl, buildPublicUrl, getSupportEmail } from '@/lib/runtime-config';
 
-const APP_URL = process.env.EXPO_PUBLIC_APP_URL || 'https://example.com';
-const SUPPORT_EMAIL = process.env.EXPO_PUBLIC_SUPPORT_EMAIL || 'support@example.com';
+const SUPPORT_EMAIL = getSupportEmail();
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const APP_ICON = require('../../assets/logos/app-icon-512.png');
 
@@ -39,22 +40,45 @@ export default function AboutScreen() {
   const insets = useSafeAreaInsets();
 
   const appVersion = Constants.expoConfig?.version || '1.0.0';
+  const termsUrl = buildPublicUrl('/terms');
+  const privacyUrl = buildPublicUrl('/privacy');
+  const supportUrl = buildPublicUrl('/support');
+
+  const openUrl = (url: string | null) => {
+    if (!url) {
+      alertMissingPublicAppUrl();
+      return;
+    }
+    Linking.openURL(url);
+  };
+
+  const openSupportEmail = () => {
+    if (!SUPPORT_EMAIL) {
+      Alert.alert(
+        'Configuration required',
+        'EXPO_PUBLIC_SUPPORT_EMAIL is not set. Please contact support.'
+      );
+      return;
+    }
+
+    Linking.openURL(`mailto:${SUPPORT_EMAIL}`);
+  };
 
   const links = [
     {
       title: 'Terms of Service',
       icon: FileText,
-      onPress: () => Linking.openURL(`${APP_URL}/terms`),
+      onPress: () => openUrl(termsUrl),
     },
     {
       title: 'Privacy Policy',
       icon: Shield,
-      onPress: () => Linking.openURL(`${APP_URL}/privacy`),
+      onPress: () => openUrl(privacyUrl),
     },
     {
       title: 'Contact Support',
       icon: Mail,
-      onPress: () => Linking.openURL(`mailto:${SUPPORT_EMAIL}`),
+      onPress: openSupportEmail,
     },
     {
       title: 'Rate the App',
@@ -64,9 +88,13 @@ export default function AboutScreen() {
         const storeUrl = Platform.select({
           ios: `https://apps.apple.com/app/facefindr`,
           android: `https://play.google.com/store/apps/details?id=com.facefindr.app`,
-          default: APP_URL,
+          default: supportUrl || undefined,
         });
-        Linking.openURL(storeUrl);
+        if (storeUrl) {
+          Linking.openURL(storeUrl);
+        } else {
+          alertMissingPublicAppUrl();
+        }
       },
     },
   ];

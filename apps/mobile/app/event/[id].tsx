@@ -55,6 +55,7 @@ import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 import { formatPrice } from '@/lib/currency';
 import { getThumbnailUrl, getCoverImageUrl, getSignedUrl } from '@/lib/storage-urls';
 import { useRealtimeSubscription } from '@/hooks/use-realtime';
+import { alertMissingPublicAppUrl, buildPublicUrl } from '@/lib/runtime-config';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const PHOTO_SIZE = (SCREEN_WIDTH - spacing.lg * 2 - spacing.sm * 2) / 3;
@@ -832,9 +833,13 @@ export default function EventDetailScreen() {
   };
 
   const handleShare = async () => {
+    const eventUrl = buildPublicUrl(`/e/${event?.publicSlug || id}`);
+    if (!eventUrl) {
+      alertMissingPublicAppUrl();
+      return;
+    }
+
     try {
-      const baseUrl = process.env.EXPO_PUBLIC_APP_URL || 'https://app.example.com';
-      const eventUrl = `${baseUrl}/e/${event?.publicSlug || id}`;
       await Share.share({
         message: `Check out photos from ${event?.name} on FaceFindr!\n${eventUrl}`,
         url: eventUrl,

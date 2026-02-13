@@ -18,16 +18,13 @@ import {
   DollarSign,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
-
-const DROP_IN_UPLOAD_FEE = 2.99;
-const DROP_IN_GIFT_FEE = 4.99;
 
 export default function DropInUploadPage() {
   const router = useRouter();
@@ -40,6 +37,26 @@ export default function DropInUploadPage() {
   const [locationName, setLocationName] = useState('');
   const [uploading, setUploading] = useState(false);
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
+  const [uploadFee, setUploadFee] = useState<number | null>(null);
+  const [giftFee, setGiftFee] = useState<number | null>(null);
+  const [currency, setCurrency] = useState('USD');
+
+  useEffect(() => {
+    const loadPricing = async () => {
+      const response = await fetch('/api/runtime/drop-in/pricing', { cache: 'no-store' });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Pricing unavailable');
+      }
+      setUploadFee(Number(data.uploadFee));
+      setGiftFee(Number(data.giftFee));
+      setCurrency(String(data.currency || 'USD'));
+    };
+
+    void loadPricing().catch((error: Error) => {
+      toast.error('Pricing unavailable', error.message);
+    });
+  }, [toast]);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const selectedFile = acceptedFiles[0];
@@ -111,9 +128,9 @@ export default function DropInUploadPage() {
     }
   };
 
-  const totalCost = includeGift 
-    ? DROP_IN_UPLOAD_FEE + DROP_IN_GIFT_FEE 
-    : DROP_IN_UPLOAD_FEE;
+  const effectiveUploadFee = uploadFee ?? 0;
+  const effectiveGiftFee = giftFee ?? 0;
+  const totalCost = includeGift ? effectiveUploadFee + effectiveGiftFee : effectiveUploadFee;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -239,18 +256,18 @@ export default function DropInUploadPage() {
         <div className="space-y-2">
           <div className="flex justify-between text-sm">
             <span className="text-secondary">Upload Fee</span>
-            <span className="text-foreground">${DROP_IN_UPLOAD_FEE.toFixed(2)}</span>
+            <span className="text-foreground">{currency} {effectiveUploadFee.toFixed(2)}</span>
           </div>
           {includeGift && (
             <div className="flex justify-between text-sm">
               <span className="text-secondary">Gift Access + Message</span>
-              <span className="text-foreground">${DROP_IN_GIFT_FEE.toFixed(2)}</span>
+              <span className="text-foreground">{currency} {effectiveGiftFee.toFixed(2)}</span>
             </div>
           )}
           <div className="border-t border-border pt-2 mt-2">
             <div className="flex justify-between font-semibold">
               <span className="text-foreground">Total</span>
-              <span className="text-accent">${totalCost.toFixed(2)}</span>
+              <span className="text-accent">{currency} {totalCost.toFixed(2)}</span>
             </div>
           </div>
         </div>
@@ -266,10 +283,10 @@ export default function DropInUploadPage() {
             </p>
             <ul className="list-disc list-inside space-y-1 ml-2">
               <li>Upload a photo of someone (they don't need to be in your contacts)</li>
-              <li>Pay ${DROP_IN_UPLOAD_FEE} to make it discoverable by premium users</li>
+              <li>Pay {currency} {effectiveUploadFee.toFixed(2)} to make it discoverable by premium users</li>
               {includeGift && (
                 <li>
-                  Pay an additional ${DROP_IN_GIFT_FEE} to cover their access fee and unlock your message
+                  Pay an additional {currency} {effectiveGiftFee.toFixed(2)} to cover their access fee and unlock your message
                 </li>
               )}
               <li>We'll use face recognition to find them and send a notification</li>
@@ -290,7 +307,7 @@ export default function DropInUploadPage() {
         </Button>
         <Button
           onClick={handleUpload}
-          disabled={!file || uploading}
+          disabled={!file || uploading || uploadFee === null || giftFee === null}
           className="flex-1"
         >
           {uploading ? (
@@ -300,7 +317,7 @@ export default function DropInUploadPage() {
             </>
           ) : (
             <>
-              Continue to Payment (${totalCost.toFixed(2)})
+              Continue to Payment ({currency} {totalCost.toFixed(2)})
             </>
           )}
         </Button>

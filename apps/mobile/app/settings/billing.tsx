@@ -38,7 +38,7 @@ import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 
-const APP_URL = process.env.EXPO_PUBLIC_APP_URL || 'https://example.com';
+const APP_URL = process.env.EXPO_PUBLIC_APP_URL || '';
 
 interface WalletData {
   balance: number;
@@ -158,31 +158,21 @@ export default function BillingScreen() {
       return;
     }
 
-    Alert.alert(
-      'Request Payout',
-      'For security, payouts are managed through the web dashboard.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Open Web Dashboard', 
-          onPress: () => Linking.openURL(`${APP_URL}/dashboard/billing`)
-        },
-      ]
-    );
+    if (!APP_URL) {
+      Alert.alert('Configuration required', 'EXPO_PUBLIC_APP_URL is not set.');
+      return;
+    }
+
+    Linking.openURL(`${APP_URL}/dashboard/billing`);
   };
 
   const handleManagePaymentMethods = () => {
-    Alert.alert(
-      'Payment Methods',
-      'Payment methods can be managed through the web dashboard.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Open Web Dashboard', 
-          onPress: () => Linking.openURL(`${APP_URL}/dashboard/billing`)
-        },
-      ]
-    );
+    if (!APP_URL) {
+      Alert.alert('Configuration required', 'EXPO_PUBLIC_APP_URL is not set.');
+      return;
+    }
+
+    Linking.openURL(`${APP_URL}/dashboard/billing`);
   };
 
   const formatCurrency = (amount: number) => {
@@ -316,7 +306,13 @@ export default function BillingScreen() {
             styles.webDashboardCard,
             pressed && styles.pressed,
           ]}
-          onPress={() => Linking.openURL(`${APP_URL}/dashboard/billing`)}
+          onPress={() => {
+            if (!APP_URL) {
+              Alert.alert('Configuration required', 'EXPO_PUBLIC_APP_URL is not set.');
+              return;
+            }
+            Linking.openURL(`${APP_URL}/dashboard/billing`);
+          }}
         >
           <View style={styles.webDashboardIcon}>
             <ExternalLink size={18} color="#8b5cf6" />

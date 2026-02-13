@@ -364,6 +364,7 @@ function AddPaymentMethodModal({ onClose, onAdd, initialType }: AddPaymentMethod
   const [isVerifying, setIsVerifying] = useState(false);
   const [verifiedName, setVerifiedName] = useState<string | null>(null);
   const [verificationError, setVerificationError] = useState<string | null>(null);
+  const [providerLoadError, setProviderLoadError] = useState<string | null>(null);
 
   // Check if form has data
   const hasUnsavedData = step === 'form' && (phoneNumber.length > 0 || selectedProvider || verifiedName);
@@ -402,52 +403,23 @@ function AddPaymentMethodModal({ onClose, onAdd, initialType }: AddPaymentMethod
   useEffect(() => {
     if (type === 'mobile_money') {
       setLoadingProviders(true);
+      setProviderLoadError(null);
       fetch(`/api/payment-methods?type=providers&country=${selectedCountry}`)
         .then(res => res.json())
         .then(data => {
           const fetchedProviders = data.providers || [];
-          // If no providers from DB, use fallback
+          setProviders(fetchedProviders);
           if (fetchedProviders.length === 0) {
-            setProviders(getFallbackProviders(selectedCountry));
-          } else {
-            setProviders(fetchedProviders);
+            setProviderLoadError('No admin-configured providers available for this country.');
           }
         })
         .catch(() => {
-          setProviders(getFallbackProviders(selectedCountry));
+          setProviders([]);
+          setProviderLoadError('Failed to load providers. Try again in a moment.');
         })
         .finally(() => setLoadingProviders(false));
     }
   }, [type, selectedCountry]);
-
-  // Fallback providers if database isn't set up yet
-  function getFallbackProviders(country: string): MobileMoneyProvider[] {
-    const fallbackMap: Record<string, MobileMoneyProvider[]> = {
-      GH: [
-        { providerCode: 'mtn_gh', providerName: 'MTN Mobile Money', countryCode: 'GH', supportsNameVerification: true },
-        { providerCode: 'vodafone_gh', providerName: 'Vodafone Cash', countryCode: 'GH', supportsNameVerification: true },
-        { providerCode: 'airteltigo_gh', providerName: 'AirtelTigo Money', countryCode: 'GH', supportsNameVerification: true },
-      ],
-      NG: [
-        { providerCode: 'opay_ng', providerName: 'OPay', countryCode: 'NG', supportsNameVerification: false },
-        { providerCode: 'palmpay_ng', providerName: 'PalmPay', countryCode: 'NG', supportsNameVerification: false },
-        { providerCode: 'paga_ng', providerName: 'Paga', countryCode: 'NG', supportsNameVerification: false },
-      ],
-      KE: [
-        { providerCode: 'mpesa_ke', providerName: 'M-Pesa', countryCode: 'KE', supportsNameVerification: true },
-        { providerCode: 'airtel_ke', providerName: 'Airtel Money', countryCode: 'KE', supportsNameVerification: false },
-      ],
-      UG: [
-        { providerCode: 'mtn_ug', providerName: 'MTN Mobile Money', countryCode: 'UG', supportsNameVerification: true },
-        { providerCode: 'airtel_ug', providerName: 'Airtel Money', countryCode: 'UG', supportsNameVerification: false },
-      ],
-      TZ: [
-        { providerCode: 'mpesa_tz', providerName: 'M-Pesa', countryCode: 'TZ', supportsNameVerification: true },
-        { providerCode: 'tigopesa_tz', providerName: 'Tigo Pesa', countryCode: 'TZ', supportsNameVerification: false },
-      ],
-    };
-    return fallbackMap[country] || [];
-  }
 
   const handleSelectType = (selectedType: 'card' | 'mobile_money' | 'paypal') => {
     setType(selectedType);
@@ -700,9 +672,7 @@ function AddPaymentMethodModal({ onClose, onAdd, initialType }: AddPaymentMethod
                       )}
                     </div>
                     {providers.length === 0 && !loadingProviders && (
-                      <p className="text-sm text-secondary mt-2">
-                        No providers available for this country yet.
-                      </p>
+                      <p className="text-sm text-secondary mt-2">{providerLoadError || 'No providers available for this country yet.'}</p>
                     )}
                   </div>
 

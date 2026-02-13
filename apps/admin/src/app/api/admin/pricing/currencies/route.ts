@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getAdminSession } from '@/lib/auth';
+import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
+import { bumpRuntimeConfigVersion } from '@/lib/runtime-config-version';
 import { supabaseAdmin } from '@/lib/supabase';
 
 // GET - List all currencies
@@ -33,6 +34,9 @@ export async function PUT(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    if (!(await hasPermission('settings.update'))) {
+      return NextResponse.json({ error: 'Permission denied' }, { status: 403 });
+    }
 
     const body = await request.json();
     const { currencies } = body;
@@ -54,6 +58,10 @@ export async function PUT(request: NextRequest) {
 
       if (error) throw error;
     }
+    await logAction('currencies_update', 'supported_currencies', undefined, {
+      updated_count: Array.isArray(currencies) ? currencies.length : 0,
+    });
+    await bumpRuntimeConfigVersion('pricing', session.adminId);
 
     return NextResponse.json({ success: true });
   } catch (error) {

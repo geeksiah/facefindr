@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRealtimeSubscription } from '@/hooks/use-realtime';
 import { useRouter } from 'next/navigation';
-import { Calendar, ArrowRight, Loader2 } from 'lucide-react';
+import { Calendar, ArrowRight } from 'lucide-react';
 import Link from 'next/link';
 
 import { Button } from '@/components/ui/button';
@@ -103,8 +103,19 @@ export default function UploadPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <Loader2 className="h-8 w-8 animate-spin text-accent" />
+      <div className="space-y-6">
+        <div className="space-y-2">
+          <div className="h-8 w-44 animate-pulse rounded bg-muted" />
+          <div className="h-4 w-64 animate-pulse rounded bg-muted" />
+        </div>
+        <div className="space-y-4">
+          <div className="h-6 w-36 animate-pulse rounded bg-muted" />
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {[0, 1, 2, 3, 4, 5].map((key) => (
+              <div key={key} className="h-24 animate-pulse rounded-xl border border-border bg-card" />
+            ))}
+          </div>
+        </div>
       </div>
     );
   }

@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   Linking,
   StatusBar,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -25,6 +26,7 @@ import {
 } from 'lucide-react-native';
 
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { alertMissingPublicAppUrl, buildPublicUrl, getSupportEmail } from '@/lib/runtime-config';
 
 export default function HelpScreen() {
   const router = useRouter();
@@ -49,21 +51,43 @@ export default function HelpScreen() {
     },
   ];
 
-  const baseUrl = process.env.EXPO_PUBLIC_APP_URL || 'https://app.example.com';
-  const supportEmail = process.env.EXPO_PUBLIC_SUPPORT_EMAIL || 'support@example.com';
+  const supportEmail = getSupportEmail();
+  const supportUrl = buildPublicUrl('/support');
+  const termsUrl = buildPublicUrl('/terms');
+  const privacyUrl = buildPublicUrl('/privacy');
+
+  const openUrl = (url: string | null) => {
+    if (!url) {
+      alertMissingPublicAppUrl();
+      return;
+    }
+    Linking.openURL(url);
+  };
+
+  const openSupportEmail = () => {
+    if (!supportEmail) {
+      Alert.alert(
+        'Configuration required',
+        'EXPO_PUBLIC_SUPPORT_EMAIL is not set. Please contact support.'
+      );
+      return;
+    }
+
+    Linking.openURL(`mailto:${supportEmail}`);
+  };
 
   const contactOptions = [
     {
       icon: Mail,
       title: 'Email Support',
-      description: supportEmail,
-      onPress: () => Linking.openURL(`mailto:${supportEmail}`),
+      description: supportEmail || 'Support email not configured',
+      onPress: openSupportEmail,
     },
     {
       icon: MessageCircle,
       title: 'Live Chat',
       description: 'Chat with our support team',
-      onPress: () => Linking.openURL(`${baseUrl}/support`),
+      onPress: () => openUrl(supportUrl),
     },
   ];
 
@@ -71,12 +95,12 @@ export default function HelpScreen() {
     {
       icon: FileText,
       title: 'Terms of Service',
-      onPress: () => Linking.openURL(`${baseUrl}/terms`),
+      onPress: () => openUrl(termsUrl),
     },
     {
       icon: Shield,
       title: 'Privacy Policy',
-      onPress: () => Linking.openURL(`${baseUrl}/privacy`),
+      onPress: () => openUrl(privacyUrl),
     },
   ];
 

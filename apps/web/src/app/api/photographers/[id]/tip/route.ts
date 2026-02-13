@@ -16,7 +16,7 @@ import {
   initializePayment,
   isFlutterwaveConfigured,
 } from '@/lib/payments/flutterwave';
-import { selectPaymentGateway } from '@/lib/payments/gateway-selector';
+import { GatewaySelectionError, selectPaymentGateway } from '@/lib/payments/gateway-selector';
 import {
   createOrder,
   getApprovalUrl,
@@ -26,7 +26,7 @@ import {
   createCheckoutSession,
   isStripeConfigured,
 } from '@/lib/payments/stripe';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 
 // POST - Create tip payment
@@ -37,10 +37,18 @@ export async function POST(
   try {
     const { id: photographerId } = params;
     const supabase = createClient();
+    const serviceClient = createServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    if (photographerId === user.id) {
+      return NextResponse.json(
+        { error: 'You cannot tip your own profile' },
+        { status: 400 }
+      );
     }
 
     const body = await request.json();
@@ -96,12 +104,28 @@ export async function POST(
       eventCurrency;
 
     // Select payment gateway based on user preference, country, and availability
-    const gatewaySelection = await selectPaymentGateway({
-      userId: user.id,
-      photographerId: photographerId,
-      currency: transactionCurrency,
-      countryCode: eventCountryCode || photographer.country_code || undefined,
-    });
+    let gatewaySelection;
+    try {
+      gatewaySelection = await selectPaymentGateway({
+        userId: user.id,
+        photographerId: photographerId,
+        currency: transactionCurrency,
+        countryCode: eventCountryCode || photographer.country_code || undefined,
+        productType: 'tip',
+      });
+    } catch (gatewayError) {
+      if (gatewayError instanceof GatewaySelectionError) {
+        return NextResponse.json(
+          {
+            error: gatewayError.message,
+            failClosed: gatewayError.failClosed,
+            code: gatewayError.code,
+          },
+          { status: 503 }
+        );
+      }
+      throw gatewayError;
+    }
 
     // Use selected gateway (or override with provided provider if valid)
     const selectedProvider = provider && gatewaySelection.availableGateways.includes(provider as any)
@@ -168,6 +192,26 @@ export async function POST(
     if (tipError) {
       throw tipError;
     }
+
+    await serviceClient.from('audit_logs').insert({
+      actor_type: 'attendee',
+      actor_id: user.id,
+      action: 'tip_created',
+      resource_type: 'tip',
+      resource_id: tip.id,
+      metadata: {
+        to_photographer_id: photographerId,
+        amount,
+        currency: transactionCurrency,
+        event_id: eventId || null,
+        media_id: mediaId || null,
+        is_anonymous: isAnonymous,
+      },
+      ip_address:
+        request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+        request.headers.get('x-real-ip') ||
+        null,
+    }).catch(() => {});
 
     // Calculate fees using centralized calculator (10% platform fee for tips)
     // Note: For tips, we always use 10% platform fee regardless of photographer plan

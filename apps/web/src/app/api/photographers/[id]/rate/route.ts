@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 export async function POST(
   request: NextRequest,
@@ -24,6 +24,13 @@ export async function POST(
 
     const { id: photographerId } = params;
     const body = await request.json();
+
+    if (photographerId === user.id) {
+      return NextResponse.json(
+        { error: 'You cannot rate your own profile' },
+        { status: 400 }
+      );
+    }
 
     // Validate rating
     const rating = parseInt(body.rating);
@@ -48,22 +55,23 @@ export async function POST(
       );
     }
 
+    const serviceClient = createServiceClient();
+    const { data: photographerEvents } = await serviceClient
+      .from('events')
+      .select('id')
+      .eq('photographer_id', photographerId);
+    const eventIds = (photographerEvents || []).map((event: any) => event.id);
+
     // Check if attendee has purchased/downloaded photos from this photographer (for verified rating)
-    const { count: purchaseCount } = await supabase
-      .from('entitlements')
-      .select('id', { count: 'exact', head: true })
-      .eq('attendee_id', user.id)
-      .in('media_id', 
-        supabase
-          .from('media')
-          .select('id')
-          .in('event_id',
-            supabase
-              .from('events')
-              .select('id')
-              .eq('photographer_id', photographerId)
-          )
-      );
+    let purchaseCount = 0;
+    if (eventIds.length > 0) {
+      const purchaseResult = await supabase
+        .from('entitlements')
+        .select('id', { count: 'exact', head: true })
+        .eq('attendee_id', user.id)
+        .in('event_id', eventIds);
+      purchaseCount = purchaseResult.count || 0;
+    }
 
     const isVerified = (purchaseCount || 0) > 0;
 
@@ -90,6 +98,23 @@ export async function POST(
 
     // Refresh rating stats
     await supabase.rpc('refresh_photographer_rating_stats').catch(() => {});
+
+    await serviceClient.from('audit_logs').insert({
+      actor_type: 'attendee',
+      actor_id: user.id,
+      action: 'photographer_rating_upsert',
+      resource_type: 'photographer_rating',
+      resource_id: ratingData.id,
+      metadata: {
+        photographer_id: photographerId,
+        rating,
+        is_verified: isVerified,
+      },
+      ip_address:
+        request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+        request.headers.get('x-real-ip') ||
+        null,
+    }).catch(() => {});
 
     return NextResponse.json({ rating: ratingData });
 

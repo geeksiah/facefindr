@@ -32,6 +32,7 @@ import { Button, Card } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { alertMissingPublicAppUrl, buildPublicUrl } from '@/lib/runtime-config';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
 
@@ -120,9 +121,13 @@ export default function UserProfileScreen() {
   };
 
   const handleShare = async () => {
+    const profileUrl = buildPublicUrl(`/u/${user?.faceTag?.replace('@', '') || user?.id}`);
+    if (!profileUrl) {
+      alertMissingPublicAppUrl();
+      return;
+    }
+
     try {
-      const baseUrl = process.env.EXPO_PUBLIC_APP_URL || 'https://app.example.com';
-      const profileUrl = `${baseUrl}/u/${user?.faceTag?.replace('@', '') || user?.id}`;
       await Share.share({
         message: `Check out ${user?.displayName}'s profile on FaceFindr!\n${profileUrl}`,
         url: profileUrl,

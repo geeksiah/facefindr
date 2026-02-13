@@ -8,6 +8,7 @@
  */
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { useSSEWithPolling } from '@/hooks/use-sse-fallback';
 
 // ============================================
 // TYPES
@@ -78,37 +79,52 @@ export function CurrencyProvider({ children }: CurrencyProviderProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [detectedCountry, setDetectedCountry] = useState<string | null>(null);
   const [detectedCurrency, setDetectedCurrency] = useState<string | null>(null);
+  const [runtimeVersion, setRuntimeVersion] = useState(0);
+
+  const loadCurrencies = useCallback(async () => {
+    try {
+      const response = await fetch('/api/currency');
+      if (!response.ok) throw new Error('Failed to load currencies');
+
+      const data = await response.json();
+
+      setCurrencies(data.currencies || []);
+      setDetectedCountry(data.detectedCountry);
+      setDetectedCurrency(data.detectedCurrency);
+
+      const effectiveCode = data.effectiveCurrency || 'USD';
+      setCurrencyCode(effectiveCode);
+
+      const currencyObj = data.currencies?.find(
+        (c: Currency) => c.code === effectiveCode
+      ) || DEFAULT_CURRENCY;
+      setCurrencyObj(currencyObj);
+    } catch (error) {
+      console.error('Failed to load currencies:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   // Load currencies and user preference
   useEffect(() => {
-    async function loadCurrencies() {
-      try {
-        const response = await fetch('/api/currency');
-        if (!response.ok) throw new Error('Failed to load currencies');
-        
-        const data = await response.json();
-        
-        setCurrencies(data.currencies || []);
-        setDetectedCountry(data.detectedCountry);
-        setDetectedCurrency(data.detectedCurrency);
-        
-        const effectiveCode = data.effectiveCurrency || 'USD';
-        setCurrencyCode(effectiveCode);
-        
-        const currencyObj = data.currencies?.find(
-          (c: Currency) => c.code === effectiveCode
-        ) || DEFAULT_CURRENCY;
-        setCurrencyObj(currencyObj);
-        
-      } catch (error) {
-        console.error('Failed to load currencies:', error);
-      } finally {
-        setIsLoading(false);
+    void loadCurrencies();
+  }, [loadCurrencies]);
+
+  useSSEWithPolling<{ version?: string }>({
+    url: '/api/stream/runtime-config',
+    eventName: 'runtime-config',
+    onPoll: loadCurrencies,
+    pollIntervalMs: 30000,
+    heartbeatTimeoutMs: 45000,
+    onMessage: (payload) => {
+      const version = Number(payload.version || 0);
+      if (!version || version > runtimeVersion) {
+        setRuntimeVersion(version || Date.now());
+        void loadCurrencies();
       }
-    }
-    
-    loadCurrencies();
-  }, []);
+    },
+  });
 
   // Set currency preference
   const setCurrency = useCallback(async (code: string) => {

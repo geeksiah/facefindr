@@ -1,7 +1,6 @@
 /**
- * Currency utilities for mobile app
- * 
- * Handles currency formatting and display.
+ * Currency utilities for mobile app.
+ * Uses Intl for formatting and requires explicit rates for conversion.
  */
 
 export interface Currency {
@@ -11,129 +10,106 @@ export interface Currency {
   locale: string;
 }
 
-export const SUPPORTED_CURRENCIES: Currency[] = [
-  { code: 'USD', name: 'US Dollar', symbol: '$', locale: 'en-US' },
-  { code: 'EUR', name: 'Euro', symbol: '€', locale: 'de-DE' },
-  { code: 'GBP', name: 'British Pound', symbol: '£', locale: 'en-GB' },
-  { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', locale: 'en-NG' },
-  { code: 'GHS', name: 'Ghanaian Cedi', symbol: '₵', locale: 'en-GH' },
-  { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', locale: 'en-KE' },
-  { code: 'ZAR', name: 'South African Rand', symbol: 'R', locale: 'en-ZA' },
-  { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$', locale: 'en-CA' },
-  { code: 'AUD', name: 'Australian Dollar', symbol: 'A$', locale: 'en-AU' },
-  { code: 'INR', name: 'Indian Rupee', symbol: '₹', locale: 'en-IN' },
-  { code: 'JPY', name: 'Japanese Yen', symbol: '¥', locale: 'ja-JP' },
-  { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', locale: 'zh-CN' },
-  { code: 'BRL', name: 'Brazilian Real', symbol: 'R$', locale: 'pt-BR' },
-  { code: 'MXN', name: 'Mexican Peso', symbol: '$', locale: 'es-MX' },
-  { code: 'CHF', name: 'Swiss Franc', symbol: 'CHF', locale: 'de-CH' },
-  { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', locale: 'ar-AE' },
-];
+const CURRENCY_NAMES: Record<string, string> = {
+  USD: 'US Dollar',
+  EUR: 'Euro',
+  GBP: 'British Pound',
+  NGN: 'Nigerian Naira',
+  GHS: 'Ghanaian Cedi',
+  KES: 'Kenyan Shilling',
+  ZAR: 'South African Rand',
+  CAD: 'Canadian Dollar',
+  AUD: 'Australian Dollar',
+  INR: 'Indian Rupee',
+  JPY: 'Japanese Yen',
+  CNY: 'Chinese Yuan',
+  BRL: 'Brazilian Real',
+  MXN: 'Mexican Peso',
+  CHF: 'Swiss Franc',
+  AED: 'UAE Dirham',
+};
 
-/**
- * Get currency info by code
- */
-export function getCurrency(code: string): Currency | undefined {
-  return SUPPORTED_CURRENCIES.find(c => c.code === code);
+const DEFAULT_LOCALE = 'en-US';
+
+function detectSymbol(code: string, locale = DEFAULT_LOCALE): string {
+  try {
+    const parts = new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: code,
+      currencyDisplay: 'symbol',
+    }).formatToParts(1);
+    const currencyPart = parts.find((part) => part.type === 'currency');
+    return currencyPart?.value || code;
+  } catch {
+    return code;
+  }
 }
 
-/**
- * Get currency symbol by code
- */
+export function getCurrency(code: string): Currency {
+  const normalized = (code || 'USD').toUpperCase();
+  return {
+    code: normalized,
+    name: CURRENCY_NAMES[normalized] || normalized,
+    symbol: detectSymbol(normalized),
+    locale: DEFAULT_LOCALE,
+  };
+}
+
 export function getCurrencySymbol(code: string): string {
-  const currency = getCurrency(code);
-  return currency?.symbol || code;
+  return getCurrency(code).symbol;
 }
 
-/**
- * Format amount with currency
- */
 export function formatCurrency(
   amount: number,
-  currencyCode: string = 'USD',
+  currencyCode = 'USD',
   options: {
     showSymbol?: boolean;
     compact?: boolean;
     decimals?: number;
+    locale?: string;
   } = {}
 ): string {
-  const { showSymbol = true, compact = false, decimals } = options;
-  const currency = getCurrency(currencyCode);
-  
-  if (!currency) {
-    return `${currencyCode} ${amount.toFixed(2)}`;
-  }
+  const { showSymbol = true, compact = false, decimals, locale = DEFAULT_LOCALE } = options;
+  const normalized = (currencyCode || 'USD').toUpperCase();
 
   try {
-    const formatter = new Intl.NumberFormat(currency.locale, {
+    return new Intl.NumberFormat(locale, {
       style: showSymbol ? 'currency' : 'decimal',
-      currency: currencyCode,
+      currency: normalized,
       minimumFractionDigits: decimals ?? (compact ? 0 : 2),
       maximumFractionDigits: decimals ?? (compact ? 0 : 2),
       notation: compact && amount >= 1000 ? 'compact' : 'standard',
-    });
-
-    return formatter.format(amount);
+    }).format(amount);
   } catch {
-    // Fallback for unsupported locales
     const formatted = amount.toFixed(decimals ?? 2);
-    return showSymbol ? `${currency.symbol}${formatted}` : formatted;
+    return showSymbol ? `${normalized} ${formatted}` : formatted;
   }
 }
 
-/**
- * Format price for display (shorthand)
- */
-export function formatPrice(
-  amount: number,
-  currencyCode: string = 'USD'
-): string {
+export function formatPrice(amount: number, currencyCode = 'USD'): string {
   return formatCurrency(amount, currencyCode, { showSymbol: true });
 }
 
-/**
- * Format compact price (e.g., $1.2K)
- */
-export function formatCompactPrice(
-  amount: number,
-  currencyCode: string = 'USD'
-): string {
+export function formatCompactPrice(amount: number, currencyCode = 'USD'): string {
   return formatCurrency(amount, currencyCode, { showSymbol: true, compact: true });
 }
 
-/**
- * Convert between currencies (simplified - would need real exchange rates)
- * This is a placeholder for when you integrate a real exchange rate API
- */
 export function convertCurrency(
   amount: number,
   fromCurrency: string,
-  toCurrency: string
+  toCurrency: string,
+  rates: Record<string, number>
 ): number {
-  // Placeholder exchange rates (would be fetched from API in production)
-  const rates: Record<string, number> = {
-    USD: 1,
-    EUR: 0.92,
-    GBP: 0.79,
-    NGN: 1550,
-    GHS: 15.5,
-    KES: 153,
-    ZAR: 18.5,
-    CAD: 1.36,
-    AUD: 1.53,
-    INR: 83,
-    JPY: 149,
-    CNY: 7.24,
-    BRL: 4.97,
-    MXN: 17.1,
-    CHF: 0.88,
-    AED: 3.67,
-  };
+  const from = (fromCurrency || '').toUpperCase();
+  const to = (toCurrency || '').toUpperCase();
+  const fromRate = rates[from];
+  const toRate = rates[to];
 
-  const fromRate = rates[fromCurrency] || 1;
-  const toRate = rates[toCurrency] || 1;
+  if (!fromRate || !toRate) {
+    throw new Error(`Missing exchange rate for ${from} or ${to}`);
+  }
 
-  // Convert to USD first, then to target currency
   const usdAmount = amount / fromRate;
   return usdAmount * toRate;
 }
+

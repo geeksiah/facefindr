@@ -42,8 +42,8 @@ import {
 
 import { useAuthStore } from '@/stores/auth-store';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { alertMissingPublicAppUrl, buildPublicUrl } from '@/lib/runtime-config';
 
-const APP_URL = process.env.EXPO_PUBLIC_APP_URL || 'https://example.com';
 const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
 
 export default function ProfileScreen() {
@@ -69,7 +69,7 @@ export default function ProfileScreen() {
     loadFollowingCount();
   }, []);
 
-  const profileUrl = `${APP_URL}/u/${profile?.faceTag?.replace('@', '')}`;
+  const profileUrl = buildPublicUrl(`/u/${profile?.faceTag?.replace('@', '')}`);
 
   const handleCopyFaceTag = async () => {
     if (profile?.faceTag) {
@@ -80,6 +80,11 @@ export default function ProfileScreen() {
   };
 
   const handleShare = async () => {
+    if (!profileUrl) {
+      alertMissingPublicAppUrl();
+      return;
+    }
+
     try {
       await Share.share({
         message: `Connect with me on FaceFindr!\n\nMy FaceTag: ${profile?.faceTag}\n${profileUrl}`,

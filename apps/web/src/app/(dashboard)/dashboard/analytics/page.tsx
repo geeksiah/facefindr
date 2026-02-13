@@ -13,7 +13,6 @@ import {
   Monitor,
   Tablet,
   ShoppingCart,
-  Loader2,
   RefreshCw,
   FileDown,
   FileText,
@@ -231,8 +230,26 @@ export default function AnalyticsPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <Loader2 className="h-8 w-8 animate-spin text-accent" />
+      <div className="space-y-8">
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <div className="h-8 w-40 animate-pulse rounded bg-muted" />
+            <div className="h-4 w-72 animate-pulse rounded bg-muted" />
+          </div>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((key) => (
+            <div key={key} className="h-36 animate-pulse rounded-2xl border border-border bg-card" />
+          ))}
+        </div>
+        <div className="grid gap-6 lg:grid-cols-3">
+          <div className="h-80 animate-pulse rounded-2xl border border-border bg-card lg:col-span-2" />
+          <div className="h-80 animate-pulse rounded-2xl border border-border bg-card" />
+        </div>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <div className="h-80 animate-pulse rounded-2xl border border-border bg-card" />
+          <div className="h-80 animate-pulse rounded-2xl border border-border bg-card" />
+        </div>
       </div>
     );
   }

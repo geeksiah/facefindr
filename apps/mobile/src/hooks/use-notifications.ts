@@ -8,6 +8,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
+import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 
 import { supabase } from '@/lib/supabase';
@@ -85,9 +86,19 @@ export function useNotifications() {
       return null;
     }
 
+    const projectId =
+      process.env.EXPO_PUBLIC_EAS_PROJECT_ID ||
+      Constants.expoConfig?.extra?.eas?.projectId ||
+      undefined;
+
+    if (!projectId) {
+      console.warn('Missing EAS project ID for push notifications. Set EXPO_PUBLIC_EAS_PROJECT_ID.');
+      return null;
+    }
+
     // Get Expo push token
     const token = await Notifications.getExpoPushTokenAsync({
-      projectId: 'your-project-id', // Replace with your EAS project ID
+      projectId,
     });
 
     // Configure Android channel

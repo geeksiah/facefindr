@@ -10,7 +10,7 @@ import {
   initializePayment,
   isFlutterwaveConfigured,
 } from '@/lib/payments/flutterwave';
-import { selectPaymentGateway } from '@/lib/payments/gateway-selector';
+import { GatewaySelectionError, selectPaymentGateway } from '@/lib/payments/gateway-selector';
 import {
   createOrder,
   getApprovalUrl,
@@ -151,12 +151,28 @@ export async function POST(request: NextRequest) {
     const transactionCurrency = currency || await getEffectiveCurrency(user?.id, event.country_code || undefined) || eventCurrency;
 
     // Select payment gateway based on user preference, country, and availability
-    const gatewaySelection = await selectPaymentGateway({
-      userId: user?.id || '',
-      photographerId: event.photographer_id,
-      currency: transactionCurrency,
-      countryCode: event.country_code || undefined,
-    });
+    let gatewaySelection;
+    try {
+      gatewaySelection = await selectPaymentGateway({
+        userId: user?.id || '',
+        photographerId: event.photographer_id,
+        currency: transactionCurrency,
+        countryCode: event.country_code || undefined,
+        productType: 'event_checkout',
+      });
+    } catch (gatewayError) {
+      if (gatewayError instanceof GatewaySelectionError) {
+        return NextResponse.json(
+          {
+            error: gatewayError.message,
+            failClosed: gatewayError.failClosed,
+            code: gatewayError.code,
+          },
+          { status: 503 }
+        );
+      }
+      throw gatewayError;
+    }
 
     // Use selected gateway (or override with provided provider if valid)
     const selectedProvider = provider && gatewaySelection.availableGateways.includes(provider as any)

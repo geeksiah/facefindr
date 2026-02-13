@@ -8,9 +8,9 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { selectPaymentGateway } from '@/lib/payments/gateway-selector';
+import { GatewaySelectionError, selectPaymentGateway } from '@/lib/payments/gateway-selector';
 import { stripe } from '@/lib/payments/stripe';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // GET - Get current subscription
 export async function GET(request: NextRequest) {
@@ -65,24 +65,58 @@ export async function POST(request: NextRequest) {
     }
 
     const { planCode } = await request.json();
-
-    if (!planCode || !['premium', 'premium_plus'].includes(planCode)) {
+    if (!planCode || typeof planCode !== 'string') {
       return NextResponse.json({ error: 'Invalid plan code' }, { status: 400 });
     }
 
-    // Pricing (monthly)
-    const pricing = {
-      premium: 499, // $4.99/month
-      premium_plus: 999, // $9.99/month
-    };
+    const serviceClient = createServiceClient();
+    const { data: plan } = await serviceClient
+      .from('subscription_plans')
+      .select('code, name, description, plan_type, is_active, base_price_usd, prices')
+      .eq('code', planCode)
+      .eq('plan_type', 'drop_in')
+      .eq('is_active', true)
+      .single();
+
+    if (!plan) {
+      return NextResponse.json(
+        { error: 'Plan not configured in admin pricing', failClosed: true },
+        { status: 503 }
+      );
+    }
+
+    const planPrices = (plan.prices as Record<string, number> | null) || {};
+    const unitAmount = planPrices.USD ?? plan.base_price_usd ?? 0;
+    if (!unitAmount || unitAmount <= 0) {
+      return NextResponse.json(
+        { error: 'Plan price is not configured', failClosed: true },
+        { status: 503 }
+      );
+    }
 
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
     // Select payment gateway based on user preference
-    const gatewaySelection = await selectPaymentGateway({
-      userId: user.id,
-      currency: 'usd', // Subscription pricing is in USD
-    });
+    let gatewaySelection;
+    try {
+      gatewaySelection = await selectPaymentGateway({
+        userId: user.id,
+        currency: 'usd',
+        productType: 'attendee_subscription',
+      });
+    } catch (gatewayError) {
+      if (gatewayError instanceof GatewaySelectionError) {
+        return NextResponse.json(
+          {
+            error: gatewayError.message,
+            failClosed: gatewayError.failClosed,
+            code: gatewayError.code,
+          },
+          { status: 503 }
+        );
+      }
+      throw gatewayError;
+    }
 
     const selectedGateway = gatewaySelection.gateway;
 
@@ -100,15 +134,13 @@ export async function POST(request: NextRequest) {
             price_data: {
               currency: 'usd',
               product_data: {
-                name: planCode === 'premium' ? 'FaceFindr Premium' : 'FaceFindr Premium Plus',
-                description: planCode === 'premium'
-                  ? 'Discover photos from non-contacts, upload drop-ins, receive all notifications'
-                  : 'All Premium features + social media & web search',
+                name: plan.name || `FaceFindr ${planCode}`,
+                description: plan.description || 'Attendee subscription',
               },
               recurring: {
                 interval: 'month',
               },
-              unit_amount: pricing[planCode as keyof typeof pricing],
+              unit_amount: unitAmount,
             },
             quantity: 1,
           },

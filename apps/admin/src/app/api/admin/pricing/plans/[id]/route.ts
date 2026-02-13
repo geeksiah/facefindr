@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
+import { bumpRuntimeConfigVersion } from '@/lib/runtime-config-version';
 import { supabaseAdmin } from '@/lib/supabase';
 
 // PUT - Update a plan
@@ -75,6 +76,7 @@ export async function PUT(
     if (error) throw error;
 
     await logAction('plan_update', 'subscription_plan', id, { name, code });
+    await bumpRuntimeConfigVersion('plans', session.adminId);
 
     return NextResponse.json({ success: true, plan: data });
   } catch (error) {
@@ -122,6 +124,7 @@ export async function DELETE(
     if (error) throw error;
 
     await logAction('plan_delete', 'subscription_plan', id, {});
+    await bumpRuntimeConfigVersion('plans', session.adminId);
 
     return NextResponse.json({ success: true });
   } catch (error) {

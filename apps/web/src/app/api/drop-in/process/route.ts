@@ -13,7 +13,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { detectFaces } from '@/lib/aws/rekognition';
 import { searchDropInFaces } from '@/lib/aws/rekognition-drop-in';
-import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/server';
 
 export async function POST(request: NextRequest) {
   try {
@@ -196,8 +196,25 @@ export async function POST(request: NextRequest) {
               gift_message_available: dropInPhoto.is_gifted && !!dropInPhoto.gift_message,
             });
 
-          // TODO: Send push notification via notification service
-          // This would trigger a background job to send push/email notifications
+          await supabase
+            .from('notifications')
+            .insert({
+              user_id: attendeeId,
+              channel: 'in_app',
+              template_code: 'drop_in_match',
+              subject: 'New drop-in photo match',
+              body: `${dropInPhoto.uploader_display_name || 'A user'} shared a drop-in photo that matched your FaceTag.`,
+              status: 'delivered',
+              sent_at: new Date().toISOString(),
+              delivered_at: new Date().toISOString(),
+              metadata: {
+                dropInPhotoId,
+                dropInMatchId: matchRecord.id,
+                uploaderId: dropInPhoto.uploader_id,
+                requiresPremium: !areContacts && !dropInPhoto.is_gifted && !isRegisteredForEvents,
+                isGifted: !!dropInPhoto.is_gifted,
+              },
+            });
         }
       }
     }

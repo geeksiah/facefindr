@@ -4,7 +4,7 @@
  * Upload photos of people outside contacts
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -33,9 +33,6 @@ import { Button } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 
-const DROP_IN_UPLOAD_FEE = 2.99;
-const DROP_IN_GIFT_FEE = 4.99;
-
 interface DropInUploadScreenProps {
   noHeader?: boolean;
 }
@@ -50,6 +47,28 @@ export default function DropInUploadScreen({ noHeader = false }: DropInUploadScr
   const [giftMessage, setGiftMessage] = useState('');
   const [locationName, setLocationName] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [uploadFee, setUploadFee] = useState<number | null>(null);
+  const [giftFee, setGiftFee] = useState<number | null>(null);
+  const [currency, setCurrency] = useState('USD');
+
+  useEffect(() => {
+    const loadPricing = async () => {
+      const appUrl = process.env.EXPO_PUBLIC_APP_URL;
+      if (!appUrl) throw new Error('EXPO_PUBLIC_APP_URL is not set');
+
+      const response = await fetch(`${appUrl}/api/runtime/drop-in/pricing`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Pricing unavailable');
+
+      setUploadFee(Number(data.uploadFee));
+      setGiftFee(Number(data.giftFee));
+      setCurrency(String(data.currency || 'USD'));
+    };
+
+    void loadPricing().catch((error: Error) => {
+      Alert.alert('Pricing unavailable', error.message);
+    });
+  }, []);
 
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -153,9 +172,9 @@ export default function DropInUploadScreen({ noHeader = false }: DropInUploadScr
     }
   };
 
-  const totalCost = includeGift 
-    ? DROP_IN_UPLOAD_FEE + DROP_IN_GIFT_FEE 
-    : DROP_IN_UPLOAD_FEE;
+  const effectiveUploadFee = uploadFee ?? 0;
+  const effectiveGiftFee = giftFee ?? 0;
+  const totalCost = includeGift ? effectiveUploadFee + effectiveGiftFee : effectiveUploadFee;
 
   return (
     <View style={styles.container}>
@@ -258,17 +277,17 @@ export default function DropInUploadScreen({ noHeader = false }: DropInUploadScr
           </View>
           <View style={styles.pricingRow}>
             <Text style={styles.pricingLabel}>Upload Fee</Text>
-            <Text style={styles.pricingValue}>${DROP_IN_UPLOAD_FEE.toFixed(2)}</Text>
+            <Text style={styles.pricingValue}>{currency} {effectiveUploadFee.toFixed(2)}</Text>
           </View>
           {includeGift && (
             <View style={styles.pricingRow}>
               <Text style={styles.pricingLabel}>Gift Access + Message</Text>
-              <Text style={styles.pricingValue}>${DROP_IN_GIFT_FEE.toFixed(2)}</Text>
+              <Text style={styles.pricingValue}>{currency} {effectiveGiftFee.toFixed(2)}</Text>
             </View>
           )}
           <View style={[styles.pricingRow, styles.pricingTotal]}>
             <Text style={styles.pricingLabelTotal}>Total</Text>
-            <Text style={styles.pricingValueTotal}>${totalCost.toFixed(2)}</Text>
+            <Text style={styles.pricingValueTotal}>{currency} {totalCost.toFixed(2)}</Text>
           </View>
         </View>
 
@@ -277,8 +296,8 @@ export default function DropInUploadScreen({ noHeader = false }: DropInUploadScr
           <Text style={styles.infoTitle}>How it works:</Text>
           <Text style={styles.infoText}>
             • Upload a photo of someone (they don't need to be in your contacts){'\n'}
-            • Pay ${DROP_IN_UPLOAD_FEE} to make it discoverable{'\n'}
-            {includeGift && `• Pay an additional $${DROP_IN_GIFT_FEE} to cover their access fee and unlock your message\n`}
+            • Pay {currency} {effectiveUploadFee.toFixed(2)} to make it discoverable{'\n'}
+            {includeGift && `• Pay an additional ${currency} ${effectiveGiftFee.toFixed(2)} to cover their access fee and unlock your message\n`}
             • We'll use face recognition to find them{'\n'}
             • If no match is found within 7 days, you'll get a full refund
           </Text>
@@ -289,7 +308,7 @@ export default function DropInUploadScreen({ noHeader = false }: DropInUploadScr
       <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
         <Button
           onPress={handleUpload}
-          disabled={!image || uploading}
+          disabled={!image || uploading || uploadFee === null || giftFee === null}
           fullWidth
         >
           {uploading ? (
@@ -298,7 +317,7 @@ export default function DropInUploadScreen({ noHeader = false }: DropInUploadScr
               Processing...
             </>
           ) : (
-            `Continue to Payment ($${totalCost.toFixed(2)})`
+            `Continue to Payment (${currency} ${totalCost.toFixed(2)})`
           )}
         </Button>
       </View>

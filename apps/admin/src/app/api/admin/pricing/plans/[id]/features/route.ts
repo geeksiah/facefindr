@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
+import { bumpRuntimeConfigVersion } from '@/lib/runtime-config-version';
 import { supabaseAdmin } from '@/lib/supabase';
 
 // GET - Get features for a specific plan
@@ -142,6 +143,7 @@ export async function PUT(
         plan_code: plan.code,
         features_count: assignments.length,
       });
+      await bumpRuntimeConfigVersion('pricing', session.adminId);
     }
 
     return NextResponse.json({ success: true });

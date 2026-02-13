@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
+import { bumpRuntimeConfigVersion } from '@/lib/runtime-config-version';
 import { supabaseAdmin } from '@/lib/supabase';
 
 // GET - List all features
@@ -89,6 +90,7 @@ export async function POST(request: NextRequest) {
     if (error) throw error;
 
     await logAction('feature_create', 'plan_feature', data.id, { code, name });
+    await bumpRuntimeConfigVersion('pricing', session.adminId);
 
     return NextResponse.json({ success: true, feature: data });
   } catch (error) {
