@@ -1,10 +1,10 @@
 import type { Database } from '@facefind/shared/types';
+import { createServerClient } from '@supabase/ssr';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { cookies } from 'next/headers';
 
 
 export function createClient(): any {
-  const { cookies } = require('next/headers') as typeof import('next/headers');
-  const { createServerClient } = require('@supabase/ssr') as typeof import('@supabase/ssr');
   const cookieStore = cookies();
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;

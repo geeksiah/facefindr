@@ -64,6 +64,11 @@ export default function DropInDiscoverPage() {
           router.push('/dashboard/subscription');
           return;
         }
+        if (response.status === 404) {
+          toast.error('Profile not eligible', 'Drop-in discover is for attendee profiles. Redirecting to uploader.');
+          router.push('/dashboard/drop-in/upload');
+          return;
+        }
         throw new Error(data.error || 'Failed to load photos');
       }
 

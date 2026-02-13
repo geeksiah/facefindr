@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 
 import { getAppUrl } from '@/lib/env';
+import { getProductPricing } from '@/lib/prints/print-service';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
@@ -69,8 +70,40 @@ export async function POST(request: NextRequest) {
 
     const serviceClient = createServiceClient();
 
+    for (const item of items) {
+      if (!item.productId || !item.mediaId || !item.quantity || item.quantity < 1 || item.quantity > 20) {
+        return NextResponse.json({ error: 'Invalid order item payload' }, { status: 400 });
+      }
+    }
+
+    // Resolve authoritative pricing server-side (fail closed on mismatch/missing config)
+    const pricingCountry = String(shipping.country || '').toUpperCase();
+    const normalizedItems: OrderItem[] = [];
+    for (const item of items) {
+      const pricing = await getProductPricing(item.productId, pricingCountry);
+      if (!pricing || pricing.basePrice <= 0) {
+        return NextResponse.json(
+          { error: `Product pricing is not configured for ${item.productName || item.productId}` },
+          { status: 503 }
+        );
+      }
+
+      // Prevent client-side price tampering.
+      if (Number(item.unitPrice) !== Number(pricing.basePrice)) {
+        return NextResponse.json(
+          { error: `Price changed for ${item.productName || item.productId}. Please refresh and try again.` },
+          { status: 409 }
+        );
+      }
+
+      normalizedItems.push({
+        ...item,
+        unitPrice: pricing.basePrice,
+      });
+    }
+
     // Calculate totals
-    const subtotal = items.reduce((sum, item) => sum + (item.unitPrice * item.quantity), 0);
+    const subtotal = normalizedItems.reduce((sum, item) => sum + (item.unitPrice * item.quantity), 0);
     const shippingCost = shipping.shippingCost || 0;
     const total = subtotal + shippingCost;
 
@@ -90,7 +123,7 @@ export async function POST(request: NextRequest) {
           country: shipping.country,
           shipping_cost: shippingCost,
         },
-        p_items: items.map(item => ({
+        p_items: normalizedItems.map(item => ({
           product_id: item.productId,
           product_name: item.productName,
           product_size: item.productSize,
@@ -118,7 +151,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     // Create Stripe Checkout Session
-    const lineItems = items.map(item => ({
+    const lineItems = normalizedItems.map(item => ({
       price_data: {
         currency: 'usd',
         product_data: {

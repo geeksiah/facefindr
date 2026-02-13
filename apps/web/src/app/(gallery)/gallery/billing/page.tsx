@@ -10,7 +10,6 @@ import {
   AlertCircle,
   Smartphone,
   Receipt,
-  ArrowRight,
   Shield,
 } from 'lucide-react';
 
@@ -36,9 +35,11 @@ interface WalletBalance {
 
 interface DropInPlan {
   id: string;
+  code: string;
   name: string;
-  price: number;
-  credits: number;
+  description: string;
+  priceCents: number;
+  currency: string;
   features: string[];
   popular?: boolean;
 }
@@ -61,43 +62,44 @@ export default function BillingPage() {
   const [dropInCredits, setDropInCredits] = useState(0);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [showAddPayment, setShowAddPayment] = useState(false);
-
-  // Drop-in credit packs (pay-as-you-go)
-  const creditPacks: DropInPlan[] = [
-    {
-      id: 'pack_10',
-      name: 'Starter Pack',
-      price: 499, // $4.99
-      credits: 10,
-      features: ['10 Drop-in searches', 'External search included', 'Valid for 1 year'],
-    },
-    {
-      id: 'pack_25',
-      name: 'Value Pack',
-      price: 999, // $9.99
-      credits: 25,
-      features: ['25 Drop-in searches', 'External search included', 'Valid for 1 year'],
-      popular: true,
-    },
-    {
-      id: 'pack_50',
-      name: 'Pro Pack',
-      price: 1799, // $17.99
-      credits: 50,
-      features: ['50 Drop-in searches', 'External search included', 'Valid for 1 year', 'Priority support'],
-    },
-    {
-      id: 'pack_100',
-      name: 'Power Pack',
-      price: 2999, // $29.99
-      credits: 100,
-      features: ['100 Drop-in searches', 'External search included', 'Never expires', 'Priority support'],
-    },
-  ];
+  const [dropInPacks, setDropInPacks] = useState<DropInPlan[]>([]);
+  const [packsError, setPacksError] = useState<string | null>(null);
+  const [purchasingCode, setPurchasingCode] = useState<string | null>(null);
 
   useEffect(() => {
-    loadBillingData();
+    void loadBillingData();
+    void loadDropInPacks();
   }, []);
+
+  const loadDropInPacks = async () => {
+    try {
+      const response = await fetch('/api/runtime/drop-in/packs', { cache: 'no-store' });
+      const data = await response.json();
+
+      if (!response.ok || !Array.isArray(data.packs) || data.packs.length === 0) {
+        setDropInPacks([]);
+        setPacksError(data?.error || 'Drop-in packs are not configured yet.');
+        return;
+      }
+
+      setDropInPacks(
+        data.packs.map((pack: any) => ({
+          id: pack.id,
+          code: pack.code,
+          name: pack.name,
+          description: pack.description || '',
+          priceCents: Number(pack.priceCents || 0),
+          currency: String(pack.currency || 'USD').toUpperCase(),
+          features: Array.isArray(pack.features) ? pack.features : [],
+          popular: Boolean(pack.popular),
+        }))
+      );
+      setPacksError(null);
+    } catch (error) {
+      setDropInPacks([]);
+      setPacksError('Failed to load drop-in packs.');
+    }
+  };
 
   const loadBillingData = async () => {
     try {
@@ -176,16 +178,33 @@ export default function BillingPage() {
   };
 
   const purchaseCredits = async (pack: DropInPlan) => {
-    toast.success('Redirecting...', `Purchasing ${pack.credits} Drop-in credits`);
-    // Redirect to checkout
-    window.location.href = `/api/checkout?type=drop_in_credits&pack_id=${pack.id}`;
+    try {
+      setPurchasingCode(pack.code);
+      const response = await fetch('/api/attendee/subscription', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planCode: pack.code }),
+      });
+      const data = await response.json();
+
+      if (!response.ok || !data?.checkoutUrl) {
+        throw new Error(data?.error || 'Unable to start checkout');
+      }
+
+      toast.success('Redirecting...', `Starting ${pack.name} checkout`);
+      window.location.href = data.checkoutUrl;
+    } catch (error: any) {
+      toast.error('Checkout failed', error?.message || 'Unable to start checkout');
+    } finally {
+      setPurchasingCode(null);
+    }
   };
 
-  const formatCurrency = (amount: number, currency: string = 'USD') => {
+  const formatCurrency = (amountInCents: number, currency: string = 'USD') => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency,
-    }).format(amount / 100);
+    }).format(amountInCents / 100);
   };
 
   if (isLoading) {
@@ -244,9 +263,20 @@ export default function BillingPage() {
 
       {/* Drop-in Credit Packs */}
       <div>
-        <h2 className="text-lg font-semibold text-foreground mb-4">Buy Drop-in Credits</h2>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {creditPacks.map((pack) => (
+        <h2 className="text-lg font-semibold text-foreground mb-4">Buy Drop-in Packs</h2>
+        {packsError && dropInPacks.length === 0 ? (
+          <div className="rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm text-foreground">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 mt-0.5 text-warning" />
+              <div>
+                <p className="font-medium">Drop-in billing is unavailable.</p>
+                <p className="text-secondary">{packsError}</p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {dropInPacks.map((pack) => (
             <div
               key={pack.id}
               className={`relative rounded-xl border p-5 transition-all hover:shadow-lg ${
@@ -264,9 +294,9 @@ export default function BillingPage() {
               )}
               <h3 className="font-semibold text-foreground">{pack.name}</h3>
               <div className="mt-2 mb-4">
-                <span className="text-3xl font-bold text-foreground">{formatCurrency(pack.price)}</span>
+                <span className="text-3xl font-bold text-foreground">{formatCurrency(pack.priceCents, pack.currency)}</span>
               </div>
-              <p className="text-accent font-medium mb-3">{pack.credits} credits</p>
+              <p className="text-accent font-medium mb-3">{pack.description || 'Configured by admin pricing'}</p>
               <ul className="space-y-2 mb-4">
                 {pack.features.map((feature, i) => (
                   <li key={i} className="flex items-center gap-2 text-sm text-secondary">
@@ -278,13 +308,15 @@ export default function BillingPage() {
               <Button 
                 className="w-full" 
                 variant={pack.popular ? 'primary' : 'outline'}
+                disabled={purchasingCode === pack.code}
                 onClick={() => purchaseCredits(pack)}
               >
-                Buy Now
+                {purchasingCode === pack.code ? 'Redirecting...' : 'Buy Now'}
               </Button>
             </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Payment Methods */}

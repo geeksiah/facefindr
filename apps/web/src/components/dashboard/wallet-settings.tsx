@@ -91,6 +91,9 @@ export function WalletSettings() {
     momoNetwork: 'MTN',
     momoNumber: '',
   });
+  const [isVerifyingAccount, setIsVerifyingAccount] = useState(false);
+  const [verifiedAccountName, setVerifiedAccountName] = useState<string | null>(null);
+  const [verificationError, setVerificationError] = useState<string | null>(null);
   
   const toast = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
@@ -155,6 +158,46 @@ export function WalletSettings() {
       toast.error('Failed to add payment method', error instanceof Error ? error.message : 'Please try again');
     } finally {
       setOnboarding(null);
+    }
+  };
+
+  const handleVerifyAccount = async () => {
+    if (!newWalletProvider || (newWalletProvider !== 'flutterwave' && newWalletProvider !== 'momo')) {
+      return;
+    }
+
+    setIsVerifyingAccount(true);
+    setVerificationError(null);
+
+    try {
+      const response = await fetch('/api/wallet/verify-account', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: newWalletProvider,
+          country: formData.country,
+          accountBank: formData.accountBank,
+          accountNumber: formData.accountNumber,
+          momoNetwork: formData.momoNetwork,
+          momoNumber: formData.momoNumber,
+        }),
+      });
+      const data = await response.json();
+
+      if (!response.ok || !data?.accountName) {
+        setVerifiedAccountName(null);
+        setVerificationError(data?.error || 'Could not verify account name');
+        return;
+      }
+
+      setVerifiedAccountName(String(data.accountName));
+      setVerificationError(null);
+      toast.success('Account verified', data.accountName);
+    } catch (error) {
+      setVerifiedAccountName(null);
+      setVerificationError('Could not verify account name');
+    } finally {
+      setIsVerifyingAccount(false);
     }
   };
 
@@ -351,7 +394,12 @@ export function WalletSettings() {
                 return (
                   <button
                     key={provider}
-                    onClick={() => !alreadyExists && setNewWalletProvider(provider)}
+                onClick={() => {
+                  if (alreadyExists) return;
+                  setNewWalletProvider(provider);
+                  setVerifiedAccountName(null);
+                  setVerificationError(null);
+                }}
                     disabled={alreadyExists}
                     className={`flex items-center gap-4 p-4 rounded-xl border transition-all text-left ${
                       alreadyExists
@@ -399,6 +447,10 @@ export function WalletSettings() {
                   <select
                     value={formData.country}
                     onChange={(e) => setFormData({ ...formData, country: e.target.value })}
+                    onBlur={() => {
+                      setVerifiedAccountName(null);
+                      setVerificationError(null);
+                    }}
                     className="w-full rounded-xl border border-input bg-background px-4 py-3 text-sm"
                   >
                     <option value="US">United States</option>
@@ -432,7 +484,11 @@ export function WalletSettings() {
                       </label>
                       <Input
                         value={formData.accountBank}
-                        onChange={(e) => setFormData({ ...formData, accountBank: e.target.value })}
+                        onChange={(e) => {
+                          setFormData({ ...formData, accountBank: e.target.value });
+                          setVerifiedAccountName(null);
+                          setVerificationError(null);
+                        }}
                         placeholder="e.g., 044 for Access Bank"
                         required
                       />
@@ -441,12 +497,26 @@ export function WalletSettings() {
                       <label className="text-sm font-medium text-foreground mb-1 block">
                         Account Number
                       </label>
-                      <Input
-                        value={formData.accountNumber}
-                        onChange={(e) => setFormData({ ...formData, accountNumber: e.target.value })}
-                        placeholder="Your bank account number"
-                        required
-                      />
+                      <div className="flex gap-2">
+                        <Input
+                          value={formData.accountNumber}
+                          onChange={(e) => {
+                            setFormData({ ...formData, accountNumber: e.target.value });
+                            setVerifiedAccountName(null);
+                            setVerificationError(null);
+                          }}
+                          placeholder="Your bank account number"
+                          required
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handleVerifyAccount}
+                          disabled={isVerifyingAccount || !formData.accountBank || !formData.accountNumber}
+                        >
+                          {isVerifyingAccount ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Verify'}
+                        </Button>
+                      </div>
                     </div>
                   </>
                 )}
@@ -491,15 +561,47 @@ export function WalletSettings() {
                       <Input
                         type="tel"
                         value={formData.momoNumber}
-                        onChange={(e) => setFormData({ ...formData, momoNumber: e.target.value })}
+                        onChange={(e) => {
+                          setFormData({ ...formData, momoNumber: e.target.value });
+                          setVerifiedAccountName(null);
+                          setVerificationError(null);
+                        }}
                         placeholder="0241234567"
                         required
                       />
                     </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleVerifyAccount}
+                      disabled={isVerifyingAccount || !formData.momoNetwork || !formData.momoNumber}
+                    >
+                      {isVerifyingAccount ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Verifying
+                        </>
+                      ) : (
+                        'Verify Account Name'
+                      )}
+                    </Button>
                     <p className="text-xs text-muted-foreground">
                       Payouts will be sent directly to this mobile money wallet. No business registration required.
                     </p>
                   </>
+                )}
+
+                {verifiedAccountName && (
+                  <div className="rounded-xl border border-success/30 bg-success/10 px-4 py-3">
+                    <p className="text-xs text-secondary">Verified account name</p>
+                    <p className="font-semibold text-foreground">{verifiedAccountName}</p>
+                  </div>
+                )}
+
+                {verificationError && (
+                  <div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground">
+                    {verificationError}
+                  </div>
                 )}
               </div>
 
@@ -510,6 +612,8 @@ export function WalletSettings() {
                   onClick={() => {
                     setNewWalletProvider(null);
                     setShowAddWallet(false);
+                    setVerifiedAccountName(null);
+                    setVerificationError(null);
                   }}
                 >
                   Cancel

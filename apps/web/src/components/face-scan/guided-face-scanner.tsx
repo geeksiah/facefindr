@@ -81,7 +81,9 @@ export function GuidedFaceScanner({
   const [holdProgress, setHoldProgress] = useState(0);
   const [useAutoCapture, setUseAutoCapture] = useState(true);
   const [modelLoaded, setModelLoaded] = useState(false);
-  
+  const [permissionBlocked, setPermissionBlocked] = useState(false);
+  const [cameraMessage, setCameraMessage] = useState<string | null>(null);
+
   const { confirm, ConfirmDialog } = useConfirm();
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -97,13 +99,41 @@ export function GuidedFaceScanner({
   // Initialize camera
   const initializeCamera = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: 'user',
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-        },
-      });
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setPermissionBlocked(false);
+        setCameraMessage('Camera is not supported on this device/browser.');
+        return false;
+      }
+
+      try {
+        const permissionsApi = (navigator as any).permissions;
+        if (permissionsApi?.query) {
+          const permissionStatus = await permissionsApi.query({ name: 'camera' as PermissionName });
+          if (permissionStatus?.state === 'denied') {
+            setPermissionBlocked(true);
+            setCameraMessage('Camera access is blocked. Enable camera permission in browser settings and retry.');
+            return false;
+          }
+        }
+      } catch {
+        // Ignore permissions API failures and continue to browser prompt.
+      }
+
+      const stream = await Promise.race([
+        navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'user',
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+          },
+        }),
+        new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error('Camera initialization timed out')), 12000);
+        }),
+      ]);
+
+      setPermissionBlocked(false);
+      setCameraMessage(null);
 
       streamRef.current = stream;
       if (videoRef.current) {
@@ -111,8 +141,15 @@ export function GuidedFaceScanner({
         await videoRef.current.play();
       }
       return true;
-    } catch (err) {
+    } catch (err: any) {
       console.error('Camera error:', err);
+      const denied = err?.name === 'NotAllowedError' || err?.name === 'SecurityError';
+      setPermissionBlocked(denied);
+      setCameraMessage(
+        denied
+          ? 'Camera permission denied. Please allow camera access and retry.'
+          : 'Failed to access camera. Check your camera and try again.'
+      );
       return false;
     }
   }, []);
@@ -122,10 +159,16 @@ export function GuidedFaceScanner({
     try {
       const tf = await import('@tensorflow/tfjs');
       await tf.ready();
-      await tf.setBackend('webgl');
+
+      try {
+        await tf.setBackend('webgl');
+      } catch {
+        await tf.setBackend('cpu');
+      }
+      await tf.ready();
 
       const faceLandmarksDetection = await import('@tensorflow-models/face-landmarks-detection');
-      
+
       detectorRef.current = await faceLandmarksDetection.createDetector(
         faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
         {
@@ -134,7 +177,7 @@ export function GuidedFaceScanner({
           maxFaces: 1,
         }
       );
-      
+
       setModelLoaded(true);
       return true;
     } catch (err) {
@@ -151,16 +194,23 @@ export function GuidedFaceScanner({
 
     const cameraReady = await initializeCamera();
     if (!cameraReady) {
-      setError('Failed to access camera. Please check permissions.');
+      setError(cameraMessage || 'Failed to access camera. Please check permissions.');
       setState('error');
       return;
     }
 
     // Try to load face detection, but don't fail if it doesn't work
     await initializeDetector();
-    
+
     setState('ready');
-  }, [initializeCamera, initializeDetector]);
+  }, [initializeCamera, initializeDetector, cameraMessage]);
+
+  const requestCameraAccess = useCallback(async () => {
+    const ok = await initializeCamera();
+    if (!ok) return;
+    setState('ready');
+    setError(null);
+  }, [initializeCamera]);
 
   // Face detection loop (only when auto-capture is enabled)
   useEffect(() => {
@@ -206,7 +256,7 @@ export function GuidedFaceScanner({
           setFaceDetected(false);
           setPositionMatch(false);
         }
-      } catch (err) {
+      } catch {
         // Silently handle detection errors
       }
 
@@ -215,7 +265,7 @@ export function GuidedFaceScanner({
       }
     };
 
-    detect();
+    void detect();
 
     return () => {
       isRunning = false;
@@ -238,10 +288,10 @@ export function GuidedFaceScanner({
     }
 
     const holdDuration = 1200; // 1.2 seconds
-    
+
     const interval = setInterval(() => {
       if (!holdStartRef.current) return;
-      
+
       const elapsed = Date.now() - holdStartRef.current;
       const progress = Math.min(elapsed / holdDuration, 1);
       setHoldProgress(progress);
@@ -259,6 +309,11 @@ export function GuidedFaceScanner({
   const captureCurrentPosition = useCallback(() => {
     if (!videoRef.current || !canvasRef.current) return;
 
+    if (!useAutoCapture && modelLoaded && !positionMatch) {
+      setError(`Adjust to "${positionConfig.label}" before capturing.`);
+      return;
+    }
+
     const video = videoRef.current;
     const canvas = canvasRef.current;
     const context = canvas.getContext('2d');
@@ -275,6 +330,7 @@ export function GuidedFaceScanner({
       const imageData = canvas.toDataURL('image/jpeg', 0.9);
       const newCaptures = [...captures, imageData];
       setCaptures(newCaptures);
+      setError(null);
 
       // Reset for next position
       setPositionMatch(false);
@@ -284,10 +340,10 @@ export function GuidedFaceScanner({
       if (currentPositionIndex < POSITION_ORDER.length - 1) {
         setCurrentPositionIndex((prev) => prev + 1);
       } else {
-        handleComplete(newCaptures);
+        void handleComplete(newCaptures);
       }
     }
-  }, [captures, currentPositionIndex]);
+  }, [captures, currentPositionIndex, useAutoCapture, modelLoaded, positionMatch, positionConfig.label]);
 
   // Handle completion
   const handleComplete = async (allCaptures: string[]) => {
@@ -327,12 +383,12 @@ export function GuidedFaceScanner({
     setHoldProgress(0);
     setError(null);
     holdStartRef.current = null;
-    initialize();
+    void initialize();
   };
 
   // Initialize on mount
   useEffect(() => {
-    initialize();
+    void initialize();
     return cleanup;
   }, [initialize, cleanup]);
 
@@ -340,8 +396,8 @@ export function GuidedFaceScanner({
     <div className="space-y-6">
       {/* Animated Head Guide */}
       <div className="flex justify-center pt-2 pb-4">
-        <FaceGuideHead 
-          targetPosition={currentPosition} 
+        <FaceGuideHead
+          targetPosition={currentPosition}
           isMatched={positionMatch}
           size={100}
         />
@@ -356,8 +412,8 @@ export function GuidedFaceScanner({
               index < currentPositionIndex
                 ? 'bg-success text-white'
                 : index === currentPositionIndex
-                ? 'bg-accent text-white ring-4 ring-accent/20'
-                : 'bg-muted text-muted-foreground'
+                  ? 'bg-accent text-white ring-4 ring-accent/20'
+                  : 'bg-muted text-muted-foreground'
             }`}
           >
             {index < currentPositionIndex ? (
@@ -397,8 +453,8 @@ export function GuidedFaceScanner({
                   positionMatch
                     ? 'border-success shadow-[0_0_40px_rgba(52,199,89,0.5)]'
                     : faceDetected
-                    ? 'border-accent shadow-[0_0_20px_rgba(10,132,255,0.3)]'
-                    : 'border-white/60'
+                      ? 'border-accent shadow-[0_0_20px_rgba(10,132,255,0.3)]'
+                      : 'border-white/60'
                 }`}
               />
 
@@ -471,7 +527,6 @@ export function GuidedFaceScanner({
         {state === 'ready' && (
           <button
             onClick={async () => {
-              // Show confirmation if scan is in progress
               if (captures.length > 0 || currentPositionIndex > 0) {
                 const confirmed = await confirm({
                   title: 'Cancel Face Scan?',
@@ -562,10 +617,20 @@ export function GuidedFaceScanner({
             <AlertCircle className="h-5 w-5 flex-shrink-0" />
             <span>{error}</span>
           </div>
-          <Button variant="primary" className="mt-4 w-full" onClick={reset}>
-            <RotateCcw className="mr-2 h-4 w-4" />
-            Try Again
-          </Button>
+          {cameraMessage && (
+            <p className="mt-2 text-sm text-foreground">{cameraMessage}</p>
+          )}
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            {permissionBlocked && (
+              <Button variant="outline" className="w-full" onClick={requestCameraAccess}>
+                Allow Camera
+              </Button>
+            )}
+            <Button variant="primary" className="w-full" onClick={reset}>
+              <RotateCcw className="mr-2 h-4 w-4" />
+              Try Again
+            </Button>
+          </div>
         </div>
       )}
 

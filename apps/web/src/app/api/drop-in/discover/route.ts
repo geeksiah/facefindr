@@ -26,6 +26,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const userType = user.user_metadata?.user_type;
+    if (userType === 'photographer') {
+      return NextResponse.json(
+        { error: 'Drop-in discovery is only available for attendee profiles' },
+        { status: 403 }
+      );
+    }
+
     // Get attendee profile
     const { data: attendee } = await supabase
       .from('attendees')

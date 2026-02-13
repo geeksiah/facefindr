@@ -8,56 +8,75 @@
  */
 
 import { usePathname, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { cn } from '@/lib/utils';
 
 export function RouteProgress() {
-  usePathname();
-  useSearchParams();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [targetUrl, setTargetUrl] = useState<string | null>(null);
+  const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const safetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const currentUrl = useMemo(() => {
+    const query = searchParams?.toString();
+    return `${pathname}${query ? `?${query}` : ''}`;
+  }, [pathname, searchParams]);
+
+  const stopTimers = () => {
+    if (progressTimerRef.current) {
+      clearInterval(progressTimerRef.current);
+      progressTimerRef.current = null;
+    }
+    if (safetyTimerRef.current) {
+      clearTimeout(safetyTimerRef.current);
+      safetyTimerRef.current = null;
+    }
+  };
+
+  const finish = () => {
+    stopTimers();
+    setProgress(100);
+    window.setTimeout(() => {
+      setIsLoading(false);
+      setProgress(0);
+      setTargetUrl(null);
+    }, 180);
+  };
+
+  const start = (nextUrl: string) => {
+    if (!nextUrl || nextUrl === currentUrl) return;
+    stopTimers();
+    setTargetUrl(nextUrl);
+    setIsLoading(true);
+    setProgress(14);
+    progressTimerRef.current = setInterval(() => {
+      setProgress((prev) => {
+        if (prev >= 92) return prev;
+        const step = prev < 45 ? 9 : prev < 75 ? 4 : 2;
+        return Math.min(prev + step, 92);
+      });
+    }, 120);
+    safetyTimerRef.current = setTimeout(() => {
+      finish();
+    }, 15000);
+  };
 
   useEffect(() => {
-    let progressInterval: NodeJS.Timeout;
-
-    // Intercept link clicks to show loading state
     const handleClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       const anchor = target.closest('a');
       
       if (anchor) {
+        if (anchor.hasAttribute('target') || anchor.hasAttribute('download')) return;
         const href = anchor.getAttribute('href');
-        
-        // Only handle internal navigation
-        if (href && href.startsWith('/') && !href.startsWith('//')) {
-          // Don't trigger for same-page navigation
-          const currentPath = window.location.pathname + window.location.search;
-          if (href !== currentPath && !anchor.hasAttribute('target')) {
-            setIsLoading(true);
-            setProgress(20);
-
-            // Simulate progress
-            progressInterval = setInterval(() => {
-              setProgress(prev => {
-                if (prev >= 90) {
-                  clearInterval(progressInterval);
-                  return prev;
-                }
-                return prev + Math.random() * 15;
-              });
-            }, 200);
-
-            // Auto-complete and hide
-            setTimeout(() => {
-              setProgress(100);
-              setTimeout(() => {
-                setIsLoading(false);
-                setProgress(0);
-              }, 250);
-            }, 900);
-          }
-        }
+        if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
+        const next = new URL(href, window.location.origin);
+        if (next.origin !== window.location.origin) return;
+        start(`${next.pathname}${next.search}`);
       }
     };
 
@@ -65,9 +84,16 @@ export function RouteProgress() {
 
     return () => {
       document.removeEventListener('click', handleClick);
-      if (progressInterval) clearInterval(progressInterval);
+      stopTimers();
     };
-  }, []);
+  }, [currentUrl]);
+
+  useEffect(() => {
+    if (!isLoading || !targetUrl) return;
+    if (currentUrl === targetUrl) {
+      finish();
+    }
+  }, [isLoading, targetUrl, currentUrl]);
 
   if (!isLoading) return null;
 

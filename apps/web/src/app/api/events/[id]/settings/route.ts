@@ -8,6 +8,29 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { createClient } from '@/lib/supabase/server';
 
+async function canAccessEventSettings(supabase: any, eventId: string, userId: string) {
+  const { data: ownedEvent } = await supabase
+    .from('events')
+    .select('id')
+    .eq('id', eventId)
+    .eq('photographer_id', userId)
+    .maybeSingle();
+
+  if (ownedEvent) {
+    return true;
+  }
+
+  const { data: collaboratorAccess } = await supabase
+    .from('event_collaborators')
+    .select('can_edit_event, can_manage_pricing, status')
+    .eq('event_id', eventId)
+    .eq('photographer_id', userId)
+    .eq('status', 'active')
+    .maybeSingle();
+
+  return Boolean(collaboratorAccess?.can_edit_event || collaboratorAccess?.can_manage_pricing);
+}
+
 // GET - Get event settings
 export async function GET(
   request: NextRequest,
@@ -22,6 +45,10 @@ export async function GET(
     }
 
     const { id } = params;
+    const canAccess = await canAccessEventSettings(supabase, id, user.id);
+    if (!canAccess) {
+      return NextResponse.json({ error: 'Not authorized to manage this event' }, { status: 403 });
+    }
 
     const { data: event, error } = await supabase
       .from('events')
@@ -30,7 +57,6 @@ export async function GET(
         event_pricing (*)
       `)
       .eq('id', id)
-      .eq('photographer_id', user.id)
       .single();
 
     if (error || !event) {
@@ -75,12 +101,16 @@ export async function PUT(
     const { id } = params;
     const body = await request.json();
 
-    // Verify ownership and get current currency
+    const canAccess = await canAccessEventSettings(supabase, id, user.id);
+    if (!canAccess) {
+      return NextResponse.json({ error: 'Not authorized to manage this event' }, { status: 403 });
+    }
+
+    // Verify event and get current currency
     const { data: event } = await supabase
       .from('events')
       .select('id, currency_code')
       .eq('id', id)
-      .eq('photographer_id', user.id)
       .single();
 
     if (!event) {
