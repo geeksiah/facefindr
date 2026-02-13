@@ -1,4 +1,5 @@
 export const dynamic = 'force-dynamic';
+export const maxDuration = 30;
 
 import { createServiceClient } from '@/lib/supabase/server';
 
@@ -39,31 +40,66 @@ async function getRuntimeVersion() {
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  let closed = false;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  let shutdown: ReturnType<typeof setTimeout> | undefined;
+
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    if (timer) clearInterval(timer);
+    if (heartbeat) clearInterval(heartbeat);
+    if (shutdown) clearTimeout(shutdown);
+  };
+
   const stream = new ReadableStream({
     start(controller) {
-      let closed = false;
+      const safeEnqueue = (chunk: Uint8Array) => {
+        if (closed) return false;
+        try {
+          controller.enqueue(chunk);
+          return true;
+        } catch {
+          cleanup();
+          return false;
+        }
+      };
 
       const push = async () => {
         if (closed) return;
-        const version = await getRuntimeVersion();
-        controller.enqueue(sseEvent('runtime-config', version));
+        try {
+          const version = await getRuntimeVersion();
+          safeEnqueue(sseEvent('runtime-config', version));
+        } catch {
+          cleanup();
+        }
       };
 
-      controller.enqueue(sseEvent('ready', { ok: true }));
+      safeEnqueue(sseEvent('ready', { ok: true }));
       void push();
-      const timer = setInterval(() => void push(), 15000);
-      const heartbeat = setInterval(() => {
-        if (!closed) controller.enqueue(encoder.encode(': ping\n\n'));
+      timer = setInterval(() => void push(), 15000);
+      heartbeat = setInterval(() => {
+        safeEnqueue(encoder.encode(': ping\n\n'));
       }, 15000);
 
-      return () => {
-        closed = true;
-        clearInterval(timer);
-        clearInterval(heartbeat);
-      };
+      // Keep each invocation under Vercel's default serverless timeout.
+      shutdown = setTimeout(() => {
+        cleanup();
+        try {
+          controller.close();
+        } catch {
+          // no-op
+        }
+      }, 25000);
+    },
+    cancel() {
+      cleanup();
     },
   });
+
+  request.signal.addEventListener('abort', cleanup);
 
   return new Response(stream, {
     headers: {
