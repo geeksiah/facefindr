@@ -1,3 +1,5 @@
+const path = require('path');
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -40,6 +42,15 @@ const nextConfig = {
   },
 
   webpack: (config, { isServer }) => {
+    const appNodeModules = path.resolve(__dirname, 'node_modules');
+    config.resolve.alias = {
+      ...(config.resolve.alias || {}),
+      react: path.join(appNodeModules, 'react'),
+      'react-dom': path.join(appNodeModules, 'react-dom'),
+      'react/jsx-runtime': path.join(appNodeModules, 'react/jsx-runtime'),
+      'react/jsx-dev-runtime': path.join(appNodeModules, 'react/jsx-dev-runtime'),
+    };
+
     if (!isServer) {
       config.resolve.fallback = { ...config.resolve.fallback, fs: false, net: false, tls: false };
     }
