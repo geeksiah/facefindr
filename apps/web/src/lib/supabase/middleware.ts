@@ -7,6 +7,10 @@ const PROTECTED_ROUTES = ['/dashboard', '/events', '/settings', '/gallery', '/ph
 // Routes that should redirect to dashboard if already authenticated
 const AUTH_ROUTES = ['/login', '/register', '/forgot-password'];
 
+function isCreatorUser(userType: unknown): boolean {
+  return userType === 'photographer' || userType === 'creator';
+}
+
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({
     request: {
@@ -77,7 +81,7 @@ export async function updateSession(request: NextRequest) {
   // Redirect authenticated users away from auth routes
   if (isAuthRoute && user) {
     const userType = user.user_metadata?.user_type;
-    const redirectPath = userType === 'photographer' ? '/dashboard' : '/gallery';
+    const redirectPath = isCreatorUser(userType) ? '/dashboard' : '/gallery';
     return NextResponse.redirect(new URL(redirectPath, request.url));
   }
 
@@ -89,7 +93,7 @@ export async function updateSession(request: NextRequest) {
     const photographerRoutes = ['/dashboard', '/events', '/settings/payout'];
     const isPhotographerRoute = photographerRoutes.some((route) => pathname.startsWith(route));
     
-    if (isPhotographerRoute && userType !== 'photographer') {
+    if (isPhotographerRoute && !isCreatorUser(userType)) {
       return NextResponse.redirect(new URL('/gallery', request.url));
     }
     

@@ -176,7 +176,7 @@ type ScanStep = 'consent' | 'capture' | 'processing' | 'results' | 'error';
 export default function FaceScanScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ imageUri?: string; eventId?: string }>();
-  const { profile } = useAuthStore();
+  const { session } = useAuthStore();
   const cameraRef = useRef<CameraView>(null);
   
   const [permission, requestPermission] = useCameraPermissions();
@@ -251,13 +251,15 @@ export default function FaceScanScreen() {
 
       const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
 
-      const response = await fetch(`${apiUrl}/api/face/match`, {
+      const response = await fetch(`${apiUrl}/api/faces/search`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
         body: JSON.stringify({
-          imageBase64: base64,
+          image: base64,
           eventId: params.eventId || null,
-          attendeeId: profile?.id,
         }),
       });
 
@@ -288,16 +290,18 @@ export default function FaceScanScreen() {
       // Use the front-facing image as primary
       const frontCapture = captures.find(c => c.id === 'front') || captures[0];
 
-      const response = await fetch(`${apiUrl}/api/face/match`, {
+      const response = await fetch(`${apiUrl}/api/faces/search`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
         body: JSON.stringify({
-          imageBase64: frontCapture.base64,
+          image: frontCapture.base64,
           additionalImages: captures
             .filter(c => c.id !== 'front')
             .map(c => ({ position: c.id, base64: c.base64 })),
           eventId: params.eventId || null,
-          attendeeId: profile?.id,
         }),
       });
 

@@ -21,7 +21,8 @@ import { PhotoUploader } from '@/components/events/photo-uploader';
 import { ShareButton } from '@/components/events/share-button';
 import { Button } from '@/components/ui/button';
 import { getCurrencySymbol } from '@/lib/currency-utils';
-import { createClient } from '@/lib/supabase/server';
+import { formatEventDateDisplay } from '@/lib/events/time';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { cn } from '@/lib/utils';
 
 interface EventPageProps {
@@ -30,6 +31,7 @@ interface EventPageProps {
 
 export default async function EventPage({ params }: EventPageProps) {
   const supabase = await createClient();
+  const serviceClient = createServiceClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
@@ -37,7 +39,7 @@ export default async function EventPage({ params }: EventPageProps) {
   }
 
   // Fetch event with pricing
-  const { data: event, error } = await supabase
+  const { data: event, error } = await serviceClient
     .from('events')
     .select(`
       *,
@@ -45,33 +47,15 @@ export default async function EventPage({ params }: EventPageProps) {
       event_access_tokens(id, token, label, created_at, expires_at, revoked_at)
     `)
     .eq('id', params.id)
-    .eq('photographer_id', user.id)
     .single();
-  
-  // Fetch media separately to ensure we get all photos
-  let mediaData: any[] = [];
-  if (event) {
-    const { data: media, error: mediaError } = await supabase
-      .from('media')
-      .select('id, storage_path, thumbnail_path, original_filename, file_size, created_at')
-      .eq('event_id', params.id)
-      .eq('photographer_id', user.id)
-      .order('created_at', { ascending: false });
-    
-    if (mediaError) {
-      console.error('Error fetching media:', mediaError);
-      // Don't fail the page, just show empty list
-      mediaData = [];
-    } else if (media) {
-      mediaData = media;
-    }
-  }
 
   if (error) {
-    console.error('Event fetch error:', error);
-    // Log detailed error for debugging
+    console.error('Event fetch error', {
+      eventId: params.id,
+      userId: user.id,
+      error,
+    });
     if (error.code === 'PGRST116') {
-      // No rows returned
       return notFound();
     }
     return notFound();
@@ -79,6 +63,55 @@ export default async function EventPage({ params }: EventPageProps) {
 
   if (!event) {
     return notFound();
+  }
+
+  const isOwner = event.photographer_id === user.id;
+  let hasCollaboratorAccess = false;
+
+  if (!isOwner) {
+    const { data: collaboratorAccess, error: collaboratorError } = await serviceClient
+      .from('event_collaborators')
+      .select('id')
+      .eq('event_id', params.id)
+      .eq('photographer_id', user.id)
+      .eq('status', 'active')
+      .maybeSingle();
+
+    if (collaboratorError) {
+      console.error('Collaborator access check error', {
+        eventId: params.id,
+        userId: user.id,
+        error: collaboratorError,
+      });
+    }
+    hasCollaboratorAccess = Boolean(collaboratorAccess);
+  }
+
+  if (!isOwner && !hasCollaboratorAccess) {
+    return notFound();
+  }
+
+  // Fetch media separately to ensure we get all photos
+  let mediaData: any[] = [];
+  if (event) {
+    const { data: media, error: mediaError } = await serviceClient
+      .from('media')
+      .select('id, storage_path, thumbnail_path, original_filename, file_size, created_at')
+      .eq('event_id', params.id)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false });
+    
+    if (mediaError) {
+      console.error('Error fetching media', {
+        eventId: params.id,
+        userId: user.id,
+        error: mediaError,
+      });
+      // Don't fail the page, just show empty list
+      mediaData = [];
+    } else if (media) {
+      mediaData = media;
+    }
   }
 
   const pricing = event.event_pricing?.[0];
@@ -117,11 +150,19 @@ export default async function EventPage({ params }: EventPageProps) {
                 <div className="flex items-center gap-1.5">
                   <Calendar className="h-4 w-4" />
                   <span>
-                    {new Date(event.event_date).toLocaleDateString('en-US', {
-                      month: 'long',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })}
+                    {formatEventDateDisplay(
+                      {
+                        event_date: event.event_date,
+                        event_start_at_utc: event.event_start_at_utc,
+                        event_timezone: event.event_timezone,
+                      },
+                      'en-US',
+                      {
+                        month: 'long',
+                        day: 'numeric',
+                        year: 'numeric',
+                      }
+                    )}
                   </span>
                 </div>
               )}

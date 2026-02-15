@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
+import { syncAnnouncementDeliveryState } from '@/lib/announcement-delivery';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export async function POST(
@@ -28,6 +29,13 @@ export async function POST(
 
     if (error || !announcement) {
       return NextResponse.json({ error: 'Announcement not found' }, { status: 404 });
+    }
+
+    if (!['draft', 'scheduled'].includes(String(announcement.status))) {
+      return NextResponse.json(
+        { error: 'Only draft or scheduled announcements can be sent' },
+        { status: 409 }
+      );
     }
 
     const targetCountry = announcement.country_code ? String(announcement.country_code).toUpperCase() : null;
@@ -202,33 +210,53 @@ export async function POST(
       }
     }
 
-    if (notifications.length > 0) {
-      const { error: insertError } = await supabaseAdmin
-        .from('notifications')
-        .insert(notifications);
-
-      if (insertError) {
-        console.error('Announcement notification insert error:', insertError);
-        return NextResponse.json({ error: 'Failed to queue notifications' }, { status: 500 });
-      }
+    const queuedCount = notifications.length;
+    if (queuedCount === 0) {
+      return NextResponse.json(
+        { error: 'No eligible notification recipients based on channel preferences and region availability' },
+        { status: 400 }
+      );
     }
 
-    // Update announcement as sent
+    const { error: insertError } = await supabaseAdmin
+      .from('notifications')
+      .insert(notifications);
+
+    if (insertError) {
+      console.error('Announcement notification insert error:', insertError);
+      return NextResponse.json({ error: 'Failed to queue notifications' }, { status: 500 });
+    }
+
+    // Queue announcement (delivery truth is synced from notification statuses)
     await supabaseAdmin
       .from('platform_announcements')
       .update({
-        status: 'sent',
-        sent_at: new Date().toISOString(),
-        sent_count: userCount,
+        status: 'queued',
+        sent_at: null,
+        sent_count: 0,
+        queued_count: queuedCount,
+        delivered_count: 0,
+        failed_count: 0,
+        delivery_completed_at: null,
+        delivery_synced_at: new Date().toISOString(),
+        delivery_summary: {
+          total: queuedCount,
+          pending: queuedCount,
+          successful: 0,
+          failed: 0,
+          by_channel: {},
+          by_status: { pending: queuedCount },
+          updated_at: new Date().toISOString(),
+        },
       })
       .eq('id', id);
 
-    // In production, you would queue notifications here
-    // For now, we just mark it as sent
+    await syncAnnouncementDeliveryState(id);
 
     await logAction('announcement_send', 'announcement', id, {
       target: announcement.target,
-      sent_count: userCount,
+      matched_users: userCount,
+      queued_count: queuedCount,
       country_code: targetCountry,
       channels: {
         send_email: announcement.send_email,
@@ -237,7 +265,11 @@ export async function POST(
       },
     });
 
-    return NextResponse.json({ success: true, sent_count: userCount });
+    return NextResponse.json({
+      success: true,
+      matched_users: userCount,
+      queued_count: queuedCount,
+    });
   } catch (error) {
     console.error('Send announcement error:', error);
     return NextResponse.json({ error: 'An error occurred' }, { status: 500 });

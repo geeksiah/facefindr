@@ -30,6 +30,7 @@ import { RatingsDisplay } from '@/components/photographer/ratings-display';
 import { Button } from '@/components/ui/button';
 import { Logo } from '@/components/ui/logo';
 import { QRCodeWithLogo, downloadQRCodeWithLogo } from '@/components/ui/qr-code-with-logo';
+import { formatEventDateDisplay } from '@/lib/events/time';
 import { cn } from '@/lib/utils';
 
 
@@ -50,6 +51,8 @@ interface PhotographerProfile {
     name: string;
     cover_image_url?: string;
     event_date: string;
+    event_start_at_utc?: string | null;
+    event_timezone?: string;
     location?: string;
     public_slug?: string;
   }>;
@@ -196,12 +199,16 @@ export default function PhotographerProfilePage() {
     setShowShareMenu(false);
   }
 
-  function formatDate(dateStr: string) {
-    return new Date(dateStr).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
+  function formatDate(eventData: PhotographerProfile['events'][number]) {
+    return formatEventDateDisplay(
+      {
+        event_date: eventData.event_date,
+        event_start_at_utc: eventData.event_start_at_utc || null,
+        event_timezone: eventData.event_timezone || 'UTC',
+      },
+      'en-US',
+      { month: 'short', day: 'numeric', year: 'numeric' }
+    );
   }
 
   if (loading) {
@@ -427,7 +434,7 @@ export default function PhotographerProfilePage() {
                     <div className="flex items-center gap-4 mt-2 text-sm text-secondary">
                       <div className="flex items-center gap-1">
                         <Calendar className="h-3.5 w-3.5" />
-                        {formatDate(event.event_date)}
+                        {formatDate(event)}
                       </div>
                       {event.location && (
                         <div className="flex items-center gap-1 truncate">

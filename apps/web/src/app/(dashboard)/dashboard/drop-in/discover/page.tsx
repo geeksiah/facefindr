@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils';
 
 interface DropInPhoto {
   matchId: string;
+  notificationId?: string | null;
   photoId: string;
   thumbnailUrl: string | null;
   confidence: number;
@@ -88,7 +89,7 @@ export default function DropInDiscoverPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          notificationId: photo.matchId, // Using matchId as notification identifier
+          notificationId: photo.notificationId || photo.matchId,
           action: 'view',
         }),
       });

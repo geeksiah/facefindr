@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 
+import { formatEventDateDisplay } from '@/lib/events/time';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // ============================================
@@ -28,6 +29,8 @@ export async function GET() {
           id,
           name,
           event_date,
+          event_start_at_utc,
+          event_timezone,
           location,
           cover_image_url,
           status,
@@ -46,6 +49,8 @@ export async function GET() {
           id,
           name,
           event_date,
+          event_start_at_utc,
+          event_timezone,
           location,
           cover_image_url,
           status,
@@ -121,14 +126,18 @@ export async function GET() {
       return {
         id: event.id,
         name: event.name,
-        date: event.event_date
-          ? new Date(event.event_date).toLocaleDateString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-            })
-          : 'No date',
+        date: formatEventDateDisplay(
+          {
+            event_date: event.event_date,
+            event_start_at_utc: event.event_start_at_utc,
+            event_timezone: event.event_timezone,
+          },
+          'en-US',
+          { month: 'short', day: 'numeric', year: 'numeric' }
+        ),
         eventDate: event.event_date || null,
+        eventTimezone: event.event_timezone || 'UTC',
+        eventStartAtUtc: event.event_start_at_utc || null,
         location: event.location,
         coverImage: coverImage,
         photographerName: event.photographers?.display_name || 'Unknown',

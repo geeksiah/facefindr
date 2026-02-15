@@ -126,6 +126,20 @@ export async function GET(request: NextRequest) {
     }
     // Premium users see all matches (no filtering needed)
 
+    const matchIds = filteredMatches.map((match) => match.id);
+    let notificationByMatchId = new Map<string, string>();
+    if (matchIds.length > 0) {
+      const { data: notifications } = await supabase
+        .from('drop_in_notifications')
+        .select('id, drop_in_match_id')
+        .eq('recipient_id', attendee.id)
+        .in('drop_in_match_id', matchIds);
+
+      notificationByMatchId = new Map(
+        (notifications || []).map((notification: any) => [notification.drop_in_match_id, notification.id])
+      );
+    }
+
     // Get signed URLs for photos
     const photosWithUrls = await Promise.all(
       filteredMatches.map(async (match) => {
@@ -138,6 +152,7 @@ export async function GET(request: NextRequest) {
 
         return {
           matchId: match.id,
+          notificationId: notificationByMatchId.get(match.id) || null,
           photoId: photo.id,
           thumbnailUrl: urlData?.signedUrl || null,
           confidence: match.confidence,

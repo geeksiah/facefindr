@@ -38,6 +38,7 @@ import { useRealtimeSubscription } from '@/hooks/use-realtime';
 
 interface DropInPhoto {
   matchId: string;
+  notificationId?: string | null;
   photoId: string;
   thumbnailUrl: string | null;
   confidence: number;
@@ -125,7 +126,7 @@ export default function DropInDiscoverScreen({ noHeader = false }: DropInDiscove
           ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
         },
         body: JSON.stringify({
-          notificationId: photo.matchId,
+          notificationId: photo.notificationId || photo.matchId,
           action: 'view',
         }),
       });

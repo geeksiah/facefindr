@@ -37,6 +37,7 @@ interface Plan {
   print_commission_percent: number;
   print_commission_fixed: number;
   print_commission_type: 'percent' | 'fixed' | 'both';
+  plan_type?: 'photographer' | 'drop_in' | 'payg';
   created_at: string;
 }
 
@@ -57,6 +58,12 @@ const defaultCurrencies: Currency[] = [
   { code: 'ZAR', name: 'South African Rand', symbol: 'R', rate_to_usd: 18.5 },
 ];
 
+function getPlanTypeLabel(planType: string | undefined): string {
+  if (planType === 'drop_in') return 'Drop-In';
+  if (planType === 'payg') return 'Pay As You Go';
+  return 'Creator';
+}
+
 // Feature Management UI Component
 function FeatureManagementUI({ plans }: { plans: Plan[] }) {
   const toast = useToast();
@@ -74,7 +81,7 @@ function FeatureManagementUI({ plans }: { plans: Plan[] }) {
     feature_type: 'boolean' as 'boolean' | 'numeric' | 'limit' | 'text',
     default_value: '',
     category: 'general',
-    applicable_to: ['photographer', 'drop_in'] as string[],
+    applicable_to: ['photographer', 'drop_in', 'payg'] as string[],
   });
   const [isCreatingFeature, setIsCreatingFeature] = useState(false);
 
@@ -177,7 +184,7 @@ function FeatureManagementUI({ plans }: { plans: Plan[] }) {
           feature_type: 'boolean',
           default_value: '',
           category: 'general',
-          applicable_to: ['photographer', 'drop_in'],
+          applicable_to: ['photographer', 'drop_in', 'payg'],
         });
         if (selectedPlanId) {
           loadPlanFeatures(selectedPlanId);
@@ -261,7 +268,7 @@ function FeatureManagementUI({ plans }: { plans: Plan[] }) {
   }
 
   const selectedPlan = plans.find(p => p.id === selectedPlanId);
-  const planType = (selectedPlan as any)?.plan_type || 'photographer';
+  const planType = selectedPlan?.plan_type || 'photographer';
 
   // Group features by category
   const featuresByCategory = availableFeatures.reduce((acc, feature) => {
@@ -345,7 +352,7 @@ function FeatureManagementUI({ plans }: { plans: Plan[] }) {
           <option value="">-- Select a plan --</option>
           {plans.map((plan) => (
             <option key={plan.id} value={plan.id}>
-              {plan.name} ({(plan as any).plan_type === 'photographer' ? 'Photographer' : 'Drop-In'})
+              {plan.name} ({getPlanTypeLabel(plan.plan_type)})
             </option>
           ))}
         </select>
@@ -362,7 +369,7 @@ function FeatureManagementUI({ plans }: { plans: Plan[] }) {
               {/* Available Features - Grouped by Category */}
               <div className="rounded-xl border border-border bg-card p-6">
                 <h3 className="text-md font-semibold text-foreground mb-4">
-                  Available Features ({planType === 'photographer' ? 'Photographer' : 'Drop-In'} Plans)
+                  Available Features ({getPlanTypeLabel(planType)} Plans)
                 </h3>
                 
                 {availableFeatures.length === 0 ? (
@@ -617,7 +624,7 @@ function FeatureManagementUI({ plans }: { plans: Plan[] }) {
 
               <div>
                 <label className="block text-sm font-medium text-foreground mb-2">Applicable To</label>
-                <div className="flex gap-4">
+                <div className="flex gap-4 flex-wrap">
                   <label className="flex items-center gap-2">
                     <input
                       type="checkbox"
@@ -630,7 +637,7 @@ function FeatureManagementUI({ plans }: { plans: Plan[] }) {
                       }}
                       className="rounded"
                     />
-                    <span className="text-sm text-foreground">Photographer Plans</span>
+                    <span className="text-sm text-foreground">Creator Plans</span>
                   </label>
                   <label className="flex items-center gap-2">
                     <input
@@ -645,6 +652,20 @@ function FeatureManagementUI({ plans }: { plans: Plan[] }) {
                       className="rounded"
                     />
                     <span className="text-sm text-foreground">Drop-In Plans</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={newFeature.applicable_to.includes('payg')}
+                      onChange={(e) => {
+                        const newApplicable = e.target.checked
+                          ? [...newFeature.applicable_to, 'payg']
+                          : newFeature.applicable_to.filter(t => t !== 'payg');
+                        setNewFeature({ ...newFeature, applicable_to: newApplicable });
+                      }}
+                      className="rounded"
+                    />
+                    <span className="text-sm text-foreground">Pay As You Go</span>
                   </label>
                 </div>
               </div>
@@ -698,7 +719,7 @@ export default function PricingPage() {
     is_popular: false,
     use_auto_conversion: true,
     manual_prices: {} as Record<string, string>,
-    plan_type: 'photographer' as 'photographer' | 'drop_in',
+    plan_type: 'photographer' as 'photographer' | 'drop_in' | 'payg',
     platform_fee_percent: 20.00,
     platform_fee_fixed: 0,
     platform_fee_type: 'percent' as 'percent' | 'fixed' | 'both',
@@ -817,7 +838,7 @@ export default function PricingPage() {
       manual_prices: plan.prices ? Object.fromEntries(
         Object.entries(plan.prices).map(([k, v]) => [k, (v / 100).toString()])
       ) : {},
-      plan_type: (plan as any).plan_type || 'photographer', // Add plan_type support
+      plan_type: plan.plan_type || 'photographer', // Add plan_type support
       platform_fee_percent: plan.platform_fee_percent ?? 0,
       platform_fee_fixed: (plan.platform_fee_fixed || 0) / 100,
       platform_fee_type: plan.platform_fee_type || 'percent',
@@ -1059,17 +1080,22 @@ export default function PricingPage() {
                     <div>
                       <h3 className="font-semibold text-foreground">{plan.name}</h3>
                       <p className="text-xs font-mono text-muted-foreground">{plan.code}</p>
-                      {(plan as any).plan_type && (
+                      {plan.plan_type && (
                         <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                          {(plan as any).plan_type === 'photographer' ? (
-                            <>
-                              <Camera className="h-3 w-3" />
-                              Photographer
-                            </>
-                          ) : (
+                          {plan.plan_type === 'drop_in' ? (
                             <>
                               <Gift className="h-3 w-3" />
                               Drop-In
+                            </>
+                          ) : plan.plan_type === 'payg' ? (
+                            <>
+                              <DollarSign className="h-3 w-3" />
+                              Pay As You Go
+                            </>
+                          ) : (
+                            <>
+                              <Camera className="h-3 w-3" />
+                              Creator
                             </>
                           )}
                         </p>
@@ -1202,11 +1228,12 @@ export default function PricingPage() {
                   <label className="block text-sm font-medium text-foreground mb-2">Plan Type</label>
                   <select
                     value={formData.plan_type}
-                    onChange={(e) => setFormData({ ...formData, plan_type: e.target.value as 'photographer' | 'drop_in' })}
+                    onChange={(e) => setFormData({ ...formData, plan_type: e.target.value as 'photographer' | 'drop_in' | 'payg' })}
                     className="w-full px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
                   >
-                    <option value="photographer">Photographer</option>
+                    <option value="photographer">Creator</option>
                     <option value="drop_in">Drop-In</option>
+                    <option value="payg">Pay As You Go</option>
                   </select>
                 </div>
                 <div>
@@ -1291,7 +1318,7 @@ export default function PricingPage() {
                     min="0"
                     value={formData.base_price_usd}
                     onChange={(e) => setFormData({ ...formData, base_price_usd: parseFloat(e.target.value) || 0 })}
-                    className="w-full pl-8 pr-4 py-2 rounded-lg bg-muted border border-input text-foreground"
+                    className="w-full pl-10 pr-4 py-2 rounded-lg bg-muted border border-input text-foreground"
                   />
                 </div>
               </div>
@@ -1331,7 +1358,7 @@ export default function PricingPage() {
                           })}
                           disabled={formData.use_auto_conversion}
                           placeholder={calculateAutoPrice(currency)}
-                          className="w-full pl-8 pr-4 py-2 rounded-lg bg-muted border border-input text-foreground disabled:opacity-50"
+                          className="w-full pl-10 pr-4 py-2 rounded-lg bg-muted border border-input text-foreground disabled:opacity-50"
                         />
                       </div>
                     </div>
@@ -1339,12 +1366,12 @@ export default function PricingPage() {
                 </div>
               </div>
 
-              {/* Platform Fee - Only for Photographer Plans */}
-              {formData.plan_type === 'photographer' && (
+              {/* Platform Fee - Creator/PAYG plans */}
+              {formData.plan_type !== 'drop_in' && (
                 <div className="space-y-4 p-4 bg-muted/50 rounded-lg">
                   <div className="flex items-center justify-between">
                     <h3 className="font-semibold text-foreground">Platform Fee</h3>
-                    <span className="text-xs text-muted-foreground bg-accent/10 text-accent px-2 py-1 rounded">Photographer Plans Only</span>
+                    <span className="text-xs text-muted-foreground bg-accent/10 text-accent px-2 py-1 rounded">Creator/PAYG Plans</span>
                   </div>
                   <p className="text-sm text-muted-foreground">
                     Fee charged on each photo sale. This is deducted from the photographer&apos;s earnings.
@@ -1402,12 +1429,12 @@ export default function PricingPage() {
                 </div>
               )}
 
-              {/* Print Commission - Only for Photographer Plans */}
-              {formData.plan_type === 'photographer' && (
+              {/* Print Commission - Creator/PAYG plans */}
+              {formData.plan_type !== 'drop_in' && (
                 <div className="space-y-4 p-4 bg-muted/50 rounded-lg">
                   <div className="flex items-center justify-between">
                     <h3 className="font-semibold text-foreground">Print Commission</h3>
-                    <span className="text-xs text-muted-foreground bg-accent/10 text-accent px-2 py-1 rounded">Photographer Plans Only</span>
+                    <span className="text-xs text-muted-foreground bg-accent/10 text-accent px-2 py-1 rounded">Creator/PAYG Plans</span>
                   </div>
                   <p className="text-sm text-muted-foreground">
                     Commission on print product sales through the platform.
@@ -1596,7 +1623,7 @@ export default function PricingPage() {
                   
                   {availablePlanFeatures.length === 0 && (
                     <p className="text-sm text-muted-foreground text-center py-4">
-                      No features available for {formData.plan_type === 'photographer' ? 'photographer' : 'drop-in'} plans.
+                      No features available for {getPlanTypeLabel(formData.plan_type).toLowerCase()} plans.
                       Create features in the Features tab first.
                     </p>
                   )}

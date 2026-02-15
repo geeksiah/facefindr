@@ -35,6 +35,7 @@ import {
 import { Button } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
+import { formatDateForDisplay, parseDateForDisplay } from '@/lib/date';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 import { useRealtimeSubscription } from '@/hooks/use-realtime';
 import { getCoverImageUrl } from '@/lib/storage-urls';
@@ -187,7 +188,8 @@ export default function MyEventsScreen() {
     if (!matchesSearch) return false;
     
     if (activeFilter === 'recent') {
-      const eventDate = new Date(event.eventDate);
+      const eventDate = parseDateForDisplay(event.eventDate);
+      if (!eventDate) return false;
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
       return eventDate >= thirtyDaysAgo;
@@ -224,7 +226,7 @@ export default function MyEventsScreen() {
           <View style={styles.eventMeta}>
             <Calendar size={12} color={colors.secondary} />
             <Text style={styles.eventMetaText}>
-              {new Date(item.eventDate).toLocaleDateString('en-US', {
+              {formatDateForDisplay(item.eventDate, 'en-US', {
                 month: 'short',
                 day: 'numeric',
               })}
@@ -279,7 +281,7 @@ export default function MyEventsScreen() {
                 <View style={styles.featuredMetaItem}>
                   <Calendar size={14} color="#fff" />
                   <Text style={styles.featuredMetaText}>
-                    {new Date(featuredEvent.eventDate).toLocaleDateString('en-US', {
+                    {formatDateForDisplay(featuredEvent.eventDate, 'en-US', {
                       month: 'short',
                       day: 'numeric',
                       year: 'numeric',

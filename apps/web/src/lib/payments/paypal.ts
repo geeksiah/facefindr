@@ -51,6 +51,39 @@ export function isPayPalConfigured(): boolean {
   return !!paypalClient;
 }
 
+function getPayPalApiBaseUrl(): string {
+  return PAYPAL_MODE === 'live'
+    ? 'https://api-m.paypal.com'
+    : 'https://api-m.sandbox.paypal.com';
+}
+
+async function getPayPalAccessToken(): Promise<string> {
+  if (!PAYPAL_CLIENT_ID || !PAYPAL_CLIENT_SECRET) {
+    throw new Error('PayPal credentials are not configured');
+  }
+
+  const auth = Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_CLIENT_SECRET}`).toString('base64');
+  const response = await fetch(`${getPayPalApiBaseUrl()}/v1/oauth2/token`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${auth}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: 'grant_type=client_credentials',
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to obtain PayPal access token');
+  }
+
+  const data = await response.json();
+  if (!data?.access_token) {
+    throw new Error('PayPal access token missing in response');
+  }
+
+  return data.access_token as string;
+}
+
 export function getPayPalClientId(): string | undefined {
   return PAYPAL_CLIENT_ID;
 }
@@ -288,20 +321,45 @@ export async function verifyWebhook(
     throw new Error('PayPal is not configured');
   }
 
-  // PayPal webhook verification requires checking the signature
-  // This is a simplified version - in production, use PayPal's verification endpoint
   const transmissionId = headers['paypal-transmission-id'];
   const transmissionTime = headers['paypal-transmission-time'];
   const certUrl = headers['paypal-cert-url'];
   const transmissionSig = headers['paypal-transmission-sig'];
+  const authAlgo = headers['paypal-auth-algo'];
 
-  if (!transmissionId || !transmissionTime || !certUrl || !transmissionSig) {
+  if (!transmissionId || !transmissionTime || !certUrl || !transmissionSig || !authAlgo) {
     return false;
   }
 
-  // In production, you would verify the signature cryptographically
-  // For now, we just check that all headers are present
-  return true;
+  try {
+    const accessToken = await getPayPalAccessToken();
+    const webhookEvent = JSON.parse(body);
+    const response = await fetch(`${getPayPalApiBaseUrl()}/v1/notifications/verify-webhook-signature`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        auth_algo: authAlgo,
+        cert_url: certUrl,
+        transmission_id: transmissionId,
+        transmission_sig: transmissionSig,
+        transmission_time: transmissionTime,
+        webhook_id: webhookId,
+        webhook_event: webhookEvent,
+      }),
+    });
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const verification = await response.json();
+    return verification?.verification_status === 'SUCCESS';
+  } catch {
+    return false;
+  }
 }
 
 // ============================================

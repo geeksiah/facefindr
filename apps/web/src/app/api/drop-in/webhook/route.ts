@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type Stripe from 'stripe';
 
 import { stripe } from '@/lib/payments/stripe';
-import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/server';
 
 export async function POST(request: NextRequest) {
   try {
@@ -40,6 +40,7 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = createServiceClient();
+    const processSecret = process.env.DROP_IN_PROCESS_SECRET;
 
     // Handle checkout.session.completed
     if (event.type === 'checkout.session.completed') {
@@ -76,21 +77,28 @@ export async function POST(request: NextRequest) {
           // Trigger face processing
           // In production, this would trigger a background job
           // For now, we'll call the process API directly
-          try {
-            const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-            const processResponse = await fetch(`${baseUrl}/api/drop-in/process`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ dropInPhotoId: dropInPhoto.id }),
-            });
-            
-            if (!processResponse.ok) {
-              console.error('Processing failed:', await processResponse.text());
-              // Don't fail the webhook - processing can be retried manually
+          if (!processSecret) {
+            console.warn('DROP_IN_PROCESS_SECRET is not configured. Skipping automatic drop-in processing trigger.');
+          } else {
+            try {
+              const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+              const processResponse = await fetch(`${baseUrl}/api/drop-in/process`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-drop-in-process-secret': processSecret,
+                },
+                body: JSON.stringify({ dropInPhotoId: dropInPhoto.id }),
+              });
+              
+              if (!processResponse.ok) {
+                console.error('Processing failed:', await processResponse.text());
+                // Don't fail the webhook - processing can be retried manually
+              }
+            } catch (error) {
+              console.error('Failed to trigger processing:', error);
+              // Don't fail the webhook - processing can be retried
             }
-          } catch (error) {
-            console.error('Failed to trigger processing:', error);
-            // Don't fail the webhook - processing can be retried
           }
         }
       }
@@ -127,15 +135,22 @@ export async function POST(request: NextRequest) {
             .eq('id', dropInPhoto.id);
 
           // Trigger processing
-          try {
-            const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-            await fetch(`${baseUrl}/api/drop-in/process`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ dropInPhotoId: dropInPhoto.id }),
-            });
-          } catch (error) {
-            console.error('Failed to trigger processing:', error);
+          if (!processSecret) {
+            console.warn('DROP_IN_PROCESS_SECRET is not configured. Skipping automatic drop-in processing trigger.');
+          } else {
+            try {
+              const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+              await fetch(`${baseUrl}/api/drop-in/process`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-drop-in-process-secret': processSecret,
+                },
+                body: JSON.stringify({ dropInPhotoId: dropInPhoto.id }),
+              });
+            } catch (error) {
+              console.error('Failed to trigger processing:', error);
+            }
           }
         }
       }

@@ -4,6 +4,11 @@ import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 
 import { verifyWebhook, captureOrder } from '@/lib/payments/paypal';
+import {
+  claimWebhookEvent,
+  markWebhookFailed,
+  markWebhookProcessed,
+} from '@/lib/payments/webhook-ledger';
 import { createServiceClient } from '@/lib/supabase/server';
 
 const PAYPAL_WEBHOOK_ID = process.env.PAYPAL_WEBHOOK_ID;
@@ -57,33 +62,65 @@ export async function POST(request: Request) {
     // Verify webhook signature
     const isValid = await verifyWebhook(webhookHeaders, body, PAYPAL_WEBHOOK_ID);
     if (!isValid) {
-      console.warn('PayPal webhook signature verification failed');
-      // In production, you might want to reject invalid signatures
-      // For now, we'll log and continue for testing
+      return NextResponse.json(
+        { error: 'Invalid webhook signature' },
+        { status: 401 }
+      );
     }
 
     const payload: PayPalWebhookPayload = JSON.parse(body);
     const supabase = createServiceClient();
+    const claim = await claimWebhookEvent({
+      supabase,
+      provider: 'paypal',
+      eventId: payload.id,
+      eventType: payload.event_type,
+      signatureVerified: true,
+      payload,
+    });
 
-    switch (payload.event_type) {
-      case 'CHECKOUT.ORDER.APPROVED': {
-        await handleOrderApproved(supabase, payload.resource);
-        break;
+    if (!claim.shouldProcess) {
+      return NextResponse.json({
+        received: true,
+        replay: true,
+        status: claim.status,
+      });
+    }
+
+    try {
+      switch (payload.event_type) {
+        case 'CHECKOUT.ORDER.APPROVED': {
+          await handleOrderApproved(supabase, payload.resource);
+          break;
+        }
+
+        case 'PAYMENT.CAPTURE.COMPLETED': {
+          await handleCaptureCompleted(supabase, payload.resource);
+          break;
+        }
+
+        case 'PAYMENT.CAPTURE.DENIED':
+        case 'PAYMENT.CAPTURE.REFUNDED': {
+          await handleCaptureFailed(supabase, payload.resource, payload.event_type);
+          break;
+        }
+
+        default:
+          console.log(`Unhandled PayPal event: ${payload.event_type}`);
       }
 
-      case 'PAYMENT.CAPTURE.COMPLETED': {
-        await handleCaptureCompleted(supabase, payload.resource);
-        break;
+      if (claim.rowId) {
+        await markWebhookProcessed(supabase, claim.rowId);
       }
-
-      case 'PAYMENT.CAPTURE.DENIED':
-      case 'PAYMENT.CAPTURE.REFUNDED': {
-        await handleCaptureFailed(supabase, payload.resource, payload.event_type);
-        break;
+    } catch (processingError) {
+      if (claim.rowId) {
+        await markWebhookFailed(
+          supabase,
+          claim.rowId,
+          processingError instanceof Error ? processingError.message : 'PayPal webhook processing failed'
+        );
       }
-
-      default:
-        console.log(`Unhandled PayPal event: ${payload.event_type}`);
+      throw processingError;
     }
 
     return NextResponse.json({ received: true });

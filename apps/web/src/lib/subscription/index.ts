@@ -2,7 +2,7 @@
  * Subscription & Plans Service
  * 
  * Unified service for fetching plans and features from the database.
- * Supports both photographer and drop-in plans.
+ * Supports creator, drop-in, and PAYG plans.
  * Falls back to defaults if database is unavailable.
  */
 
@@ -18,7 +18,7 @@ export * from './enforcement';
 // TYPES
 // ============================================
 
-export type PlanType = 'photographer' | 'drop_in';
+export type PlanType = 'photographer' | 'drop_in' | 'payg';
 
 export interface SubscriptionPlan {
   id: string;

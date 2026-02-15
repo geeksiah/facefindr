@@ -4,6 +4,11 @@ import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 
 import { verifyWebhookSignature, verifyTransaction } from '@/lib/payments/flutterwave';
+import {
+  claimWebhookEvent,
+  markWebhookFailed,
+  markWebhookProcessed,
+} from '@/lib/payments/webhook-ledger';
 import { createServiceClient } from '@/lib/supabase/server';
 
 const FLUTTERWAVE_WEBHOOK_SECRET = process.env.FLUTTERWAVE_WEBHOOK_SECRET;
@@ -55,21 +60,53 @@ export async function POST(request: Request) {
 
     const payload: FlutterwaveWebhookPayload = JSON.parse(body);
     const supabase = createServiceClient();
+    const providerEventId = `${payload.event}:${payload.data?.id || payload.data?.tx_ref || 'unknown'}`;
+    const claim = await claimWebhookEvent({
+      supabase,
+      provider: 'flutterwave',
+      eventId: providerEventId,
+      eventType: payload.event,
+      signatureVerified: true,
+      payload,
+    });
 
-    // Handle different event types
-    switch (payload.event) {
-      case 'charge.completed': {
-        await handleChargeCompleted(supabase, payload.data);
-        break;
+    if (!claim.shouldProcess) {
+      return NextResponse.json({
+        received: true,
+        replay: true,
+        status: claim.status,
+      });
+    }
+
+    try {
+      // Handle different event types
+      switch (payload.event) {
+        case 'charge.completed': {
+          await handleChargeCompleted(supabase, payload.data);
+          break;
+        }
+
+        case 'transfer.completed': {
+          await handleTransferCompleted(supabase, payload.data);
+          break;
+        }
+
+        default:
+          console.log(`Unhandled Flutterwave event: ${payload.event}`);
       }
 
-      case 'transfer.completed': {
-        await handleTransferCompleted(supabase, payload.data);
-        break;
+      if (claim.rowId) {
+        await markWebhookProcessed(supabase, claim.rowId);
       }
-
-      default:
-        console.log(`Unhandled Flutterwave event: ${payload.event}`);
+    } catch (processingError) {
+      if (claim.rowId) {
+        await markWebhookFailed(
+          supabase,
+          claim.rowId,
+          processingError instanceof Error ? processingError.message : 'Flutterwave webhook processing failed'
+        );
+      }
+      throw processingError;
     }
 
     return NextResponse.json({ received: true });

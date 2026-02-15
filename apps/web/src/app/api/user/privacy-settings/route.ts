@@ -2,7 +2,17 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createClientWithAccessToken } from '@/lib/supabase/server';
+
+async function getAuthClient(request: NextRequest) {
+  const authHeader = request.headers.get('authorization');
+  const accessToken = authHeader?.startsWith('Bearer ')
+    ? authHeader.slice(7)
+    : null;
+  return accessToken
+    ? createClientWithAccessToken(accessToken)
+    : await createClient();
+}
 
 export interface PrivacySettings {
   profileVisible: boolean;
@@ -14,9 +24,9 @@ export interface PrivacySettings {
 }
 
 // GET - Fetch user's privacy settings
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await getAuthClient(request);
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -83,7 +93,7 @@ export async function GET() {
 // PUT - Update user's privacy settings
 export async function PUT(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await getAuthClient(request);
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {

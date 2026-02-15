@@ -8,12 +8,15 @@ import Link from 'next/link';
 
 import { Button } from '@/components/ui/button';
 import { PhotoUploader } from '@/components/events/photo-uploader';
+import { formatEventDateDisplay } from '@/lib/events/time';
 import { createClient } from '@/lib/supabase/client';
 
 interface Event {
   id: string;
   name: string;
   event_date: string | null;
+  event_start_at_utc: string | null;
+  event_timezone: string | null;
   status: string;
   media_count: number;
 }
@@ -38,7 +41,7 @@ export default function UploadPage() {
 
       const { data: eventsRes, error: eventsError } = await supabase
         .from('events')
-        .select('id, name, event_date, status')
+        .select('id, name, event_date, event_start_at_utc, event_timezone, status')
         .eq('photographer_id', userRes.user.id)
         .in('status', ['draft', 'active'])
         .order('created_at', { ascending: false });
@@ -77,6 +80,8 @@ export default function UploadPage() {
           id: e.id,
           name: e.name,
           event_date: e.event_date,
+          event_start_at_utc: e.event_start_at_utc,
+          event_timezone: e.event_timezone,
           status: e.status,
           media_count: counts.get(e.id) || 0,
         }))
@@ -163,10 +168,18 @@ export default function UploadPage() {
                     <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
                       {event.event_date && (
                         <span>
-                          {new Date(event.event_date).toLocaleDateString('en-US', {
-                            month: 'short',
-                            day: 'numeric',
-                          })}
+                          {formatEventDateDisplay(
+                            {
+                              event_date: event.event_date,
+                              event_start_at_utc: event.event_start_at_utc,
+                              event_timezone: event.event_timezone,
+                            },
+                            'en-US',
+                            {
+                              month: 'short',
+                              day: 'numeric',
+                            }
+                          )}
                         </span>
                       )}
                       <span>{event.media_count} photos</span>
@@ -187,7 +200,7 @@ export default function UploadPage() {
                 onClick={() => setSelectedEventId(null)}
                 className="text-sm text-muted-foreground hover:text-foreground mb-1"
               >
-                ← Back to events
+                {'<- Back to events'}
               </button>
               <h2 className="text-lg font-semibold text-foreground">
                 {events.find((e) => e.id === selectedEventId)?.name}

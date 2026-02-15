@@ -18,6 +18,11 @@ import {
   type UpdateEventInput,
   type EventPricingInput,
 } from '@/lib/validations/event';
+import {
+  deriveEventStartAtUtc,
+  normalizeEventTimezone,
+  normalizeIsoDate,
+} from '@/lib/events/time';
 
 // ============================================
 // CREATE EVENT
@@ -77,6 +82,18 @@ export async function createEvent(formData: CreateEventInput) {
     }
   }
 
+  const { data: photographerProfile } = await supabase
+    .from('photographers')
+    .select('timezone')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  const eventDate = normalizeIsoDate(validated.data.eventDate || null);
+  const eventTimezone = normalizeEventTimezone(
+    validated.data.eventTimezone || photographerProfile?.timezone || 'UTC'
+  );
+  const eventStartAtUtc = deriveEventStartAtUtc(eventDate, eventTimezone);
+
   // Create the event
   const { data: event, error } = await supabase
     .from('events')
@@ -85,7 +102,9 @@ export async function createEvent(formData: CreateEventInput) {
       name: validated.data.name,
       description: validated.data.description || null,
       location: validated.data.location || null,
-      event_date: validated.data.eventDate || null,
+      event_date: eventDate,
+      event_timezone: eventTimezone,
+      event_start_at_utc: eventStartAtUtc,
       is_public: validated.data.isPublic,
       face_recognition_enabled: validated.data.faceRecognitionEnabled,
       live_mode_enabled: validated.data.liveModeEnabled,
@@ -191,13 +210,19 @@ export async function updateEvent(eventId: string, formData: UpdateEventInput) {
   // Verify ownership
   const { data: existingEvent } = await supabase
     .from('events')
-    .select('photographer_id')
+    .select('photographer_id, event_timezone')
     .eq('id', eventId)
     .single();
 
   if (!existingEvent || existingEvent.photographer_id !== user.id) {
     return { error: 'Event not found' };
   }
+
+  const eventDate = normalizeIsoDate(validated.data.eventDate || null);
+  const eventTimezone = normalizeEventTimezone(
+    validated.data.eventTimezone || existingEvent.event_timezone || 'UTC'
+  );
+  const eventStartAtUtc = deriveEventStartAtUtc(eventDate, eventTimezone);
 
   // Update the event
   const { error } = await supabase
@@ -206,7 +231,9 @@ export async function updateEvent(eventId: string, formData: UpdateEventInput) {
       name: validated.data.name,
       description: validated.data.description,
       location: validated.data.location,
-      event_date: validated.data.eventDate,
+      event_date: eventDate,
+      event_timezone: eventTimezone,
+      event_start_at_utc: eventStartAtUtc,
       is_public: validated.data.isPublic,
       face_recognition_enabled: validated.data.faceRecognitionEnabled,
       live_mode_enabled: validated.data.liveModeEnabled,

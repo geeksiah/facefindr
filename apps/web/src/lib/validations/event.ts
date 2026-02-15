@@ -12,6 +12,7 @@ export const createEventSchema = z.object({
   description: z.string().max(1000, 'Description must be less than 1000 characters').optional(),
   location: z.string().max(255, 'Location must be less than 255 characters').optional(),
   eventDate: z.string().optional(),
+  eventTimezone: z.string().optional(),
   isPublic: z.boolean().default(false),
   faceRecognitionEnabled: z.boolean().default(true),
   liveModeEnabled: z.boolean().default(false),

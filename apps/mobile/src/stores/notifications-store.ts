@@ -7,15 +7,20 @@
 import { create } from 'zustand';
 import { supabase } from '@/lib/supabase';
 import { RealtimeChannel } from '@supabase/supabase-js';
+import { useAuthStore } from '@/stores/auth-store';
+
+const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
 
 export interface Notification {
   id: string;
-  type: 'photo_match' | 'new_follower' | 'event_update' | 'payout' | 'system';
+  type: string;
   title: string;
   message: string;
   data?: Record<string, unknown>;
   read: boolean;
   createdAt: string;
+  channel?: string;
+  status?: string;
 }
 
 interface NotificationsState {
@@ -42,28 +47,40 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
 
   fetchNotifications: async (userId: string) => {
     set({ isLoading: true });
+    void userId;
 
     try {
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(50);
+      const accessToken = useAuthStore.getState().session?.access_token;
+      if (!accessToken || !API_URL) {
+        set({ notifications: [], unreadCount: 0, isLoading: false });
+        return;
+      }
 
-      if (error) throw error;
+      const response = await fetch(`${API_URL}/api/notifications?limit=50`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || 'Failed to load notifications');
+      }
 
-      const notifications: Notification[] = (data || []).map((n: any) => ({
+      const notifications: Notification[] = (payload.notifications || []).map((n: any) => ({
         id: n.id,
-        type: n.type,
-        title: n.title,
-        message: n.message,
-        data: n.data,
-        read: n.read,
-        createdAt: n.created_at,
+        type: n.template_code || n.templateCode || n.channel || 'system',
+        title: n.subject || 'Notification',
+        message: n.body || '',
+        data: n.metadata || {},
+        read: Boolean(n.read_at || n.readAt),
+        createdAt: n.created_at || n.createdAt || new Date().toISOString(),
+        channel: n.channel,
+        status: n.status,
       }));
 
-      const unreadCount = notifications.filter(n => !n.read).length;
+      const unreadCount = typeof payload.unreadCount === 'number'
+        ? payload.unreadCount
+        : notifications.filter(n => !n.read).length;
 
       set({ notifications, unreadCount, isLoading: false });
     } catch (error) {
@@ -83,10 +100,23 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
     set({ notifications: updated, unreadCount });
 
     try {
-      await supabase
-        .from('notifications')
-        .update({ read: true })
-        .eq('id', notificationId);
+      const accessToken = useAuthStore.getState().session?.access_token;
+      if (!accessToken || !API_URL) {
+        throw new Error('Missing auth session');
+      }
+
+      const response = await fetch(`${API_URL}/api/notifications`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ notificationId }),
+      });
+      if (!response.ok) {
+        const payload = await response.json();
+        throw new Error(payload.error || 'Failed to mark notification as read');
+      }
     } catch (error) {
       console.error('Failed to mark notification as read:', error);
       // Revert on error
@@ -96,17 +126,30 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
 
   markAllAsRead: async (userId: string) => {
     const { notifications } = get();
+    void userId;
     
     // Optimistic update
     const updated = notifications.map(n => ({ ...n, read: true }));
     set({ notifications: updated, unreadCount: 0 });
 
     try {
-      await supabase
-        .from('notifications')
-        .update({ read: true })
-        .eq('user_id', userId)
-        .eq('read', false);
+      const accessToken = useAuthStore.getState().session?.access_token;
+      if (!accessToken || !API_URL) {
+        throw new Error('Missing auth session');
+      }
+
+      const response = await fetch(`${API_URL}/api/notifications`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ markAllRead: true }),
+      });
+      if (!response.ok) {
+        const payload = await response.json();
+        throw new Error(payload.error || 'Failed to mark all notifications as read');
+      }
     } catch (error) {
       console.error('Failed to mark all notifications as read:', error);
       // Revert on error
@@ -144,12 +187,14 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
         (payload) => {
           const newNotification: Notification = {
             id: payload.new.id,
-            type: payload.new.type || 'system',
-            title: payload.new.title || payload.new.subject || '',
-            message: payload.new.message || payload.new.body || '',
-            data: payload.new.data || payload.new.metadata,
-            read: payload.new.read || !payload.new.read_at,
+            type: payload.new.template_code || payload.new.type || payload.new.channel || 'system',
+            title: payload.new.subject || payload.new.title || 'Notification',
+            message: payload.new.body || payload.new.message || '',
+            data: payload.new.metadata || payload.new.data,
+            read: Boolean(payload.new.read_at),
             createdAt: payload.new.created_at,
+            channel: payload.new.channel,
+            status: payload.new.status,
           };
           addNotification(newNotification);
         }

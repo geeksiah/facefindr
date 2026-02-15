@@ -13,10 +13,33 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { detectFaces } from '@/lib/aws/rekognition';
 import { searchDropInFaces } from '@/lib/aws/rekognition-drop-in';
-import { createServiceClient } from '@/lib/supabase/server';
+import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
 export async function POST(request: NextRequest) {
   try {
+    const processSecret = process.env.DROP_IN_PROCESS_SECRET;
+    const secretHeader = request.headers.get('x-drop-in-process-secret');
+    const internalAuthorized = !!processSecret && secretHeader === processSecret;
+
+    let requesterId: string | null = null;
+    if (!internalAuthorized) {
+      const authHeader = request.headers.get('authorization');
+      const accessToken = authHeader?.startsWith('Bearer ')
+        ? authHeader.slice(7)
+        : null;
+      const authClient = accessToken
+        ? createClientWithAccessToken(accessToken)
+        : await createClient();
+      const {
+        data: { user },
+      } = await authClient.auth.getUser();
+
+      if (!user) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+      requesterId = user.id;
+    }
+
     const { dropInPhotoId } = await request.json();
 
     if (!dropInPhotoId) {
@@ -34,6 +57,10 @@ export async function POST(request: NextRequest) {
 
     if (photoError || !dropInPhoto) {
       return NextResponse.json({ error: 'Drop-in photo not found' }, { status: 404 });
+    }
+
+    if (!internalAuthorized && requesterId !== dropInPhoto.uploader_id) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     // Check payment status
@@ -146,7 +173,7 @@ export async function POST(request: NextRequest) {
 
         // Also check if attendee is registered for any events (free discovery)
         const { data: registeredEvents } = await supabase
-          .from('event_access_tokens')
+          .from('entitlements')
           .select('event_id')
           .eq('attendee_id', attendeeId)
           .limit(1);

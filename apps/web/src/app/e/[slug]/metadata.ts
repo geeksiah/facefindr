@@ -1,14 +1,16 @@
 import { Metadata } from 'next';
 
-import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/server';
 
 export async function generateEventMetadata(slug: string): Promise<Metadata> {
-  const supabase = createClient();
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://facefindr.app';
 
   try {
+    const supabase = createServiceClient();
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(slug);
+
     // Find event by slug
-    const { data: event } = await supabase
+    let query = supabase
       .from('events')
       .select(`
         id,
@@ -22,14 +24,20 @@ export async function generateEventMetadata(slug: string): Promise<Metadata> {
         require_access_code,
         photographers (display_name, profile_photo_url)
       `)
-      .or(`public_slug.eq.${slug},short_link.eq.${slug}`)
-      .eq('status', 'active')
-      .single();
+      .eq('status', 'active');
+
+    if (isUuid) {
+      query = query.eq('id', slug);
+    } else {
+      query = query.or(`public_slug.eq.${slug},short_link.eq.${slug}`);
+    }
+
+    const { data: event } = await query.maybeSingle();
 
     if (!event) {
       return {
-        title: 'Event Not Found',
-        description: 'The event you are looking for could not be found.',
+        title: 'FaceFindr Event',
+        description: 'Find your event photos on FaceFindr',
       };
     }
 

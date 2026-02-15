@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 
 // POST - Upload cover photo
@@ -12,6 +13,19 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
+    const session = await getAdminSession();
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const canManage =
+      (await hasPermission('settings.update')) ||
+      (await hasPermission('events.feature')) ||
+      (await hasPermission('events.transfer'));
+    if (!canManage) {
+      return NextResponse.json({ error: 'Permission denied' }, { status: 403 });
+    }
+
     const { id } = params;
 
     // Verify event exists
@@ -73,6 +87,11 @@ export async function POST(
       );
     }
 
+    await logAction('event_cover_upload', 'event', id, {
+      admin_id: session.adminId,
+      file_path: filePath,
+    });
+
     return NextResponse.json({ url: urlData.publicUrl });
 
   } catch (error) {
@@ -90,6 +109,19 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
+    const session = await getAdminSession();
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const canManage =
+      (await hasPermission('settings.update')) ||
+      (await hasPermission('events.feature')) ||
+      (await hasPermission('events.transfer'));
+    if (!canManage) {
+      return NextResponse.json({ error: 'Permission denied' }, { status: 403 });
+    }
+
     const { id } = params;
 
     // Get current cover image URL
@@ -128,6 +160,10 @@ export async function DELETE(
         { status: 500 }
       );
     }
+
+    await logAction('event_cover_delete', 'event', id, {
+      admin_id: session.adminId,
+    });
 
     return NextResponse.json({ success: true });
 

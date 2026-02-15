@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic';
 
+import { createHash } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -21,7 +22,35 @@ import {
   isStripeConfigured,
 } from '@/lib/payments/stripe';
 import { checkRateLimit, getClientIP, rateLimitHeaders, rateLimits } from '@/lib/rate-limit';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
+
+async function getAuthClient(request: NextRequest) {
+  const authHeader = request.headers.get('authorization');
+  const accessToken = authHeader?.startsWith('Bearer ')
+    ? authHeader.slice(7)
+    : null;
+  return accessToken
+    ? createClientWithAccessToken(accessToken)
+    : createClient();
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`;
+  }
+
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(obj[key])}`).join(',')}}`;
+}
+
+function buildCheckoutRequestHash(payload: Record<string, unknown>): string {
+  return createHash('sha256').update(stableStringify(payload)).digest('hex');
+}
 
 export async function POST(request: NextRequest) {
   // Rate limiting for checkout
@@ -34,8 +63,18 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  let idempotencyFinalizeRef:
+    | ((
+        status: 'completed' | 'failed',
+        responseCode: number,
+        payload: Record<string, unknown>,
+        transactionId?: string
+      ) => Promise<void>)
+    | null = null;
+
   try {
-    const supabase = await createClient();
+    const supabase = await getAuthClient(request);
+    const serviceClient = createServiceClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -48,51 +87,66 @@ export async function POST(request: NextRequest) {
       provider,
       currency,
       customerEmail,
-      idempotencyKey, // Client-generated unique key to prevent duplicate submissions
+      idempotencyKey: bodyIdempotencyKey, // backward-compat body key
     } = body;
+
+    const headerIdempotencyKey = request.headers.get('Idempotency-Key') || request.headers.get('idempotency-key');
+    const idempotencyKey = String(headerIdempotencyKey || bodyIdempotencyKey || '').trim();
+    const actorId = user?.id || `guest:${String(customerEmail || '').trim().toLowerCase() || 'anonymous'}`;
+    const idempotencyScope = 'checkout.create';
+    const requestHash = buildCheckoutRequestHash({
+      eventId,
+      mediaIds: Array.isArray(mediaIds) ? [...mediaIds].sort() : [],
+      unlockAll: Boolean(unlockAll),
+      provider: provider || null,
+      currency: currency || null,
+      customerEmail: customerEmail || null,
+      actorId,
+    });
+    let idempotencyRecordId: string | null = null;
+    let idempotencyFinalized = false;
+
+    const finalizeIdempotency = async (
+      status: 'completed' | 'failed',
+      responseCode: number,
+      payload: Record<string, unknown>,
+      transactionId?: string
+    ) => {
+      if (!idempotencyRecordId || idempotencyFinalized) return;
+      idempotencyFinalized = true;
+
+      await serviceClient
+        .from('api_idempotency_keys')
+        .update({
+          status,
+          response_code: responseCode,
+          response_payload: status === 'completed' ? payload : null,
+          error_payload: status === 'failed' ? payload : null,
+          transaction_id: transactionId || null,
+          last_seen_at: new Date().toISOString(),
+        })
+        .eq('id', idempotencyRecordId);
+    };
+    idempotencyFinalizeRef = finalizeIdempotency;
+
+    const respond = async (
+      payload: Record<string, unknown>,
+      responseCode: number,
+      status?: 'completed' | 'failed',
+      transactionId?: string
+    ) => {
+      if (status) {
+        await finalizeIdempotency(status, responseCode, payload, transactionId);
+      }
+      return NextResponse.json(payload, { status: responseCode });
+    };
 
     // Validate idempotency key
     if (!idempotencyKey) {
       return NextResponse.json(
-        { error: 'Idempotency key is required' },
+        { error: 'Idempotency key is required via Idempotency-Key header or request body' },
         { status: 400 }
       );
-    }
-
-    // Check for existing transaction with same idempotency key (prevent double submission)
-    // Check in metadata since idempotency_key might be stored there
-    const { data: existingTransactions } = await supabase
-      .from('transactions')
-      .select('id, status, metadata')
-      .eq('event_id', eventId)
-      .eq('attendee_id', user?.id || '')
-      .eq('status', 'pending')
-      .gte('created_at', new Date(Date.now() - 10 * 60 * 1000).toISOString()) // Last 10 minutes
-      .order('created_at', { ascending: false })
-      .limit(5);
-
-    // Check if any transaction has the same idempotency key in metadata
-    const existingTransaction = existingTransactions?.find(
-      (t: any) => t.metadata?.idempotency_key === idempotencyKey
-    );
-
-    if (existingTransaction) {
-      // Return existing transaction if already processed
-      if (existingTransaction.status === 'succeeded') {
-        return NextResponse.json(
-          { error: 'This transaction has already been completed' },
-          { status: 409 }
-        );
-      }
-      // Return existing checkout URL if still pending
-      if (existingTransaction.metadata?.checkoutUrl) {
-        return NextResponse.json({
-          checkoutUrl: existingTransaction.metadata.checkoutUrl,
-          sessionId: existingTransaction.id,
-          provider: existingTransaction.payment_provider || provider,
-          message: 'Using existing checkout session',
-        });
-      }
     }
 
     // Validate event exists and get pricing
@@ -320,6 +374,72 @@ export async function POST(request: NextRequest) {
     // Determine customer email
     const email = customerEmail || user?.email;
 
+    // Claim idempotency slot before creating provider session/order.
+    const claimTimestamp = new Date().toISOString();
+    const { data: claimedIdempotency, error: claimError } = await serviceClient
+      .from('api_idempotency_keys')
+      .insert({
+        operation_scope: idempotencyScope,
+        actor_id: actorId,
+        idempotency_key: idempotencyKey,
+        request_hash: requestHash,
+        status: 'processing',
+        last_seen_at: claimTimestamp,
+      })
+      .select('id')
+      .single();
+
+    if (claimError) {
+      if (claimError.code !== '23505') {
+        throw claimError;
+      }
+
+      const { data: existingIdempotency } = await serviceClient
+        .from('api_idempotency_keys')
+        .select('*')
+        .eq('operation_scope', idempotencyScope)
+        .eq('actor_id', actorId)
+        .eq('idempotency_key', idempotencyKey)
+        .single();
+
+      if (!existingIdempotency) {
+        throw claimError;
+      }
+
+      await serviceClient
+        .from('api_idempotency_keys')
+        .update({ last_seen_at: claimTimestamp })
+        .eq('id', existingIdempotency.id);
+
+      if (existingIdempotency.request_hash !== requestHash) {
+        return NextResponse.json(
+          { error: 'Idempotency key was already used with a different request payload' },
+          { status: 409 }
+        );
+      }
+
+      if (existingIdempotency.status === 'completed' && existingIdempotency.response_payload) {
+        return NextResponse.json(
+          existingIdempotency.response_payload as Record<string, unknown>,
+          { status: existingIdempotency.response_code || 200 }
+        );
+      }
+
+      if (existingIdempotency.status === 'failed' && existingIdempotency.error_payload) {
+        return NextResponse.json(
+          existingIdempotency.error_payload as Record<string, unknown>,
+          { status: existingIdempotency.response_code || 400 }
+        );
+      }
+
+      return NextResponse.json(
+        { error: 'Checkout request is already being processed with this idempotency key' },
+        { status: 409 }
+      );
+    }
+
+    idempotencyRecordId = claimedIdempotency.id;
+
     let checkoutUrl: string;
     let sessionId: string;
 
@@ -329,9 +449,10 @@ export async function POST(request: NextRequest) {
     // Handle Stripe
     if (finalProvider === 'stripe') {
       if (!isStripeConfigured() || !wallet.stripe_account_id) {
-        return NextResponse.json(
+        return respond(
           { error: 'Stripe is not configured' },
-          { status: 500 }
+          500,
+          'failed'
         );
       }
 
@@ -361,9 +482,10 @@ export async function POST(request: NextRequest) {
     // Handle Flutterwave
     else if (finalProvider === 'flutterwave') {
       if (!isFlutterwaveConfigured() || !wallet.flutterwave_subaccount_id) {
-        return NextResponse.json(
+        return respond(
           { error: 'Flutterwave is not configured' },
-          { status: 500 }
+          500,
+          'failed'
         );
       }
 
@@ -390,9 +512,10 @@ export async function POST(request: NextRequest) {
     // Handle PayPal
     else if (finalProvider === 'paypal') {
       if (!isPayPalConfigured() || !wallet.paypal_merchant_id) {
-        return NextResponse.json(
+        return respond(
           { error: 'PayPal is not configured' },
-          { status: 500 }
+          500,
+          'failed'
         );
       }
 
@@ -415,38 +538,21 @@ export async function POST(request: NextRequest) {
 
       const approvalUrl = getApprovalUrl(order);
       if (!approvalUrl) {
-        return NextResponse.json(
+        return respond(
           { error: 'Failed to get PayPal approval URL' },
-          { status: 500 }
+          500,
+          'failed'
         );
       }
 
       checkoutUrl = approvalUrl;
       sessionId = order.id;
     } else {
-      return NextResponse.json(
+      return respond(
         { error: 'Invalid payment provider' },
-        { status: 400 }
+        400,
+        'failed'
       );
-    }
-
-    // Additional security: Check for duplicate pending transactions for same user/event/media
-    if (user?.id) {
-      const { data: duplicatePending } = await supabase
-        .from('transactions')
-        .select('id')
-        .eq('event_id', eventId)
-        .eq('attendee_id', user.id)
-        .eq('status', 'pending')
-        .gte('created_at', new Date(Date.now() - 5 * 60 * 1000).toISOString()) // Last 5 minutes
-        .single();
-
-      if (duplicatePending) {
-        return NextResponse.json(
-          { error: 'A pending transaction already exists. Please wait for it to complete.' },
-          { status: 409 }
-        );
-      }
     }
 
     // Validate media IDs are not already purchased (prevent double purchase)
@@ -460,12 +566,13 @@ export async function POST(request: NextRequest) {
 
       if (existingEntitlements && existingEntitlements.length > 0) {
         const alreadyOwned = existingEntitlements.map((e: any) => e.media_id);
-        return NextResponse.json(
+        return respond(
           { 
             error: 'Some photos have already been purchased',
             alreadyOwned,
           },
-          { status: 400 }
+          400,
+          'failed'
         );
       }
     }
@@ -479,10 +586,10 @@ export async function POST(request: NextRequest) {
         attendee_id: user?.id || null,
         attendee_email: email,
         payment_provider: finalProvider,
-        stripe_payment_intent_id: provider === 'stripe' ? null : null, // Will be filled by webhook
-        stripe_checkout_session_id: provider === 'stripe' ? sessionId : null,
-        flutterwave_tx_ref: provider === 'flutterwave' ? txRef : null,
-        paypal_order_id: provider === 'paypal' ? sessionId : null,
+        stripe_payment_intent_id: finalProvider === 'stripe' ? null : null, // Will be filled by webhook
+        stripe_checkout_session_id: finalProvider === 'stripe' ? sessionId : null,
+        flutterwave_tx_ref: finalProvider === 'flutterwave' ? txRef : null,
+        paypal_order_id: finalProvider === 'paypal' ? sessionId : null,
         gross_amount: feeCalculation.grossAmount,
         original_amount: feeCalculation.originalAmount,
         platform_fee: feeCalculation.platformFee,
@@ -519,15 +626,16 @@ export async function POST(request: NextRequest) {
           .eq('status', 'pending')
           .order('created_at', { ascending: false })
           .limit(1)
-          .single();
+          .maybeSingle();
 
         if (existing && existing.metadata?.checkoutUrl) {
-          return NextResponse.json({
+          const duplicatePayload = {
             checkoutUrl: existing.metadata.checkoutUrl,
             sessionId: existing.id,
-            provider,
+            provider: existing.payment_provider || finalProvider,
             message: 'Using existing checkout session',
-          });
+          };
+          return respond(duplicatePayload, 200, 'completed', existing.id);
         }
       }
       throw transactionError;
@@ -544,7 +652,7 @@ export async function POST(request: NextRequest) {
       })
       .eq('id', transaction.id);
 
-    return NextResponse.json({
+    const successPayload = {
       checkoutUrl,
       sessionId,
       provider: finalProvider,
@@ -552,13 +660,16 @@ export async function POST(request: NextRequest) {
         reason: gatewaySelection.reason,
         availableGateways: gatewaySelection.availableGateways,
       },
-    });
+    };
+
+    return respond(successPayload, 200, 'completed', transaction.id);
   } catch (error) {
     console.error('Checkout error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Checkout failed' },
-      { status: 500 }
-    );
+    const errorPayload = { error: error instanceof Error ? error.message : 'Checkout failed' };
+    if (idempotencyFinalizeRef) {
+      await idempotencyFinalizeRef('failed', 500, errorPayload);
+    }
+    return NextResponse.json(errorPayload, { status: 500 });
   }
 }
 

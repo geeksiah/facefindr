@@ -16,6 +16,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Lightbox } from '@/components/ui/lightbox';
 import { useToast } from '@/components/ui/toast';
+import { formatEventDateDisplay } from '@/lib/events/time';
 import { createClient } from '@/lib/supabase/client';
 
 interface Photo {
@@ -25,6 +26,8 @@ interface Photo {
   eventId: string;
   eventName: string;
   eventDate: string;
+  eventStartAtUtc: string | null;
+  eventTimezone: string | null;
   photographerName: string;
 }
 
@@ -58,6 +61,8 @@ export default function PhotosPage() {
               id,
               name,
               event_date,
+              event_start_at_utc,
+              event_timezone,
               photographer:photographer_id (
                 display_name
               )
@@ -83,6 +88,8 @@ export default function PhotosPage() {
           eventId: e.media.event?.id || '',
           eventName: e.media.event?.name || 'Unknown Event',
           eventDate: e.media.event?.event_date || '',
+          eventStartAtUtc: e.media.event?.event_start_at_utc || null,
+          eventTimezone: e.media.event?.event_timezone || null,
           photographerName: e.media.event?.photographer?.display_name || 'Unknown',
         }));
 
@@ -115,13 +122,22 @@ export default function PhotosPage() {
       acc[photo.eventId] = {
         eventName: photo.eventName,
         eventDate: photo.eventDate,
+        eventStartAtUtc: photo.eventStartAtUtc,
+        eventTimezone: photo.eventTimezone,
         photographerName: photo.photographerName,
         photos: [],
       };
     }
     acc[photo.eventId].photos.push(photo);
     return acc;
-  }, {} as Record<string, { eventName: string; eventDate: string; photographerName: string; photos: Photo[] }>);
+  }, {} as Record<string, {
+    eventName: string;
+    eventDate: string;
+    eventStartAtUtc: string | null;
+    eventTimezone: string | null;
+    photographerName: string;
+    photos: Photo[];
+  }>);
 
   if (isLoading) {
     return (
@@ -179,7 +195,14 @@ export default function PhotosPage() {
                 <div className="flex items-center gap-3 text-sm text-secondary mt-1">
                   <span className="flex items-center gap-1">
                     <Calendar className="h-3.5 w-3.5" />
-                    {new Date(group.eventDate).toLocaleDateString()}
+                    {formatEventDateDisplay(
+                      {
+                        event_date: group.eventDate,
+                        event_start_at_utc: group.eventStartAtUtc,
+                        event_timezone: group.eventTimezone,
+                      },
+                      'en-US'
+                    )}
                   </span>
                   <span className="flex items-center gap-1">
                     <Camera className="h-3.5 w-3.5" />
@@ -258,7 +281,14 @@ export default function PhotosPage() {
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-foreground truncate">{photo.eventName}</p>
                 <p className="text-sm text-secondary">
-                  {new Date(photo.eventDate).toLocaleDateString()} • {photo.photographerName}
+                  {formatEventDateDisplay(
+                    {
+                      event_date: photo.eventDate,
+                      event_start_at_utc: photo.eventStartAtUtc,
+                      event_timezone: photo.eventTimezone,
+                    },
+                    'en-US'
+                  )} {' - '} {photo.photographerName}
                 </p>
               </div>
               <Button 

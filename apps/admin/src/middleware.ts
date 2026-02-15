@@ -2,7 +2,8 @@ import { jwtVerify } from 'jose';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-const JWT_SECRET = new TextEncoder().encode(process.env.ADMIN_JWT_SECRET);
+import { getAdminJwtSecretBytes } from './lib/jwt-secret';
+
 const COOKIE_NAME = 'admin_session';
 
 // Public routes that don't require authentication
@@ -25,10 +26,17 @@ export async function middleware(request: NextRequest) {
     loginUrl.searchParams.set('redirect', pathname);
     return NextResponse.redirect(loginUrl);
   }
+
+  let jwtSecret: Uint8Array;
+  try {
+    jwtSecret = getAdminJwtSecretBytes();
+  } catch {
+    return new NextResponse('Admin authentication is not configured', { status: 503 });
+  }
   
   // Verify token
   try {
-    await jwtVerify(token, JWT_SECRET);
+    await jwtVerify(token, jwtSecret);
     return NextResponse.next();
   } catch {
     // Invalid token, redirect to login

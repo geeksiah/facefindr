@@ -4,6 +4,11 @@ import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 
+import {
+  claimWebhookEvent,
+  markWebhookFailed,
+  markWebhookProcessed,
+} from '@/lib/payments/webhook-ledger';
 import { constructWebhookEvent } from '@/lib/payments/stripe';
 import { createServiceClient } from '@/lib/supabase/server';
 
@@ -33,40 +38,71 @@ export async function POST(request: Request) {
 
     const event = constructWebhookEvent(body, signature, STRIPE_WEBHOOK_SECRET);
     const supabase = createServiceClient();
+    const claim = await claimWebhookEvent({
+      supabase,
+      provider: 'stripe',
+      eventId: event.id,
+      eventType: event.type,
+      signatureVerified: true,
+      payload: event,
+    });
 
-    switch (event.type) {
-      case 'checkout.session.completed': {
-        const session = event.data.object as Stripe.Checkout.Session;
-        await handleCheckoutComplete(supabase, session);
-        break;
+    if (!claim.shouldProcess) {
+      return NextResponse.json({
+        received: true,
+        replay: true,
+        status: claim.status,
+      });
+    }
+
+    try {
+      switch (event.type) {
+        case 'checkout.session.completed': {
+          const session = event.data.object as Stripe.Checkout.Session;
+          await handleCheckoutComplete(supabase, session);
+          break;
+        }
+
+        case 'payment_intent.succeeded': {
+          const paymentIntent = event.data.object as Stripe.PaymentIntent;
+          await handlePaymentSuccess(supabase, paymentIntent);
+          break;
+        }
+
+        case 'payment_intent.payment_failed': {
+          const paymentIntent = event.data.object as Stripe.PaymentIntent;
+          await handlePaymentFailed(supabase, paymentIntent);
+          break;
+        }
+
+        case 'charge.refunded': {
+          const charge = event.data.object as Stripe.Charge;
+          await handleRefund(supabase, charge);
+          break;
+        }
+
+        case 'account.updated': {
+          const account = event.data.object as Stripe.Account;
+          await handleAccountUpdate(supabase, account);
+          break;
+        }
+
+        default:
+          console.log(`Unhandled Stripe event: ${event.type}`);
       }
 
-      case 'payment_intent.succeeded': {
-        const paymentIntent = event.data.object as Stripe.PaymentIntent;
-        await handlePaymentSuccess(supabase, paymentIntent);
-        break;
+      if (claim.rowId) {
+        await markWebhookProcessed(supabase, claim.rowId);
       }
-
-      case 'payment_intent.payment_failed': {
-        const paymentIntent = event.data.object as Stripe.PaymentIntent;
-        await handlePaymentFailed(supabase, paymentIntent);
-        break;
+    } catch (processingError) {
+      if (claim.rowId) {
+        await markWebhookFailed(
+          supabase,
+          claim.rowId,
+          processingError instanceof Error ? processingError.message : 'Stripe webhook processing failed'
+        );
       }
-
-      case 'charge.refunded': {
-        const charge = event.data.object as Stripe.Charge;
-        await handleRefund(supabase, charge);
-        break;
-      }
-
-      case 'account.updated': {
-        const account = event.data.object as Stripe.Account;
-        await handleAccountUpdate(supabase, account);
-        break;
-      }
-
-      default:
-        console.log(`Unhandled Stripe event: ${event.type}`);
+      throw processingError;
     }
 
     return NextResponse.json({ received: true });

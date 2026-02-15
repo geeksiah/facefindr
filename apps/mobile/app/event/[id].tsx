@@ -51,6 +51,7 @@ import {
 import { Button, Card, Lightbox } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
+import { formatDateForDisplay } from '@/lib/date';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 import { formatPrice } from '@/lib/currency';
 import { getThumbnailUrl, getCoverImageUrl, getSignedUrl } from '@/lib/storage-urls';
@@ -186,7 +187,7 @@ function PhotographerEventView({
                   <View style={photographerStyles.statusMeta}>
                     <Calendar size={12} color="rgba(255,255,255,0.8)" />
                     <Text style={photographerStyles.statusMetaText}>
-                      {new Date(event.eventDate).toLocaleDateString('en-US', {
+                      {formatDateForDisplay(event.eventDate, 'en-US', {
                         month: 'short',
                         day: 'numeric',
                         year: 'numeric',
@@ -479,7 +480,7 @@ function AttendeeEventView({
           <View style={attendeeStyles.metaRow}>
             <Calendar size={16} color={colors.secondary} />
             <Text style={attendeeStyles.metaText}>
-              {new Date(event.eventDate).toLocaleDateString('en-US', {
+              {formatDateForDisplay(event.eventDate, 'en-US', {
                 weekday: 'long',
                 month: 'long',
                 day: 'numeric',

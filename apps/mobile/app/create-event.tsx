@@ -71,13 +71,19 @@ export default function CreateEventScreen() {
     setIsLoading(true);
 
     try {
+      const eventDateIso = eventDate.toISOString().slice(0, 10);
+      const eventTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      const eventStartAtUtc = new Date(`${eventDateIso}T12:00:00.000Z`).toISOString();
+
       const { data, error } = await supabase
         .from('events')
         .insert({
           photographer_id: profile?.id,
           name: name.trim(),
           description: description.trim() || null,
-          event_date: eventDate.toISOString(),
+          event_date: eventDateIso,
+          event_timezone: eventTimezone,
+          event_start_at_utc: eventStartAtUtc,
           location: location.trim() || null,
           event_type: eventType || null,
           expected_guests: estimatedGuests ? parseInt(estimatedGuests, 10) : null,

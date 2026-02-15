@@ -34,7 +34,7 @@ import { Button } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
-import { formatPrice, getCurrencySymbol } from '@/lib/currency';
+import { formatPrice } from '@/lib/currency';
 import { getThumbnailUrl, getSignedUrl } from '@/lib/storage-urls';
 import { alertMissingPublicAppUrl, buildPublicUrl, getPublicAppUrl } from '@/lib/runtime-config';
 
@@ -42,6 +42,7 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 interface PhotoDetails {
   id: string;
+  storagePath: string;
   fullUrl: string;
   thumbnailUrl: string;
   watermarkedUrl: string;
@@ -101,7 +102,7 @@ export default function PhotoViewerScreen() {
         // Get pricing
         const { data: pricing } = await supabase
           .from('event_pricing')
-          .select('single_photo_price, currency')
+          .select('price_per_media, currency')
           .eq('event_id', (mediaData?.event as any)?.id)
           .single();
 
@@ -115,6 +116,7 @@ export default function PhotoViewerScreen() {
 
           const photoData = {
             id: mediaData.id,
+            storagePath: mediaData.storage_path,
             fullUrl: fullUrl || '',
             thumbnailUrl: thumbnailUrl || '',
             watermarkedUrl: watermarkedUrl || '',
@@ -123,7 +125,7 @@ export default function PhotoViewerScreen() {
             photographerName: (mediaData.photographer as any)?.display_name || 'Unknown',
             photographerId: (mediaData.photographer as any)?.id,
             isOwned: !!entitlement,
-            price: pricing?.single_photo_price || 2.99,
+            price: pricing?.price_per_media || 299,
             currency: pricing?.currency || 'USD',
             createdAt: mediaData.created_at,
           };
@@ -189,7 +191,7 @@ export default function PhotoViewerScreen() {
       // Get full resolution URL
       const { data } = await supabase.storage
         .from('media')
-        .createSignedUrl(photo.fullUrl, 3600);
+        .createSignedUrl(photo.storagePath, 3600);
 
       if (!data?.signedUrl) {
         throw new Error('Failed to get download URL');
@@ -258,22 +260,6 @@ export default function PhotoViewerScreen() {
       console.error('Failed to update favorite:', error);
     }
   };
-
-  useEffect(() => {
-    const loadDisplayUrl = async () => {
-      if (photo) {
-        if (photo.isOwned) {
-          // Get full resolution signed URL
-          const url = await getSignedUrl('media', photo.fullUrl);
-          setDisplayUrl(url || '');
-        } else {
-          // Use watermarked or thumbnail
-          setDisplayUrl(photo.watermarkedUrl || photo.thumbnailUrl);
-        }
-      }
-    };
-    loadDisplayUrl();
-  }, [photo]);
 
   if (isLoading) {
     return (

@@ -33,6 +33,7 @@ import {
 import { Button, Card } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
+import { formatDateForDisplay } from '@/lib/date';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 import { getCoverImageUrl } from '@/lib/storage-urls';
 import { useRealtimeSubscription } from '@/hooks/use-realtime';
@@ -191,7 +192,7 @@ export default function EventsScreen() {
           <View style={styles.eventMeta}>
             <Calendar size={11} color={colors.secondary} />
             <Text style={styles.eventDate}>
-              {new Date(item.eventDate).toLocaleDateString('en-US', {
+              {formatDateForDisplay(item.eventDate, 'en-US', {
                 month: 'short',
                 day: 'numeric',
               })}

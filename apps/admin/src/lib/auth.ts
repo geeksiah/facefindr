@@ -9,15 +9,10 @@ import bcrypt from 'bcryptjs';
 import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
 
+import { getAdminJwtSecretBytes } from './jwt-secret';
 import { supabaseAdmin, AdminUser, AdminRole } from './supabase';
 
-// Validate JWT secret exists
-const jwtSecretString = process.env.ADMIN_JWT_SECRET || 'development-secret-change-in-production';
-if (!process.env.ADMIN_JWT_SECRET && process.env.NODE_ENV === 'production') {
-  console.error('WARNING: ADMIN_JWT_SECRET not set in production!');
-}
-
-const JWT_SECRET = new TextEncoder().encode(jwtSecretString);
+const JWT_SECRET = getAdminJwtSecretBytes();
 const COOKIE_NAME = 'admin_session';
 const SESSION_DURATION = 8 * 60 * 60 * 1000; // 8 hours
 

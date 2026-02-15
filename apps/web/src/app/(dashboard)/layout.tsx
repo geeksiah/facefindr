@@ -4,6 +4,10 @@ import { DashboardHeader } from '@/components/dashboard/header';
 import { DashboardSidebar } from '@/components/dashboard/sidebar';
 import { createClient } from '@/lib/supabase/server';
 
+function isCreatorUser(userType: unknown): boolean {
+  return userType === 'photographer' || userType === 'creator';
+}
+
 export default async function DashboardLayout({
   children,
 }: {
@@ -18,8 +22,8 @@ export default async function DashboardLayout({
 
   const userType = user.user_metadata?.user_type;
   
-  // Only photographers can access dashboard
-  if (userType !== 'photographer') {
+  // Only creators can access dashboard (supports legacy "photographer" and new "creator")
+  if (!isCreatorUser(userType)) {
     redirect('/gallery');
   }
 
@@ -36,7 +40,7 @@ export default async function DashboardLayout({
       <DashboardSidebar 
         user={{
           email: user.email || '',
-          displayName: profile?.display_name || 'Photographer',
+          displayName: profile?.display_name || 'Creator',
           profilePhotoUrl: profile?.profile_photo_url,
           faceTag: profile?.face_tag,
           plan: profile?.subscriptions?.[0]?.plan_code || 'free',

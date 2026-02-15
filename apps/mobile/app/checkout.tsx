@@ -29,6 +29,7 @@ import {
 import { Button, Card } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
+import { formatPrice } from '@/lib/currency';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 
 interface CartItem {
@@ -45,12 +46,13 @@ export default function CheckoutScreen() {
     eventId: string;
     photoIds: string;
   }>();
-  const { profile } = useAuthStore();
+  const { profile, session } = useAuthStore();
 
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>('card');
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [currency, setCurrency] = useState('USD');
 
   const photoIdArray = photoIds?.split(',') || [];
 
@@ -68,11 +70,13 @@ export default function CheckoutScreen() {
       // Get pricing for event
       const { data: pricing } = await supabase
         .from('event_pricing')
-        .select('single_photo_price')
+        .select('price_per_media, currency')
         .eq('event_id', eventId)
         .single();
 
-      const price = pricing?.single_photo_price || 2.99;
+      const pricePerPhotoCents = pricing?.price_per_media || 299;
+      const price = pricePerPhotoCents / 100;
+      setCurrency(pricing?.currency || 'USD');
 
       if (data) {
         setCartItems(
@@ -95,19 +99,35 @@ export default function CheckoutScreen() {
   const total = subtotal + processingFee;
 
   const handleCheckout = async () => {
+    if (!session?.access_token) {
+      Alert.alert('Sign in required', 'Please sign in again before checkout.');
+      return;
+    }
+
     setIsProcessing(true);
 
     try {
       const apiUrl = process.env.EXPO_PUBLIC_API_URL;
+      if (!apiUrl) {
+        throw new Error('Missing EXPO_PUBLIC_API_URL configuration');
+      }
+      const provider: 'stripe' | 'flutterwave' | 'paypal' =
+        selectedMethod === 'mobile_money' ? 'flutterwave' : selectedMethod === 'paypal' ? 'paypal' : 'stripe';
+      const idempotencyKey = `mobile-${profile?.id || 'user'}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
-      const response = await fetch(`${apiUrl}/api/checkout/create`, {
+      const response = await fetch(`${apiUrl}/api/checkout`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+          'Idempotency-Key': idempotencyKey,
+        },
         body: JSON.stringify({
           eventId,
-          photoIds: photoIdArray,
-          paymentMethod: selectedMethod,
-          attendeeId: profile?.id,
+          mediaIds: photoIdArray,
+          unlockAll: false,
+          provider,
+          currency,
         }),
       });
 
@@ -236,19 +256,19 @@ export default function CheckoutScreen() {
               <Text style={styles.summaryLabel}>
                 {cartItems.length} photo{cartItems.length !== 1 ? 's' : ''}
               </Text>
-              <Text style={styles.summaryValue}>${subtotal.toFixed(2)}</Text>
+              <Text style={styles.summaryValue}>{formatPrice(subtotal, currency)}</Text>
             </View>
             
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Processing fee</Text>
-              <Text style={styles.summaryValue}>${processingFee.toFixed(2)}</Text>
+              <Text style={styles.summaryValue}>{formatPrice(processingFee, currency)}</Text>
             </View>
 
             <View style={styles.divider} />
 
             <View style={styles.summaryRow}>
               <Text style={styles.totalLabel}>Total</Text>
-              <Text style={styles.totalValue}>${total.toFixed(2)}</Text>
+              <Text style={styles.totalValue}>{formatPrice(total, currency)}</Text>
             </View>
           </Card>
 
@@ -268,7 +288,7 @@ export default function CheckoutScreen() {
             size="lg"
           >
             <Shield size={20} color="#fff" />
-            {` Pay $${total.toFixed(2)}`}
+            {` Pay ${formatPrice(total, currency)}`}
           </Button>
         </ScrollView>
       </SafeAreaView>

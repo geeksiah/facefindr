@@ -86,11 +86,20 @@ export function centsToDollars(cents: number): number {
  * Format date for display
  */
 export function formatDate(date: string | Date, options?: Intl.DateTimeFormatOptions): string {
-  const d = typeof date === 'string' ? new Date(date) : date;
+  const d = (() => {
+    if (typeof date !== 'string') return date;
+    const value = date.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      const [year, month, day] = value.split('-').map(Number);
+      return new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+    }
+    return new Date(value);
+  })();
   return d.toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
+    timeZone: options?.timeZone || (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) ? 'UTC' : undefined),
     ...options,
   });
 }

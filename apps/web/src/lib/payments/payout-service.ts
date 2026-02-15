@@ -44,6 +44,7 @@ export interface PayoutRequest {
   amount: number; // in cents
   currency: string;
   mode: PayoutMode;
+  identityKey?: string;
 }
 
 export interface PayoutResult {
@@ -51,6 +52,7 @@ export interface PayoutResult {
   payoutId?: string;
   providerReference?: string;
   error?: string;
+  deduped?: boolean;
 }
 
 // ============================================
@@ -60,6 +62,9 @@ export interface PayoutResult {
 export async function processPayout(request: PayoutRequest): Promise<PayoutResult> {
   const supabase = createServiceClient();
   const reference = `PO-${uuidv4().slice(0, 8).toUpperCase()}`;
+  const payoutIdentityKey =
+    request.identityKey ||
+    `wallet:${request.walletId}:mode:${request.mode}:currency:${request.currency.toUpperCase()}:amount:${request.amount}`;
 
   try {
     // Get wallet details
@@ -95,11 +100,32 @@ export async function processPayout(request: PayoutRequest): Promise<PayoutResul
         status: 'processing',
         payout_method: wallet.provider === 'momo' ? wallet.momo_provider : 'bank',
         provider_payout_id: reference,
+        payout_identity_key: payoutIdentityKey,
       })
       .select()
       .single();
 
     if (createError || !payout) {
+      if (createError?.code === '23505') {
+        const { data: existingPayout } = await supabase
+          .from('payouts')
+          .select('id, status, provider_payout_id, failure_reason')
+          .eq('payout_identity_key', payoutIdentityKey)
+          .maybeSingle();
+
+        if (existingPayout) {
+          const terminalFailure = existingPayout.status === 'failed';
+          return {
+            success: !terminalFailure,
+            payoutId: existingPayout.id,
+            providerReference: existingPayout.provider_payout_id || undefined,
+            error: terminalFailure
+              ? existingPayout.failure_reason || 'Payout already failed for this identity key'
+              : undefined,
+            deduped: true,
+          };
+        }
+      }
       return { success: false, error: 'Failed to create payout record' };
     }
 
@@ -217,10 +243,168 @@ export interface BatchPayoutResult {
   successful: number;
   failed: number;
   errors: Array<{ walletId: string; error: string }>;
+  runId?: string;
+  runKey?: string;
+  skippedReason?: string;
+}
+
+const PAYOUT_BATCH_LEASE_MS = 10 * 60 * 1000;
+type BatchTriggerType = 'daily' | 'weekly' | 'monthly' | 'threshold' | 'scheduled';
+
+interface BatchLeaseResult {
+  acquired: boolean;
+  runId?: string;
+  runKey: string;
+  skippedReason?: string;
+}
+
+function getWeeklyRunKey(date: Date): string {
+  const utcDate = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const day = utcDate.getUTCDay() || 7;
+  utcDate.setUTCDate(utcDate.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(utcDate.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((utcDate.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return `${utcDate.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+
+function getBatchRunKey(triggerType: BatchTriggerType, now: Date): string {
+  const iso = now.toISOString();
+  switch (triggerType) {
+    case 'daily':
+      return iso.slice(0, 10);
+    case 'weekly':
+      return getWeeklyRunKey(now);
+    case 'monthly':
+      return iso.slice(0, 7);
+    case 'threshold':
+      return iso.slice(0, 13); // hourly bucket
+    case 'scheduled':
+      return iso.slice(0, 13); // hourly bucket for manual scheduled batches
+    default:
+      return iso.slice(0, 13);
+  }
+}
+
+async function acquireBatchLease(
+  triggerType: BatchTriggerType,
+  now: Date
+): Promise<BatchLeaseResult> {
+  const supabase = createServiceClient();
+  const runKey = getBatchRunKey(triggerType, now);
+  const nowIso = now.toISOString();
+  const leaseExpiresAt = new Date(now.getTime() + PAYOUT_BATCH_LEASE_MS).toISOString();
+
+  const { data: createdRun, error: createRunError } = await supabase
+    .from('payout_batch_runs')
+    .insert({
+      run_type: triggerType,
+      run_key: runKey,
+      status: 'processing',
+      lease_expires_at: leaseExpiresAt,
+      metadata: {
+        triggerType,
+        startedAt: nowIso,
+        leaseMs: PAYOUT_BATCH_LEASE_MS,
+      },
+    })
+    .select('id')
+    .single();
+
+  if (!createRunError && createdRun?.id) {
+    return { acquired: true, runId: createdRun.id, runKey };
+  }
+
+  if (createRunError?.code !== '23505') {
+    throw createRunError;
+  }
+
+  const { data: existingRun, error: existingRunError } = await supabase
+    .from('payout_batch_runs')
+    .select('id, status, lease_expires_at')
+    .eq('run_type', triggerType)
+    .eq('run_key', runKey)
+    .single();
+
+  if (existingRunError || !existingRun) {
+    throw existingRunError || new Error('Unable to resolve existing payout batch run');
+  }
+
+  if (existingRun.status === 'completed' || existingRun.status === 'failed') {
+    return {
+      acquired: false,
+      runId: existingRun.id,
+      runKey,
+      skippedReason: 'batch-already-finalized',
+    };
+  }
+
+  if (new Date(existingRun.lease_expires_at).getTime() > now.getTime()) {
+    return {
+      acquired: false,
+      runId: existingRun.id,
+      runKey,
+      skippedReason: 'batch-lease-active',
+    };
+  }
+
+  const { data: reclaimedRun } = await supabase
+    .from('payout_batch_runs')
+    .update({
+      status: 'processing',
+      lease_expires_at: leaseExpiresAt,
+      completed_at: null,
+      metadata: {
+        triggerType,
+        reclaimedAt: nowIso,
+        leaseMs: PAYOUT_BATCH_LEASE_MS,
+      },
+    })
+    .eq('id', existingRun.id)
+    .lte('lease_expires_at', nowIso)
+    .select('id')
+    .maybeSingle();
+
+  if (reclaimedRun?.id) {
+    return { acquired: true, runId: reclaimedRun.id, runKey };
+  }
+
+  return {
+    acquired: false,
+    runId: existingRun.id,
+    runKey,
+    skippedReason: 'batch-lease-raced',
+  };
+}
+
+async function finalizeBatchLease(
+  runId: string,
+  status: 'completed' | 'failed',
+  summary: BatchPayoutResult,
+  triggerType: BatchTriggerType
+): Promise<void> {
+  const supabase = createServiceClient();
+  const finalizedAt = new Date().toISOString();
+
+  await supabase
+    .from('payout_batch_runs')
+    .update({
+      status,
+      completed_at: finalizedAt,
+      lease_expires_at: finalizedAt,
+      metadata: {
+        triggerType,
+        finalizedAt,
+        processed: summary.processed,
+        successful: summary.successful,
+        failed: summary.failed,
+        errors: summary.errors,
+      },
+    })
+    .eq('id', runId);
 }
 
 export async function processPendingPayouts(
-  triggerType: 'daily' | 'weekly' | 'monthly' | 'threshold' | 'scheduled'
+  triggerType: BatchTriggerType
 ): Promise<BatchPayoutResult> {
   const supabase = createServiceClient();
   const results: BatchPayoutResult = {
@@ -237,7 +421,20 @@ export async function processPendingPayouts(
     return results;
   }
 
+  let lease: BatchLeaseResult | null = null;
+  let finalizeStatus: 'completed' | 'failed' = 'completed';
+
   try {
+    lease = await acquireBatchLease(triggerType, new Date());
+    results.runId = lease.runId;
+    results.runKey = lease.runKey;
+
+    if (!lease.acquired) {
+      results.skippedReason = lease.skippedReason || 'batch-lease-not-acquired';
+      console.log(`[PAYOUT] Skipping ${triggerType} run (${results.runKey}): ${results.skippedReason}`);
+      return results;
+    }
+
     // Get all wallets with pending balances and their photographer settings
     const { data: wallets } = await supabase
       .from('wallets')
@@ -245,6 +442,7 @@ export async function processPendingPayouts(
         id,
         photographer_id,
         provider,
+        momo_provider,
         preferred_currency,
         payout_settings:photographer_id (
           payout_frequency,
@@ -341,6 +539,7 @@ export async function processPendingPayouts(
         amount: balanceData.available_balance,
         currency,
         mode: triggerType === 'threshold' ? 'threshold' : 'scheduled',
+        identityKey: `batch:${triggerType}:${lease.runKey}:wallet:${wallet.id}`,
       });
 
       if (result.success) {
@@ -356,8 +555,13 @@ export async function processPendingPayouts(
 
     return results;
   } catch (error) {
+    finalizeStatus = 'failed';
     console.error('Batch payout error:', error);
     return results;
+  } finally {
+    if (lease?.acquired && lease.runId) {
+      await finalizeBatchLease(lease.runId, finalizeStatus, results, triggerType);
+    }
   }
 }
 
@@ -449,6 +653,7 @@ export async function retryFailedPayouts(): Promise<BatchPayoutResult> {
       amount: payout.amount,
       currency: payout.currency,
       mode: 'manual',
+      identityKey: `retry:${payout.id}`,
     });
 
     if (result.success) {

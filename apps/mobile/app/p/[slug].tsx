@@ -29,6 +29,7 @@ import {
 import { Button, Card } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
+import { formatDateForDisplay } from '@/lib/date';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -185,7 +186,7 @@ export default function PhotographerProfileScreen() {
           {item.name}
         </Text>
         <Text style={styles.eventDate}>
-          {new Date(item.eventDate).toLocaleDateString()}
+          {formatDateForDisplay(item.eventDate)}
         </Text>
       </View>
     </TouchableOpacity>

@@ -46,8 +46,13 @@ export async function POST(request: NextRequest) {
       print_commission_percent, print_commission_fixed, print_commission_type
     } = body;
 
+    const allowedPlanTypes = new Set(['photographer', 'drop_in', 'payg']);
+    const planType = typeof plan_type === 'string' ? plan_type : 'photographer';
+    if (!allowedPlanTypes.has(planType)) {
+      return NextResponse.json({ error: 'Invalid plan type' }, { status: 400 });
+    }
+
     // Check if code already exists for this plan type
-    const planType = plan_type || 'photographer';
     const { data: existing } = await supabaseAdmin
       .from('subscription_plans')
       .select('id')
@@ -70,6 +75,7 @@ export async function POST(request: NextRequest) {
         is_active: is_active ?? true,
         is_popular: is_popular ?? false,
         prices: prices || {},
+        plan_type: planType,
         platform_fee_percent: platform_fee_percent ?? 20.00,
         platform_fee_fixed: platform_fee_fixed ?? 0,
         platform_fee_type: platform_fee_type ?? 'percent',

@@ -44,6 +44,8 @@ export async function GET() {
           id,
           name,
           event_date,
+          event_start_at_utc,
+          event_timezone,
           location,
           cover_image_url,
           photographers (
@@ -85,6 +87,9 @@ export async function GET() {
           id: event.id,
           name: event.name,
           date: event.event_date,
+          eventDate: event.event_date || null,
+          eventTimezone: event.event_timezone || 'UTC',
+          eventStartAtUtc: event.event_start_at_utc || null,
           location: event.location,
           photographerName: event.photographers?.display_name || 'Unknown',
           coverImage,

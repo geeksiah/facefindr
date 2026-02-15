@@ -35,6 +35,7 @@ import { Camera } from 'expo-camera';
 // Button component replaced with custom TouchableOpacity for better control
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
+import { formatDateForDisplay } from '@/lib/date';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 
 const { width } = Dimensions.get('window');
@@ -292,7 +293,7 @@ export default function UploadScreen() {
                     styles.eventChipDateText,
                     selectedEvent?.id === event.id && styles.eventChipDateTextSelected,
                   ]}>
-                    {new Date(event.eventDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    {formatDateForDisplay(event.eventDate, 'en-US', { month: 'short', day: 'numeric' })}
                   </Text>
                 </View>
               </TouchableOpacity>

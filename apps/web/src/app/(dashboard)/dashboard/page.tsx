@@ -12,6 +12,7 @@ import Link from 'next/link';
 import { Suspense } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { formatEventDateDisplay } from '@/lib/events/time';
 import { createClient } from '@/lib/supabase/server';
 
 // ============================================
@@ -161,7 +162,7 @@ export default async function DashboardPage() {
   const [eventsResult, photosResult, transactionsResult, lastMonthTransactions] = await Promise.all([
     supabase
       .from('events')
-      .select('id, name, event_date, status, media(id)', { count: 'exact' })
+      .select('id, name, event_date, event_start_at_utc, event_timezone, status, media(id)', { count: 'exact' })
       .eq('photographer_id', user.id)
       .order('created_at', { ascending: false })
       .limit(5),
@@ -217,13 +218,19 @@ export default async function DashboardPage() {
     eventsResult.data?.map((event) => ({
       id: event.id,
       name: event.name,
-      date: event.event_date
-        ? new Date(event.event_date).toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-          })
-        : 'No date set',
+      date: formatEventDateDisplay(
+        {
+          event_date: event.event_date,
+          event_start_at_utc: event.event_start_at_utc,
+          event_timezone: event.event_timezone,
+        },
+        'en-US',
+        {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        }
+      ),
       photos: Array.isArray(event.media) ? event.media.length : 0,
       status: event.status as 'draft' | 'active' | 'closed',
     })) || [];

@@ -8,12 +8,18 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createClientWithAccessToken } from '@/lib/supabase/server';
 
 // PUT - Update notification preferences
 export async function PUT(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const authHeader = request.headers.get('authorization');
+    const accessToken = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : null;
+    const supabase = accessToken
+      ? createClientWithAccessToken(accessToken)
+      : await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {

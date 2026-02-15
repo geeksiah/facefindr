@@ -4,6 +4,13 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
+import {
+  deriveEventStartAtUtc,
+  normalizeEventTimezone,
+  normalizeIsoDate,
+  normalizeUtcTimestamp,
+} from '@/lib/event-time';
 import { supabaseAdmin } from '@/lib/supabase';
 
 // GET - Get event settings
@@ -12,6 +19,16 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    const session = await getAdminSession();
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const canView = (await hasPermission('events.view')) || (await hasPermission('settings.view'));
+    if (!canView) {
+      return NextResponse.json({ error: 'Permission denied' }, { status: 403 });
+    }
+
     const { id } = params;
 
     const { data: event, error } = await supabaseAdmin
@@ -55,13 +72,26 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
+    const session = await getAdminSession();
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const canManage =
+      (await hasPermission('settings.update')) ||
+      (await hasPermission('events.feature')) ||
+      (await hasPermission('events.transfer'));
+    if (!canManage) {
+      return NextResponse.json({ error: 'Permission denied' }, { status: 403 });
+    }
+
     const { id } = params;
     const body = await request.json();
 
     // Verify event exists
     const { data: event } = await supabaseAdmin
       .from('events')
-      .select('id, currency_code')
+      .select('id, currency_code, event_date, event_timezone')
       .eq('id', id)
       .single();
 
@@ -75,7 +105,25 @@ export async function PUT(
     if (body.name !== undefined) updates.name = body.name;
     if (body.description !== undefined) updates.description = body.description;
     if (body.location !== undefined) updates.location = body.location;
-    if (body.event_date !== undefined) updates.event_date = body.event_date;
+    const nextEventDate =
+      body.event_date !== undefined
+        ? normalizeIsoDate(body.event_date)
+        : normalizeIsoDate(event.event_date);
+    const nextEventTimezone =
+      body.event_timezone !== undefined
+        ? normalizeEventTimezone(body.event_timezone)
+        : normalizeEventTimezone(event.event_timezone);
+
+    if (body.event_date !== undefined) updates.event_date = nextEventDate;
+    if (body.event_timezone !== undefined) updates.event_timezone = nextEventTimezone;
+    if (body.event_start_at_utc !== undefined) {
+      updates.event_start_at_utc = normalizeUtcTimestamp(body.event_start_at_utc);
+    } else if (body.event_date !== undefined || body.event_timezone !== undefined) {
+      updates.event_start_at_utc = deriveEventStartAtUtc(nextEventDate);
+    }
+    if (body.event_end_at_utc !== undefined) {
+      updates.event_end_at_utc = normalizeUtcTimestamp(body.event_end_at_utc);
+    }
     if (body.end_date !== undefined) updates.end_date = body.end_date;
     if (body.is_public !== undefined) updates.is_public = body.is_public;
     if (body.is_publicly_listed !== undefined) updates.is_publicly_listed = body.is_publicly_listed;
@@ -178,6 +226,11 @@ export async function PUT(
         }
       }
     }
+
+    await logAction('event_settings_update', 'event', id, {
+      admin_id: session.adminId,
+      updated_fields: Object.keys(body || {}),
+    });
 
     return NextResponse.json({ success: true });
 

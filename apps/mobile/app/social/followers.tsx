@@ -47,7 +47,7 @@ export default function FollowersScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { profile } = useAuthStore();
+  const { profile, session } = useAuthStore();
   
   const [followers, setFollowers] = useState<FollowerItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -59,7 +59,12 @@ export default function FollowersScreen() {
     
     try {
       const response = await fetch(
-        `${API_URL}/api/social/follow?type=followers&photographerId=${profile.id}`
+        `${API_URL}/api/social/follow?type=followers&photographerId=${profile.id}`,
+        {
+          headers: session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {},
+        }
       );
       if (response.ok) {
         const data = await response.json();
@@ -72,7 +77,7 @@ export default function FollowersScreen() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [profile?.id]);
+  }, [profile?.id, session?.access_token]);
 
   useEffect(() => {
     loadFollowers();

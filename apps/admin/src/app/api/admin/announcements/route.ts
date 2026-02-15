@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { syncAnnouncementDeliveryState } from '@/lib/announcement-delivery';
 import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 
@@ -10,22 +11,39 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // First, delete sent announcements older than 24 hours (auto-cleanup)
+    // First, delete terminal announcements older than 24 hours (auto-cleanup)
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     
     await supabaseAdmin
       .from('platform_announcements')
       .delete()
-      .eq('status', 'sent')
-      .lt('sent_at', twentyFourHoursAgo);
+      .in('status', ['sent', 'delivered', 'partially_delivered', 'failed', 'cancelled'])
+      .lt('updated_at', twentyFourHoursAgo);
 
-    // Fetch remaining announcements
-    const { data } = await supabaseAdmin
+    // Fetch current announcements
+    const { data: announcements } = await supabaseAdmin
       .from('platform_announcements')
       .select('*')
       .order('created_at', { ascending: false });
 
-    return NextResponse.json({ announcements: data || [] });
+    const syncable = (announcements || []).filter((announcement: any) =>
+      ['queued', 'sending', 'sent', 'scheduled'].includes(String(announcement.status))
+    );
+
+    for (const announcement of syncable) {
+      try {
+        await syncAnnouncementDeliveryState(announcement.id);
+      } catch (syncError) {
+        console.error(`Announcement delivery sync failed for ${announcement.id}:`, syncError);
+      }
+    }
+
+    const { data: refreshed } = await supabaseAdmin
+      .from('platform_announcements')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    return NextResponse.json({ announcements: refreshed || [] });
   } catch (error) {
     console.error('Get announcements error:', error);
     return NextResponse.json({ error: 'An error occurred' }, { status: 500 });

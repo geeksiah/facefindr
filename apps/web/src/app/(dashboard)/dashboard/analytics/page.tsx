@@ -22,6 +22,7 @@ import { useState, useEffect } from 'react';
 import { DashboardBanner } from '@/components/notifications';
 import { useCurrency } from '@/components/providers';
 import { useRealtimeSubscription } from '@/hooks/use-realtime';
+import { formatEventDateDisplay } from '@/lib/events/time';
 
 interface DashboardStats {
   totalViews: number;
@@ -128,7 +129,7 @@ export default function AnalyticsPage() {
     const csvRows = [
       ['Date', 'Views', 'Revenue', 'Sales', 'Downloads'],
       ...timeSeries.map(d => [
-        new Date(d.date).toLocaleDateString(),
+        formatDateDisplay(d.date),
         d.views.toString(),
         (d.revenue / 100).toFixed(2),
         d.sales.toString(),
@@ -356,7 +357,7 @@ export default function AnalyticsPage() {
                   <div
                     key={day.date}
                     className="flex-1 flex flex-col items-center gap-1"
-                    title={`${new Date(day.date).toLocaleDateString()}: ${day.views} views`}
+                    title={`${formatDateDisplay(day.date)}: ${day.views} views`}
                   >
                     <div
                       className="w-full bg-accent/80 rounded-t transition-all hover:bg-accent"
@@ -367,7 +368,7 @@ export default function AnalyticsPage() {
                     />
                     {index % 7 === 0 && (
                       <span className="text-[10px] text-muted-foreground">
-                        {new Date(day.date).getDate()}
+                        {parseDateForDisplay(day.date).getUTCDate()}
                       </span>
                     )}
                   </div>
@@ -442,7 +443,7 @@ export default function AnalyticsPage() {
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-foreground truncate">{event.eventName}</p>
                     <p className="text-sm text-secondary">
-                      {new Date(event.eventDate).toLocaleDateString()}
+                      {formatEventDateDisplay({ event_date: event.eventDate }, 'en-US')}
                     </p>
                   </div>
                   <div className="text-right">
@@ -511,7 +512,7 @@ export default function AnalyticsPage() {
                 <div
                   key={day.date}
                   className="flex-1 flex flex-col items-center gap-1"
-                  title={`${new Date(day.date).toLocaleDateString()}: ${formatPrice(day.revenue)}`}
+                  title={`${formatDateDisplay(day.date)}: ${formatPrice(day.revenue)}`}
                 >
                   <div
                     className="w-full bg-green-500/80 rounded-t transition-all hover:bg-green-500"
@@ -573,4 +574,21 @@ function formatNumber(num: number): string {
     return (num / 1000).toFixed(1) + 'K';
   }
   return num.toString();
+}
+
+function parseDateForDisplay(value: string): Date {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+  }
+  return new Date(value);
+}
+
+function formatDateDisplay(value: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(parseDateForDisplay(value));
 }

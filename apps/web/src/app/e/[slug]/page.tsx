@@ -24,6 +24,7 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Logo } from '@/components/ui/logo';
+import { formatEventDateDisplay } from '@/lib/events/time';
 import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
 
@@ -65,6 +66,9 @@ interface Event {
   name: string;
   description?: string;
   date: string;
+  event_date?: string;
+  event_start_at_utc?: string | null;
+  event_timezone?: string;
   end_date?: string;
   location?: string;
   cover_image_url?: string;
@@ -189,13 +193,21 @@ export default function PublicEventPage() {
     setShowShareMenu(false);
   }
 
-  function formatDate(dateStr: string) {
-    return new Date(dateStr).toLocaleDateString('en-US', {
+  function formatDate(eventData: Event) {
+    return formatEventDateDisplay(
+      {
+        event_date: eventData.event_date || eventData.date,
+        event_start_at_utc: eventData.event_start_at_utc || null,
+        event_timezone: eventData.event_timezone || 'UTC',
+      },
+      'en-US',
+      {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
       day: 'numeric',
-    });
+      }
+    );
   }
 
   if (loading) {
@@ -390,7 +402,7 @@ export default function PublicEventPage() {
               {event?.date && (
                 <div className="flex items-center gap-2">
                   <Calendar className="h-4 w-4" />
-                  {formatDate(event.date)}
+                  {formatDate(event)}
                 </div>
               )}
               {event?.location && (

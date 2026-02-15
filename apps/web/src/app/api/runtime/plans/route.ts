@@ -9,7 +9,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const planType = searchParams.get('type');
     const normalizedPlanType =
-      planType === 'drop_in' || planType === 'photographer' ? planType : undefined;
+      planType === 'drop_in' || planType === 'photographer' || planType === 'payg' ? planType : undefined;
 
     const plans = await getAllPlans(normalizedPlanType);
 

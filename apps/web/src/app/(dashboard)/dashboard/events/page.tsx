@@ -13,6 +13,7 @@ import { DeleteEventButton } from '@/components/events/delete-event-button';
 import { EventsListRealtime } from '@/components/events/events-list-realtime';
 import { Button } from '@/components/ui/button';
 import { getCurrencySymbol } from '@/lib/currency-utils';
+import { formatEventDateDisplay } from '@/lib/events/time';
 import { getCoverImageUrl } from '@/lib/storage-urls';
 import { createClient } from '@/lib/supabase/server';
 
@@ -72,6 +73,8 @@ export default async function EventsPage() {
       description: event.description,
       location: event.location,
       eventDate: event.event_date,
+      eventStartAtUtc: event.event_start_at_utc,
+      eventTimezone: event.event_timezone,
       status: event.status,
       isPublic: event.is_public,
       coverImageUrl: getCoverImageUrl(event.cover_image_url || event.cover_image_path),
@@ -181,14 +184,22 @@ export default async function EventsPage() {
                   </div>
                   {event.eventDate && (
                     <div className="flex items-center gap-1">
-                      <Calendar className="h-3 w-3" />
-                      <span>
-                        {new Date(event.eventDate).toLocaleDateString('en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                        })}
-                      </span>
-                    </div>
+                        <Calendar className="h-3 w-3" />
+                        <span>
+                          {formatEventDateDisplay(
+                            {
+                              event_date: event.eventDate,
+                              event_start_at_utc: event.eventStartAtUtc,
+                              event_timezone: event.eventTimezone,
+                            },
+                            'en-US',
+                            {
+                              month: 'short',
+                              day: 'numeric',
+                            }
+                          )}
+                        </span>
+                      </div>
                   )}
                 </div>
 

@@ -4,6 +4,23 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { createClient } from '@/lib/supabase/server';
 
+function parseDateForDisplay(value: string): Date {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+  }
+  return new Date(value);
+}
+
+function formatDateDisplay(value: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(parseDateForDisplay(value));
+}
+
 /**
  * Export Analytics Data
  * Supports PDF and CSV export
@@ -36,7 +53,7 @@ export async function POST(request: NextRequest) {
         ['Time Series Data'],
         ['Date', 'Views', 'Revenue', 'Sales', 'Downloads'],
         ...timeSeries.map((d: any) => [
-          new Date(d.date).toLocaleDateString(),
+          formatDateDisplay(d.date),
           d.views.toString(),
           `$${(d.revenue / 100).toFixed(2)}`,
           d.sales.toString(),
@@ -47,7 +64,7 @@ export async function POST(request: NextRequest) {
         ['Event Name', 'Event Date', 'Views', 'Revenue', 'Conversion Rate'],
         ...(topEvents || []).map((e: any) => [
           e.eventName,
-          new Date(e.eventDate).toLocaleDateString(),
+          formatDateDisplay(e.eventDate),
           e.totalViews.toString(),
           `$${(e.totalRevenue / 100).toFixed(2)}`,
           `${e.conversionRate.toFixed(1)}%`,
@@ -108,7 +125,7 @@ export async function POST(request: NextRequest) {
               <tr><th>Date</th><th>Views</th><th>Revenue</th><th>Sales</th><th>Downloads</th></tr>
               ${timeSeries.map((d: any) => `
                 <tr>
-                  <td>${new Date(d.date).toLocaleDateString()}</td>
+                  <td>${formatDateDisplay(d.date)}</td>
                   <td>${d.views}</td>
                   <td>$${(d.revenue / 100).toFixed(2)}</td>
                   <td>${d.sales}</td>

@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { rekognitionClient } from '@/lib/aws/rekognition';
 import { checkRateLimit, getClientIP, rateLimitHeaders, rateLimits } from '@/lib/rate-limit';
-import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
 // ============================================
 // FACE SEARCH API
@@ -25,7 +25,13 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const supabase = await createClient();
+    const authHeader = request.headers.get('authorization');
+    const accessToken = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : null;
+    const supabase = accessToken
+      ? createClientWithAccessToken(accessToken)
+      : createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {

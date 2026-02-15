@@ -8,6 +8,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 
 import { NotificationBell } from '@/components/notifications';
 import { Button } from '@/components/ui/button';
+import { formatEventDateDisplay } from '@/lib/events/time';
 import { createClient } from '@/lib/supabase/client';
 
 interface SearchResult {
@@ -15,6 +16,8 @@ interface SearchResult {
   name?: string;
   display_name?: string;
   event_date?: string;
+  event_start_at_utc?: string;
+  event_timezone?: string;
   type: 'event' | 'photographer' | 'attendee';
 }
 
@@ -63,7 +66,7 @@ export function DashboardHeader() {
       // Search events
       const { data: events } = await supabase
         .from('events')
-        .select('id, name, event_date')
+        .select('id, name, event_date, event_start_at_utc, event_timezone')
         .ilike('name', `%${searchTerm}%`)
         .limit(5);
 
@@ -183,7 +186,14 @@ export function DashboardHeader() {
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {result.type === 'event' 
-                            ? new Date(result.event_date || '').toLocaleDateString()
+                            ? formatEventDateDisplay(
+                                {
+                                  event_date: result.event_date,
+                                  event_start_at_utc: result.event_start_at_utc,
+                                  event_timezone: result.event_timezone,
+                                },
+                                'en-US'
+                              )
                             : 'Photographer'
                           }
                         </p>
@@ -298,7 +308,14 @@ export function DashboardHeader() {
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {result.type === 'event' 
-                            ? new Date(result.event_date || '').toLocaleDateString()
+                            ? formatEventDateDisplay(
+                                {
+                                  event_date: result.event_date,
+                                  event_start_at_utc: result.event_start_at_utc,
+                                  event_timezone: result.event_timezone,
+                                },
+                                'en-US'
+                              )
                             : 'Photographer'
                           }
                         </p>

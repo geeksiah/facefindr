@@ -49,7 +49,7 @@ const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
 export default function ProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { profile, signOut } = useAuthStore();
+  const { profile, session, signOut } = useAuthStore();
   const [copiedRecently, setCopiedRecently] = useState(false);
   const [followingCount, setFollowingCount] = useState(0);
 
@@ -57,7 +57,11 @@ export default function ProfileScreen() {
   useEffect(() => {
     const loadFollowingCount = async () => {
       try {
-        const response = await fetch(`${API_URL}/api/social/follow?type=following`);
+        const response = await fetch(`${API_URL}/api/social/follow?type=following`, {
+          headers: session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {},
+        });
         if (response.ok) {
           const data = await response.json();
           setFollowingCount(data.total || 0);
@@ -67,7 +71,7 @@ export default function ProfileScreen() {
       }
     };
     loadFollowingCount();
-  }, []);
+  }, [session?.access_token]);
 
   const profileUrl = buildPublicUrl(`/u/${profile?.faceTag?.replace('@', '')}`);
 

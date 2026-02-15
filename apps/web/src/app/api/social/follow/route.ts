@@ -8,12 +8,22 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
+
+async function getAuthClient(request: NextRequest) {
+  const authHeader = request.headers.get('authorization');
+  const accessToken = authHeader?.startsWith('Bearer ')
+    ? authHeader.slice(7)
+    : null;
+  return accessToken
+    ? createClientWithAccessToken(accessToken)
+    : await createClient();
+}
 
 // POST - Follow a photographer
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await getAuthClient(request);
     const serviceClient = createServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
 
@@ -118,7 +128,7 @@ export async function POST(request: NextRequest) {
 // DELETE - Unfollow a photographer
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await getAuthClient(request);
     const serviceClient = createServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
 
@@ -181,7 +191,7 @@ export async function DELETE(request: NextRequest) {
 // GET - Check follow status or get following list
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await getAuthClient(request);
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {

@@ -17,8 +17,19 @@ interface Announcement {
   send_sms: boolean;
   country_code: string | null;
   sent_count: number;
+  queued_count?: number;
+  delivered_count?: number;
+  failed_count?: number;
+  delivery_summary?: {
+    total?: number;
+    pending?: number;
+    successful?: number;
+    failed?: number;
+    updated_at?: string;
+  } | null;
   created_at: string;
   sent_at: string | null;
+  delivery_synced_at?: string | null;
 }
 
 interface RegionOption {
@@ -117,7 +128,12 @@ export default function AnnouncementsPage() {
   const statusColors: Record<string, string> = {
     draft: 'bg-gray-500/10 text-gray-500',
     scheduled: 'bg-yellow-500/10 text-yellow-500',
+    queued: 'bg-blue-500/10 text-blue-500',
+    sending: 'bg-indigo-500/10 text-indigo-500',
     sent: 'bg-green-500/10 text-green-500',
+    delivered: 'bg-green-500/10 text-green-500',
+    partially_delivered: 'bg-orange-500/10 text-orange-500',
+    failed: 'bg-red-500/10 text-red-500',
     cancelled: 'bg-red-500/10 text-red-500',
   };
 
@@ -307,8 +323,14 @@ export default function AnnouncementsPage() {
                         .join(', ') || 'None'}
                     </span>
                     <span>Created: {formatDateTime(announcement.created_at)}</span>
+                    <span>Queued: {announcement.queued_count ?? 0}</span>
+                    <span>Delivered: {announcement.delivered_count ?? announcement.sent_count ?? 0}</span>
+                    <span>Failed: {announcement.failed_count ?? 0}</span>
+                    {announcement.delivery_synced_at && (
+                      <span>Last Sync: {formatDateTime(announcement.delivery_synced_at)}</span>
+                    )}
                     {announcement.sent_at && (
-                      <span>Sent: {formatDateTime(announcement.sent_at)} ({announcement.sent_count} users)</span>
+                      <span>Completed: {formatDateTime(announcement.sent_at)}</span>
                     )}
                   </div>
                 </div>

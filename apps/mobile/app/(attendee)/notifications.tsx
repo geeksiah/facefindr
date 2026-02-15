@@ -32,9 +32,11 @@ import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 
+const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
+
 interface Notification {
   id: string;
-  type: 'photo_drop' | 'purchase' | 'promo' | 'system';
+  type: string;
   title: string;
   message: string;
   isRead: boolean;
@@ -52,7 +54,7 @@ const NOTIFICATION_ICONS: Record<string, { icon: React.ComponentType<any>; color
 export default function NotificationsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { profile } = useAuthStore();
+  const { profile, session } = useAuthStore();
   
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -60,26 +62,27 @@ export default function NotificationsScreen() {
 
   const loadNotifications = async () => {
     try {
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('user_id', profile?.id)
-        .order('created_at', { ascending: false })
-        .limit(50);
+      if (!session?.access_token) return;
 
-      if (!error && data) {
-        setNotifications(
-          data.map((item: any) => ({
-            id: item.id,
-            type: item.type,
-            title: item.title,
-            message: item.message,
-            isRead: item.is_read,
-            createdAt: item.created_at,
-            data: item.data,
-          }))
-        );
+      const response = await fetch(`${API_URL}/api/notifications?limit=50`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || 'Failed to load notifications');
       }
+
+      setNotifications(
+        (payload.notifications || []).map((item: any) => ({
+          id: item.id,
+          type: item.template_code || item.templateCode || item.channel || 'system',
+          title: item.subject || 'Notification',
+          message: item.body || '',
+          isRead: Boolean(item.read_at || item.readAt),
+          createdAt: item.created_at || item.createdAt || new Date().toISOString(),
+          data: item.metadata || {},
+        }))
+      );
     } catch (err) {
       console.error('Error loading notifications:', err);
     } finally {
@@ -109,12 +112,12 @@ export default function NotificationsScreen() {
           // Add new notification at the top
           const newNotification: Notification = {
             id: payload.new.id,
-            type: payload.new.type || 'system',
-            title: payload.new.title || '',
-            message: payload.new.message || '',
-            isRead: payload.new.is_read || false,
+            type: payload.new.template_code || payload.new.type || payload.new.channel || 'system',
+            title: payload.new.subject || payload.new.title || 'Notification',
+            message: payload.new.body || payload.new.message || '',
+            isRead: Boolean(payload.new.read_at),
             createdAt: payload.new.created_at,
-            data: payload.new.data,
+            data: payload.new.metadata || payload.new.data,
           };
           setNotifications((prev) => [newNotification, ...prev]);
         }
@@ -124,7 +127,7 @@ export default function NotificationsScreen() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [profile?.id]);
+  }, [profile?.id, session?.access_token]);
 
   const handleRefresh = () => {
     setIsRefreshing(true);
@@ -132,10 +135,16 @@ export default function NotificationsScreen() {
   };
 
   const markAsRead = async (id: string) => {
-    await supabase
-      .from('notifications')
-      .update({ is_read: true })
-      .eq('id', id);
+    if (!session?.access_token) return;
+
+    await fetch(`${API_URL}/api/notifications`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ notificationId: id }),
+    });
 
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
@@ -143,11 +152,16 @@ export default function NotificationsScreen() {
   };
 
   const markAllAsRead = async () => {
-    await supabase
-      .from('notifications')
-      .update({ is_read: true })
-      .eq('user_id', profile?.id)
-      .eq('is_read', false);
+    if (!session?.access_token) return;
+
+    await fetch(`${API_URL}/api/notifications`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ markAllRead: true }),
+    });
 
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
   };

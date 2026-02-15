@@ -54,7 +54,7 @@ export default function FollowingScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { profile } = useAuthStore();
+  const { session } = useAuthStore();
   
   const [following, setFollowing] = useState<FollowingItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -63,7 +63,11 @@ export default function FollowingScreen() {
 
   const loadFollowing = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/social/follow?type=following`);
+      const response = await fetch(`${API_URL}/api/social/follow?type=following`, {
+        headers: session?.access_token
+          ? { Authorization: `Bearer ${session.access_token}` }
+          : {},
+      });
       if (response.ok) {
         const data = await response.json();
         setFollowing(data.following || []);
@@ -75,7 +79,7 @@ export default function FollowingScreen() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, []);
+  }, [session?.access_token]);
 
   useEffect(() => {
     loadFollowing();
@@ -107,6 +111,9 @@ export default function FollowingScreen() {
             try {
               await fetch(`${API_URL}/api/social/follow?photographerId=${photographerId}`, {
                 method: 'DELETE',
+                headers: session?.access_token
+                  ? { Authorization: `Bearer ${session.access_token}` }
+                  : {},
               });
               setFollowing(prev => prev.filter(f => f.following_id !== photographerId));
               setTotal(prev => prev - 1);
@@ -133,7 +140,10 @@ export default function FollowingScreen() {
     try {
       await fetch(`${API_URL}/api/social/follow/preferences`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
         body: JSON.stringify({
           photographerId,
           [field === 'notify_new_event' ? 'notifyNewEvent' : 'notifyPhotoDrop']: newValue,

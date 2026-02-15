@@ -6,9 +6,15 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createClient } from '@/lib/supabase/server';
+import {
+  deriveEventStartAtUtc,
+  normalizeEventTimezone,
+  normalizeIsoDate,
+  normalizeUtcTimestamp,
+} from '@/lib/events/time';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
-async function canAccessEventSettings(supabase: any, eventId: string, userId: string) {
+async function getEventAccess(supabase: any, eventId: string, userId: string) {
   const { data: ownedEvent } = await supabase
     .from('events')
     .select('id')
@@ -17,7 +23,10 @@ async function canAccessEventSettings(supabase: any, eventId: string, userId: st
     .maybeSingle();
 
   if (ownedEvent) {
-    return true;
+    return {
+      canView: true,
+      canEdit: true,
+    };
   }
 
   const { data: collaboratorAccess } = await supabase
@@ -28,7 +37,17 @@ async function canAccessEventSettings(supabase: any, eventId: string, userId: st
     .eq('status', 'active')
     .maybeSingle();
 
-  return Boolean(collaboratorAccess?.can_edit_event || collaboratorAccess?.can_manage_pricing);
+  if (!collaboratorAccess) {
+    return {
+      canView: false,
+      canEdit: false,
+    };
+  }
+
+  return {
+    canView: true,
+    canEdit: Boolean(collaboratorAccess.can_edit_event || collaboratorAccess.can_manage_pricing),
+  };
 }
 
 // GET - Get event settings
@@ -38,6 +57,7 @@ export async function GET(
 ) {
   try {
     const supabase = await createClient();
+    const serviceClient = createServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -45,12 +65,12 @@ export async function GET(
     }
 
     const { id } = params;
-    const canAccess = await canAccessEventSettings(supabase, id, user.id);
-    if (!canAccess) {
+    const access = await getEventAccess(serviceClient, id, user.id);
+    if (!access.canView) {
       return NextResponse.json({ error: 'Not authorized to manage this event' }, { status: 403 });
     }
 
-    const { data: event, error } = await supabase
+    const { data: event, error } = await serviceClient
       .from('events')
       .select(`
         *,
@@ -92,6 +112,7 @@ export async function PUT(
 ) {
   try {
     const supabase = await createClient();
+    const serviceClient = createServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -101,15 +122,15 @@ export async function PUT(
     const { id } = params;
     const body = await request.json();
 
-    const canAccess = await canAccessEventSettings(supabase, id, user.id);
-    if (!canAccess) {
+    const access = await getEventAccess(serviceClient, id, user.id);
+    if (!access.canEdit) {
       return NextResponse.json({ error: 'Not authorized to manage this event' }, { status: 403 });
     }
 
     // Verify event and get current currency
-    const { data: event } = await supabase
+    const { data: event } = await serviceClient
       .from('events')
-      .select('id, currency_code')
+      .select('id, currency_code, event_date, event_timezone')
       .eq('id', id)
       .single();
 
@@ -123,7 +144,25 @@ export async function PUT(
     if (body.name !== undefined) updates.name = body.name;
     if (body.description !== undefined) updates.description = body.description;
     if (body.location !== undefined) updates.location = body.location;
-    if (body.event_date !== undefined) updates.event_date = body.event_date;
+    const nextEventDate =
+      body.event_date !== undefined
+        ? normalizeIsoDate(body.event_date)
+        : normalizeIsoDate(event.event_date);
+    const nextEventTimezone =
+      body.event_timezone !== undefined
+        ? normalizeEventTimezone(body.event_timezone)
+        : normalizeEventTimezone(event.event_timezone);
+
+    if (body.event_date !== undefined) updates.event_date = nextEventDate;
+    if (body.event_timezone !== undefined) updates.event_timezone = nextEventTimezone;
+    if (body.event_start_at_utc !== undefined) {
+      updates.event_start_at_utc = normalizeUtcTimestamp(body.event_start_at_utc);
+    } else if (body.event_date !== undefined || body.event_timezone !== undefined) {
+      updates.event_start_at_utc = deriveEventStartAtUtc(nextEventDate, nextEventTimezone);
+    }
+    if (body.event_end_at_utc !== undefined) {
+      updates.event_end_at_utc = normalizeUtcTimestamp(body.event_end_at_utc);
+    }
     if (body.end_date !== undefined) updates.end_date = body.end_date;
     if (body.is_public !== undefined) updates.is_public = body.is_public;
     if (body.is_publicly_listed !== undefined) updates.is_publicly_listed = body.is_publicly_listed;
@@ -150,7 +189,7 @@ export async function PUT(
         }
       }
 
-      const { data: existingPricing } = await supabase
+      const { data: existingPricing } = await serviceClient
         .from('event_pricing')
         .select('id')
         .eq('event_id', id)
@@ -182,7 +221,7 @@ export async function PUT(
       }
 
       if (existingPricing) {
-        const { error: pricingError } = await supabase
+        const { error: pricingError } = await serviceClient
           .from('event_pricing')
           .update(pricingData)
           .eq('event_id', id);
@@ -191,7 +230,7 @@ export async function PUT(
           throw pricingError;
         }
       } else {
-        const { error: pricingError } = await supabase
+        const { error: pricingError } = await serviceClient
           .from('event_pricing')
           .insert(pricingData);
 
@@ -202,7 +241,7 @@ export async function PUT(
 
       // Prevent currency change if transactions exist (to avoid accounting issues)
       if (body.currency_code !== undefined && body.currency_code !== (event.currency_code || 'USD')) {
-        const { count: transactionCount } = await supabase
+        const { count: transactionCount } = await serviceClient
           .from('transactions')
           .select('id', { count: 'exact', head: true })
           .eq('event_id', id)
@@ -218,7 +257,7 @@ export async function PUT(
       }
     }
 
-    const { error: updateError } = await supabase
+    const { error: updateError } = await serviceClient
       .from('events')
       .update(updates)
       .eq('id', id);

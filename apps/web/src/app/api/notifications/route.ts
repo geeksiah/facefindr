@@ -14,12 +14,22 @@ import {
   markAllNotificationsAsRead,
   getUnreadCount,
 } from '@/lib/notifications';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createClientWithAccessToken } from '@/lib/supabase/server';
+
+async function getAuthClient(request: NextRequest) {
+  const authHeader = request.headers.get('authorization');
+  const accessToken = authHeader?.startsWith('Bearer ')
+    ? authHeader.slice(7)
+    : null;
+  return accessToken
+    ? createClientWithAccessToken(accessToken)
+    : createClient();
+}
 
 // GET - Get user notifications
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await getAuthClient(request);
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -40,7 +50,21 @@ export async function GET(request: NextRequest) {
     const unreadCount = await getUnreadCount(user.id);
 
     return NextResponse.json({
-      notifications,
+      notifications: notifications.map((notification) => ({
+        id: notification.id,
+        channel: notification.channel,
+        subject: notification.subject,
+        body: notification.body,
+        status: notification.status,
+        metadata: notification.metadata,
+        read_at: notification.readAt ? notification.readAt.toISOString() : null,
+        created_at: notification.createdAt.toISOString(),
+        template_code: notification.templateCode,
+        // Backward-compatible aliases for existing clients
+        readAt: notification.readAt ? notification.readAt.toISOString() : null,
+        createdAt: notification.createdAt.toISOString(),
+        templateCode: notification.templateCode,
+      })),
       unreadCount,
     });
 
@@ -56,7 +80,7 @@ export async function GET(request: NextRequest) {
 // POST - Mark notification(s) as read
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await getAuthClient(request);
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
