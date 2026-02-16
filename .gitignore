@@ -60,6 +60,8 @@ supabase/.temp
 *.key
 *.mobileprovision
 *.orig.*
+apps/mobile/android/
+apps/mobile/ios/
 ios/Pods/
 android/.gradle/
 android/app/build/
