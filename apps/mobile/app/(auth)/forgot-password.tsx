@@ -17,6 +17,7 @@ import { useRouter } from 'expo-router';
 import { ArrowLeft, Mail } from 'lucide-react-native';
 
 import { Button, Input } from '@/components/ui';
+import { buildCanonicalDeepLink } from '@/lib/deep-link';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 
@@ -44,7 +45,7 @@ export default function ForgotPasswordScreen() {
     try {
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(
         email,
-        { redirectTo: 'facefindr://reset-password' }
+        { redirectTo: buildCanonicalDeepLink('/reset-password') }
       );
 
       if (resetError) {

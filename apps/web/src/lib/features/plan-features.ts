@@ -22,7 +22,7 @@ export interface PlanLimits {
  */
 export async function getPlanLimits(
   photographerId: string,
-  planType: 'photographer' | 'drop_in' = 'photographer'
+  planType: 'creator' | 'photographer' | 'drop_in' = 'creator'
 ): Promise<PlanLimits> {
   try {
     const supabase = createServiceClient();
@@ -49,12 +49,18 @@ export async function getPlanLimits(
     }
 
     // Get plan by plan_code
-    const { data: plan } = await supabase
+    let planQuery = supabase
       .from('subscription_plans')
       .select('id')
-      .eq('code', subscription.plan_code)
-      .eq('plan_type', planType)
-      .single();
+      .eq('code', subscription.plan_code);
+
+    if (planType === 'creator' || planType === 'photographer') {
+      planQuery = planQuery.in('plan_type', ['creator', 'photographer']);
+    } else {
+      planQuery = planQuery.eq('plan_type', planType);
+    }
+
+    const { data: plan } = await planQuery.single();
 
     if (!plan) {
       // Return free plan defaults

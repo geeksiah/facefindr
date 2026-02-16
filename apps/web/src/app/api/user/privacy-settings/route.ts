@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { normalizeUserType } from '@/lib/user-type';
 import { createClient, createClientWithAccessToken } from '@/lib/supabase/server';
 
 async function getAuthClient(request: NextRequest) {
@@ -19,7 +20,7 @@ export interface PrivacySettings {
   allowPhotoTagging: boolean;
   showInSearch: boolean;
   allowFaceRecognition: boolean;
-  shareActivityWithPhotographers: boolean;
+  shareActivityWithCreators: boolean;
   emailMarketing: boolean;
 }
 
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest) {
 
     // If no settings exist, create default ones
     if (!settings) {
-      const userType = user.user_metadata?.user_type || 'attendee';
+      const userType = normalizeUserType(user.user_metadata?.user_type) || 'attendee';
       
       const { data: newSettings, error: insertError } = await supabase
         .from('user_privacy_settings')
@@ -76,7 +77,7 @@ export async function GET(request: NextRequest) {
         allowPhotoTagging: settings.allow_photo_tagging,
         showInSearch: settings.show_in_search,
         allowFaceRecognition: settings.allow_face_recognition,
-        shareActivityWithPhotographers: settings.share_activity_with_photographers,
+        shareActivityWithCreators: settings.share_activity_with_photographers,
         emailMarketing: settings.email_marketing,
       },
     });
@@ -106,7 +107,7 @@ export async function PUT(request: NextRequest) {
       allowPhotoTagging,
       showInSearch,
       allowFaceRecognition,
-      shareActivityWithPhotographers,
+      shareActivityWithCreators,
       emailMarketing,
     } = body;
 
@@ -126,7 +127,7 @@ export async function PUT(request: NextRequest) {
     if (typeof allowPhotoTagging === 'boolean') updateData.allow_photo_tagging = allowPhotoTagging;
     if (typeof showInSearch === 'boolean') updateData.show_in_search = showInSearch;
     if (typeof allowFaceRecognition === 'boolean') updateData.allow_face_recognition = allowFaceRecognition;
-    if (typeof shareActivityWithPhotographers === 'boolean') updateData.share_activity_with_photographers = shareActivityWithPhotographers;
+    if (typeof shareActivityWithCreators === 'boolean') updateData.share_activity_with_photographers = shareActivityWithCreators;
     if (typeof emailMarketing === 'boolean') updateData.email_marketing = emailMarketing;
 
     let result;
@@ -141,7 +142,7 @@ export async function PUT(request: NextRequest) {
         .single();
     } else {
       // Insert new settings
-      const userType = user.user_metadata?.user_type || 'attendee';
+      const userType = normalizeUserType(user.user_metadata?.user_type) || 'attendee';
       result = await supabase
         .from('user_privacy_settings')
         .insert({
@@ -168,7 +169,7 @@ export async function PUT(request: NextRequest) {
         allowPhotoTagging: result.data.allow_photo_tagging,
         showInSearch: result.data.show_in_search,
         allowFaceRecognition: result.data.allow_face_recognition,
-        shareActivityWithPhotographers: result.data.share_activity_with_photographers,
+        shareActivityWithCreators: result.data.share_activity_with_photographers,
         emailMarketing: result.data.email_marketing,
       },
     });

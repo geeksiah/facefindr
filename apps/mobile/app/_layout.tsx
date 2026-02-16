@@ -19,6 +19,7 @@ SplashScreen.preventAutoHideAsync();
 export default function RootLayout() {
   const router = useRouter();
   const segments = useSegments();
+  const rootSegment = segments[0] as string | undefined;
   const rootNavigationState = useRootNavigationState();
   const { isLoading, isInitialized, initialize, user, profile } = useAuthStore();
   const [navigationReady, setNavigationReady] = useState(false);
@@ -47,14 +48,14 @@ export default function RootLayout() {
   useEffect(() => {
     if (!isInitialized || !navigationReady) return;
 
-    const inAuthGroup = segments[0] === '(auth)';
-    const inPhotographerGroup = segments[0] === '(photographer)';
-    const inAttendeeGroup = segments[0] === '(attendee)';
-    const isRootIndex = segments[0] === undefined;
+    const inAuthGroup = rootSegment === '(auth)';
+    const inCreatorGroup = rootSegment === '(creator)' || rootSegment === '(photographer)';
+    const inAttendeeGroup = rootSegment === '(attendee)';
+    const isRootIndex = rootSegment === undefined;
 
     if (!user) {
       // Not signed in - go to welcome if on protected route
-      if (inPhotographerGroup || inAttendeeGroup) {
+      if (inCreatorGroup || inAttendeeGroup) {
         router.replace('/' as any);
       }
       // Reset navigation tracking when signed out
@@ -63,14 +64,14 @@ export default function RootLayout() {
       // Signed in with profile - route to correct dashboard (only once per session)
       if ((inAuthGroup || isRootIndex) && !hasNavigated.current) {
         hasNavigated.current = true;
-        if (profile.userType === 'photographer') {
-          router.replace('/(photographer)' as any);
+        if (profile.userType === 'creator') {
+          router.replace('/(creator)' as any);
         } else {
           router.replace('/(attendee)' as any);
         }
       }
     }
-  }, [isInitialized, navigationReady, user, profile, segments]);
+  }, [isInitialized, navigationReady, user, profile, rootSegment]);
 
   // Show loading screen
   if (!isInitialized || isLoading) {
@@ -93,6 +94,7 @@ export default function RootLayout() {
       >
         <Stack.Screen name="index" />
         <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+        <Stack.Screen name="(creator)" options={{ headerShown: false }} />
         <Stack.Screen name="(photographer)" options={{ headerShown: false }} />
         <Stack.Screen name="(attendee)" options={{ headerShown: false }} />
         <Stack.Screen 

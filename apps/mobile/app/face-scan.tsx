@@ -29,6 +29,7 @@ import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { buttonPress, faceDetected, matchFound, noMatch, error as hapticError, selection } from '@/lib/haptics';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { getApiBaseUrl } from '@/lib/api-base';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const PHOTO_SIZE = (SCREEN_WIDTH - spacing.lg * 2 - spacing.sm * 2) / 3;
@@ -249,7 +250,7 @@ export default function FaceScanScreen() {
         encoding: FileSystem.EncodingType.Base64,
       });
 
-      const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+      const apiUrl = getApiBaseUrl();
 
       const response = await fetch(`${apiUrl}/api/faces/search`, {
         method: 'POST',
@@ -285,7 +286,7 @@ export default function FaceScanScreen() {
     setErrorMessage(null);
 
     try {
-      const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+      const apiUrl = getApiBaseUrl();
 
       // Use the front-facing image as primary
       const frontCapture = captures.find(c => c.id === 'front') || captures[0];

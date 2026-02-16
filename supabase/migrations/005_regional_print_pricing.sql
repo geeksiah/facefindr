@@ -1,4 +1,4 @@
--- FaceFindr Database Migration
+-- Ferchr Database Migration
 -- Migration: 005_regional_print_pricing
 -- Description: Region-specific pricing for print products
 

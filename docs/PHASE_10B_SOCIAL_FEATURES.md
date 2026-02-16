@@ -2,16 +2,16 @@
 
 ## Overview
 
-This extension adds social features to FaceFindr:
-- Photographers get FaceTags like attendees (`@photographer.1234`)
+This extension adds social features to Ferchr:
+- Creators get FaceTags like attendees (`@photographer.1234`)
 - Attendees can follow photographers
-- Photographers can add/connect with attendees
+- Creators can add/connect with attendees
 - Profile QR codes for sharing
 - Deep linking to mobile app
 
 ## Features
 
-### 1. Photographer FaceTags
+### 1. Creator FaceTags
 
 Every photographer automatically gets a unique FaceTag:
 - Format: `@displayname.1234`
@@ -31,9 +31,9 @@ Every photographer automatically gets a unique FaceTag:
 - Customizable notification preferences per follow
 - Follower count on photographer profiles
 
-### 3. Connections (Photographer <-> Attendee)
+### 3. Connections (Creator <-> Attendee)
 
-**Photographers can add attendees as connections to:**
+**Creators can add attendees as connections to:**
 - Tag them in photos easily
 - Build a client list
 - Organize with tags and notes
@@ -46,7 +46,7 @@ Every photographer automatically gets a unique FaceTag:
 
 ### 4. Public Profile Pages
 
-**Photographer Profile (`/p/{slug}`):**
+**Creator Profile (`/p/{slug}`):**
 - Profile photo, bio, social links
 - Follower count
 - Recent public events
@@ -67,9 +67,9 @@ Every photographer automatically gets a unique FaceTag:
 - Scannable by anyone
 
 **URL Structure:**
-- Web: `https://facefindr.com/p/{slug}`
-- App Deep Link: `facefindr://photographer/{id}`
-- Universal Link: `https://facefindr.com/p/{slug}?app=1`
+- Web: `https://ferchr.com/p/{slug}`
+- App Deep Link: `ferchr://photographer/{id}`
+- Universal Link: `https://ferchr.com/p/{slug}?app=1`
 
 ### 6. Deep Linking (Mobile App)
 
@@ -80,10 +80,10 @@ When QR code is scanned:
 4. If not installed → user stays on web page
 
 **App URL Schemes:**
-- `facefindr://profile/photographer/{id}`
-- `facefindr://profile/attendee/{id}`
-- `facefindr://photographer/{id}`
-- `facefindr://user/{id}`
+- `ferchr://profile/photographer/{id}`
+- `ferchr://profile/attendee/{id}`
+- `ferchr://photographer/{id}`
+- `ferchr://user/{id}`
 
 ## Database Schema
 
@@ -119,11 +119,11 @@ profile_qr_code_url TEXT
 - `notify_photo_drop` - Boolean
 
 **connections:**
-- `photographer_id` - Photographer
+- `photographer_id` - Creator
 - `attendee_id` - Attendee
 - `connection_type` - 'event', 'scan', 'manual', 'qr_code'
 - `source_event_id` - Optional source event
-- `notes` - Photographer notes
+- `notes` - Creator notes
 - `tags` - Array of tags
 
 **profile_views:**
@@ -158,21 +158,21 @@ profile_qr_code_url TEXT
 
 | URL | Description |
 |-----|-------------|
-| `/p/{slug}` | Photographer public profile |
+| `/p/{slug}` | Creator public profile |
 | `/u/{slug}` | Attendee public profile |
 
 ## Services
 
 ### follow-service.ts
-- `followPhotographer()`
-- `unfollowPhotographer()`
+- `followCreator()`
+- `unfollowCreator()`
 - `isFollowing()`
 - `getFollowers()`
 - `getFollowing()`
-- `searchPhotographers()`
+- `searchCreators()`
 
 ### profile-service.ts
-- `getPhotographerProfile()`
+- `getCreatorProfile()`
 - `getAttendeeProfile()`
 - `generateProfileUrls()`
 - `generateProfileQRCode()`
@@ -197,7 +197,7 @@ import { Linking } from 'react-native';
 Linking.addEventListener('url', ({ url }) => {
   const parsed = parseDeepLink(url);
   if (parsed.type === 'photographer') {
-    navigation.navigate('PhotographerProfile', { id: parsed.id });
+    navigation.navigate('CreatorProfile', { id: parsed.id });
   } else if (parsed.type === 'user') {
     navigation.navigate('UserProfile', { id: parsed.id });
   }
@@ -205,10 +205,10 @@ Linking.addEventListener('url', ({ url }) => {
 
 // Parse deep link
 function parseDeepLink(url: string) {
-  // facefindr://photographer/uuid
-  // facefindr://user/uuid
-  // facefindr://profile/photographer/uuid
-  const match = url.match(/facefindr:\/\/(photographer|user|profile)\/(.*)/);
+  // ferchr://photographer/uuid
+  // ferchr://user/uuid
+  // ferchr://profile/photographer/uuid
+  const match = url.match(/ferchr:\/\/(photographer|user|profile)\/(.*)/);
   if (match) {
     return { type: match[1], id: match[2] };
   }
@@ -224,7 +224,7 @@ Add to `apple-app-site-association`:
   "applinks": {
     "apps": [],
     "details": [{
-      "appID": "TEAMID.com.facefindr.app",
+      "appID": "TEAMID.com.ferchr.app",
       "paths": ["/p/*", "/u/*"]
     }]
   }
@@ -239,14 +239,14 @@ Add to `AndroidManifest.xml`:
   <action android:name="android.intent.action.VIEW" />
   <category android:name="android.intent.category.DEFAULT" />
   <category android:name="android.intent.category.BROWSABLE" />
-  <data android:scheme="https" android:host="facefindr.com" android:pathPrefix="/p/" />
-  <data android:scheme="https" android:host="facefindr.com" android:pathPrefix="/u/" />
+  <data android:scheme="https" android:host="ferchr.com" android:pathPrefix="/p/" />
+  <data android:scheme="https" android:host="ferchr.com" android:pathPrefix="/u/" />
 </intent-filter>
 ```
 
 ## Usage Examples
 
-### Follow a Photographer
+### Follow a Creator
 
 ```typescript
 // In attendee's app/gallery
@@ -283,13 +283,13 @@ const addByFaceTag = async (faceTag: string) => {
 
 ```typescript
 const shareProfile = async () => {
-  const url = `https://facefindr.com/p/${profile.public_profile_slug}`;
+  const url = `https://ferchr.com/p/${profile.public_profile_slug}`;
   
   // Native share on mobile
   if (navigator.share) {
     await navigator.share({
       title: profile.display_name,
-      text: `Check out ${profile.display_name} on FaceFindr`,
+      text: `Check out ${profile.display_name} on Ferchr`,
       url,
     });
   } else {

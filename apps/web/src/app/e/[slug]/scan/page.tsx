@@ -38,8 +38,8 @@ export default function PublicEventScanPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const router = useRouter();
-  const slug = params.slug as string;
-  const code = searchParams.get('code');
+  const slug = params?.slug as string;
+  const code = searchParams?.get('code');
 
   const [event, setEvent] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -464,3 +464,5 @@ export default function PublicEventScanPage() {
     </div>
   );
 }
+
+

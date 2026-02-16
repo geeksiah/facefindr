@@ -43,7 +43,7 @@ This document audits all payment flows to ensure they respect user preferences a
 - Added Flutterwave and PayPal support
 - Returns gateway selection info
 
-### ✅ 3. Photographer Subscriptions (`/api/subscriptions/checkout`)
+### ✅ 3. Creator Subscriptions (`/api/subscriptions/checkout`)
 **Status**: ✅ UPDATED
 - Uses gateway selector
 - Currently subscriptions only support Stripe (industry standard)
@@ -87,7 +87,7 @@ Should include:
 
 ### `photographers` Table
 Should include:
-- `country_code` VARCHAR(2) - Photographer's country
+- `country_code` VARCHAR(2) - Creator's country
 
 ## Webhook Configuration
 
@@ -110,8 +110,8 @@ Should include:
 - [ ] User with preferred gateway (Flutterwave) → Uses Flutterwave if available
 - [ ] User from Ghana → Prefers Flutterwave
 - [ ] User from US → Prefers Stripe
-- [ ] Photographer with only Stripe wallet → Uses Stripe
-- [ ] Photographer with multiple wallets → Uses user preference or country-based
+- [ ] Creator with only Stripe wallet → Uses Stripe
+- [ ] Creator with multiple wallets → Uses user preference or country-based
 - [ ] Drop-in upload respects user preference
 - [ ] Event photo purchase respects user preference
 - [ ] Subscription checkout uses Stripe (or shows error for others)

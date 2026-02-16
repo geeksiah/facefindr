@@ -1,4 +1,4 @@
--- FaceFindr Storage Setup
+-- Ferchr Storage Setup
 -- Run this in Supabase SQL Editor
 
 -- Create the media storage bucket

@@ -10,7 +10,7 @@ import {
   IndexFacesCommand,
 } from '@aws-sdk/client-rekognition';
 
-import { rekognitionClient, ATTENDEE_COLLECTION_ID } from './rekognition';
+import { rekognitionClient, ATTENDEE_COLLECTION_ID, LEGACY_ATTENDEE_COLLECTION_ID } from './rekognition';
 
 /**
  * Ensure global attendee collection exists
@@ -83,7 +83,7 @@ export async function searchDropInFaces(
   try {
     await ensureAttendeeCollection();
 
-    const response = await rekognitionClient.send(
+    const primaryResponse = await rekognitionClient.send(
       new SearchFacesByImageCommand({
         CollectionId: ATTENDEE_COLLECTION_ID,
         Image: { Bytes: imageBytes },
@@ -92,13 +92,39 @@ export async function searchDropInFaces(
       })
     );
 
-    const matches = (response.FaceMatches || []).map((match) => ({
+    const primaryMatches = (primaryResponse.FaceMatches || []).map((match) => ({
       rekognitionFaceId: match.Face?.FaceId || '',
       similarity: match.Similarity || 0,
       boundingBox: match.Face?.BoundingBox,
     }));
 
-    return { matches };
+    if (primaryMatches.length > 0) {
+      return { matches: primaryMatches };
+    }
+
+    try {
+      const legacyResponse = await rekognitionClient.send(
+        new SearchFacesByImageCommand({
+          CollectionId: LEGACY_ATTENDEE_COLLECTION_ID,
+          Image: { Bytes: imageBytes },
+          MaxFaces: 100,
+          FaceMatchThreshold: similarityThreshold,
+        })
+      );
+
+      const legacyMatches = (legacyResponse.FaceMatches || []).map((match) => ({
+        rekognitionFaceId: match.Face?.FaceId || '',
+        similarity: match.Similarity || 0,
+        boundingBox: match.Face?.BoundingBox,
+      }));
+
+      return { matches: legacyMatches };
+    } catch (legacyError: any) {
+      if (legacyError.name === 'ResourceNotFoundException') {
+        return { matches: primaryMatches };
+      }
+      throw legacyError;
+    }
   } catch (error: any) {
     if (error.name === 'ResourceNotFoundException') {
       // Collection doesn't exist yet - no attendees indexed

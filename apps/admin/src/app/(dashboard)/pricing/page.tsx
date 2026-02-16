@@ -334,7 +334,7 @@ function FeatureManagementUI({ plans }: { plans: Plan[] }) {
         </div>
         <div className="mt-4 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
           <p className="text-sm text-yellow-700 dark:text-yellow-400">
-            <strong>Tip:</strong> Use -1 for unlimited limits. Features marked as &quot;Photographer Only&quot; or &quot;Drop-In Only&quot; will only appear for those plan types.
+            <strong>Tip:</strong> Use -1 for unlimited limits. Features marked as &quot;Creator Only&quot; or &quot;Drop-In Only&quot; will only appear for those plan types.
           </p>
         </div>
       </div>

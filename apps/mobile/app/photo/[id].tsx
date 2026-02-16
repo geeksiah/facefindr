@@ -34,6 +34,7 @@ import { Button } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { getApiBaseUrl } from '@/lib/api-base';
 import { formatPrice } from '@/lib/currency';
 import { getThumbnailUrl, getSignedUrl } from '@/lib/storage-urls';
 import { alertMissingPublicAppUrl, buildPublicUrl, getPublicAppUrl } from '@/lib/runtime-config';
@@ -158,7 +159,7 @@ export default function PhotoViewerScreen() {
 
     try {
       await Share.share({
-        message: `Check out this photo from ${photo?.eventName} on FaceFindr!`,
+        message: `Check out this photo from ${photo?.eventName} on Ferchr!`,
         url: shareUrl,
       });
     } catch (error) {
@@ -198,7 +199,7 @@ export default function PhotoViewerScreen() {
       }
 
       // Download to local file system
-      const fileName = `FaceFindr_${photo.id}.jpg`;
+      const fileName = `Ferchr_${photo.id}.jpg`;
       const fileUri = FileSystem.documentDirectory + fileName;
       
       await FileSystem.downloadAsync(data.signedUrl, fileUri);
@@ -237,7 +238,7 @@ export default function PhotoViewerScreen() {
     setIsFavorite(nextValue);
 
     try {
-      const baseUrl = process.env.EXPO_PUBLIC_API_URL || getPublicAppUrl();
+      const baseUrl = getApiBaseUrl();
       if (!baseUrl) {
         alertMissingPublicAppUrl();
         setIsFavorite(!nextValue);

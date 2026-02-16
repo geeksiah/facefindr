@@ -19,6 +19,7 @@ import { useRouter } from 'expo-router';
 import { Camera, CameraView } from 'expo-camera';
 import { X, Flashlight, FlashlightOff, AlertCircle } from 'lucide-react-native';
 
+import { isSupportedAppScheme } from '@/lib/deep-link';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 import { buttonPress, matchFound, error as hapticError } from '@/lib/haptics';
 
@@ -86,15 +87,14 @@ export default function ScanScreen() {
     // Expected formats:
     // - https://{domain}/e/[slug]
     // - https://{domain}/s/[code]
-    // - facefindr://event/[id]
+    // - ferchr://event/[id] (legacy: facefindr://event/[id])
     // - Any URL with /e/ or /s/ path patterns
-    
-    const appScheme = process.env.EXPO_PUBLIC_APP_SCHEME || 'facefindr';
 
     try {
       const url = new URL(data);
       const pathParts = url.pathname.split('/').filter(Boolean);
-      const isCustomScheme = url.protocol === `${appScheme}:`;
+      const isCustomScheme = isSupportedAppScheme(url.protocol);
+      const host = url.hostname.toLowerCase();
       
       // Check for event path patterns (more lenient matching)
       if (pathParts[0] === 'e' && pathParts[1]) {
@@ -118,8 +118,27 @@ export default function ScanScreen() {
         return;
       }
       
+      if (isCustomScheme && host === 'event' && pathParts[0]) {
+        // Custom scheme: ferchr://event/[id] and legacy facefindr://event/[id]
+        await matchFound(); // Haptic feedback for successful QR scan
+        router.replace(`/event/${pathParts[0]}` as any);
+        return;
+      }
+
+      if (isCustomScheme && host === 's' && pathParts[0]) {
+        await matchFound();
+        router.replace(`/s/${pathParts[0]}` as any);
+        return;
+      }
+
+      if (isCustomScheme && host === 'e' && pathParts[0]) {
+        await matchFound();
+        router.replace(`/event/${pathParts[0]}` as any);
+        return;
+      }
+
       if (isCustomScheme && pathParts[0]) {
-        // Custom scheme: facefindr://event/[id]
+        // Custom scheme fallback: ferchr://<eventId>
         await matchFound(); // Haptic feedback for successful QR scan
         router.replace(`/event/${pathParts[0]}` as any);
         return;

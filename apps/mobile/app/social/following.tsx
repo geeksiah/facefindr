@@ -30,9 +30,10 @@ import {
 } from 'lucide-react-native';
 
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { getApiBaseUrl } from '@/lib/api-base';
 import { useAuthStore } from '@/stores/auth-store';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
+const API_URL = getApiBaseUrl();
 
 interface FollowingItem {
   id: string;
@@ -168,7 +169,12 @@ export default function FollowingScreen() {
             styles.itemContent,
             pressed && styles.itemPressed,
           ]}
-          onPress={() => router.push(`/p/${photographer.public_profile_slug || photographer.id}`)}
+          onPress={() =>
+            router.push({
+              pathname: '/p/[slug]',
+              params: { slug: photographer.public_profile_slug || photographer.id },
+            })
+          }
         >
           {photographer.profile_photo_url ? (
             <Image source={{ uri: photographer.profile_photo_url }} style={styles.avatar} />
@@ -275,7 +281,7 @@ export default function FollowingScreen() {
             style={styles.searchButton}
             onPress={() => router.push('/search')}
           >
-            <Text style={styles.searchButtonText}>Find Photographers</Text>
+            <Text style={styles.searchButtonText}>Find Creators</Text>
           </TouchableOpacity>
         </View>
       ) : (

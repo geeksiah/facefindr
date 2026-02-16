@@ -134,7 +134,7 @@ export async function POST(request: NextRequest) {
             price_data: {
               currency: 'usd',
               product_data: {
-                name: plan.name || `FaceFindr ${planCode}`,
+                name: plan.name || `Ferchr ${planCode}`,
                 description: plan.description || 'Attendee subscription',
               },
               recurring: {

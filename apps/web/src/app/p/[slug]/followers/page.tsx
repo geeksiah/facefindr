@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Photographer Followers Page (Public)
+ * Creator Followers Page (Public)
  * 
  * Shows list of followers for a photographer's public profile.
  */
@@ -33,7 +33,7 @@ interface FollowerItem {
   };
 }
 
-interface PhotographerInfo {
+interface CreatorInfo {
   id: string;
   display_name: string;
   face_tag: string;
@@ -41,12 +41,12 @@ interface PhotographerInfo {
   public_profile_slug: string | null;
 }
 
-export default function PhotographerFollowersPage() {
+export default function CreatorFollowersPage() {
   const params = useParams();
   const router = useRouter();
-  const slug = params.slug as string;
+  const slug = params?.slug as string;
 
-  const [photographer, setPhotographer] = useState<PhotographerInfo | null>(null);
+  const [photographer, setCreator] = useState<CreatorInfo | null>(null);
   const [followers, setFollowers] = useState<FollowerItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -56,14 +56,14 @@ export default function PhotographerFollowersPage() {
   const loadData = useCallback(async () => {
     try {
       // Load photographer info
-      const profileRes = await fetch(`/api/profiles/photographer/${slug}`);
+      const profileRes = await fetch(`/api/profiles/creator/${slug}`);
       if (!profileRes.ok) {
         const data = await profileRes.json();
         setError(data.error || 'Profile not found');
         return;
       }
       const profileData = await profileRes.json();
-      setPhotographer(profileData.profile);
+      setCreator(profileData.profile);
 
       // Load followers
       const followersRes = await fetch(`/api/social/follow?type=followers&photographerId=${profileData.profile.id}`);
@@ -140,9 +140,9 @@ export default function PhotographerFollowersPage() {
       </header>
 
       <main className="max-w-4xl mx-auto px-4 sm:px-6 py-6">
-        {/* Photographer Info */}
+        {/* Creator Info */}
         <Link
-          href={`/p/${photographer.public_profile_slug || photographer.id}`}
+          href={`/c/${photographer.public_profile_slug || photographer.id}`}
           className="flex items-center gap-4 p-4 rounded-xl border border-border bg-card mb-6 hover:bg-muted/50 transition-colors"
         >
           {photographer.profile_photo_url ? (
@@ -190,7 +190,7 @@ export default function PhotographerFollowersPage() {
             <p className="text-sm text-secondary">
               {searchQuery
                 ? 'Try a different search term'
-                : 'Be the first to follow this photographer!'}
+                : 'Be the first to follow this creator!'}
             </p>
           </div>
         ) : (
@@ -245,3 +245,4 @@ export default function PhotographerFollowersPage() {
     </div>
   );
 }
+

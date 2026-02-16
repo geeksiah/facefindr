@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 /**
- * Photographer Rating Stats API
+ * Creator Rating Stats API
  * 
  * Get rating statistics for a photographer
  */

@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { normalizeUserType } from '@/lib/user-type';
 import { createClient, createClientWithAccessToken } from '@/lib/supabase/server';
 
 async function getAuthClient(request: NextRequest) {
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    const userType = user.user_metadata?.user_type || 'attendee';
+    const userType = normalizeUserType(user.user_metadata?.user_type) || 'attendee';
 
     // Create new export request
     const { data: exportRequest, error } = await supabase
@@ -188,7 +189,7 @@ async function processDataExport(
       
       exportData.privacySettings = privacy;
 
-    } else if (userType === 'photographer') {
+    } else if (userType === 'creator') {
       // Fetch photographer profile
       const { data: profile } = await supabase
         .from('photographers')

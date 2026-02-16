@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 /**
- * Photographer Subscription API
+ * Creator Subscription API
  * 
  * Get current subscription status, usage, and payment method.
  * Returns full plan details from the modular pricing system.
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 
-import { getUserPlan, getAllPlans, getPhotographerPlanFeatures } from '@/lib/subscription';
+import { getUserPlan, getAllPlans, getCreatorPlanFeatures } from '@/lib/subscription';
 import { createClient } from '@/lib/supabase/server';
 
 // GET - Get subscription details
@@ -26,7 +26,7 @@ export async function GET() {
     const currentPlan = await getUserPlan(user.id, 'photographer');
     
     // Also get legacy features for backward compatibility
-    const legacyFeatures = await getPhotographerPlanFeatures(user.id);
+    const legacyFeatures = await getCreatorPlanFeatures(user.id);
 
     // Get subscription record
     const { data: subscription } = await supabase

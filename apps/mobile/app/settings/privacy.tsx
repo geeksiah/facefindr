@@ -23,15 +23,16 @@ import { ArrowLeft, Eye, Lock, Trash2, Download, Check, AlertCircle } from 'luci
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { getApiBaseUrl } from '@/lib/api-base';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+const API_URL = getApiBaseUrl();
 
 interface PrivacySettings {
   profileVisible: boolean;
   allowPhotoTagging: boolean;
   showInSearch: boolean;
   allowFaceRecognition: boolean;
-  shareActivityWithPhotographers: boolean;
+  shareActivityWithCreators: boolean;
   emailMarketing: boolean;
 }
 
@@ -50,7 +51,7 @@ export default function PrivacySettingsScreen() {
     allowPhotoTagging: true,
     showInSearch: true,
     allowFaceRecognition: true,
-    shareActivityWithPhotographers: false,
+    shareActivityWithCreators: false,
     emailMarketing: false,
   });
 

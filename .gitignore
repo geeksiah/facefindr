@@ -8,6 +8,8 @@ dist/
 .expo/
 out/
 build/
+.gradle-local*/
+.g/
 
 # Turbo
 .turbo/

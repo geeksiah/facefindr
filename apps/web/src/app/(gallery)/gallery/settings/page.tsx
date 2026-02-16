@@ -77,7 +77,7 @@ export default function SettingsPage() {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'facefindr-data-export.json';
+        a.download = 'ferchr-data-export.json';
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
@@ -119,7 +119,7 @@ export default function SettingsPage() {
               <div>
                 <p className="font-medium text-foreground">Allow Photo Tagging</p>
                 <p className="text-sm text-secondary">
-                  Photographers can match your face in their photos
+                  Creators can match your face in their photos
                 </p>
               </div>
             </div>
@@ -149,7 +149,7 @@ export default function SettingsPage() {
               <div>
                 <p className="font-medium text-foreground">Appear in Search</p>
                 <p className="text-sm text-secondary">
-                  Photographers can find you by FaceTag
+                  Creators can find you by FaceTag
                 </p>
               </div>
             </div>

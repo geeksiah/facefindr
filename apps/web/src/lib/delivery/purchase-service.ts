@@ -4,7 +4,7 @@
  * Handles photo purchases, cart management, and order processing.
  */
 
-import { getPhotographerPlatformFee } from '@/lib/subscription/plans';
+import { getCreatorPlatformFee } from '@/lib/subscription/plans';
 import { createServiceClient } from '@/lib/supabase/server';
 
 import { createEntitlement, Resolution } from './download-service';
@@ -339,7 +339,7 @@ export async function createPurchase(
     
     // Calculate totals
     const subtotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
-    const platformFeeRate = await getPhotographerPlatformFee(photographerId);
+    const platformFeeRate = await getCreatorPlatformFee(photographerId);
     const platformFee = Math.round(subtotal * platformFeeRate);
     const photographerAmount = subtotal - platformFee;
 

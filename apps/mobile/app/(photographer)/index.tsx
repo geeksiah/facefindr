@@ -1,5 +1,5 @@
 /**
- * Photographer Dashboard Screen
+ * Creator Dashboard Screen
  * 
  * Photo-focused overview of events, uploads, and quick actions.
  */
@@ -406,7 +406,7 @@ export default function DashboardScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.headerIconButton}
-              onPress={() => router.push('/(photographer)/notifications')}
+              onPress={() => router.push('/(creator)/notifications' as any)}
               activeOpacity={0.7}
             >
               <Bell size={22} color={colors.foreground} />
@@ -420,7 +420,7 @@ export default function DashboardScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.avatarContainer}
-              onPress={() => router.push('/(photographer)/profile')}
+              onPress={() => router.push('/(creator)/profile' as any)}
               activeOpacity={0.9}
             >
               {profile?.profilePhotoUrl ? (
@@ -455,7 +455,7 @@ export default function DashboardScreen() {
             styles.uploadHero,
             pressed && styles.uploadHeroPressed,
           ]}
-          onPress={() => router.push('/(photographer)/upload')}
+          onPress={() => router.push('/(creator)/upload' as any)}
         >
           <LinearGradient
             colors={[colors.accent, colors.accentDark]}
@@ -480,7 +480,7 @@ export default function DashboardScreen() {
         <View style={styles.statsRow}>
           <TouchableOpacity 
             style={styles.statCard}
-            onPress={() => router.push('/(photographer)/analytics')}
+            onPress={() => router.push('/(creator)/analytics' as any)}
             activeOpacity={0.7}
           >
             <View style={[styles.statIcon, { backgroundColor: colors.accent + '15' }]}>
@@ -492,7 +492,7 @@ export default function DashboardScreen() {
           
           <TouchableOpacity 
             style={styles.statCard}
-            onPress={() => router.push('/(photographer)/events')}
+            onPress={() => router.push('/(creator)/events' as any)}
             activeOpacity={0.7}
           >
             <View style={[styles.statIcon, { backgroundColor: '#f59e0b15' }]}>
@@ -546,7 +546,7 @@ export default function DashboardScreen() {
             
             <TouchableOpacity
               style={styles.quickActionCard}
-              onPress={() => router.push('/(photographer)/analytics')}
+              onPress={() => router.push('/(creator)/analytics' as any)}
               activeOpacity={0.7}
             >
               <View style={[styles.quickActionIcon, { backgroundColor: '#8b5cf615' }]}>
@@ -557,7 +557,7 @@ export default function DashboardScreen() {
             
             <TouchableOpacity
               style={styles.quickActionCard}
-              onPress={() => router.push('/(photographer)/events')}
+              onPress={() => router.push('/(creator)/events' as any)}
               activeOpacity={0.7}
             >
               <View style={[styles.quickActionIcon, { backgroundColor: '#f59e0b15' }]}>
@@ -573,7 +573,7 @@ export default function DashboardScreen() {
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Recent Uploads</Text>
-              <TouchableOpacity onPress={() => router.push('/(photographer)/upload')}>
+              <TouchableOpacity onPress={() => router.push('/(creator)/upload' as any)}>
                 <Text style={styles.seeAllText}>See all</Text>
               </TouchableOpacity>
             </View>
@@ -592,7 +592,7 @@ export default function DashboardScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Your Events</Text>
-            <TouchableOpacity onPress={() => router.push('/(photographer)/events')}>
+            <TouchableOpacity onPress={() => router.push('/(creator)/events' as any)}>
               <Text style={styles.seeAllText}>See all</Text>
             </TouchableOpacity>
           </View>
@@ -1051,3 +1051,5 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 });
+
+

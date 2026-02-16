@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Followers Page (Photographer Dashboard)
+ * Followers Page (Creator Dashboard)
  * 
  * Shows list of attendees following the photographer.
  */

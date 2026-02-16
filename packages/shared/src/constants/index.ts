@@ -1,5 +1,5 @@
 /**
- * FaceFindr Constants
+ * Ferchr Constants
  * Central source of truth for all application constants
  */
 

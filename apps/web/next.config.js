@@ -1,4 +1,13 @@
 /** @type {import('next').NextConfig} */
+const reactAliases = {
+  'react$': require.resolve('next/dist/compiled/react'),
+  'react/jsx-runtime': require.resolve('next/dist/compiled/react/jsx-runtime'),
+  'react/jsx-dev-runtime': require.resolve('next/dist/compiled/react/jsx-dev-runtime'),
+  'react-dom$': require.resolve('next/dist/compiled/react-dom'),
+  'react-dom/client': require.resolve('next/dist/compiled/react-dom/client'),
+  'react-dom/server': require.resolve('next/dist/compiled/react-dom/server'),
+};
+
 const nextConfig = {
   reactStrictMode: true,
 
@@ -36,10 +45,17 @@ const nextConfig = {
   async redirects() {
     return [
       { source: '/dashboard', destination: '/dashboard/events', permanent: false },
+      { source: '/p/:slug/followers', destination: '/c/:slug/followers', permanent: false },
+      { source: '/p/:slug', destination: '/c/:slug', permanent: false },
     ];
   },
 
   webpack: (config, { isServer }) => {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      ...reactAliases,
+    };
+
     if (!isServer) {
       config.resolve.fallback = { ...config.resolve.fallback, fs: false, net: false, tls: false };
     }

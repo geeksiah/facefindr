@@ -28,7 +28,7 @@ function ResetPasswordPageContent() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const fromAdmin = searchParams.get('from') === 'admin';
+  const fromAdmin = searchParams?.get('from') === 'admin';
   const backToLoginHref = fromAdmin
     ? `${process.env.NEXT_PUBLIC_ADMIN_APP_URL || 'http://localhost:3001'}/login`
     : '/login';
@@ -199,3 +199,4 @@ function ResetPasswordPageContent() {
     </div>
   );
 }
+

@@ -138,7 +138,7 @@ export default function DropInUploadPage() {
       <div>
         <h1 className="text-3xl font-bold text-foreground">Upload Drop-In Photo</h1>
         <p className="mt-2 text-secondary">
-          Share a photo of someone you saw. If they're on FaceFindr, we'll notify them!
+          Share a photo of someone you saw. If they're on Ferchr, we'll notify them!
         </p>
       </div>
 

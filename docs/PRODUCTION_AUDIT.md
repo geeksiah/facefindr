@@ -1,4 +1,4 @@
-# FaceFindr Production Readiness Audit
+# Ferchr Production Readiness Audit
 
 **Date:** ${new Date().toISOString().split('T')[0]}  
 **Scope:** Complete system audit across web (photographer, admin, attendee) and mobile (photographer, attendee) platforms
@@ -38,7 +38,7 @@
 #### Issue 1.1: Status Validation Too Strict
 **Location:** `apps/web/src/app/api/events/public/[slug]/route.ts:42`  
 **Problem:** Events with `is_public = true` but `status = 'draft'` return 404 instead of helpful error  
-**Impact:** High - Photographers can't preview their public events before publishing  
+**Impact:** High - Creators can't preview their public events before publishing  
 **Fix Required:** Return 403 with clear message for draft events
 
 #### Issue 1.2: Missing Slug Generation
@@ -115,7 +115,7 @@
 
 #### Issue 3.1: Admin Pricing Page
 **Location:** `apps/admin/src/app/(dashboard)/pricing/page.tsx:341`  
-**Problem:** `📷 Photographer` and `🎁 Drop-In` emojis in plan cards  
+**Problem:** `📷 Creator` and `🎁 Drop-In` emojis in plan cards  
 **Fix:** ✅ REPLACED with `Camera` and `Gift` icons from lucide-react
 
 #### Issue 3.2: OG Image Route
@@ -170,7 +170,7 @@
 
 ## 5. Web App Audit
 
-### 5.1 Photographer Dashboard
+### 5.1 Creator Dashboard
 
 #### Events Management
 - ✅ Create/Edit/Delete events
@@ -214,7 +214,7 @@
 - ❌ **CRITICAL:** Cannot set event limits, photo limits per plan
 - ❌ **CRITICAL:** Cannot set drop-in plan features
 
-#### Photographers
+#### Creators
 - ✅ List photographers
 - ✅ View photographer details
 - ✅ Filter by plan
@@ -246,7 +246,7 @@
 - ✅ View followers list
 - ✅ View following list
 - ✅ Photo reactions (love, fire, amazing, beautiful)
-- ✅ Photographer ratings
+- ✅ Creator ratings
 - ✅ Tip photographer after download
 
 ### 5.4 Public Event Pages
@@ -272,7 +272,7 @@
 
 ## 6. Mobile App Audit
 
-### 6.1 Photographer Mobile App
+### 6.1 Creator Mobile App
 
 #### Navigation
 - ✅ Bottom tab navigation
@@ -414,7 +414,7 @@
 1. ⚠️ **Event Creation → Publish** - Slug should be generated on creation, not publish
 2. ⚠️ **Plan Creation → Feature Assignment** - Two-step process, should be integrated
 3. ⚠️ **Photo Upload → Processing** - Need to verify face indexing happens correctly
-4. ⚠️ **Payment → Payout** - Photographers cannot request payouts on mobile
+4. ⚠️ **Payment → Payout** - Creators cannot request payouts on mobile
 
 ---
 

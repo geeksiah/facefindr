@@ -69,14 +69,22 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
     async function loadPhotoUrls() {
       try {
         const supabase = createClient();
-        const urls: Record<string, string> = {};
+        const existingUrls: Record<string, string> = {};
+        const missingPhotos = photos.filter((photo) => !photoUrls[photo.id]);
+
+        if (missingPhotos.length === 0) {
+          setLoading(false);
+          return;
+        }
+
+        setLoading(true);
 
         // Process photos in batches to avoid overwhelming the API
         const batchSize = 10;
-        for (let i = 0; i < photos.length; i += batchSize) {
+        for (let i = 0; i < missingPhotos.length; i += batchSize) {
           if (!isMounted) break;
           
-          const batch = photos.slice(i, i + batchSize);
+          const batch = missingPhotos.slice(i, i + batchSize);
           await Promise.all(
             batch.map(async (photo) => {
               try {
@@ -101,7 +109,7 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
                 }
                 
                 if (data?.signedUrl && isMounted) {
-                  urls[photo.id] = data.signedUrl;
+                  existingUrls[photo.id] = data.signedUrl;
                 }
               } catch (error) {
                 // Silently ignore individual photo errors
@@ -114,7 +122,7 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
           );
 
           if (isMounted) {
-            setPhotoUrls((prev) => ({ ...prev, ...urls }));
+            setPhotoUrls((prev) => ({ ...prev, ...existingUrls }));
             if (i === 0) {
               setLoading(false);
             }
@@ -122,7 +130,7 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
         }
 
         if (isMounted) {
-          setPhotoUrls(urls);
+          setPhotoUrls((prev) => ({ ...prev, ...existingUrls }));
           setLoading(false);
         }
       } catch (error) {
@@ -150,17 +158,7 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
       isMounted = false;
       abortController.abort();
     };
-  }, [photos]);
-
-  // Subscribe to real-time updates for media in this event
-  useRealtimeSubscription({
-    table: 'media',
-    filter: `event_id=eq.${eventId}`,
-    onChange: () => {
-      // Reload photos when changes occur
-      router.refresh();
-    },
-  });
+  }, [photos, photoUrls]);
 
   const toggleSelect = (photoId: string) => {
     setSelectedPhotos((prev) => {

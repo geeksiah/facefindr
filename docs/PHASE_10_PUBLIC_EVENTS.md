@@ -72,7 +72,7 @@ Three widget types:
 **Embed Code Example:**
 ```html
 <iframe 
-  src="https://facefindr.com/embed/my-event?type=gallery&theme=auto" 
+  src="https://ferchr.com/embed/my-event?type=gallery&theme=auto" 
   width="100%" 
   height="500" 
   frameborder="0"
@@ -95,7 +95,7 @@ Three widget types:
 
 ### 6. Sharing Settings
 
-**Photographer Controls:**
+**Creator Controls:**
 - Toggle public listing
 - Enable/disable anonymous scanning
 - Require access code
@@ -142,7 +142,7 @@ short_link VARCHAR(50)
 | GET | `/s/[code]` | Short link redirect |
 | GET | `/embed/[slug]` | Embeddable widget |
 
-### Photographer (Auth Required)
+### Creator (Auth Required)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -165,7 +165,7 @@ Full-featured sharing modal for photographers:
 ### Public Event Page
 - Hero with cover image
 - Event info card
-- Photographer profile
+- Creator profile
 - Photo preview grid
 - Face scan CTA
 - Social share menu
@@ -208,7 +208,7 @@ Full-featured sharing modal for photographers:
 
 ## Usage Flow
 
-### Photographer Flow
+### Creator Flow
 1. Create/activate event
 2. Open Share panel
 3. Copy link or download QR

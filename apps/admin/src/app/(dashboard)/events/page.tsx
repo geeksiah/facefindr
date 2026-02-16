@@ -304,7 +304,7 @@ export default async function EventsPage({
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
                     <th className="text-left px-6 py-3 text-sm font-medium text-muted-foreground">Event</th>
-                    <th className="text-left px-6 py-3 text-sm font-medium text-muted-foreground">Photographer</th>
+                    <th className="text-left px-6 py-3 text-sm font-medium text-muted-foreground">Creator</th>
                     <th className="text-left px-6 py-3 text-sm font-medium text-muted-foreground">Photos</th>
                     <th className="text-left px-6 py-3 text-sm font-medium text-muted-foreground">Revenue</th>
                     <th className="text-left px-6 py-3 text-sm font-medium text-muted-foreground">Status</th>

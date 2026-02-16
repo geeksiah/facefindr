@@ -3,10 +3,11 @@ import {
   Plus,
   Search,
   Filter,
-  Image,
+  Image as ImageIcon,
   Eye,
   Pencil,
 } from 'lucide-react';
+import Image from 'next/image';
 import Link from 'next/link';
 
 import { DeleteEventButton } from '@/components/events/delete-event-button';
@@ -14,7 +15,6 @@ import { EventsListRealtime } from '@/components/events/events-list-realtime';
 import { Button } from '@/components/ui/button';
 import { getCurrencySymbol } from '@/lib/currency-utils';
 import { formatEventDateDisplay } from '@/lib/events/time';
-import { getCoverImageUrl } from '@/lib/storage-urls';
 import { createClient } from '@/lib/supabase/server';
 
 // ============================================
@@ -53,6 +53,19 @@ export default async function EventsPage() {
     return null;
   }
 
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const buildCoverImageUrl = (coverImagePath: string | null | undefined) => {
+    if (!coverImagePath) return null;
+    if (coverImagePath.startsWith('http://') || coverImagePath.startsWith('https://')) {
+      return coverImagePath;
+    }
+    if (!supabaseUrl) {
+      return null;
+    }
+    const cleanPath = coverImagePath.startsWith('/') ? coverImagePath.slice(1) : coverImagePath;
+    return `${supabaseUrl}/storage/v1/object/public/covers/${cleanPath}`;
+  };
+
   // Fetch events with media count
   const { data: events } = await supabase
     .from('events')
@@ -77,7 +90,7 @@ export default async function EventsPage() {
       eventTimezone: event.event_timezone,
       status: event.status,
       isPublic: event.is_public,
-      coverImageUrl: getCoverImageUrl(event.cover_image_url || event.cover_image_path),
+      coverImageUrl: buildCoverImageUrl(event.cover_image_url || event.cover_image_path),
       photoCount: event.media?.[0]?.count || 0,
       pricing: event.event_pricing?.[0],
       createdAt: event.created_at,
@@ -151,9 +164,11 @@ export default async function EventsPage() {
               {/* Cover Image */}
               <div className="relative aspect-[4/3] bg-gradient-to-br from-accent/10 to-accent/20 overflow-hidden">
                 {event.coverImageUrl ? (
-                  <img
+                  <Image
                     src={event.coverImageUrl}
                     alt={event.name}
+                    fill
+                    sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
                     className="w-full h-full object-cover"
                   />
                 ) : (
@@ -179,7 +194,7 @@ export default async function EventsPage() {
                 {/* Meta */}
                 <div className="mt-2 flex flex-col gap-1.5 text-xs text-muted-foreground">
                   <div className="flex items-center gap-1">
-                    <Image className="h-3 w-3" />
+                    <ImageIcon className="h-3 w-3" />
                     <span>{event.photoCount} photos</span>
                   </div>
                   {event.eventDate && (

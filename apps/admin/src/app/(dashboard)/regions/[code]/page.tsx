@@ -95,7 +95,7 @@ const PUSH_PROVIDER_OPTIONS = [
 export default function RegionConfigPage() {
   const router = useRouter();
   const params = useParams();
-  const code = params.code as string;
+  const code = params?.code as string;
 
   const [config, setConfig] = useState<RegionConfig | null>(null);
   const [smsPresets, setSmsPresets] = useState<SmsPreset[]>([]);

@@ -7,7 +7,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const eventName = searchParams.get('name') || 'Event';
   const eventDate = searchParams.get('date') || '';
-  const photographerName = searchParams.get('photographer') || 'Photographer';
+  const photographerName = searchParams.get('photographer') || 'Creator';
   const photoCount = searchParams.get('photos') || '0';
   const coverUrl = searchParams.get('cover') || null;
 
@@ -172,7 +172,7 @@ export async function GET(request: NextRequest) {
             <span style={{ fontSize: '28px', color: 'white', fontWeight: 'bold' }}>F</span>
           </div>
           <span style={{ fontSize: '28px', color: 'white', fontWeight: 'bold' }}>
-            FaceFindr
+            Ferchr
           </span>
         </div>
       </div>

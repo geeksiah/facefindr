@@ -32,9 +32,11 @@ import { Button, Card } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { isCreatorUserType } from '@/lib/user-type';
+import { getApiBaseUrl } from '@/lib/api-base';
 import { alertMissingPublicAppUrl, buildPublicUrl } from '@/lib/runtime-config';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
+const API_URL = getApiBaseUrl();
 
 interface UserProfile {
   id: string;
@@ -129,7 +131,7 @@ export default function UserProfileScreen() {
 
     try {
       await Share.share({
-        message: `Check out ${user?.displayName}'s profile on FaceFindr!\n${profileUrl}`,
+        message: `Check out ${user?.displayName}'s profile on Ferchr!\n${profileUrl}`,
         url: profileUrl,
       });
     } catch (error) {
@@ -152,11 +154,11 @@ export default function UserProfileScreen() {
   };
 
   const handleAddConnection = async () => {
-    if (!user || !currentUser || userType !== 'photographer') return;
+    if (!user || !currentUser || !isCreatorUserType(userType)) return;
 
     setIsAddingConnection(true);
     try {
-      const response = await fetch(`${API_URL}/api/photographers/connections`, {
+      const response = await fetch(`${API_URL}/api/creators/connections`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ attendeeFaceTag: user.faceTag }),
@@ -287,8 +289,8 @@ export default function UserProfileScreen() {
           </View>
         </View>
 
-        {/* Actions for Photographers */}
-        {userType === 'photographer' && currentUser && (
+        {/* Actions for Creators */}
+        {isCreatorUserType(userType) && currentUser && (
           <Card style={styles.actionCard}>
             <View style={styles.actionContent}>
               <UserPlus size={24} color={colors.accent} />
@@ -313,7 +315,7 @@ export default function UserProfileScreen() {
         <Card style={styles.infoCard}>
           <Text style={styles.infoTitle}>About FaceTag</Text>
           <Text style={styles.infoText}>
-            This is a FaceFindr user profile. FaceTags are unique identifiers that 
+            This is a Ferchr user profile. FaceTags are unique identifiers that 
             help photographers tag attendees in photos automatically using facial recognition.
           </Text>
         </Card>

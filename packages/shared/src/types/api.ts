@@ -1,5 +1,5 @@
 /**
- * FaceFindr API Types
+ * Ferchr API Types
  * Request/Response types for all API endpoints
  */
 
@@ -7,7 +7,7 @@ import type {
   Event,
   EventPricing,
   Media,
-  Photographer,
+  Creator,
   Subscription,
   SubscriptionPlan,
   Wallet,
@@ -36,7 +36,7 @@ export interface LoginRequest {
 
 export interface LoginResponse {
   session_token: string;
-  user: Pick<Photographer, 'id' | 'email' | 'display_name' | 'business_name'>;
+  user: Pick<Creator, 'id' | 'email' | 'display_name' | 'business_name'>;
 }
 
 export interface AttendeeRegisterRequest {
@@ -281,7 +281,7 @@ export interface DailyStat {
   revenue: number;
 }
 
-export interface PhotographerDashboardResponse {
+export interface CreatorDashboardResponse {
   total_events: number;
   active_events: number;
   total_photos: number;
@@ -353,7 +353,7 @@ export interface PlanDefinition {
   code: string;
   name: string;
   description: string;
-  planType: 'photographer' | 'drop_in';
+  planType: 'creator' | 'photographer' | 'drop_in' | 'payg';
   isActive: boolean;
   prices: Record<string, number>;
   features: PlanFeature[];

@@ -27,9 +27,10 @@ import {
 } from 'lucide-react-native';
 
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { getApiBaseUrl } from '@/lib/api-base';
 import { useAuthStore } from '@/stores/auth-store';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
+const API_URL = getApiBaseUrl();
 
 interface FollowerItem {
   id: string;
@@ -92,7 +93,7 @@ export default function FollowersScreen() {
     if (navigation.canGoBack()) {
       router.back();
     } else {
-      router.replace('/(photographer)/profile');
+      router.replace('/(creator)/profile' as any);
     }
   };
 
@@ -299,3 +300,5 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 });
+
+

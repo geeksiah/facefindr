@@ -89,11 +89,11 @@ export async function updateSession(request: NextRequest) {
   if (user) {
     const userType = user.user_metadata?.user_type;
     
-    // Photographer-only routes
+    // Creator-only routes
     const photographerRoutes = ['/dashboard', '/events', '/settings/payout'];
-    const isPhotographerRoute = photographerRoutes.some((route) => pathname.startsWith(route));
+    const isCreatorRoute = photographerRoutes.some((route) => pathname.startsWith(route));
     
-    if (isPhotographerRoute && !isCreatorUser(userType)) {
+    if (isCreatorRoute && !isCreatorUser(userType)) {
       return NextResponse.redirect(new URL('/gallery', request.url));
     }
     

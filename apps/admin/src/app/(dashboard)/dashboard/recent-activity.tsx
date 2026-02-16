@@ -98,7 +98,7 @@ export function RecentActivity({ activity }: { activity: Activity }) {
           <div className="px-6 py-4 border-b border-border flex items-center justify-between">
             <div className="flex items-center gap-2">
               <UserPlus className="h-5 w-5 text-muted-foreground" />
-              <h2 className="font-semibold text-foreground">New Photographers</h2>
+              <h2 className="font-semibold text-foreground">New Creators</h2>
             </div>
             <Link 
               href="/photographers"

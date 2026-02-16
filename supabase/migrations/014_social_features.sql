@@ -279,13 +279,13 @@ CREATE POLICY "Anyone can record profile views"
 -- =============================================
 -- DEEP LINK URL STRUCTURE
 -- =============================================
--- Web: https://facefindr.com/p/{slug} (photographers)
--- Web: https://facefindr.com/u/{slug} (attendees/users)
--- App: facefindr://profile/{type}/{id}
--- App: facefindr://photographer/{id}
--- App: facefindr://user/{id}
+-- Web: https://ferchr.com/p/{slug} (photographers)
+-- Web: https://ferchr.com/u/{slug} (attendees/users)
+-- App: ferchr://profile/{type}/{id}
+-- App: ferchr://photographer/{id}
+-- App: ferchr://user/{id}
 --
--- QR Code contains: https://facefindr.com/p/{slug}?app=1
+-- QR Code contains: https://ferchr.com/p/{slug}?app=1
 -- When app=1, web page attempts deep link to app first
 
 -- =============================================

@@ -1,5 +1,5 @@
 /**
- * FaceFindr Utilities
+ * Ferchr Utilities
  * Shared helper functions
  */
 
@@ -300,4 +300,28 @@ export function calculateFees(
   const netAmount = grossAmount - platformFee - stripeFee;
 
   return { platformFee, stripeFee, netAmount };
+}
+
+// ============================================
+// ROLE UTILITIES
+// ============================================
+
+export type CanonicalUserType = 'creator' | 'attendee';
+export type LegacyUserType = 'photographer';
+export type AnyUserType = CanonicalUserType | LegacyUserType;
+
+export function normalizeUserType(userType: unknown): CanonicalUserType | null {
+  if (userType === 'attendee') return 'attendee';
+  if (userType === 'creator' || userType === 'photographer') return 'creator';
+  return null;
+}
+
+export function isCreatorUserType(userType: unknown): boolean {
+  return normalizeUserType(userType) === 'creator';
+}
+
+export function toLegacyUserType(userType: unknown): 'photographer' | 'attendee' | null {
+  const canonical = normalizeUserType(userType);
+  if (!canonical) return null;
+  return canonical === 'creator' ? 'photographer' : 'attendee';
 }

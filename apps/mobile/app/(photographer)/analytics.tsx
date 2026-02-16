@@ -456,7 +456,7 @@ export default function AnalyticsScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Top Performing</Text>
-            <TouchableOpacity onPress={() => router.push('/(photographer)/events')}>
+            <TouchableOpacity onPress={() => router.push('/(creator)/events' as any)}>
               <Text style={styles.seeAllText}>See all</Text>
             </TouchableOpacity>
           </View>
@@ -798,3 +798,5 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 });
+
+

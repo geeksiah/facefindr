@@ -16,12 +16,13 @@ interface SearchFilterProps {
 export function SearchFilter({ searchParams, total }: SearchFilterProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const safePathname = pathname ?? '';
   const params = useSearchParams();
   
   const [search, setSearch] = useState(searchParams.search || '');
 
   const updateParams = useCallback((key: string, value: string | null) => {
-    const newParams = new URLSearchParams(params.toString());
+    const newParams = new URLSearchParams((params?.toString() ?? ''));
     if (value) {
       newParams.set(key, value);
     } else {
@@ -38,7 +39,7 @@ export function SearchFilter({ searchParams, total }: SearchFilterProps) {
 
   const clearFilters = () => {
     setSearch('');
-    router.push(pathname);
+    router.push(safePathname);
   };
 
   const hasFilters = searchParams.search || searchParams.status || searchParams.plan;
@@ -104,3 +105,5 @@ export function SearchFilter({ searchParams, total }: SearchFilterProps) {
     </div>
   );
 }
+
+

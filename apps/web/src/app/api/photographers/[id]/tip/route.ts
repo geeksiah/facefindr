@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 /**
- * Tip Photographer API
+ * Tip Creator API
  * 
  * Handle tips to photographers (after photo purchase/download)
  * Uses dynamic payment gateway selection based on user preference and country
@@ -78,7 +78,7 @@ export async function POST(
       .single();
 
     if (!photographer) {
-      return NextResponse.json({ error: 'Photographer not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
     }
 
     // Get event info if provided (for currency and country detection)
@@ -165,7 +165,7 @@ export async function POST(
 
       return NextResponse.json(
         { 
-          error: 'Photographer has not set up payments for any available method',
+          error: 'Creator has not set up payments for any available method',
           availableGateways: gatewaySelection.availableGateways,
         },
         { status: 400 }

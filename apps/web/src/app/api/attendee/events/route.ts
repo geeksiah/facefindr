@@ -97,17 +97,17 @@ export async function GET() {
     );
 
     const eventIds = rawEvents.map((event: any) => event.id);
-    const { data: mediaRows } = await serviceClient
-      .from('media')
-      .select('event_id')
-      .in('event_id', eventIds.length ? eventIds : ['00000000-0000-0000-0000-000000000000'])
-      .is('deleted_at', null);
-
-    const totalCountMap = new Map<string, number>();
-    (mediaRows || []).forEach((row: any) => {
-      if (!row?.event_id) return;
-      totalCountMap.set(row.event_id, (totalCountMap.get(row.event_id) || 0) + 1);
-    });
+    const totalCountEntries = await Promise.all(
+      eventIds.map(async (eventId) => {
+        const { count } = await serviceClient
+          .from('media')
+          .select('id', { count: 'exact', head: true })
+          .eq('event_id', eventId)
+          .is('deleted_at', null);
+        return [eventId, count || 0] as const;
+      })
+    );
+    const totalCountMap = new Map<string, number>(totalCountEntries);
 
     // Format events
     const events = rawEvents.map((event: any) => {
@@ -120,7 +120,8 @@ export async function GET() {
       const coverImage = coverPath?.startsWith('http')
         ? coverPath
         : coverPath
-        ? serviceClient.storage.from('covers').getPublicUrl(coverPath).data.publicUrl
+        ? serviceClient.storage.from('covers').getPublicUrl(coverPath).data.publicUrl ||
+          serviceClient.storage.from('events').getPublicUrl(coverPath).data.publicUrl
         : null;
 
       return {

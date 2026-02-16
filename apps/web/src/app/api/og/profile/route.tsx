@@ -6,7 +6,7 @@ export const runtime = 'edge';
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const faceTag = searchParams.get('faceTag') || '@user';
-  const name = searchParams.get('name') || 'FaceFindr User';
+  const name = searchParams.get('name') || 'Ferchr User';
   const photoUrl = searchParams.get('photo') || null;
 
   return new ImageResponse(
@@ -108,7 +108,7 @@ export async function GET(request: NextRequest) {
               color: '#94a3b8',
             }}
           >
-            Connect with me on FaceFindr
+            Connect with me on Ferchr
           </div>
         </div>
 
@@ -135,7 +135,7 @@ export async function GET(request: NextRequest) {
             <span style={{ fontSize: '24px', color: 'white', fontWeight: 'bold' }}>F</span>
           </div>
           <span style={{ fontSize: '24px', color: 'white', fontWeight: 'bold' }}>
-            FaceFindr
+            Ferchr
           </span>
         </div>
       </div>

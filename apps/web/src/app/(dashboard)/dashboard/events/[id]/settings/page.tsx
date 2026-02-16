@@ -75,7 +75,7 @@ export default function EventSettingsPage() {
   const params = useParams();
   const router = useRouter();
   const toast = useToast();
-  const eventId = params.id as string;
+  const eventId = params?.id as string;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1007,3 +1007,4 @@ export default function EventSettingsPage() {
     </div>
   );
 }
+

@@ -6,10 +6,11 @@
 
 import { create } from 'zustand';
 import { supabase } from '@/lib/supabase';
+import { getApiBaseUrl } from '@/lib/api-base';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { useAuthStore } from '@/stores/auth-store';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
+const API_URL = getApiBaseUrl();
 
 export interface Notification {
   id: string;

@@ -54,7 +54,7 @@ const EmailIcon = () => (
   </svg>
 );
 
-interface Photographer {
+interface Creator {
   id: string;
   display_name: string;
   profile_photo_url?: string;
@@ -76,9 +76,9 @@ interface Event {
   allow_anonymous_scan: boolean;
   require_access_code: boolean;
   // Primary photographer (owner)
-  photographer: Photographer;
+  photographer: Creator;
   // All photographers (including collaborators)
-  all_photographers?: Photographer[];
+  all_photographers?: Creator[];
   // Employer/client info (if applicable)
   employer_id?: string;
   employer_name?: string;
@@ -94,8 +94,8 @@ interface Photo {
 export default function PublicEventPage() {
   const params = useParams();
   const searchParams = useSearchParams();
-  const slug = params.slug as string;
-  const codeFromUrl = searchParams.get('code');
+  const slug = params?.slug as string;
+  const codeFromUrl = searchParams?.get('code');
 
   const [event, setEvent] = useState<Event | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -169,7 +169,7 @@ export default function PublicEventPage() {
 
   async function handleShare(platform: string) {
     const eventUrl = window.location.href;
-    const text = `Find your photos from "${event?.name}" on FaceFindr`;
+    const text = `Find your photos from "${event?.name}" on Ferchr`;
 
     switch (platform) {
       case 'twitter':
@@ -302,7 +302,7 @@ export default function PublicEventPage() {
           </form>
 
           <p className="text-center text-sm text-secondary mt-6">
-            Don't have the code? Contact the photographer.
+            Don&apos;t have the code? Contact the creator.
           </p>
         </div>
       </div>
@@ -417,13 +417,13 @@ export default function PublicEventPage() {
               </div>
             </div>
 
-            {/* Photographers */}
+            {/* Creators */}
             {(event?.photographer || event?.all_photographers) && (
               <div className="mb-6">
                 {/* Show all photographers if multiple */}
                 {event.all_photographers && event.all_photographers.length > 1 ? (
                   <div className="space-y-3">
-                    <p className="text-sm font-medium text-secondary">Photographers</p>
+                    <p className="text-sm font-medium text-secondary">Creators</p>
                     <div className="flex flex-wrap gap-3">
                       {event.all_photographers.map((photographer) => (
                         <div key={photographer.id} className="flex items-center gap-2 p-2 bg-muted rounded-lg">
@@ -465,7 +465,7 @@ export default function PublicEventPage() {
                     </div>
                     <div className="flex-1">
                       <p className="font-medium text-foreground">{event.photographer?.display_name}</p>
-                      <p className="text-sm text-secondary">Photographer</p>
+                      <p className="text-sm text-secondary">Creator</p>
                     </div>
                   </div>
                 )}
@@ -517,7 +517,7 @@ export default function PublicEventPage() {
             <>
               <h2 className="text-xl font-semibold text-foreground mb-2">Photos Coming Soon</h2>
               <p className="text-secondary mb-6">
-                The photographer is still uploading photos for this event. Check back soon!
+                The creator is still uploading photos for this event. Check back soon!
               </p>
               <Button variant="outline" onClick={() => loadEvent()}>
                 Refresh

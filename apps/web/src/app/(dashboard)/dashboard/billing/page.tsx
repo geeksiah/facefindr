@@ -103,7 +103,7 @@ export default function BillingPage() {
       }
 
       // Load current subscription
-      const subRes = await fetch('/api/photographer/subscription');
+      const subRes = await fetch('/api/creator/subscription');
       if (subRes.ok) {
         const data = await subRes.json();
         setSubscription(data.subscription);
@@ -111,7 +111,7 @@ export default function BillingPage() {
       }
 
       // Load real-time usage data
-      const usageRes = await fetch('/api/photographer/usage');
+      const usageRes = await fetch('/api/creator/usage');
       if (usageRes.ok) {
         const data = await usageRes.json();
         setUsageData(data);

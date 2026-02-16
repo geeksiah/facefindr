@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 /**
- * Photographer Notification Settings API
+ * Creator Notification Settings API
  * 
  * Get and update notification preferences.
  */

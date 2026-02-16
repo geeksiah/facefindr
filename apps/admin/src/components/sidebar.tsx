@@ -52,7 +52,7 @@ const navigation: NavGroup[] = [
   {
     label: 'Users',
     items: [
-      { label: 'Photographers', href: '/photographers', icon: Users },
+      { label: 'Creators', href: '/photographers', icon: Users },
       { label: 'Attendees', href: '/attendees', icon: UserCircle },
     ],
   },
@@ -98,6 +98,7 @@ interface SidebarProps {
 
 export function Sidebar({ admin }: SidebarProps) {
   const pathname = usePathname();
+  const safePathname = pathname ?? '';
   const router = useRouter();
   const { theme, setTheme } = useTheme();
 
@@ -146,7 +147,7 @@ export function Sidebar({ admin }: SidebarProps) {
             </p>
             <div className="space-y-1">
               {group.items.map((item) => {
-                const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
+                const isActive = safePathname === item.href || safePathname.startsWith(item.href + '/');
                 return (
                   <Link
                     key={item.href}
@@ -214,3 +215,4 @@ export function Sidebar({ admin }: SidebarProps) {
     </aside>
   );
 }
+

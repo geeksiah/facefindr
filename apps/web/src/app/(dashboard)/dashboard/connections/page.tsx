@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Connections Page (Photographer Dashboard)
+ * Connections Page (Creator Dashboard)
  * 
  * Manage attendee connections for easy tagging.
  */
@@ -50,7 +50,7 @@ export default function ConnectionsPage() {
 
   const loadConnections = useCallback(async () => {
     try {
-      const response = await fetch('/api/photographers/connections');
+      const response = await fetch('/api/creators/connections');
       if (response.ok) {
         const data = await response.json();
         setConnections(data.connections || []);
@@ -77,7 +77,7 @@ export default function ConnectionsPage() {
 
     setIsAdding(true);
     try {
-      const response = await fetch('/api/photographers/connections', {
+      const response = await fetch('/api/creators/connections', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ attendeeFaceTag: newFaceTag.trim() }),
@@ -109,7 +109,7 @@ export default function ConnectionsPage() {
     if (!confirm(`Remove ${name} from your connections?`)) return;
 
     try {
-      const response = await fetch(`/api/photographers/connections?connectionId=${connectionId}`, {
+      const response = await fetch(`/api/creators/connections?connectionId=${connectionId}`, {
         method: 'DELETE',
       });
 

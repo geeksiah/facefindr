@@ -36,7 +36,7 @@ interface DropInMatch {
   eventName: string;
   photographerName: string;
   confidence: number;
-  source: 'facefindr' | 'external';
+  source: 'ferchr' | 'external';
 }
 
 export default function DropInPage() {
@@ -195,7 +195,7 @@ export default function DropInPage() {
             </div>
           </div>
           <p className="text-sm text-secondary mb-4">
-            Search for photos from your contacts and events you've attended on FaceFindr.
+            Search for photos from your contacts and events you've attended on Ferchr.
           </p>
           <Button 
             className="w-full" 
@@ -358,7 +358,7 @@ export default function DropInPage() {
                       ? 'bg-accent/90 text-white' 
                       : 'bg-success/90 text-white'
                   }`}>
-                    {match.source === 'external' ? 'External' : 'FaceFindr'}
+                    {match.source === 'external' ? 'External' : 'Ferchr'}
                   </span>
                 </div>
 

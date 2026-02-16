@@ -123,7 +123,7 @@ INSERT INTO plan_features (code, name, description, feature_type, default_value,
 -- Feature Flags
 ('face_recognition_enabled', 'Face Recognition', 'Enable AI face recognition for events', 'boolean', 'false'::jsonb, ARRAY['photographer']::plan_type[], 'face_recognition', 40),
 ('priority_processing', 'Priority Processing', 'Get faster photo processing and indexing', 'boolean', 'false'::jsonb, ARRAY['photographer']::plan_type[], 'performance', 50),
-('api_access', 'API Access', 'Access to FaceFindr API for integrations', 'boolean', 'false'::jsonb, ARRAY['photographer']::plan_type[], 'integrations', 60),
+('api_access', 'API Access', 'Access to Ferchr API for integrations', 'boolean', 'false'::jsonb, ARRAY['photographer']::plan_type[], 'integrations', 60),
 ('custom_watermark', 'Custom Watermark', 'Upload and use custom watermarks on photos', 'boolean', 'false'::jsonb, ARRAY['photographer']::plan_type[], 'branding', 70),
 ('live_event_mode', 'Live Event Mode', 'Enable real-time notifications during events', 'boolean', 'false'::jsonb, ARRAY['photographer']::plan_type[], 'events', 80),
 

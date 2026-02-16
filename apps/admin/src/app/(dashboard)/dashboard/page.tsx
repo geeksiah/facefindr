@@ -29,7 +29,7 @@ async function getStats() {
     monthlyRevenueResult,
     lastMonthRevenueResult,
     photographersResult,
-    newPhotographersResult,
+    newCreatorsResult,
     attendeesResult,
     newAttendeesResult,
     pendingPayoutsResult,
@@ -114,8 +114,8 @@ async function getStats() {
     totalRevenue,
     monthlyRevenue,
     revenueChange: parseFloat(revenueChange),
-    totalPhotographers: photographersResult.count || 0,
-    newPhotographers: newPhotographersResult.count || 0,
+    totalCreators: photographersResult.count || 0,
+    newCreators: newCreatorsResult.count || 0,
     totalAttendees: attendeesResult.count || 0,
     newAttendees: newAttendeesResult.count || 0,
     pendingPayouts: pendingPayoutsTotal,
@@ -209,8 +209,8 @@ export default async function DashboardPage() {
         />
         <StatCard
           title="Active Users"
-          value={formatNumber(stats.totalPhotographers + stats.totalAttendees)}
-          subtitle={`${stats.newPhotographers + stats.newAttendees} new this month`}
+          value={formatNumber(stats.totalCreators + stats.totalAttendees)}
+          subtitle={`${stats.newCreators + stats.newAttendees} new this month`}
           icon={Users}
           iconColor="text-blue-500"
           iconBg="bg-blue-500/10"

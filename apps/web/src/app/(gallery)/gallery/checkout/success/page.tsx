@@ -27,10 +27,10 @@ export default function CheckoutSuccessPage() {
     const verifyPurchase = async () => {
       try {
         // Get provider and session info from URL
-        const provider = searchParams.get('provider') || 'stripe';
-        const sessionId = searchParams.get('session_id');
-        const txRef = searchParams.get('tx_ref');
-        const orderId = searchParams.get('order_id');
+        const provider = searchParams?.get('provider') || 'stripe';
+        const sessionId = searchParams?.get('session_id');
+        const txRef = searchParams?.get('tx_ref');
+        const orderId = searchParams?.get('order_id');
 
         let verifyUrl = '/api/checkout/verify?';
         if (sessionId) verifyUrl += `session_id=${sessionId}`;
@@ -141,3 +141,4 @@ export default function CheckoutSuccessPage() {
     </div>
   );
 }
+

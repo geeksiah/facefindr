@@ -14,7 +14,8 @@ import {
   trackClick,
   AdPlacementCode,
 } from '@/lib/notifications';
-import { getPhotographerPlan } from '@/lib/subscription';
+import { getCreatorPlan } from '@/lib/subscription';
+import { normalizeUserType } from '@/lib/user-type';
 import { createClient } from '@/lib/supabase/server';
 
 // GET - Get ad for placement
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Get user info for targeting
-    let userType: 'photographer' | 'attendee' | undefined;
+    let userType: 'creator' | 'attendee' | undefined;
     let userPlan: string | undefined;
 
     const supabase = await createClient();
@@ -40,10 +41,10 @@ export async function GET(request: NextRequest) {
 
     if (user) {
       const userData = user.user_metadata;
-      userType = userData?.user_type;
+      userType = normalizeUserType(userData?.user_type) || undefined;
       
-      if (userType === 'photographer') {
-        userPlan = await getPhotographerPlan(user.id);
+      if (userType === 'creator') {
+        userPlan = await getCreatorPlan(user.id);
       }
     }
 

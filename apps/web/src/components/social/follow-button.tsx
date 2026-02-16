@@ -76,7 +76,7 @@ export function FollowButton({
 
   const loadFollowerCount = async () => {
     try {
-      const response = await fetch(`/api/profiles/photographer/${photographerId}/followers`);
+      const response = await fetch(`/api/profiles/creator/${photographerId}/followers`);
       if (response.ok) {
         const data = await response.json();
         setFollowerCount(data.count || 0);

@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
-interface TipPhotographerProps {
+interface TipCreatorProps {
   photographerId: string;
   photographerName: string;
   eventId?: string;
@@ -19,7 +19,7 @@ interface TipPhotographerProps {
 
 const PRESET_AMOUNTS = [200, 500, 1000]; // $2, $5, $10 in cents
 
-export function TipPhotographer({
+export function TipCreator({
   photographerId,
   photographerName,
   eventId,
@@ -27,7 +27,7 @@ export function TipPhotographer({
   onSuccess,
   onCancel,
   className,
-}: TipPhotographerProps) {
+}: TipCreatorProps) {
   const [amount, setAmount] = useState<number | null>(null);
   const [customAmount, setCustomAmount] = useState('');
   const [message, setMessage] = useState('');
@@ -61,7 +61,7 @@ export function TipPhotographer({
 
     try {
       // Create tip checkout session
-      const response = await fetch(`/api/photographers/${photographerId}/tip`, {
+      const response = await fetch(`/api/creators/${photographerId}/tip`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -54,7 +54,7 @@ Admin can toggle each channel and set per-country providers:
 | Code | Name | Channels | Description |
 |------|------|----------|-------------|
 | `photo_drop` | Photo Drop | All | New photos matching user's face |
-| `payout_success` | Payout Success | Email, SMS, Push | Photographer payout completed |
+| `payout_success` | Payout Success | Email, SMS, Push | Creator payout completed |
 | `order_shipped` | Order Shipped | All | Print order has shipped |
 | `verification_otp` | Verification OTP | Email, SMS | OTP code for verification |
 | `event_live` | Event Live | All | Event is now live |
@@ -344,7 +344,7 @@ TERMII_SENDER_ID=xxx
                 ▼
 5. Send via enabled channels
    ├── Email: "15 new photos from Wedding 2026!"
-   ├── SMS: "FaceFindr: 15 new photos match you!"
+   ├── SMS: "Ferchr: 15 new photos match you!"
    └── Push: "New Photos!" + "15 photos match..."
 ```
 

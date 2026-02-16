@@ -1,5 +1,5 @@
 /**
- * Photographer Profile Screen
+ * Creator Profile Screen
  * 
  * Profile, FaceTag, and account management.
  */
@@ -41,9 +41,10 @@ import * as Clipboard from 'expo-clipboard';
 
 import { useAuthStore } from '@/stores/auth-store';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { getApiBaseUrl } from '@/lib/api-base';
 import { alertMissingPublicAppUrl, buildPublicUrl } from '@/lib/runtime-config';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
+const API_URL = getApiBaseUrl();
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -80,7 +81,7 @@ export default function ProfileScreen() {
   };
 
   const handleShare = async () => {
-    const profileUrl = buildPublicUrl(`/p/${profile?.faceTag?.replace('@', '')}`);
+    const profileUrl = buildPublicUrl(`/c/${profile?.faceTag?.replace('@', '')}`);
     if (!profileUrl) {
       alertMissingPublicAppUrl();
       return;
@@ -88,7 +89,7 @@ export default function ProfileScreen() {
 
     try {
       await Share.share({
-        message: `Check out my photography on FaceFindr!\n${profileUrl}`,
+        message: `Check out my photography on Ferchr!\n${profileUrl}`,
         url: profileUrl,
       });
     } catch (error) {
@@ -232,7 +233,7 @@ export default function ProfileScreen() {
           
           <View style={styles.roleBadge}>
             <Camera size={12} color={colors.accent} />
-            <Text style={styles.roleBadgeText}>Photographer</Text>
+            <Text style={styles.roleBadgeText}>Creator</Text>
           </View>
         </View>
 
@@ -245,7 +246,7 @@ export default function ProfileScreen() {
             <View style={styles.faceTagHeader}>
               <View style={styles.faceTagInfo}>
                 <Text style={styles.faceTagLabel}>Your FaceTag</Text>
-                <Text style={styles.faceTag}>{profile?.faceTag || '@facefindr'}</Text>
+                <Text style={styles.faceTag}>{profile?.faceTag || '@ferchr'}</Text>
               </View>
               <View style={styles.faceTagActions}>
                 <TouchableOpacity 
@@ -342,8 +343,8 @@ export default function ProfileScreen() {
 
         {/* App Version */}
         <View style={styles.footer}>
-          <Text style={styles.version}>FaceFindr v1.0.0</Text>
-          <Text style={styles.copyright}>© {new Date().getFullYear()} The FaceFindr Team</Text>
+          <Text style={styles.version}>Ferchr v1.0.0</Text>
+          <Text style={styles.copyright}>Â© {new Date().getFullYear()} The Ferchr Team</Text>
         </View>
       </ScrollView>
     </View>

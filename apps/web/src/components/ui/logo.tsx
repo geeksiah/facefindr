@@ -53,7 +53,7 @@ export function Logo({
           {showText && (
             <Image
               src={wordmarkSrc}
-              alt="FaceFindr"
+              alt="Ferchr"
               width={dimension * 2.5}
               height={dimension * 0.6}
               className="flex-shrink-0"
@@ -67,7 +67,7 @@ export function Logo({
       {variant === 'icon' && (
         <Image
           src={iconSrc}
-          alt="FaceFindr"
+          alt="Ferchr"
           width={dimension}
           height={dimension}
           className="flex-shrink-0"
@@ -79,7 +79,7 @@ export function Logo({
       {variant === 'full' && (
         <Image
           src={logoSrc}
-          alt="FaceFindr"
+          alt="Ferchr"
           width={dimension}
           height={dimension * 0.27}
           className="flex-shrink-0"
@@ -91,7 +91,7 @@ export function Logo({
       {variant === 'wordmark' && (
         <Image
           src={wordmarkSrc}
-          alt="FaceFindr"
+          alt="Ferchr"
           width={dimension}
           height={dimension * 0.23}
           className="flex-shrink-0"
@@ -121,7 +121,7 @@ export function LogoIcon({ size = 36, className }: { size?: number; className?: 
   return (
     <Image
       src={iconSrc}
-      alt="FaceFindr"
+      alt="Ferchr"
       width={size}
       height={size}
       className={cn('flex-shrink-0', className)}

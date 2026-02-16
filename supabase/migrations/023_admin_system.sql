@@ -510,7 +510,7 @@ END $$;
 
 INSERT INTO admin_users (email, password_hash, name, role)
 VALUES (
-    'admin@facefindr.com',
+    'admin@ferchr.com',
     '$2a$10$rQEY8dHKQSYBOVe3FJqMYOZxE8xxT1nB6CYZ8kRPvQiW9BHxLCyHm',
     'System Admin',
     'super_admin'

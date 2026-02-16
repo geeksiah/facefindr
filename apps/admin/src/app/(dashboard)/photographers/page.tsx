@@ -2,7 +2,7 @@ import { Suspense } from 'react';
 
 import { supabaseAdmin } from '@/lib/supabase';
 
-import { PhotographerList } from './photographer-list';
+import { CreatorList } from './photographer-list';
 import { SearchFilter } from './search-filter';
 
 interface SearchParams {
@@ -12,7 +12,7 @@ interface SearchParams {
   page?: string;
 }
 
-async function getPhotographers(searchParams: SearchParams) {
+async function getCreators(searchParams: SearchParams) {
   const page = parseInt(searchParams.page || '1');
   const limit = 20;
   const offset = (page - 1) * limit;
@@ -71,18 +71,18 @@ async function getPhotographers(searchParams: SearchParams) {
   };
 }
 
-export default async function PhotographersPage({
+export default async function CreatorsPage({
   searchParams,
 }: {
   searchParams: SearchParams;
 }) {
-  const { photographers, total, page, limit } = await getPhotographers(searchParams);
+  const { photographers, total, page, limit } = await getCreators(searchParams);
 
   return (
     <div className="space-y-6">
       {/* Page Header */}
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Photographers</h1>
+        <h1 className="text-2xl font-bold text-foreground">Creators</h1>
         <p className="text-muted-foreground mt-1">
           Manage photographer accounts, subscriptions, and access
         </p>
@@ -94,9 +94,9 @@ export default async function PhotographersPage({
         total={total}
       />
 
-      {/* Photographer List */}
+      {/* Creator List */}
       <Suspense fallback={<ListLoading />}>
-        <PhotographerList 
+        <CreatorList 
           photographers={photographers}
           total={total}
           page={page}

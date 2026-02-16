@@ -10,7 +10,7 @@ Photo delivery system handling watermarks, purchases, downloads, and entitlement
 
 ### Watermark Settings
 
-Photographers can configure:
+Creators can configure:
 
 | Setting | Options | Default |
 |---------|---------|---------|
@@ -84,7 +84,7 @@ If you own "full", you can download web and standard too.
 
 ### Event-Specific Pricing
 
-Photographers can override default prices per event:
+Creators can override default prices per event:
 
 ```javascript
 // Event pricing table
@@ -305,7 +305,7 @@ const access = await checkEntitlement(userId, mediaId, 'full');
 
 | Table | Purpose |
 |-------|---------|
-| watermark_settings | Photographer watermark config |
+| watermark_settings | Creator watermark config |
 | digital_products | Available download products |
 | event_pricing | Per-event price overrides |
 | cart_items | Shopping cart |
@@ -346,11 +346,11 @@ const access = await checkEntitlement(userId, mediaId, 'full');
 
 ---
 
-## 9. Photographer Features
+## 9. Creator Features
 
 ### Gift Photo
 
-Photographers can gift photos to attendees:
+Creators can gift photos to attendees:
 
 ```javascript
 await giftPhoto(

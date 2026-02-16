@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     let currency = searchParams.get('currency');
-    const planType = searchParams.get('type') as 'photographer' | 'drop_in' | null;
+    const planType = searchParams.get('type') as 'creator' | 'photographer' | 'drop_in' | null;
     
     // If no currency specified, detect from user preference or location
     if (!currency) {
@@ -33,7 +33,8 @@ export async function GET(request: NextRequest) {
       currency = await getEffectiveCurrency(user?.id, detectedCountry || undefined);
     }
     
-    const plansFromConfig = await getAllPlans(planType || 'photographer');
+    const normalizedPlanType = planType === 'photographer' ? 'creator' : planType;
+    const plansFromConfig = await getAllPlans(normalizedPlanType || 'creator');
     if (!plansFromConfig || plansFromConfig.length === 0) {
       return NextResponse.json(
         {

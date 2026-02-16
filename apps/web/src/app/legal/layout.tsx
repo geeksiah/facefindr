@@ -25,7 +25,7 @@ export default function LegalLayout({
               <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider mb-4">
                 Legal Documents
               </h3>
-              <NavLink href="/legal/terms-photographers">Terms of Service (Photographers)</NavLink>
+              <NavLink href="/legal/terms-photographers">Terms of Service (Creators)</NavLink>
               <NavLink href="/legal/terms-attendees">Terms of Use (Attendees)</NavLink>
               <NavLink href="/legal/privacy">Privacy Policy</NavLink>
               <NavLink href="/legal/biometric">Biometric Data Policy</NavLink>

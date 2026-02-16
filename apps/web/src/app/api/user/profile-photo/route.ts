@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { normalizeUserType } from '@/lib/user-type';
 import { createClient } from '@/lib/supabase/server';
 
 // POST - Upload profile photo
@@ -48,8 +49,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Determine user type
-    const userType = user.user_metadata?.user_type || 'attendee';
-    const table = userType === 'photographer' ? 'photographers' : 'attendees';
+    const userType = normalizeUserType(user.user_metadata?.user_type) || 'attendee';
+    const table = userType === 'creator' ? 'photographers' : 'attendees';
 
     // Generate unique filename
     const ext = file.name.split('.').pop();
@@ -120,8 +121,8 @@ export async function DELETE() {
     }
 
     // Determine user type
-    const userType = user.user_metadata?.user_type || 'attendee';
-    const table = userType === 'photographer' ? 'photographers' : 'attendees';
+    const userType = normalizeUserType(user.user_metadata?.user_type) || 'attendee';
+    const table = userType === 'creator' ? 'photographers' : 'attendees';
 
     // Get current photo URL
     const { data: profile } = await supabase

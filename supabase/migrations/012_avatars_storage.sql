@@ -1,4 +1,4 @@
--- FaceFindr Database Migration
+-- Ferchr Database Migration
 -- Migration: 012_avatars_storage
 -- Description: Storage bucket for profile photos
 

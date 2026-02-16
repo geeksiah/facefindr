@@ -2,7 +2,7 @@
 
 ## Overview
 
-This phase implements the complete attendee experience for FaceFindr, including:
+This phase implements the complete attendee experience for Ferchr, including:
 - Attendee account creation with unique FaceTag
 - Face scanning and registration
 - Photo Passport gallery
@@ -128,7 +128,7 @@ Basic notification infrastructure:
 
 ### Attendee Collection
 
-A global collection `facefindr-attendees` stores all attendee face profiles:
+A global collection `ferchr-attendees` stores all attendee face profiles:
 - One face profile per attendee (primary)
 - Used for initial matching across events
 - ExternalImageId = user ID for reference
@@ -136,7 +136,7 @@ A global collection `facefindr-attendees` stores all attendee face profiles:
 ### Face Registration Flow
 
 1. Attendee takes selfie or uploads photo
-2. Face is indexed to `facefindr-attendees` collection
+2. Face is indexed to `ferchr-attendees` collection
 3. System searches all event collections for matches
 4. Matched photos are displayed in Photo Passport
 

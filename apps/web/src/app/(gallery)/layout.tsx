@@ -18,6 +18,7 @@ import { LogoutButton } from '@/components/auth/logout-button';
 import { GallerySearch } from '@/components/gallery';
 import { Logo } from '@/components/ui/logo';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
+import { normalizeUserType } from '@/lib/user-type';
 import { createClient } from '@/lib/supabase/server';
 
 export default async function GalleryLayout({
@@ -32,10 +33,10 @@ export default async function GalleryLayout({
     redirect('/login');
   }
 
-  const userType = user.user_metadata?.user_type;
+  const userType = normalizeUserType(user.user_metadata?.user_type);
   
-  // Redirect photographers to dashboard
-  if (userType === 'photographer') {
+  // Redirect creators to dashboard
+  if (userType === 'creator') {
     redirect('/dashboard');
   }
 

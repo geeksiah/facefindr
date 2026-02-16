@@ -86,8 +86,8 @@ export default function AboutScreen() {
       onPress: () => {
         // In production, link to App Store / Play Store
         const storeUrl = Platform.select({
-          ios: `https://apps.apple.com/app/facefindr`,
-          android: `https://play.google.com/store/apps/details?id=com.facefindr.app`,
+          ios: `https://apps.apple.com/app/ferchr`,
+          android: `https://play.google.com/store/apps/details?id=com.ferchr.app`,
           default: supportUrl || undefined,
         });
         if (storeUrl) {
@@ -129,7 +129,7 @@ export default function AboutScreen() {
             source={APP_ICON}
             style={styles.appIcon}
           />
-          <Text style={styles.appName}>FaceFindr</Text>
+          <Text style={styles.appName}>Ferchr</Text>
           <Text style={styles.appTagline}>Find yourself in every moment</Text>
           <View style={styles.versionBadge}>
             <Text style={styles.versionText}>v{appVersion}</Text>
@@ -139,7 +139,7 @@ export default function AboutScreen() {
         {/* Description */}
         <View style={styles.descriptionCard}>
           <Text style={styles.descriptionText}>
-            FaceFindr uses AI-powered facial recognition to help you discover and collect photos of yourself at events. 
+            Ferchr uses AI-powered facial recognition to help you discover and collect photos of yourself at events. 
             Connect with photographers, build your photo passport, and never miss a captured moment.
           </Text>
         </View>
@@ -167,9 +167,9 @@ export default function AboutScreen() {
 
         {/* Credits */}
         <View style={styles.creditsSection}>
-          <Text style={styles.teamText}>The FaceFindr Team</Text>
+          <Text style={styles.teamText}>The Ferchr Team</Text>
           <Text style={styles.copyright}>
-            © {new Date().getFullYear()} FaceFindr. All rights reserved.
+            © {new Date().getFullYear()} Ferchr. All rights reserved.
           </Text>
         </View>
 

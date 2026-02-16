@@ -219,7 +219,7 @@ export default function AnnouncementsPage() {
                   className="w-full mt-1 px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
                 >
                   <option value="all">All Users</option>
-                  <option value="photographers">Photographers Only</option>
+                  <option value="photographers">Creators Only</option>
                   <option value="attendees">Attendees Only</option>
                 </select>
               </div>

@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button';
 export default function DropInSuccessPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const sessionId = searchParams.get('session_id');
+  const sessionId = searchParams?.get('session_id');
   const [processing, setProcessing] = useState(true);
 
   const verifyPayment = useCallback(async () => {
@@ -75,3 +75,4 @@ export default function DropInSuccessPage() {
     </div>
   );
 }
+

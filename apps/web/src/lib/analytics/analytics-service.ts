@@ -66,7 +66,7 @@ export interface TrackViewOptions {
   mediaId?: string;
   photographerId?: string;
   viewerId?: string;
-  viewerType?: 'photographer' | 'attendee' | 'anonymous';
+  viewerType?: 'creator' | 'photographer' | 'attendee' | 'anonymous';
   ipHash?: string;
   countryCode?: string;
   deviceType?: DeviceType;

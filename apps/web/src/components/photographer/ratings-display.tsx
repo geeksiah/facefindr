@@ -54,7 +54,7 @@ export function RatingsDisplay({
 
   const loadRatingStats = async () => {
     try {
-      const response = await fetch(`/api/photographers/${photographerId}/ratings/stats`);
+      const response = await fetch(`/api/creators/${photographerId}/ratings/stats`);
       if (response.ok) {
         const data = await response.json();
         setStats(data);
@@ -71,7 +71,7 @@ export function RatingsDisplay({
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const response = await fetch(`/api/photographers/${photographerId}/ratings/my`);
+      const response = await fetch(`/api/creators/${photographerId}/ratings/my`);
       if (response.ok) {
         const data = await response.json();
         setUserRating(data.rating || null);
@@ -90,7 +90,7 @@ export function RatingsDisplay({
 
     setRatingLoading(true);
     try {
-      const response = await fetch(`/api/photographers/${photographerId}/rate`, {
+      const response = await fetch(`/api/creators/${photographerId}/rate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -215,7 +215,7 @@ export function RatingsDisplay({
       {showRatingModal && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-card rounded-2xl border border-border p-6 max-w-md w-full mx-4">
-            <h3 className="font-semibold text-foreground mb-4">Rate Photographer</h3>
+            <h3 className="font-semibold text-foreground mb-4">Rate Creator</h3>
             <div className="flex items-center justify-center gap-2 mb-4">
               {[1, 2, 3, 4, 5].map((star) => (
                 <button

@@ -123,7 +123,7 @@ export default function SettingsPage() {
 
   // Handle URL params for tab switching
   useEffect(() => {
-    const tab = searchParams.get('tab');
+    const tab = searchParams?.get('tab');
     if (tab) {
       setActiveTab(tab);
     }
@@ -134,7 +134,7 @@ export default function SettingsPage() {
     async function loadData() {
       try {
         // Load profile
-        const profileRes = await fetch('/api/photographer/profile');
+        const profileRes = await fetch('/api/creator/profile');
         if (profileRes.ok) {
           const data = await profileRes.json();
           setProfile(data.profile);
@@ -152,14 +152,14 @@ export default function SettingsPage() {
         }
 
         // Load subscription to check plan
-        const subRes = await fetch('/api/photographer/subscription');
+        const subRes = await fetch('/api/creator/subscription');
         if (subRes.ok) {
           const data = await subRes.json();
           setCurrentPlan(data.subscription?.planCode || 'free');
         }
 
         // Load notification settings
-        const notifRes = await fetch('/api/photographer/notification-settings');
+        const notifRes = await fetch('/api/creator/notification-settings');
         if (notifRes.ok) {
           const data = await notifRes.json();
           setNotifications(data.settings);
@@ -178,7 +178,7 @@ export default function SettingsPage() {
   const handleSaveProfile = async () => {
     setIsSaving(true);
     try {
-      const response = await fetch('/api/photographer/profile', {
+      const response = await fetch('/api/creator/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(profileForm),
@@ -286,7 +286,7 @@ export default function SettingsPage() {
   const handleSaveNotifications = async () => {
     setIsSavingNotifications(true);
     try {
-      const response = await fetch('/api/photographer/notification-settings', {
+      const response = await fetch('/api/creator/notification-settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(notifications),
@@ -444,12 +444,12 @@ export default function SettingsPage() {
                 <p className="text-sm text-muted-foreground">
                   Public profile:{' '}
                   <a 
-                    href={`/p/${profile.publicProfileSlug}`} 
+                    href={`/c/${profile.publicProfileSlug}`} 
                     target="_blank" 
                     rel="noopener noreferrer"
                     className="text-accent hover:underline"
                   >
-                    {new URL(process.env.NEXT_PUBLIC_APP_URL || window.location.origin).hostname}/p/{profile.publicProfileSlug}
+                    {new URL(process.env.NEXT_PUBLIC_APP_URL || window.location.origin).hostname}/c/{profile.publicProfileSlug}
                   </a>
                 </p>
               </div>
@@ -832,7 +832,7 @@ export default function SettingsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-medium text-foreground">Analytics Sharing</p>
-                  <p className="text-sm text-secondary">Help improve FaceFindr with anonymous usage data</p>
+                  <p className="text-sm text-secondary">Help improve Ferchr with anonymous usage data</p>
                 </div>
                 <Switch defaultChecked />
               </div>
@@ -874,3 +874,4 @@ export default function SettingsPage() {
     </div>
   );
 }
+

@@ -225,7 +225,7 @@ export const USP_MESSAGES = {
   
   comparison: {
     competitors: 'Other platforms: $50-$100 minimum',
-    us: 'FaceFindr: As low as $1 with daily payouts',
+    us: 'Ferchr: As low as $1 with daily payouts',
   },
   
   scheduledBenefit: 'Choose daily or weekly payouts to access funds faster, even small amounts',

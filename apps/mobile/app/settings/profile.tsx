@@ -26,6 +26,7 @@ import { Button } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { isCreatorUserType } from '@/lib/user-type';
 
 export default function EditProfileScreen() {
   const router = useRouter();
@@ -46,7 +47,7 @@ export default function EditProfileScreen() {
     setIsLoading(true);
 
     try {
-      const table = profile?.userType === 'photographer' ? 'photographers' : 'attendees';
+      const table = isCreatorUserType(profile?.userType) ? 'photographers' : 'attendees';
       
       const { error } = await supabase
         .from(table)
@@ -110,7 +111,7 @@ export default function EditProfileScreen() {
         .getPublicUrl(fileName);
 
       // Update profile
-      const table = profile?.userType === 'photographer' ? 'photographers' : 'attendees';
+      const table = isCreatorUserType(profile?.userType) ? 'photographers' : 'attendees';
       
       await supabase
         .from(table)

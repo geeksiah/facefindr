@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 /**
- * Photographer Profile Photo API
+ * Creator Profile Photo API
  * 
  * Upload and delete profile photos.
  */

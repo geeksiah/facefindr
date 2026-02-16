@@ -53,6 +53,7 @@ import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { formatDateForDisplay } from '@/lib/date';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { isCreatorUserType } from '@/lib/user-type';
 import { formatPrice } from '@/lib/currency';
 import { getThumbnailUrl, getCoverImageUrl, getSignedUrl } from '@/lib/storage-urls';
 import { useRealtimeSubscription } from '@/hooks/use-realtime';
@@ -102,7 +103,7 @@ interface EventStats {
 // ============================================
 // PHOTOGRAPHER EVENT MANAGEMENT VIEW
 // ============================================
-function PhotographerEventView({
+function CreatorEventView({
   event,
   photos,
   stats,
@@ -273,7 +274,7 @@ function PhotographerEventView({
                   <TrendingUp size={18} color="#FF9F0A" />
                 </View>
                 <Text style={photographerStyles.statValue}>
-                  {stats.conversionRate > 0 ? `${stats.conversionRate.toFixed(1)}%` : '—'}
+                  {stats.conversionRate > 0 ? `${stats.conversionRate.toFixed(1)}%` : 'â€”'}
                 </Text>
                 <Text style={photographerStyles.statLabel}>Conversion</Text>
               </View>
@@ -385,7 +386,7 @@ function PhotographerEventView({
                 <View style={photographerStyles.linkTextContainer}>
                   <Text style={photographerStyles.linkLabel}>Public Event Page</Text>
                   <Text style={photographerStyles.linkUrl} numberOfLines={1}>
-                    facefindr.com/e/{event.publicSlug || event.id.slice(0, 8)}
+                    ferchr.com/e/{event.publicSlug || event.id.slice(0, 8)}
                   </Text>
                 </View>
               </View>
@@ -498,7 +499,7 @@ function AttendeeEventView({
 
           <TouchableOpacity
             style={attendeeStyles.photographerRow}
-            onPress={() => router.push(`/p/${event.photographerId}` as any)}
+            onPress={() => router.push(`/c/${event.photographerId}` as any)}
           >
             <Text style={attendeeStyles.photographerLabel}>Photos by </Text>
             <Text style={attendeeStyles.photographerName}>{event.photographerName}</Text>
@@ -700,7 +701,7 @@ export default function EventDetailScreen() {
           Image.prefetch(coverImageUrl);
         }
 
-        const isOwner = Boolean(userType === 'photographer' && profile?.id === photographerId);
+        const isOwner = Boolean(isCreatorUserType(userType) && profile?.id === photographerId);
         setIsOwnEvent(isOwner);
 
         const pricing = Array.isArray(eventData.event_pricing) ? eventData.event_pricing[0] : eventData.event_pricing;
@@ -776,7 +777,7 @@ export default function EventDetailScreen() {
         setPhotos(photosList);
 
         // Calculate stats for photographer
-        if (isOwnEvent || (userType === 'photographer' && profile?.id === eventData?.photographer_id)) {
+        if (isOwnEvent || (isCreatorUserType(userType) && profile?.id === eventData?.photographer_id)) {
           const matchedCount = photosList.filter(p => p.isMatched).length;
 
           const { count: attendeeCount } = await supabase
@@ -842,7 +843,7 @@ export default function EventDetailScreen() {
 
     try {
       await Share.share({
-        message: `Check out photos from ${event?.name} on FaceFindr!\n${eventUrl}`,
+        message: `Check out photos from ${event?.name} on Ferchr!\n${eventUrl}`,
         url: eventUrl,
       });
     } catch (error) {
@@ -879,16 +880,16 @@ export default function EventDetailScreen() {
   // Render photographer view for their own events
   if (isOwnEvent) {
     return (
-      <PhotographerEventView
+      <CreatorEventView
         event={event}
         photos={photos}
         stats={eventStats}
         isRefreshing={isRefreshing}
         onRefresh={handleRefresh}
-        onUpload={() => router.push(`/(photographer)/upload?eventId=${id}` as any)}
+        onUpload={() => router.push(`/(creator)/upload?eventId=${id}` as any)}
         onShare={handleShare}
         onSettings={() => Alert.alert('Settings', 'Open web dashboard for full event settings')}
-        onAnalytics={() => router.push(`/(photographer)/analytics?eventId=${id}` as any)}
+        onAnalytics={() => router.push(`/(creator)/analytics?eventId=${id}` as any)}
         onPhotoPress={handlePhotoPress}
       />
     );

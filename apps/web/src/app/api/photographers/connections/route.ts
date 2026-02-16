@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 /**
- * Photographer Connections API
+ * Creator Connections API
  * 
  * Manage photographer-attendee connections for easy tagging.
  */

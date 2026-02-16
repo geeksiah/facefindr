@@ -1,13 +1,13 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useRealtimeSubscription } from '@/hooks/use-realtime';
-import { useRouter } from 'next/navigation';
 import { Calendar, ArrowRight } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
-import { Button } from '@/components/ui/button';
 import { PhotoUploader } from '@/components/events/photo-uploader';
+import { Button } from '@/components/ui/button';
+import { useRealtimeSubscription } from '@/hooks/use-realtime';
 import { formatEventDateDisplay } from '@/lib/events/time';
 import { createClient } from '@/lib/supabase/client';
 
@@ -18,13 +18,14 @@ interface Event {
   event_start_at_utc: string | null;
   event_timezone: string | null;
   status: string;
-  media_count: number;
+  media_count?: number;
 }
 
 export default function UploadPage() {
   const router = useRouter();
   const [events, setEvents] = useState<Event[]>([]);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [creatorId, setCreatorId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const loadEvents = useCallback(async () => {
@@ -39,20 +40,60 @@ export default function UploadPage() {
         return;
       }
 
-      const { data: eventsRes, error: eventsError } = await supabase
+      const currentCreatorId = userRes.user.id;
+      setCreatorId(currentCreatorId);
+
+      const [{ data: ownedEventsRes, error: ownedEventsError }, { data: collaboratorRows, error: collaboratorError }] = await Promise.all([
+        supabase
         .from('events')
         .select('id, name, event_date, event_start_at_utc, event_timezone, status')
-        .eq('photographer_id', userRes.user.id)
-        .in('status', ['draft', 'active'])
-        .order('created_at', { ascending: false });
+          .eq('photographer_id', currentCreatorId)
+          .in('status', ['draft', 'active', 'closed'])
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('event_collaborators')
+          .select('event_id')
+          .eq('photographer_id', currentCreatorId)
+          .eq('status', 'active'),
+      ]);
 
-      if (eventsError) {
-        console.error('Error loading events:', eventsError);
+      if (ownedEventsError) {
+        console.error('Error loading owned events:', ownedEventsError);
         setEvents([]);
         return;
       }
 
-      const eventsList = eventsRes ?? [];
+      if (collaboratorError) {
+        console.error('Error loading collaborator events:', collaboratorError);
+      }
+
+      const collaboratorEventIds = (collaboratorRows ?? []).map((row) => row.event_id).filter(Boolean);
+      let collaboratorEvents: Event[] = [];
+      if (collaboratorEventIds.length > 0) {
+        const { data: collaboratorEventsRes, error: collaboratorEventsError } = await supabase
+          .from('events')
+          .select('id, name, event_date, event_start_at_utc, event_timezone, status')
+          .in('id', collaboratorEventIds)
+          .in('status', ['draft', 'active', 'closed'])
+          .order('created_at', { ascending: false });
+
+        if (collaboratorEventsError) {
+          console.error('Error loading collaborator event details:', collaboratorEventsError);
+        } else {
+          collaboratorEvents = (collaboratorEventsRes ?? []) as Event[];
+        }
+      }
+
+      const eventMap = new Map<string, Event>();
+      for (const event of (ownedEventsRes ?? []) as Event[]) {
+        eventMap.set(event.id, event);
+      }
+      for (const event of collaboratorEvents) {
+        if (!eventMap.has(event.id)) {
+          eventMap.set(event.id, event);
+        }
+      }
+      const eventsList = Array.from(eventMap.values());
 
       if (eventsList.length === 0) {
         setEvents([]);
@@ -86,6 +127,8 @@ export default function UploadPage() {
           media_count: counts.get(e.id) || 0,
         }))
       );
+
+      setSelectedEventId((prev) => (prev && !eventMap.has(prev) ? null : prev));
     } catch (error) {
       console.error('Error loading events:', error);
       setEvents([]);
@@ -101,9 +144,18 @@ export default function UploadPage() {
   // Subscribe to real-time updates for events
   useRealtimeSubscription({
     table: 'events',
-    onChange: () => {
-      loadEvents();
-    },
+    filter: creatorId
+      ? `photographer_id=eq.${creatorId}`
+      : 'photographer_id=eq.00000000-0000-0000-0000-000000000000',
+    onChange: loadEvents,
+  });
+
+  useRealtimeSubscription({
+    table: 'event_collaborators',
+    filter: creatorId
+      ? `photographer_id=eq.${creatorId}`
+      : 'photographer_id=eq.00000000-0000-0000-0000-000000000000',
+    onChange: loadEvents,
   });
 
   if (loading) {

@@ -190,7 +190,7 @@ export default function GeoRestrictionPage() {
           </Link>
           <div>
             <h1 className="text-2xl font-bold text-foreground">Geo-Restriction Settings</h1>
-            <p className="text-muted-foreground">Control where FaceFindr is available</p>
+            <p className="text-muted-foreground">Control where Ferchr is available</p>
           </div>
         </div>
         <div className="flex items-center gap-3">

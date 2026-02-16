@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { isCreatorUser, normalizeUserType } from '@/lib/user-type';
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
@@ -23,16 +24,18 @@ export async function GET(request: NextRequest) {
       
       if (user) {
         // Determine user type from metadata or query param (for OAuth)
-        let userType = user.user_metadata?.user_type as 'photographer' | 'attendee' | undefined;
+        let userType = normalizeUserType(user.user_metadata?.user_type);
         
         // For OAuth logins, user_type might be passed as query param
         if (!userType && userTypeParam) {
-          userType = userTypeParam as 'photographer' | 'attendee';
+          userType = normalizeUserType(userTypeParam);
           
           // Update user metadata with the user type
-          await supabase.auth.updateUser({
-            data: { user_type: userType }
-          });
+          if (userType) {
+            await supabase.auth.updateUser({
+              data: { user_type: userType }
+            });
+          }
         }
         
         // Default to attendee if no type specified
@@ -44,7 +47,7 @@ export async function GET(request: NextRequest) {
         }
         
         // Check if profile exists, create if not (for OAuth users)
-        if (userType === 'photographer') {
+        if (isCreatorUser(userType)) {
           const { data: existingProfile } = await userDb
             .from('photographers')
             .select('id')
@@ -56,7 +59,7 @@ export async function GET(request: NextRequest) {
             const displayName = user.user_metadata?.full_name || 
                                user.user_metadata?.name || 
                                user.email?.split('@')[0] || 
-                               'Photographer';
+                               'Creator';
             
             // Generate username from display name
             const username = displayName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15);
@@ -127,7 +130,7 @@ export async function GET(request: NextRequest) {
         }
         
         // Redirect based on user type
-        const redirectPath = userType === 'photographer' ? '/dashboard' : '/gallery';
+        const redirectPath = isCreatorUser(userType) ? '/dashboard' : '/gallery';
         return NextResponse.redirect(new URL(redirectPath, requestUrl.origin));
       }
       

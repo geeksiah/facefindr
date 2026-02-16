@@ -16,11 +16,12 @@ interface SearchFilterProps {
 export function SearchFilter({ searchParams, total }: SearchFilterProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const safePathname = pathname ?? '';
   const params = useSearchParams();
   const [search, setSearch] = useState(searchParams.search || '');
 
   const updateParams = useCallback((key: string, value: string | null) => {
-    const newParams = new URLSearchParams(params.toString());
+    const newParams = new URLSearchParams((params?.toString() ?? ''));
     if (value) {
       newParams.set(key, value);
     } else {
@@ -37,11 +38,11 @@ export function SearchFilter({ searchParams, total }: SearchFilterProps) {
 
   const clearFilters = () => {
     setSearch('');
-    router.push(pathname);
+    router.push(safePathname);
   };
 
   const handleExport = async () => {
-    const response = await fetch(`/api/admin/transactions/export?${params.toString()}`);
+    const response = await fetch(`/api/admin/transactions/export?${(params?.toString() ?? '')}`);
     if (response.ok) {
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
@@ -118,3 +119,5 @@ export function SearchFilter({ searchParams, total }: SearchFilterProps) {
     </div>
   );
 }
+
+

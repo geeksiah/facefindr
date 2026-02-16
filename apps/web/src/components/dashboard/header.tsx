@@ -18,7 +18,7 @@ interface SearchResult {
   event_date?: string;
   event_start_at_utc?: string;
   event_timezone?: string;
-  type: 'event' | 'photographer' | 'attendee';
+  type: 'event' | 'creator' | 'photographer' | 'attendee';
 }
 
 export function DashboardHeader() {
@@ -108,8 +108,8 @@ export function DashboardHeader() {
     
     if (result.type === 'event') {
       router.push(`/dashboard/events/${result.id}`);
-    } else if (result.type === 'photographer') {
-      router.push(`/p/${result.id}`);
+    } else if (result.type === 'creator' || result.type === 'photographer') {
+      router.push(`/c/${result.id}`);
     }
   };
 
@@ -194,7 +194,7 @@ export function DashboardHeader() {
                                 },
                                 'en-US'
                               )
-                            : 'Photographer'
+                            : 'Creator'
                           }
                         </p>
                       </div>
@@ -316,7 +316,7 @@ export function DashboardHeader() {
                                 },
                                 'en-US'
                               )
-                            : 'Photographer'
+                            : 'Creator'
                           }
                         </p>
                       </div>

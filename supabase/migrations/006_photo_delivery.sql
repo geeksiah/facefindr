@@ -1,4 +1,4 @@
--- FaceFindr Database Migration
+-- Ferchr Database Migration
 -- Migration: 006_photo_delivery
 -- Description: Photo delivery system - watermarks, purchases, downloads, entitlements
 

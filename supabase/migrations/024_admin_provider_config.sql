@@ -262,7 +262,7 @@ CREATE TABLE IF NOT EXISTS geo_restriction (
     strict_mode BOOLEAN DEFAULT TRUE, -- Require exact country match
     
     -- Messaging
-    restriction_message TEXT DEFAULT 'FaceFindr is not yet available in your region. We''re working on expanding to more countries soon!',
+    restriction_message TEXT DEFAULT 'Ferchr is not yet available in your region. We''re working on expanding to more countries soon!',
     waitlist_enabled BOOLEAN DEFAULT TRUE,
     
     -- Metadata

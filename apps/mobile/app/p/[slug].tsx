@@ -1,5 +1,5 @@
 /**
- * Public Photographer Profile Screen
+ * Public Creator Profile Screen
  */
 
 import { useState, useEffect } from 'react';
@@ -35,7 +35,7 @@ import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const EVENT_CARD_WIDTH = SCREEN_WIDTH * 0.7;
 
-interface PhotographerProfile {
+interface CreatorProfile {
   id: string;
   displayName: string;
   faceTag: string;
@@ -56,12 +56,12 @@ interface Event {
   photoCount: number;
 }
 
-export default function PhotographerProfileScreen() {
+export default function CreatorProfileScreen() {
   const router = useRouter();
   const { slug } = useLocalSearchParams<{ slug: string }>();
   const { profile: currentUser } = useAuthStore();
 
-  const [photographer, setPhotographer] = useState<PhotographerProfile | null>(null);
+  const [photographer, setCreator] = useState<CreatorProfile | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isFollowing, setIsFollowing] = useState(false);
@@ -104,7 +104,7 @@ export default function PhotographerProfileScreen() {
           : Promise.resolve({ data: null }),
       ]);
 
-      setPhotographer({
+      setCreator({
         id: photographerData.id,
         displayName: photographerData.display_name,
         faceTag: photographerData.face_tag,

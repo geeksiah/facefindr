@@ -35,6 +35,7 @@ import { useAuthStore } from '@/stores/auth-store';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 import { getSignedUrl } from '@/lib/storage-urls';
 import { useRealtimeSubscription } from '@/hooks/use-realtime';
+import { getApiBaseUrl } from '@/lib/api-base';
 
 interface DropInPhoto {
   matchId: string;
@@ -70,7 +71,7 @@ export default function DropInDiscoverScreen({ noHeader = false }: DropInDiscove
 
   const loadPhotos = async () => {
     try {
-      const baseUrl = process.env.EXPO_PUBLIC_APP_URL || 'https://app.facefindr.com';
+      const baseUrl = getApiBaseUrl();
       const response = await fetch(`${baseUrl}/api/drop-in/discover`, {
         headers: session?.access_token
           ? {
@@ -118,7 +119,7 @@ export default function DropInDiscoverScreen({ noHeader = false }: DropInDiscove
   const handleViewPhoto = async (photo: DropInPhoto) => {
     // Mark notification as viewed
     try {
-      const baseUrl = process.env.EXPO_PUBLIC_APP_URL || 'https://app.facefindr.com';
+      const baseUrl = getApiBaseUrl();
       await fetch(`${baseUrl}/api/drop-in/notifications`, {
         method: 'POST',
         headers: {
@@ -350,7 +351,7 @@ export default function DropInDiscoverScreen({ noHeader = false }: DropInDiscove
                     onPress={async () => {
                       if (!selectedPhoto?.photoId) return;
                       try {
-                        const baseUrl = process.env.EXPO_PUBLIC_APP_URL || 'https://app.facefindr.com';
+                        const baseUrl = getApiBaseUrl();
                         const res = await fetch(`${baseUrl}/api/vault`, {
                           method: 'POST',
                           headers: {

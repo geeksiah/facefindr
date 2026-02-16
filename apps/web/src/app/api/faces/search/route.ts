@@ -1,9 +1,8 @@
 export const dynamic = 'force-dynamic';
 
-import { SearchFacesByImageCommand } from '@aws-sdk/client-rekognition';
 import { NextRequest, NextResponse } from 'next/server';
 
-import { rekognitionClient } from '@/lib/aws/rekognition';
+import { searchEventCollectionWithFallback } from '@/lib/aws/rekognition';
 import { checkRateLimit, getClientIP, rateLimitHeaders, rateLimits } from '@/lib/rate-limit';
 import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
@@ -90,17 +89,13 @@ export async function POST(request: NextRequest) {
 
     // If specific event ID provided, search only that event
     if (eventId) {
-      const collectionId = `facefindr-event-${eventId}`;
-
       try {
-        const searchCommand = new SearchFacesByImageCommand({
-          CollectionId: collectionId,
-          Image: { Bytes: imageBuffer },
-          MaxFaces: 100,
-          FaceMatchThreshold: 80,
-        });
-
-        const searchResult = await rekognitionClient.send(searchCommand);
+        const { response: searchResult } = await searchEventCollectionWithFallback(
+          eventId,
+          imageBuffer,
+          100,
+          80
+        );
 
         if (searchResult.FaceMatches && searchResult.FaceMatches.length > 0) {
           // Get event details
@@ -148,17 +143,13 @@ export async function POST(request: NextRequest) {
 
       if (events && events.length > 0) {
         for (const event of events) {
-          const collectionId = `facefindr-event-${event.id}`;
-
           try {
-            const searchCommand = new SearchFacesByImageCommand({
-              CollectionId: collectionId,
-              Image: { Bytes: imageBuffer },
-              MaxFaces: 50,
-              FaceMatchThreshold: 80,
-            });
-
-            const searchResult = await rekognitionClient.send(searchCommand);
+            const { response: searchResult } = await searchEventCollectionWithFallback(
+              event.id,
+              imageBuffer,
+              50,
+              80
+            );
 
             if (searchResult.FaceMatches && searchResult.FaceMatches.length > 0) {
               const mediaIds = searchResult.FaceMatches.map(m => m.Face?.ExternalImageId).filter(Boolean);

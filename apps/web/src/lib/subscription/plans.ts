@@ -208,7 +208,7 @@ export async function getPlanFeatures(planCode: PlanCode): Promise<PlanFeatures>
 // GET PHOTOGRAPHER'S CURRENT PLAN
 // ============================================
 
-export async function getPhotographerPlan(photographerId: string): Promise<PlanCode> {
+export async function getCreatorPlan(photographerId: string): Promise<PlanCode> {
   try {
     const supabase = createServiceClient();
     const { data } = await supabase
@@ -230,8 +230,8 @@ export async function getPhotographerPlan(photographerId: string): Promise<PlanC
   return 'free';
 }
 
-export async function getPhotographerPlanFeatures(photographerId: string): Promise<PlanFeatures> {
-  const planCode = await getPhotographerPlan(photographerId);
+export async function getCreatorPlanFeatures(photographerId: string): Promise<PlanFeatures> {
+  const planCode = await getCreatorPlan(photographerId);
   return getPlanFeatures(planCode);
 }
 
@@ -246,7 +246,7 @@ export async function checkEventLimit(photographerId: string): Promise<{
   unlimited: boolean;
 }> {
   const supabase = createServiceClient();
-  const features = await getPhotographerPlanFeatures(photographerId);
+  const features = await getCreatorPlanFeatures(photographerId);
 
   // Count active events
   const { count } = await supabase
@@ -285,7 +285,7 @@ export async function checkPhotoLimit(eventId: string): Promise<{
     return { allowed: false, current: 0, limit: 0 };
   }
 
-  const features = await getPhotographerPlanFeatures(event.photographer_id);
+  const features = await getCreatorPlanFeatures(event.photographer_id);
 
   // Count photos in event
   const { count } = await supabase
@@ -322,7 +322,7 @@ export async function checkFaceOpsLimit(eventId: string): Promise<{
     return { allowed: false, used: 0, limit: 0 };
   }
 
-  const features = await getPhotographerPlanFeatures(event.photographer_id);
+  const features = await getCreatorPlanFeatures(event.photographer_id);
   const used = event.face_ops_used || 0;
   const limit = features.maxFaceOpsPerEvent;
 
@@ -341,7 +341,7 @@ export async function hasFeature(
   photographerId: string,
   feature: keyof PlanFeatures
 ): Promise<boolean> {
-  const features = await getPhotographerPlanFeatures(photographerId);
+  const features = await getCreatorPlanFeatures(photographerId);
   const value = features[feature];
   
   // Handle different types
@@ -350,13 +350,13 @@ export async function hasFeature(
   return !!value;
 }
 
-export async function getPhotographerPlatformFee(photographerId: string): Promise<number> {
-  const features = await getPhotographerPlanFeatures(photographerId);
+export async function getCreatorPlatformFee(photographerId: string): Promise<number> {
+  const features = await getCreatorPlanFeatures(photographerId);
   return features.platformFeePercent / 100; // Convert to decimal
 }
 
-export async function getPhotographerPrintCommission(photographerId: string): Promise<number> {
-  const features = await getPhotographerPlanFeatures(photographerId);
+export async function getCreatorPrintCommission(photographerId: string): Promise<number> {
+  const features = await getCreatorPlanFeatures(photographerId);
   return features.printCommissionPercent / 100; // Convert to decimal
 }
 
@@ -372,7 +372,7 @@ export interface PlanComparison {
 }
 
 export async function suggestUpgrade(photographerId: string): Promise<PlanComparison | null> {
-  const currentPlan = await getPhotographerPlan(photographerId);
+  const currentPlan = await getCreatorPlan(photographerId);
   const features = await getPlanFeatures(currentPlan);
   const supabase = createServiceClient();
 

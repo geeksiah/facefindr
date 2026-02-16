@@ -139,7 +139,7 @@ export default async function EventDetailPage({ params }: EventPageProps) {
           </div>
 
           <div>
-            <h2 className="font-semibold text-foreground mb-4">Photographer</h2>
+            <h2 className="font-semibold text-foreground mb-4">Creator</h2>
             <div className="space-y-3">
               <div>
                 <p className="text-sm text-muted-foreground">Name</p>

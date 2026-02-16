@@ -42,9 +42,10 @@ import {
 
 import { useAuthStore } from '@/stores/auth-store';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { getApiBaseUrl } from '@/lib/api-base';
 import { alertMissingPublicAppUrl, buildPublicUrl } from '@/lib/runtime-config';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
+const API_URL = getApiBaseUrl();
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -91,7 +92,7 @@ export default function ProfileScreen() {
 
     try {
       await Share.share({
-        message: `Connect with me on FaceFindr!\n\nMy FaceTag: ${profile?.faceTag}\n${profileUrl}`,
+        message: `Connect with me on Ferchr!\n\nMy FaceTag: ${profile?.faceTag}\n${profileUrl}`,
         url: profileUrl,
       });
     } catch (error) {
@@ -214,7 +215,7 @@ export default function ProfileScreen() {
 
         </View>
 
-        {/* FaceTag Card - Matching Photographer Design */}
+        {/* FaceTag Card - Matching Creator Design */}
         {profile?.faceTag && (
           <View style={styles.faceTagCard}>
             <LinearGradient
@@ -321,7 +322,7 @@ export default function ProfileScreen() {
         {/* Footer */}
         <View style={styles.footer}>
           <Text style={styles.footerText}>
-            © {new Date().getFullYear()} The FaceFindr Team
+            © {new Date().getFullYear()} The Ferchr Team
           </Text>
           <Text style={styles.versionText}>Version 1.0.0</Text>
         </View>

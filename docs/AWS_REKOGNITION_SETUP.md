@@ -1,6 +1,6 @@
 # AWS Rekognition Setup
 
-This guide helps you set up AWS Rekognition for face detection and matching in FaceFindr.
+This guide helps you set up AWS Rekognition for face detection and matching in Ferchr.
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@ This guide helps you set up AWS Rekognition for face detection and matching in F
 
 1. Go to **AWS Console** → **IAM** → **Users**
 2. Click **"Add users"**
-3. User name: `facefindr-rekognition`
+3. User name: `ferchr-rekognition`
 4. Select **"Access key - Programmatic access"**
 5. Click **Next: Permissions**
 
@@ -41,7 +41,7 @@ Create a custom policy with these permissions:
 }
 ```
 
-6. Name the policy: `FaceFindrRekognitionPolicy`
+6. Name the policy: `FerchrRekognitionPolicy`
 7. Attach it to the user
 8. Complete user creation and **save the Access Key ID and Secret**
 

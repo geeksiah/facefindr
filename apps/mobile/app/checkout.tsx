@@ -31,6 +31,7 @@ import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { formatPrice } from '@/lib/currency';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { getApiBaseUrl } from '@/lib/api-base';
 
 interface CartItem {
   id: string;
@@ -107,10 +108,7 @@ export default function CheckoutScreen() {
     setIsProcessing(true);
 
     try {
-      const apiUrl = process.env.EXPO_PUBLIC_API_URL;
-      if (!apiUrl) {
-        throw new Error('Missing EXPO_PUBLIC_API_URL configuration');
-      }
+      const apiUrl = getApiBaseUrl();
       const provider: 'stripe' | 'flutterwave' | 'paypal' =
         selectedMethod === 'mobile_money' ? 'flutterwave' : selectedMethod === 'paypal' ? 'paypal' : 'stripe';
       const idempotencyKey = `mobile-${profile?.id || 'user'}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;

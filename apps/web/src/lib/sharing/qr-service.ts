@@ -105,7 +105,7 @@ export async function generateTransparentQRCode(
 }
 
 /**
- * Generate QR code with custom styling for FaceFindr branding
+ * Generate QR code with custom styling for Ferchr branding
  * Always includes logo in center
  */
 export async function generateBrandedQRCode(
@@ -230,7 +230,7 @@ export function generateEmbedCode(
   allow="camera" 
   style="border-radius:12px;overflow:hidden;max-width:100%;"
   loading="lazy"
-  title="FaceFindr Event Gallery"
+  title="Ferchr Event Gallery"
 ></iframe>`;
 }
 
@@ -250,8 +250,8 @@ export function generateSocialShareUrls(
   copy: string;
 } {
   const text = photographerName
-    ? `Find your photos from "${eventName}" by ${photographerName} on FaceFindr`
-    : `Find your photos from "${eventName}" on FaceFindr`;
+    ? `Find your photos from "${eventName}" by ${photographerName} on Ferchr`
+    : `Find your photos from "${eventName}" on Ferchr`;
   
   const encodedUrl = encodeURIComponent(eventUrl);
   const encodedText = encodeURIComponent(text);

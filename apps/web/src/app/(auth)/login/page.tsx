@@ -24,7 +24,7 @@ export default function LoginPage() {
 
 function LoginPageContent() {
   const searchParams = useSearchParams();
-  const message = searchParams.get('message');
+  const message = searchParams?.get('message');
   const toast = useToast();
   
   const [showPassword, setShowPassword] = useState(false);

@@ -1,6 +1,6 @@
 # Admin Dashboard Requirements
 
-This document outlines all the controls and features needed for the FaceFindr admin dashboard.
+This document outlines all the controls and features needed for the Ferchr admin dashboard.
 
 ## 1. Payout Management
 
@@ -20,7 +20,7 @@ This document outlines all the controls and features needed for the FaceFindr ad
 - Search by photographer name/email
 - Export to CSV/Excel
 
-### Per-Photographer Controls
+### Per-Creator Controls
 - View photographer's payout history
 - Pause payouts for specific photographer
 - Override payout settings temporarily
@@ -92,9 +92,9 @@ This document outlines all the controls and features needed for the FaceFindr ad
 
 3. **Print Products**
    - Platform handles fulfillment (zero effort for photographer)
-   - Photographer earns commission on each sale
+   - Creator earns commission on each sale
    - Higher plans = higher commission (15% → 30%)
-   - Photographer can add markup for extra earnings
+   - Creator can add markup for extra earnings
 
 ### Admin Controls for Subscriptions
 - View all subscriptions
@@ -151,7 +151,7 @@ Print products have different pricing per region due to:
 
 ## 3. User Management
 
-### Photographer Management
+### Creator Management
 - View all photographers (with search/filter)
 - View photographer details:
   - Profile info
@@ -353,7 +353,7 @@ const ADMIN_PERMISSIONS = {
 
 ### Users
 - `GET /api/admin/photographers` - List photographers
-- `GET /api/admin/photographers/:id` - Photographer details
+- `GET /api/admin/photographers/:id` - Creator details
 - `PUT /api/admin/photographers/:id` - Update photographer
 - `POST /api/admin/photographers/:id/suspend` - Suspend
 - `GET /api/admin/attendees` - List attendees

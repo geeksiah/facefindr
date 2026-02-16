@@ -1,4 +1,4 @@
--- FaceFindr Database Migration
+-- Ferchr Database Migration
 -- Migration: 002_payment_providers
 -- Description: Extend payment system for multiple providers
 

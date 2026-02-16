@@ -17,8 +17,9 @@ import {
 import { AtSign, Check, X } from 'lucide-react-native';
 
 import { colors, spacing, borderRadius } from '@/lib/theme';
+import { getApiBaseUrl } from '@/lib/api-base';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
+const API_URL = getApiBaseUrl();
 
 interface UsernameSelectorProps {
   value: string;

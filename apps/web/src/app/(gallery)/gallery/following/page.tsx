@@ -191,7 +191,7 @@ export default function FollowingPage() {
           </p>
           {!searchQuery && (
             <Button asChild>
-              <Link href="/gallery/events">Find Photographers</Link>
+              <Link href="/gallery/events">Find Creators</Link>
             </Button>
           )}
         </div>
@@ -205,9 +205,9 @@ export default function FollowingPage() {
                 key={item.id}
                 className="rounded-xl border border-border bg-card overflow-hidden"
               >
-                {/* Photographer Info */}
+                {/* Creator Info */}
                 <Link
-                  href={`/p/${photographer.public_profile_slug || photographer.id}`}
+                  href={`/c/${photographer.public_profile_slug || photographer.id}`}
                   className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
                 >
                   {photographer.profile_photo_url ? (

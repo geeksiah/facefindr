@@ -14,7 +14,7 @@ import { notFound } from 'next/navigation';
 import { supabaseAdmin } from '@/lib/supabase';
 import { formatDate, formatDateTime, formatCurrency, getInitials } from '@/lib/utils';
 
-async function getPhotographer(id: string) {
+async function getCreator(id: string) {
   const { data: photographer, error } = await supabaseAdmin
     .from('photographers')
     .select(`
@@ -78,13 +78,13 @@ async function getPhotographer(id: string) {
   };
 }
 
-export default async function PhotographerDetailPage({
+export default async function CreatorDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const photographer = await getPhotographer(id);
+  const photographer = await getCreator(id);
 
   if (!photographer) {
     notFound();
@@ -115,7 +115,7 @@ export default async function PhotographerDetailPage({
         className="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
       >
         <ArrowLeft className="h-4 w-4" />
-        Back to Photographers
+        Back to Creators
       </Link>
 
       {/* Header */}

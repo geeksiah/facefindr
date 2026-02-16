@@ -132,7 +132,7 @@ export default function MyEventsPage() {
           <div>
             <h3 className="font-semibold text-foreground">Join an Event</h3>
             <p className="text-sm text-secondary mt-1">
-              Enter the access code provided by the photographer
+              Enter the access code provided by the creator
             </p>
           </div>
           <div className="flex gap-3">

@@ -3,8 +3,8 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 
 import {
-  getPhotographerPayoutSettings,
-  updatePhotographerPayoutSettings,
+  getCreatorPayoutSettings,
+  updateCreatorPayoutSettings,
   getPayoutMinimum,
   MINIMUM_DISPLAY,
 } from '@/lib/payments/payout-config';
@@ -20,7 +20,7 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const settings = await getPhotographerPayoutSettings(user.id);
+    const settings = await getCreatorPayoutSettings(user.id);
 
     // Get currency-specific minimum for display
     const minPayout = await getPayoutMinimum(settings.preferredCurrency);
@@ -92,7 +92,7 @@ export async function PUT(request: Request) {
       );
     }
 
-    const success = await updatePhotographerPayoutSettings(user.id, body);
+    const success = await updateCreatorPayoutSettings(user.id, body);
 
     if (!success) {
       return NextResponse.json(
@@ -101,7 +101,7 @@ export async function PUT(request: Request) {
       );
     }
 
-    const updatedSettings = await getPhotographerPayoutSettings(user.id);
+    const updatedSettings = await getCreatorPayoutSettings(user.id);
 
     return NextResponse.json({
       success: true,

@@ -3,11 +3,12 @@ export const dynamic = 'force-dynamic';
 /**
  * Follow API
  * 
- * Manage follows for photographers.
+ * Manage follows for creators.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { normalizeUserType } from '@/lib/user-type';
 import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
 async function getAuthClient(request: NextRequest) {
@@ -20,7 +21,7 @@ async function getAuthClient(request: NextRequest) {
     : await createClient();
 }
 
-// POST - Follow a photographer
+// POST - Follow a creator
 export async function POST(request: NextRequest) {
   try {
     const supabase = await getAuthClient(request);
@@ -36,11 +37,11 @@ export async function POST(request: NextRequest) {
     const resolvedTargetType =
       targetType === 'attendee'
         ? 'attendee'
-        : targetType === 'photographer'
-        ? 'photographer'
+        : targetType === 'creator' || targetType === 'photographer'
+        ? 'creator'
         : attendeeId
         ? 'attendee'
-        : 'photographer';
+        : 'creator';
     const resolvedTargetId =
       targetId ||
       (resolvedTargetType === 'attendee' ? attendeeId : photographerId);
@@ -49,7 +50,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Target ID required' }, { status: 400 });
     }
 
-    if (resolvedTargetType === 'photographer') {
+    if (resolvedTargetType === 'creator') {
       // Check if photographer exists and allows follows
       const { data: photographer } = await supabase
         .from('photographers')
@@ -58,15 +59,15 @@ export async function POST(request: NextRequest) {
         .single();
 
       if (!photographer) {
-        return NextResponse.json({ error: 'Photographer not found' }, { status: 404 });
+        return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
       }
 
       if (!photographer.is_public_profile) {
-        return NextResponse.json({ error: 'Photographer profile is private' }, { status: 403 });
+        return NextResponse.json({ error: 'Creator profile is private' }, { status: 403 });
       }
 
       if (!photographer.allow_follows) {
-        return NextResponse.json({ error: 'This photographer does not accept followers' }, { status: 400 });
+        return NextResponse.json({ error: 'This creator does not accept followers' }, { status: 400 });
       }
     } else {
       const { data: attendee } = await supabase
@@ -84,12 +85,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const normalizedFollowerType =
+      normalizeUserType(user.user_metadata?.user_type) === 'creator' ? 'creator' : 'attendee';
+
     // Create follow
     const { error } = await supabase
       .from('follows')
       .insert({
         follower_id: user.id,
-        follower_type: user.user_metadata?.user_type === 'photographer' ? 'photographer' : 'attendee',
+        follower_type: normalizedFollowerType,
         following_id: resolvedTargetId,
         following_type: resolvedTargetType,
       });
@@ -102,7 +106,7 @@ export async function POST(request: NextRequest) {
     }
 
     await serviceClient.from('audit_logs').insert({
-      actor_type: user.user_metadata?.user_type === 'photographer' ? 'photographer' : 'attendee',
+      actor_type: normalizedFollowerType,
       actor_id: user.id,
       action: 'follow_created',
       resource_type: 'follow',
@@ -125,7 +129,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// DELETE - Unfollow a photographer
+// DELETE - Unfollow a creator
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await getAuthClient(request);
@@ -143,15 +147,18 @@ export async function DELETE(request: NextRequest) {
     const targetType =
       searchParams.get('targetType') === 'attendee'
         ? 'attendee'
-        : searchParams.get('targetType') === 'photographer'
-        ? 'photographer'
+        : searchParams.get('targetType') === 'creator' || searchParams.get('targetType') === 'photographer'
+        ? 'creator'
         : attendeeId
         ? 'attendee'
-        : 'photographer';
+        : 'creator';
 
     if (!targetId) {
       return NextResponse.json({ error: 'Target ID required' }, { status: 400 });
     }
+
+    const normalizedFollowerType =
+      normalizeUserType(user.user_metadata?.user_type) === 'creator' ? 'creator' : 'attendee';
 
     const { error } = await supabase
       .from('follows')
@@ -165,7 +172,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     await serviceClient.from('audit_logs').insert({
-      actor_type: user.user_metadata?.user_type === 'photographer' ? 'photographer' : 'attendee',
+      actor_type: normalizedFollowerType,
       actor_id: user.id,
       action: 'follow_deleted',
       resource_type: 'follow',
@@ -205,11 +212,11 @@ export async function GET(request: NextRequest) {
     const targetType =
       searchParams.get('targetType') === 'attendee'
         ? 'attendee'
-        : searchParams.get('targetType') === 'photographer'
-        ? 'photographer'
+        : searchParams.get('targetType') === 'creator' || searchParams.get('targetType') === 'photographer'
+        ? 'creator'
         : attendeeId
         ? 'attendee'
-        : 'photographer';
+        : 'creator';
     const type = searchParams.get('type'); // 'check', 'following', 'followers'
 
     if (type === 'check' && targetId) {
@@ -227,7 +234,7 @@ export async function GET(request: NextRequest) {
 
     if (type === 'following') {
       const includeAttendees = searchParams.get('includeAttendees') === 'true';
-      // Get list of photographers user is following
+      // Get list of creators user is following
       const { data, count } = await supabase
         .from('follows')
         .select(`
@@ -241,7 +248,7 @@ export async function GET(request: NextRequest) {
           )
         `, { count: 'exact' })
         .eq('follower_id', user.id)
-        .eq('following_type', 'photographer')
+        .in('following_type', ['creator', 'photographer'])
         .eq('status', 'active')
         .order('created_at', { ascending: false });
 
@@ -272,11 +279,11 @@ export async function GET(request: NextRequest) {
     }
 
     if (type === 'followers') {
-      // Get followers for a photographer (either by ID or current user)
-      let targetPhotographerId = photographerId;
+      // Get followers for a creator (either by ID or current user)
+      let targetCreatorId = photographerId;
       
-      // If no photographerId provided, get current user's followers (for photographers)
-      if (!targetPhotographerId) {
+      // If no photographerId provided, get current user's followers (for creators)
+      if (!targetCreatorId) {
         const { data: photographer } = await supabase
           .from('photographers')
           .select('id')
@@ -284,30 +291,30 @@ export async function GET(request: NextRequest) {
           .single();
         
         if (!photographer) {
-          return NextResponse.json({ error: 'Not a photographer' }, { status: 403 });
+          return NextResponse.json({ error: 'Not a creator' }, { status: 403 });
         }
-        targetPhotographerId = photographer.id;
+        targetCreatorId = photographer.id;
       } else {
         // Check if photographer exists and profile is public
         const { data: photographer } = await supabase
           .from('photographers')
           .select('id, is_public_profile, public_profile_slug, user_id')
-          .or(`id.eq.${targetPhotographerId},public_profile_slug.eq.${targetPhotographerId}`)
+          .or(`id.eq.${targetCreatorId},public_profile_slug.eq.${targetCreatorId}`)
           .single();
 
         if (!photographer) {
-          return NextResponse.json({ error: 'Photographer not found' }, { status: 404 });
+          return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
         }
 
         // Allow access if:
         // 1. User is viewing their own followers, OR
-        // 2. Photographer profile is public
+        // 2. Creator profile is public
         const isOwnProfile = user && photographer.user_id === user.id;
         if (!isOwnProfile && !photographer.is_public_profile) {
           return NextResponse.json({ error: 'Profile is private' }, { status: 403 });
         }
         
-        targetPhotographerId = photographer.id;
+        targetCreatorId = photographer.id;
       }
 
       const { data, count } = await supabase
@@ -322,11 +329,11 @@ export async function GET(request: NextRequest) {
             id, display_name, face_tag, profile_photo_url, email
           )
         `, { count: 'exact' })
-        .eq('following_id', targetPhotographerId)
+        .eq('following_id', targetCreatorId)
         .eq('status', 'active')
         .order('created_at', { ascending: false });
 
-      // Calculate stats for photographer's own followers
+      // Calculate stats for creator's own followers
       const now = new Date();
       const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
       const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);

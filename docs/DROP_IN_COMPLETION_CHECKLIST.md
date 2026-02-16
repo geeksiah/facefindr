@@ -173,7 +173,7 @@ EXPO_PUBLIC_APP_URL=https://your-app.com
 ### Issue: Drop-in photos not matching
 **Solution**: 
 - Verify attendee faces are indexed in global collection
-- Check AWS Rekognition collection exists: `facefindr-attendees`
+- Check AWS Rekognition collection exists: `ferchr-attendees`
 - Verify face registration API is working
 - Check processing logs for errors
 

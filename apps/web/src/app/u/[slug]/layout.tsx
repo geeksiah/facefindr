@@ -25,26 +25,26 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
   if (!attendee) {
     return {
-      title: 'Profile | FaceFindr',
-      description: 'Find your photos from events on FaceFindr',
+      title: 'Profile | Ferchr',
+      description: 'Find your photos from events on Ferchr',
     };
   }
 
-  const displayName = attendee.display_name || 'FaceFindr User';
+  const displayName = attendee.display_name || 'Ferchr User';
   const profileImage = attendee.profile_photo_url || `${APP_URL}/og-default.png`;
-  const description = `Connect with ${displayName} on FaceFindr. FaceTag: ${attendee.face_tag}. Find and share event photos with AI-powered face recognition.`;
+  const description = `Connect with ${displayName} on Ferchr. FaceTag: ${attendee.face_tag}. Find and share event photos with AI-powered face recognition.`;
   
   // Generate OG image URL
   const ogImageUrl = `${APP_URL}/api/og/profile?faceTag=${encodeURIComponent(attendee.face_tag || '')}&name=${encodeURIComponent(displayName)}${attendee.profile_photo_url ? `&photo=${encodeURIComponent(attendee.profile_photo_url)}` : ''}`;
 
   return {
-    title: `${displayName} | FaceFindr`,
+    title: `${displayName} | Ferchr`,
     description,
     openGraph: {
-      title: `${displayName} on FaceFindr`,
+      title: `${displayName} on Ferchr`,
       description,
       url: `${APP_URL}/u/${slug}`,
-      siteName: 'FaceFindr',
+      siteName: 'Ferchr',
       images: [
         {
           url: profileImage,
@@ -56,14 +56,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
           url: ogImageUrl,
           width: 1200,
           height: 630,
-          alt: `${displayName} on FaceFindr`,
+          alt: `${displayName} on Ferchr`,
         },
       ],
       type: 'profile',
     },
     twitter: {
       card: 'summary_large_image',
-      title: `${displayName} on FaceFindr`,
+      title: `${displayName} on Ferchr`,
       description,
       images: [ogImageUrl],
     },

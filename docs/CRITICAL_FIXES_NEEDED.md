@@ -165,7 +165,7 @@
 
 ---
 
-### 10. Photographer Web Settings Page Not Opening
+### 10. Creator Web Settings Page Not Opening
 
 **Problem:** Settings page not accessible.
 

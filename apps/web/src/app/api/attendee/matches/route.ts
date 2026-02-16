@@ -56,22 +56,26 @@ export async function GET() {
       .eq('attendee_id', user.id)
       .order('matched_at', { ascending: false });
 
-    const mediaIds = (matches || [])
-      .map((match: any) => match.media?.id)
-      .filter(Boolean);
+    const mediaIds = (matches || []).map((match: any) => match.media?.id).filter(Boolean);
+    const eventIds = Array.from(new Set((matches || []).map((match: any) => match.event_id).filter(Boolean)));
 
     const { data: entitlements } = await supabase
       .from('entitlements')
       .select('media_id')
       .eq('attendee_id', user.id)
-      .in('media_id', mediaIds.length ? mediaIds : ['00000000-0000-0000-0000-000000000000']);
+      .in('event_id', eventIds.length ? eventIds : ['00000000-0000-0000-0000-000000000000']);
     const purchased = new Set(entitlements?.map((e: any) => e.media_id) || []);
 
+    const PREVIEW_LIMIT_PER_EVENT = 6;
     const grouped: Record<string, any> = {};
+    const totalByEvent = new Map<string, number>();
+
     for (const match of matches || []) {
       const event = match.events as any;
       const media = match.media as any;
       if (!event || !media) continue;
+
+      totalByEvent.set(event.id, (totalByEvent.get(event.id) || 0) + 1);
 
       if (!grouped[event.id]) {
         const coverPath = event.cover_image_url?.startsWith('/')
@@ -80,7 +84,8 @@ export async function GET() {
         const coverImage = coverPath?.startsWith('http')
           ? coverPath
           : coverPath
-          ? serviceClient.storage.from('covers').getPublicUrl(coverPath).data.publicUrl
+          ? serviceClient.storage.from('covers').getPublicUrl(coverPath).data.publicUrl ||
+            serviceClient.storage.from('events').getPublicUrl(coverPath).data.publicUrl
           : null;
 
         grouped[event.id] = {
@@ -97,16 +102,17 @@ export async function GET() {
         };
       }
 
+      if (grouped[event.id].photos.length >= PREVIEW_LIMIT_PER_EVENT) {
+        continue;
+      }
+
       const rawThumbnailPath = media.thumbnail_path || media.storage_path;
       const thumbnailPath = rawThumbnailPath?.startsWith('/') ? rawThumbnailPath.slice(1) : rawThumbnailPath;
-      const { data: thumbData } = thumbnailPath
-        ? await serviceClient.storage.from('media').createSignedUrl(thumbnailPath, 3600)
-        : { data: null };
 
       grouped[event.id].photos.push({
         id: media.id,
-        url: media.storage_path,
-        thumbnailUrl: thumbData?.signedUrl || null,
+        thumbnailPath,
+        storagePath: media.storage_path,
         eventId: event.id,
         eventName: event.name,
         eventDate: event.event_date,
@@ -119,9 +125,51 @@ export async function GET() {
       });
     }
 
+    const previewPaths = Array.from(
+      new Set(
+        Object.values(grouped)
+          .flatMap((group: any) => group.photos.map((photo: any) => photo.thumbnailPath))
+          .filter(Boolean)
+      )
+    );
+
+    const signedUrlEntries = await Promise.all(
+      previewPaths.map(async (path) => {
+        if (typeof path !== 'string') return [String(path), null] as const;
+        const cleanPath = path.startsWith('/') ? path.slice(1) : path;
+        const { data } = await serviceClient.storage.from('media').createSignedUrl(cleanPath, 3600);
+        return [path, data?.signedUrl || null] as const;
+      })
+    );
+    const signedUrlMap = new Map<string, string | null>(signedUrlEntries);
+
     const eventGroups = Object.values(grouped).map((group: any) => ({
       ...group,
-      totalPhotos: group.photos.length,
+      photos: group.photos
+        .map((photo: any) => {
+        const signedThumbnail = photo.thumbnailPath ? signedUrlMap.get(photo.thumbnailPath) : null;
+
+        if (!signedThumbnail) {
+          return null;
+        }
+
+        return {
+          id: photo.id,
+          url: signedThumbnail,
+          thumbnailUrl: signedThumbnail,
+          eventId: photo.eventId,
+          eventName: photo.eventName,
+          eventDate: photo.eventDate,
+          eventLocation: photo.eventLocation,
+          photographerName: photo.photographerName,
+          matchedAt: photo.matchedAt,
+          confidence: photo.confidence,
+          isPurchased: photo.isPurchased,
+          isWatermarked: photo.isWatermarked,
+        };
+      })
+        .filter(Boolean),
+      totalPhotos: totalByEvent.get(group.id) || group.photos.length,
     }));
 
     return NextResponse.json({

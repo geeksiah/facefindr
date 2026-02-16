@@ -50,7 +50,7 @@
 ### 1. Index Attendee Faces to Global Collection ✅ COMPLETE
 **Priority: High**
 
-✅ **COMPLETED**: Attendee faces are now automatically indexed in the global `facefindr-attendees` collection.
+✅ **COMPLETED**: Attendee faces are now automatically indexed in the global `ferchr-attendees` collection.
 
 **Implementation:**
 - ✅ `/api/faces/register` already indexes to `ATTENDEE_COLLECTION_ID` (global collection)

@@ -43,7 +43,7 @@ export interface CalculateFeesParams {
  * 
  * This is the single source of truth for fee calculations.
  * It considers:
- * - Photographer's subscription plan (for platform fee base rate)
+ * - Creator's subscription plan (for platform fee base rate)
  * - Region configuration (can override platform fee, adds transaction fees)
  * - Payment provider (affects provider fees)
  * - Currency (affects provider fees and conversion)

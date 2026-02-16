@@ -29,7 +29,7 @@ interface AttendeeProfile {
 
 export default function AttendeeProfilePage() {
   const params = useParams();
-  const slug = params.slug as string;
+  const slug = params?.slug as string;
 
   const [profile, setProfile] = useState<AttendeeProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -149,7 +149,7 @@ export default function AttendeeProfilePage() {
           {/* Add Connection CTA (for photographers viewing) */}
           <div className="mt-8 p-6 bg-muted rounded-2xl max-w-md mx-auto">
             <p className="text-secondary text-sm">
-              This is a FaceFindr user profile. Photographers can add this user as a connection to easily tag them in photos.
+              This is a Ferchr user profile. Creators can add this user as a connection to easily tag them in photos.
             </p>
           </div>
         </div>
@@ -189,7 +189,7 @@ export default function AttendeeProfilePage() {
             </div>
             
             <p className="text-sm text-secondary text-center mb-4">
-              Scan to view this profile in the FaceFindr app
+              Scan to view this profile in the Ferchr app
             </p>
             
             <button
@@ -218,4 +218,5 @@ export default function AttendeeProfilePage() {
     </div>
   );
 }
+
 

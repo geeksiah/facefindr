@@ -135,10 +135,10 @@ export default function RegisterPage() {
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
-                onClick={() => setValue('userType', 'photographer', { shouldValidate: true })}
+                onClick={() => setValue('userType', 'creator', { shouldValidate: true })}
                 className={cn(
                   'flex flex-col items-center gap-2 rounded-xl border-2 p-4 transition-all',
-                  selectedUserType === 'photographer'
+                  selectedUserType === 'creator'
                     ? 'border-accent bg-accent/5'
                     : 'border-border hover:border-border/80 hover:bg-muted/50'
                 )}
@@ -146,16 +146,16 @@ export default function RegisterPage() {
                 <Camera
                   className={cn(
                     'h-6 w-6',
-                    selectedUserType === 'photographer' ? 'text-accent' : 'text-secondary'
+                    selectedUserType === 'creator' ? 'text-accent' : 'text-secondary'
                   )}
                 />
                 <span
                   className={cn(
                     'text-sm font-medium',
-                    selectedUserType === 'photographer' ? 'text-accent' : 'text-foreground'
+                    selectedUserType === 'creator' ? 'text-accent' : 'text-foreground'
                   )}
                 >
-                  Photographer
+                  Creator
                 </span>
                 <span className="text-xs text-muted-foreground">Upload & sell photos</span>
               </button>

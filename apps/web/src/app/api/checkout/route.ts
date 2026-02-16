@@ -179,7 +179,7 @@ export async function POST(request: NextRequest) {
 
     if (!subscription) {
       return NextResponse.json(
-        { error: 'Photographer must have an active subscription to accept payments' },
+        { error: 'Creator must have an active subscription to accept payments' },
         { status: 403 }
       );
     }
@@ -267,7 +267,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json(
         { 
-          error: 'Photographer has not set up payments for any available method',
+          error: 'Creator has not set up payments for any available method',
           availableGateways: gatewaySelection.availableGateways,
         },
         { status: 400 }

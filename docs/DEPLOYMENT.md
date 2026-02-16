@@ -1,6 +1,6 @@
-# FaceFindr Deployment Guide
+# Ferchr Deployment Guide
 
-Complete guide for deploying FaceFindr to production across various hosting platforms.
+Complete guide for deploying Ferchr to production across various hosting platforms.
 
 ## Architecture Overview
 
@@ -12,7 +12,7 @@ Complete guide for deploying FaceFindr to production across various hosting plat
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────────────┐  │
 │  │   Web App    │    │    Admin     │    │     Mobile App       │  │
 │  │   (Vercel)   │    │   (Vercel)   │    │  (App Store/Play)    │  │
-│  │ facefindr.com│    │admin.facef...│    │                      │  │
+│  │ ferchr.com│    │admin.facef...│    │                      │  │
 │  └──────┬───────┘    └──────┬───────┘    └──────────┬───────────┘  │
 │         │                   │                       │              │
 │         └───────────────────┼───────────────────────┘              │
@@ -69,16 +69,16 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOi...
 AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=AKIA...
 AWS_SECRET_ACCESS_KEY=xxx
-AWS_REKOGNITION_COLLECTION_ID=facefindr-faces
+AWS_REKOGNITION_COLLECTION_ID=ferchr-faces
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_xxx
 STRIPE_SECRET_KEY=sk_live_xxx
 STRIPE_WEBHOOK_SECRET=whsec_xxx
-NEXT_PUBLIC_APP_URL=https://facefindr.com
+NEXT_PUBLIC_APP_URL=https://ferchr.com
 ```
 
 **3. Configure Domain**
 - Go to Project → Settings → Domains
-- Add your custom domain (e.g., `facefindr.com`)
+- Add your custom domain (e.g., `ferchr.com`)
 - Update DNS records as instructed
 
 ### Deploy Admin Dashboard (Separate Project)
@@ -94,11 +94,11 @@ vercel
 NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOi...  # SERVICE ROLE, not anon!
 ADMIN_JWT_SECRET=your-secure-random-string-64-chars
-NEXT_PUBLIC_APP_URL=https://admin.facefindr.com
+NEXT_PUBLIC_APP_URL=https://admin.ferchr.com
 ```
 
 **3. Configure Domain**
-- Add `admin.facefindr.com` as custom domain
+- Add `admin.ferchr.com` as custom domain
 - Keep this URL private/internal
 
 ### Vercel Configuration Files
@@ -169,8 +169,8 @@ NEXT_PUBLIC_APP_URL=https://admin.facefindr.com
 
 **1. Create ECR Repository**
 ```bash
-aws ecr create-repository --repository-name facefindr-web
-aws ecr create-repository --repository-name facefindr-admin
+aws ecr create-repository --repository-name ferchr-web
+aws ecr create-repository --repository-name ferchr-admin
 ```
 
 **2. Build and Push Docker Images**
@@ -203,18 +203,18 @@ CMD ["node", "server.js"]
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <account-id>.dkr.ecr.us-east-1.amazonaws.com
 
 # Build and push
-docker build -t facefindr-web ./apps/web
-docker tag facefindr-web:latest <account-id>.dkr.ecr.us-east-1.amazonaws.com/facefindr-web:latest
-docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/facefindr-web:latest
+docker build -t ferchr-web ./apps/web
+docker tag ferchr-web:latest <account-id>.dkr.ecr.us-east-1.amazonaws.com/ferchr-web:latest
+docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/ferchr-web:latest
 ```
 
 **3. Create App Runner Service**
 ```bash
 aws apprunner create-service \
-  --service-name facefindr-web \
+  --service-name ferchr-web \
   --source-configuration '{
     "ImageRepository": {
-      "ImageIdentifier": "<account-id>.dkr.ecr.us-east-1.amazonaws.com/facefindr-web:latest",
+      "ImageIdentifier": "<account-id>.dkr.ecr.us-east-1.amazonaws.com/ferchr-web:latest",
       "ImageRepositoryType": "ECR"
     }
   }' \
@@ -266,7 +266,7 @@ applications:
 ```bash
 # Create launch template
 aws ec2 create-launch-template \
-  --launch-template-name facefindr-template \
+  --launch-template-name ferchr-template \
   --launch-template-data '{
     "ImageId": "ami-0abcdef1234567890",
     "InstanceType": "t3.medium",
@@ -283,15 +283,15 @@ yum install -y nodejs git
 npm install -g pnpm pm2
 
 cd /home/ec2-user
-git clone https://github.com/your-repo/facefindr.git
-cd facefindr
+git clone https://github.com/your-repo/ferchr.git
+cd ferchr
 
 # Install and build
 pnpm install
 pnpm build
 
 # Start with PM2
-pm2 start apps/web/node_modules/.bin/next --name "facefindr-web" -- start
+pm2 start apps/web/node_modules/.bin/next --name "ferchr-web" -- start
 pm2 startup
 pm2 save
 ```
@@ -315,7 +315,7 @@ pm2 save
 
 ```yaml
 # .do/app.yaml
-name: facefindr
+name: ferchr
 region: nyc
 services:
   - name: web
@@ -360,16 +360,16 @@ apt install -y nodejs nginx certbot python3-certbot-nginx
 npm install -g pnpm pm2
 
 # Clone and setup
-git clone https://github.com/your-repo/facefindr.git
-cd facefindr
+git clone https://github.com/your-repo/ferchr.git
+cd ferchr
 pnpm install
 pnpm build
 
 # Configure Nginx
-cat > /etc/nginx/sites-available/facefindr << 'EOF'
+cat > /etc/nginx/sites-available/ferchr << 'EOF'
 server {
     listen 80;
-    server_name facefindr.com;
+    server_name ferchr.com;
     
     location / {
         proxy_pass http://localhost:3000;
@@ -383,7 +383,7 @@ server {
 
 server {
     listen 80;
-    server_name admin.facefindr.com;
+    server_name admin.ferchr.com;
     
     location / {
         proxy_pass http://localhost:3001;
@@ -396,11 +396,11 @@ server {
 }
 EOF
 
-ln -s /etc/nginx/sites-available/facefindr /etc/nginx/sites-enabled/
+ln -s /etc/nginx/sites-available/ferchr /etc/nginx/sites-enabled/
 nginx -t && systemctl reload nginx
 
 # SSL with Let's Encrypt
-certbot --nginx -d facefindr.com -d admin.facefindr.com
+certbot --nginx -d ferchr.com -d admin.ferchr.com
 
 # Start apps with PM2
 cd apps/web && pm2 start pnpm --name "web" -- start
@@ -448,7 +448,7 @@ railway up
 ```yaml
 services:
   - type: web
-    name: facefindr-web
+    name: ferchr-web
     env: node
     region: oregon
     buildCommand: pnpm install && pnpm build
@@ -460,7 +460,7 @@ services:
         value: production
 
   - type: web
-    name: facefindr-admin
+    name: ferchr-admin
     env: node
     region: oregon
     rootDir: apps/admin
@@ -493,11 +493,12 @@ supabase db push
 
 **3. Configure Auth**
 - Go to Authentication → URL Configuration
-- Set Site URL: `https://facefindr.com`
+- Set Site URL: `https://ferchr.com`
 - Add Redirect URLs:
-  - `https://facefindr.com/**`
-  - `https://admin.facefindr.com/**`
-  - `facefindr://` (for mobile deep links)
+  - `https://ferchr.com/**`
+  - `https://admin.ferchr.com/**`
+  - `ferchr://` (for mobile deep links)
+  - `facefindr://` (legacy deep-link compatibility window)
 
 **4. Enable Realtime**
 ```sql
@@ -514,6 +515,16 @@ ALTER PUBLICATION supabase_realtime ADD TABLE notifications;
 ---
 
 ## Mobile App Deployment
+
+### Mobile Identity Cutover
+
+1. Canonical app identity is now:
+   1. Name: `Ferchr`
+   2. Slug: `ferchr`
+   3. Scheme: `ferchr://` (legacy `facefindr://` still accepted in-app)
+   4. Android package: `com.ferchr.app`
+   5. iOS bundle ID: `com.ferchr.app`
+2. Because bundle/package IDs changed, prior installs under old identifiers require a fresh install path.
 
 ### iOS (App Store)
 

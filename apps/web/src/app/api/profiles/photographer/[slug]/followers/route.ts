@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 /**
- * Get Photographer Followers Count
+ * Get Creator Followers Count
  * 
  * Get the follower count for a photographer
  */
@@ -26,7 +26,7 @@ export async function GET(
       .single();
 
     if (!photographer) {
-      return NextResponse.json({ error: 'Photographer not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
     }
 
     // Get actual follower count from follows table (more accurate than cached count)

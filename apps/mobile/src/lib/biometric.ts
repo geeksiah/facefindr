@@ -161,7 +161,7 @@ export async function authenticateForAppUnlock(): Promise<boolean> {
       return true; // No biometric auth required
     }
     
-    const result = await authenticateWithBiometric('Unlock FaceFindr');
+    const result = await authenticateWithBiometric('Unlock Ferchr');
     return result.success;
   } catch (error) {
     console.error('App unlock authentication error:', error);

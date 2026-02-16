@@ -204,7 +204,7 @@ export default function SearchScreen() {
     }
   };
 
-  const renderPhotographer = ({ item }: { item: SearchResult }) => {
+  const renderCreator = ({ item }: { item: SearchResult }) => {
     const isFollowing = followingIds.has(item.id);
     
     return (
@@ -213,7 +213,12 @@ export default function SearchScreen() {
           styles.resultCard,
           pressed && styles.resultCardPressed,
         ]}
-        onPress={() => router.push(`/p/${item.public_profile_slug || item.id}`)}
+        onPress={() =>
+          router.push({
+            pathname: '/p/[slug]',
+            params: { slug: item.public_profile_slug || item.id },
+          })
+        }
       >
         {item.profile_photo_url ? (
           <Image source={{ uri: item.profile_photo_url }} style={styles.avatar} />
@@ -324,7 +329,7 @@ export default function SearchScreen() {
             onPress={() => setSearchType(type)}
           >
             <Text style={[styles.filterTabText, searchType === type && styles.filterTabTextActive]}>
-              {type === 'all' ? 'All' : type === 'photographers' ? 'Photographers' : 'Users'}
+              {type === 'all' ? 'All' : type === 'photographers' ? 'Creators' : 'Users'}
             </Text>
           </TouchableOpacity>
         ))}
@@ -343,9 +348,9 @@ export default function SearchScreen() {
             <View style={styles.emptyIcon}>
               <AtSign size={48} color={colors.secondary} strokeWidth={1.5} />
             </View>
-            <Text style={styles.emptyTitle}>Search FaceFindr</Text>
+            <Text style={styles.emptyTitle}>Search Ferchr</Text>
             <Text style={styles.emptyDescription}>
-              Find photographers and users by their name or FaceTag
+              Find creators and users by their name or FaceTag
             </Text>
           </View>
         </TouchableWithoutFeedback>
@@ -361,13 +366,13 @@ export default function SearchScreen() {
       ) : (
         <FlatList
           data={[
-            ...(searchType !== 'users' ? results.photographers.map(p => ({ ...p, type: 'photographer' })) : []),
+            ...(searchType !== 'users' ? results.photographers.map(p => ({ ...p, type: 'creator' })) : []),
             ...(searchType !== 'photographers' ? results.users.map(u => ({ ...u, type: 'user' })) : []),
           ]}
           keyExtractor={(item) => `${item.type}-${item.id}`}
           renderItem={({ item }) => 
-            item.type === 'photographer' 
-              ? renderPhotographer({ item }) 
+            item.type === 'creator' 
+              ? renderCreator({ item }) 
               : renderUser({ item })
           }
           contentContainerStyle={styles.resultsList}

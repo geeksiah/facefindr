@@ -28,7 +28,7 @@ export const registerSchema = z
       .min(4, 'Username must be at least 4 characters')
       .max(8, 'Username must be at most 8 characters')
       .regex(/^[a-z][a-z0-9]*$/, 'Username must start with a letter and contain only letters/numbers'),
-    userType: z.enum(['photographer', 'attendee'], {
+    userType: z.enum(['creator', 'photographer', 'attendee'], {
       required_error: 'Please select an account type',
     }),
     acceptTerms: z.boolean().refine((val) => val === true, {

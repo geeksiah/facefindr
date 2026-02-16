@@ -1,4 +1,4 @@
-import type { Photographer, Attendee } from '@facefind/shared/types';
+import type { Creator, Attendee } from '@facefind/shared/types';
 import type { User } from '@supabase/supabase-js';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
@@ -7,11 +7,11 @@ import { persist } from 'zustand/middleware';
 // TYPES
 // ============================================
 
-export type UserType = 'photographer' | 'attendee';
+export type UserType = 'creator' | 'photographer' | 'attendee';
 
 export interface AuthUser extends User {
   userType?: UserType;
-  profile?: Photographer | Attendee | null;
+  profile?: Creator | Attendee | null;
 }
 
 interface AuthState {

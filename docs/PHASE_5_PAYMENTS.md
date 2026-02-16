@@ -1,6 +1,6 @@
 # Phase 5: Payment Integration
 
-This document describes the payment system implementation for FaceFindr, supporting multiple payment providers for global coverage.
+This document describes the payment system implementation for Ferchr, supporting multiple payment providers for global coverage.
 
 ## Payment Providers
 
@@ -91,10 +91,10 @@ CREATE TABLE payouts (
 
 ## Payment Flow
 
-### 1. Photographer Onboarding
+### 1. Creator Onboarding
 
 ```
-Photographer → Settings → Payments → Add Payment Method
+Creator → Settings → Payments → Add Payment Method
                                            ↓
                               Select Provider (Stripe/Flutterwave/PayPal)
                                            ↓
@@ -137,7 +137,7 @@ Attendee → Event → Select Photos → Checkout
 - Gross: $10.00
 - Platform fee: $1.50 (15%)
 - Stripe fee: ~$0.59 (2.9% + $0.30)
-- Photographer receives: ~$7.91
+- Creator receives: ~$7.91
 
 ## Environment Variables
 

@@ -36,7 +36,7 @@ apps/mobile/
 │   │   ├── events.tsx          # My Events
 │   │   ├── notifications.tsx   # Notifications
 │   │   └── profile.tsx         # Profile & Settings
-│   └── (photographer)/         # Photographer tabs
+│   └── (photographer)/         # Creator tabs
 │       ├── _layout.tsx         # Tab navigator
 │       ├── index.tsx           # Dashboard
 │       ├── events.tsx          # Events list
@@ -77,7 +77,7 @@ apps/mobile/
 4. **Notifications** - Photo drops, purchase confirmations, promotions
 5. **Profile** - FaceTag display, QR code sharing, settings
 
-### For Photographers
+### For Creators
 
 1. **Dashboard** - Revenue, views, photos, active events overview
 2. **Events** - List, filter, and manage events
@@ -90,7 +90,7 @@ apps/mobile/
 1. **QR Code Scanning** - Scan event QR codes for quick access
 2. **Manual Code Entry** - Enter event access codes
 3. **Push Notifications** - Real-time alerts for photo drops, payouts, etc.
-4. **Deep Linking** - `facefindr://` URL scheme support
+4. **Deep Linking** - `ferchr://` URL scheme support
 
 ## Authentication
 
@@ -131,18 +131,18 @@ apps/mobile/
 
 ## Deep Linking
 
-### URL Scheme: `facefindr://`
+### URL Scheme: `ferchr://`
 
-- `facefindr://event/{id}` - Open event page
-- `facefindr://s/{code}` - Short code redirect
-- `facefindr://profile/{faceTag}` - View profile
+- `ferchr://event/{id}` - Open event page
+- `ferchr://s/{code}` - Short code redirect
+- `ferchr://profile/{faceTag}` - View profile
 
 ### Web Links
 
-- `https://facefindr.com/e/{slug}` - Event page
-- `https://facefindr.com/s/{code}` - Short code
-- `https://facefindr.com/p/{slug}` - Photographer profile
-- `https://facefindr.com/u/{slug}` - User profile
+- `https://ferchr.com/e/{slug}` - Event page
+- `https://ferchr.com/s/{code}` - Short code
+- `https://ferchr.com/p/{slug}` - Creator profile
+- `https://ferchr.com/u/{slug}` - User profile
 
 ## Development
 
@@ -188,8 +188,8 @@ Create `.env` file:
 ```
 EXPO_PUBLIC_SUPABASE_URL=your_supabase_url
 EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-EXPO_PUBLIC_API_URL=https://api.facefindr.com
-EXPO_PUBLIC_APP_URL=https://facefindr.com
+EXPO_PUBLIC_API_URL=https://api.ferchr.com
+EXPO_PUBLIC_APP_URL=https://ferchr.com
 ```
 
 ## TODO

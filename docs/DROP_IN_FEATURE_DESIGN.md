@@ -11,12 +11,12 @@ Enable users to discover photos of themselves uploaded by people outside their c
 ## Feature Overview
 
 ### Free Tier
-- Find photos uploaded in FaceFindr by **contacts only**
+- Find photos uploaded in Ferchr by **contacts only**
 - Receive notifications from contacts
 - Basic photo discovery within contact network
 
 ### Paid Tier (Subscription or Pay-Per-Use)
-- Find photos uploaded in FaceFindr by **non-contacts**
+- Find photos uploaded in Ferchr by **non-contacts**
 - Find photos from external social media platforms
 - Find photos from external websites
 - Receive "drop-in" notifications from non-contacts
@@ -34,7 +34,7 @@ Enable users to discover photos of themselves uploaded by people outside their c
 ### Scenario: Kojo → Abena (Crush Drop-In)
 
 1. **Kojo sees Abena** (not in contacts, shy to approach)
-2. **Kojo takes photo** and opens FaceFindr
+2. **Kojo takes photo** and opens Ferchr
 3. **Kojo uploads photo** → System detects Abena not in contacts
 4. **Kojo pays drop-in fee** ($2.99) to make upload discoverable
 5. **Kojo adds message** (optional, 200 char limit)
@@ -207,7 +207,7 @@ CREATE INDEX idx_contacts_contact ON contacts(contact_id);
 ## Implementation Phases
 
 ### Phase 1: Core Drop-In (MVP) - 4 weeks
-**Goal**: Basic drop-in upload and discovery within FaceFindr app
+**Goal**: Basic drop-in upload and discovery within Ferchr app
 
 1. **Database Schema**
    - Create `drop_in_photos`, `drop_in_notifications`, `drop_in_matches` tables

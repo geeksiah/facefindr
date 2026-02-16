@@ -162,13 +162,13 @@ export default async function DashboardPage() {
   const [eventsResult, photosResult, transactionsResult, lastMonthTransactions] = await Promise.all([
     supabase
       .from('events')
-      .select('id, name, event_date, event_start_at_utc, event_timezone, status, media(id)', { count: 'exact' })
+      .select('id, name, event_date, event_start_at_utc, event_timezone, status, media:media(count)', { count: 'exact' })
       .eq('photographer_id', user.id)
       .order('created_at', { ascending: false })
       .limit(5),
     supabase
       .from('media')
-      .select('id', { count: 'exact' })
+      .select('id', { count: 'exact', head: true })
       .in('event_id', eventIds.length > 0 ? eventIds : ['00000000-0000-0000-0000-000000000000']),
     supabase
       .from('transactions')
@@ -231,7 +231,7 @@ export default async function DashboardPage() {
           year: 'numeric',
         }
       ),
-      photos: Array.isArray(event.media) ? event.media.length : 0,
+      photos: event.media?.[0]?.count || 0,
       status: event.status as 'draft' | 'active' | 'closed',
     })) || [];
 

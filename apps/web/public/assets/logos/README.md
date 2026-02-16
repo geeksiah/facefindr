@@ -1,4 +1,4 @@
-# FaceFindr Logo Assets
+# Ferchr Logo Assets
 
 Place your logo files in this directory. The app expects the following variations:
 
@@ -22,7 +22,7 @@ Place your logo files in this directory. The app expects the following variation
 - `icon-dark.svg` - Square icon, light colors (for dark mode)
 
 ### Wordmark Only
-- `wordmark.svg` - Text only "FaceFindr" (dark colors for light backgrounds)
+- `wordmark.svg` - Text only "Ferchr" (dark colors for light backgrounds)
 - `wordmark-dark.svg` - Text only (light colors for dark backgrounds)
 
 ## Recommended Dimensions

@@ -77,7 +77,7 @@ export function PayoutPreferences() {
 
   const fetchSettings = async () => {
     try {
-      const response = await fetch('/api/photographer/payout-settings');
+      const response = await fetch('/api/creator/payout-settings');
       const data = await response.json();
       
       if (response.ok) {
@@ -97,7 +97,7 @@ export function PayoutPreferences() {
     
     setSaving(true);
     try {
-      const response = await fetch('/api/photographer/payout-settings', {
+      const response = await fetch('/api/creator/payout-settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),

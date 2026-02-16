@@ -1,10 +1,10 @@
 # Plan Features Documentation
 
-This document describes all available feature codes for Photographer Plans and Drop-in Credits.
+This document describes all available feature codes for Creator Plans and Drop-in Credits.
 
 ## Overview
 
-FaceFindr uses a modular pricing system where features can be assigned to any plan with custom values. Features are stored in the `plan_features` table and assigned to plans via `plan_feature_assignments`.
+Ferchr uses a modular pricing system where features can be assigned to any plan with custom values. Features are stored in the `plan_features` table and assigned to plans via `plan_feature_assignments`.
 
 ### Plan Types
 - **photographer**: Subscription plans for photographers (monthly/yearly)
@@ -12,7 +12,7 @@ FaceFindr uses a modular pricing system where features can be assigned to any pl
 
 ---
 
-## Photographer Plan Feature Codes
+## Creator Plan Feature Codes
 
 These features apply to photographer subscription plans.
 
@@ -30,7 +30,7 @@ These features apply to photographer subscription plans.
 |------|------|------|-------------|----------------|
 | `face_recognition_enabled` | Face Recognition | boolean | Enable AI face recognition for events | Free: `false`, Pro: `true` |
 | `priority_processing` | Priority Processing | boolean | Get faster photo processing and indexing | Free: `false`, Business: `true` |
-| `api_access` | API Access | boolean | Access to FaceFindr API for integrations | Free: `false`, Enterprise: `true` |
+| `api_access` | API Access | boolean | Access to Ferchr API for integrations | Free: `false`, Enterprise: `true` |
 | `custom_watermark` | Custom Watermark | boolean | Upload and use custom watermarks on photos | Free: `false`, Pro: `true` |
 | `live_event_mode` | Live Event Mode | boolean | Enable real-time notifications during events | Free: `false`, Pro: `true` |
 | `advanced_analytics` | Advanced Analytics | boolean | Access to detailed analytics and insights | Free: `false`, Pro: `true` |
@@ -52,7 +52,7 @@ Drop-in is a **pay-as-you-go** system, NOT a subscription. Attendees purchase cr
 
 1. **Attendees buy credit packs** (e.g., 10 credits for $4.99, 25 credits for $9.99)
 2. **Credits are consumed** when using premium Drop-in features
-3. **Contact Search is FREE** - searching within FaceFindr events
+3. **Contact Search is FREE** - searching within Ferchr events
 4. **External Search costs 1 credit** - searching across external platforms
 
 ### Drop-in Feature Codes
@@ -145,7 +145,7 @@ Credit packs are defined in the billing page. Here's the current configuration:
 
 | Action | Cost |
 |--------|------|
-| Contact Search (within FaceFindr) | FREE |
+| Contact Search (within Ferchr) | FREE |
 | External Search (web/social) | 1 credit |
 | Gift a Drop-in notification | 1 credit |
 
@@ -164,7 +164,7 @@ In the Admin dashboard, when creating or editing a plan:
 
 ### Example Plan Configuration
 
-**Pro Plan (Photographer)**:
+**Pro Plan (Creator)**:
 ```json
 {
   "max_active_events": 5,
@@ -236,7 +236,7 @@ CREATE TABLE plan_feature_assignments (
 
 ## Quick Reference: All Feature Codes
 
-### Photographer Features
+### Creator Features
 - `max_active_events`
 - `max_photos_per_event`
 - `max_face_ops_per_event`

@@ -3,7 +3,7 @@ import { Metadata } from 'next';
 import { createServiceClient } from '@/lib/supabase/server';
 
 export async function generateEventMetadata(slug: string): Promise<Metadata> {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://facefindr.app';
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://ferchr.app';
 
   try {
     const supabase = createServiceClient();
@@ -36,15 +36,23 @@ export async function generateEventMetadata(slug: string): Promise<Metadata> {
 
     if (!event) {
       return {
-        title: 'FaceFindr Event',
-        description: 'Find your event photos on FaceFindr',
+        title: 'Ferchr Event',
+        description: 'Find your event photos on Ferchr',
       };
     }
 
     const photographer = event.photographers as any;
     const eventUrl = `${baseUrl}/e/${slug}`;
-    const coverImage = event.cover_image_url || `${baseUrl}/assets/logos/og-logo.png`;
-    const description = event.description || `Find your photos from ${event.name} on FaceFindr`;
+    const coverPath = event.cover_image_url?.startsWith('/')
+      ? event.cover_image_url.slice(1)
+      : event.cover_image_url;
+    const coverImage = coverPath?.startsWith('http')
+      ? coverPath
+      : coverPath
+      ? supabase.storage.from('covers').getPublicUrl(coverPath).data.publicUrl ||
+        supabase.storage.from('events').getPublicUrl(coverPath).data.publicUrl
+      : `${baseUrl}/assets/logos/og-logo.png`;
+    const description = event.description || `Find your photos from ${event.name} on Ferchr`;
     const isRestricted = event.is_public === false || event.is_publicly_listed === false || event.require_access_code === true;
 
     return {
@@ -55,7 +63,7 @@ export async function generateEventMetadata(slug: string): Promise<Metadata> {
         follow: !isRestricted,
       },
       keywords: [
-        'FaceFindr',
+        'Ferchr',
         'event photos',
         event.name,
         event.location || '',
@@ -66,7 +74,7 @@ export async function generateEventMetadata(slug: string): Promise<Metadata> {
         url: eventUrl,
         title: event.name,
         description,
-        siteName: 'FaceFindr',
+        siteName: 'Ferchr',
         images: [
           {
             url: coverImage,
@@ -91,7 +99,7 @@ export async function generateEventMetadata(slug: string): Promise<Metadata> {
     console.error('Error generating event metadata:', error);
     return {
       title: 'Event',
-      description: 'Find your event photos on FaceFindr',
+      description: 'Find your event photos on Ferchr',
     };
   }
 }

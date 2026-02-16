@@ -43,7 +43,7 @@ export default function HelpScreen() {
     },
     {
       question: 'Are my photos private?',
-      answer: 'Yes, only you can see your matched photos until you choose to share them. Photographers cannot access your personal data.',
+      answer: 'Yes, only you can see your matched photos until you choose to share them. Creators cannot access your personal data.',
     },
     {
       question: 'How do I contact a photographer?',
@@ -196,8 +196,8 @@ export default function HelpScreen() {
 
         {/* App Info */}
         <View style={styles.appInfo}>
-          <Text style={styles.appVersion}>FaceFindr v1.0.0</Text>
-          <Text style={styles.appCopyright}>© {new Date().getFullYear()} FaceFindr. All rights reserved.</Text>
+          <Text style={styles.appVersion}>Ferchr v1.0.0</Text>
+          <Text style={styles.appCopyright}>© {new Date().getFullYear()} Ferchr. All rights reserved.</Text>
         </View>
       </ScrollView>
     </View>

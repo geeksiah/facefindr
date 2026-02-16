@@ -11,10 +11,10 @@ Environment: local workspace (`c:\\Users\\abbas\\Documents\\facefindr`)
 4. Type checks:
 - `pnpm --filter @facefind/web type-check`
 - `pnpm --filter @facefind/admin type-check`
-- `pnpm --filter @facefindr/mobile type-check`
+- `pnpm --filter @ferchr/mobile type-check`
 - `pnpm type-check`
 5. Lint checks:
-- `pnpm --filter @facefindr/mobile lint -- --quiet`
+- `pnpm --filter @ferchr/mobile lint -- --quiet`
 - `pnpm --filter @facefind/web lint -- --quiet`
 - `pnpm --filter @facefind/admin lint -- --quiet`
 - `pnpm lint`
@@ -38,8 +38,8 @@ Environment: local workspace (`c:\\Users\\abbas\\Documents\\facefindr`)
 10. H10 normalization verification (current pass):
 - `pnpm --filter @facefind/web type-check`
 - `pnpm --filter @facefind/web lint -- --quiet`
-- `pnpm --filter @facefindr/mobile type-check`
-- `pnpm --filter @facefindr/mobile lint -- --quiet`
+- `pnpm --filter @ferchr/mobile type-check`
+- `pnpm --filter @ferchr/mobile lint -- --quiet`
 - `pnpm --filter @facefind/admin lint -- --quiet`
 - `pnpm build`
 - `pnpm type-check`
@@ -51,17 +51,17 @@ Environment: local workspace (`c:\\Users\\abbas\\Documents\\facefindr`)
 |---|---|---|
 | `pnpm --filter @facefind/web type-check` | Pass | `tsc --noEmit` completed |
 | `pnpm --filter @facefind/admin type-check` | Pass | `tsc --noEmit` completed |
-| `pnpm --filter @facefindr/mobile type-check` | Pass | `tsc --noEmit` completed |
+| `pnpm --filter @ferchr/mobile type-check` | Pass | `tsc --noEmit` completed |
 | `pnpm type-check` | Pass | turbo run type-check successful |
-| `pnpm --filter @facefindr/mobile lint -- --quiet` | Pass | no errors |
+| `pnpm --filter @ferchr/mobile lint -- --quiet` | Pass | no errors |
 | `pnpm --filter @facefind/web lint -- --quiet` | Pass | no errors, warnings only |
 | `pnpm --filter @facefind/admin lint -- --quiet` | Pass | no errors, warnings only |
 | `pnpm lint` | Pass | workspace lint completed; warning debt remains |
 | `pnpm build` | Pass | web/admin/shared build succeeded |
 | `pnpm --filter @facefind/web lint -- --quiet` | Pass | no errors |
 | `pnpm --filter @facefind/web type-check` | Pass | `tsc --noEmit` completed |
-| `pnpm --filter @facefindr/mobile lint -- --quiet` | Pass | no errors |
-| `pnpm --filter @facefindr/mobile type-check` | Pass | `tsc --noEmit` completed |
+| `pnpm --filter @ferchr/mobile lint -- --quiet` | Pass | no errors |
+| `pnpm --filter @ferchr/mobile type-check` | Pass | `tsc --noEmit` completed |
 
 ## Key Implemented Artifacts
 - `apps/web/src/lib/payments/webhook-ledger.ts`
@@ -112,3 +112,4 @@ Environment: local workspace (`c:\\Users\\abbas\\Documents\\facefindr`)
 
 ## Remaining Blocking Scope (for gate)
 - None (Critical/High gate blockers closed).
+

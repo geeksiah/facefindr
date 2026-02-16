@@ -21,7 +21,7 @@ import { useState, useEffect } from 'react';
 import { RatingsDisplay } from '@/components/photographer/ratings-display';
 import { FollowButton } from '@/components/social/follow-button';
 import { PhotoReactions } from '@/components/social/photo-reactions';
-import { TipPhotographer } from '@/components/social/tip-photographer';
+import { TipCreator } from '@/components/social/tip-photographer';
 import { Button } from '@/components/ui/button';
 
 interface EventPhoto {
@@ -56,7 +56,7 @@ interface EventDetails {
 export default function EventDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const eventId = params.id as string;
+  const eventId = params?.id as string;
 
   const [event, setEvent] = useState<EventDetails | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -190,7 +190,7 @@ export default function EventDetailPage() {
               </div>
             </div>
 
-            {/* Photographer Info */}
+            {/* Creator Info */}
             <div className="flex items-center gap-3 bg-white/10 backdrop-blur-sm rounded-xl px-4 py-2">
               {event.photographerAvatar ? (
                 <Image
@@ -460,7 +460,7 @@ export default function EventDetailPage() {
             className="bg-card rounded-2xl border border-border p-6 max-w-md w-full mx-4"
             onClick={(e) => e.stopPropagation()}
           >
-            <TipPhotographer
+            <TipCreator
               photographerId={event.photographerId || event.id}
               photographerName={event.photographerName}
               eventId={event.id}
@@ -480,3 +480,4 @@ export default function EventDetailPage() {
     </div>
   );
 }
+

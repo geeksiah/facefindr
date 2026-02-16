@@ -11,6 +11,7 @@ import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { trackView, ViewType, DeviceType } from '@/lib/analytics';
+import { normalizeUserType } from '@/lib/user-type';
 import { createClient } from '@/lib/supabase/server';
 
 // POST - Track a view
@@ -46,10 +47,10 @@ export async function POST(request: NextRequest) {
                         undefined;
 
     // Determine viewer type
-    let viewerType: 'photographer' | 'attendee' | 'anonymous' = 'anonymous';
+    let viewerType: 'creator' | 'attendee' | 'anonymous' = 'anonymous';
     if (user) {
       const userMeta = user.user_metadata;
-      viewerType = userMeta?.user_type || 'attendee';
+      viewerType = normalizeUserType(userMeta?.user_type) || 'attendee';
     }
 
     const viewId = await trackView({

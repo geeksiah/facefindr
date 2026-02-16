@@ -56,7 +56,7 @@ export type AdPlacementCode = typeof AD_PLACEMENTS[keyof typeof AD_PLACEMENTS];
 
 export interface GetAdOptions {
   placementCode: AdPlacementCode;
-  userType?: 'photographer' | 'attendee';
+  userType?: 'creator' | 'photographer' | 'attendee';
   userPlan?: string;
   userCountry?: string;
 }

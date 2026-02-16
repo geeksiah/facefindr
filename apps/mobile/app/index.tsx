@@ -523,7 +523,7 @@ export default function WelcomeScreen() {
               <Path d="M 6 18 Q 12 14 18 18" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" />
             </Svg>
           </View>
-          <Text style={styles.logoText}>FaceFindr</Text>
+          <Text style={styles.logoText}>Ferchr</Text>
         </View>
       </View>
 

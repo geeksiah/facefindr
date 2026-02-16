@@ -9,7 +9,7 @@ import { Logo } from '@/components/logo';
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirect = searchParams.get('redirect') || '/dashboard';
+  const redirect = searchParams?.get('redirect') || '/dashboard';
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -89,7 +89,7 @@ export default function LoginPage() {
                 required
                 autoComplete="email"
                 className="w-full px-4 py-3 rounded-xl bg-muted border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-colors"
-                placeholder="admin@facefindr.com"
+                placeholder="admin@ferchr.com"
               />
             </div>
 
@@ -147,3 +147,4 @@ export default function LoginPage() {
     </div>
   );
 }
+

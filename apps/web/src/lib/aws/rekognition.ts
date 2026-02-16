@@ -12,6 +12,7 @@ import {
   type FaceMatch,
   type BoundingBox,
   type AuditImage,
+  type SearchFacesByImageCommandOutput,
 } from '@aws-sdk/client-rekognition';
 
 // Initialize Rekognition client
@@ -24,10 +25,78 @@ export const rekognitionClient = new RekognitionClient({
 });
 
 // Collection IDs
-export const ATTENDEE_COLLECTION_ID = 'facefindr-attendees';
+export const ATTENDEE_COLLECTION_ID = 'ferchr-attendees';
+export const LEGACY_ATTENDEE_COLLECTION_ID = 'facefindr-attendees';
 
-// Collection naming convention: facefindr-event-{eventId}
-const getCollectionId = (eventId: string) => `facefindr-event-${eventId}`;
+// Collection naming convention: ferchr-event-{eventId}
+const EVENT_COLLECTION_PREFIX = 'ferchr-event-';
+const LEGACY_EVENT_COLLECTION_PREFIX = 'facefindr-event-';
+
+export const getEventCollectionId = (eventId: string) => `${EVENT_COLLECTION_PREFIX}${eventId}`;
+export const getLegacyEventCollectionId = (eventId: string) => `${LEGACY_EVENT_COLLECTION_PREFIX}${eventId}`;
+export const getEventCollectionIds = (eventId: string) => [getEventCollectionId(eventId), getLegacyEventCollectionId(eventId)];
+
+export async function searchEventCollectionWithFallback(
+  eventId: string,
+  imageBytes: Uint8Array,
+  maxFaces: number,
+  similarityThreshold: number
+): Promise<{ response: SearchFacesByImageCommandOutput; collectionId: string; usedLegacyCollection: boolean }> {
+  const primaryCollectionId = getEventCollectionId(eventId);
+  const legacyCollectionId = getLegacyEventCollectionId(eventId);
+
+  let primaryResponse: SearchFacesByImageCommandOutput | null = null;
+
+  try {
+    primaryResponse = await rekognitionClient.send(
+      new SearchFacesByImageCommand({
+        CollectionId: primaryCollectionId,
+        Image: { Bytes: imageBytes },
+        MaxFaces: maxFaces,
+        FaceMatchThreshold: similarityThreshold,
+      })
+    );
+
+    if ((primaryResponse.FaceMatches || []).length > 0) {
+      return { response: primaryResponse, collectionId: primaryCollectionId, usedLegacyCollection: false };
+    }
+  } catch (error: any) {
+    if (error.name !== 'ResourceNotFoundException') {
+      throw error;
+    }
+  }
+
+  try {
+    const legacyResponse = await rekognitionClient.send(
+      new SearchFacesByImageCommand({
+        CollectionId: legacyCollectionId,
+        Image: { Bytes: imageBytes },
+        MaxFaces: maxFaces,
+        FaceMatchThreshold: similarityThreshold,
+      })
+    );
+
+    if ((legacyResponse.FaceMatches || []).length > 0) {
+      await createEventCollection(eventId);
+      return { response: legacyResponse, collectionId: legacyCollectionId, usedLegacyCollection: true };
+    }
+
+    if (primaryResponse) {
+      return { response: primaryResponse, collectionId: primaryCollectionId, usedLegacyCollection: false };
+    }
+
+    return { response: legacyResponse, collectionId: legacyCollectionId, usedLegacyCollection: true };
+  } catch (error: any) {
+    if (error.name === 'ResourceNotFoundException') {
+      return {
+        response: primaryResponse || ({ $metadata: {}, FaceMatches: [] } as SearchFacesByImageCommandOutput),
+        collectionId: primaryCollectionId,
+        usedLegacyCollection: false,
+      };
+    }
+    throw error;
+  }
+}
 
 // ============================================
 // COLLECTION MANAGEMENT
@@ -39,7 +108,7 @@ const getCollectionId = (eventId: string) => `facefindr-event-${eventId}`;
  */
 export async function createEventCollection(eventId: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const collectionId = getCollectionId(eventId);
+    const collectionId = getEventCollectionId(eventId);
     
     await rekognitionClient.send(
       new CreateCollectionCommand({
@@ -63,13 +132,21 @@ export async function createEventCollection(eventId: string): Promise<{ success:
  */
 export async function deleteEventCollection(eventId: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const collectionId = getCollectionId(eventId);
-    
-    await rekognitionClient.send(
-      new DeleteCollectionCommand({
-        CollectionId: collectionId,
-      })
-    );
+    const collectionIds = getEventCollectionIds(eventId);
+
+    for (const collectionId of collectionIds) {
+      try {
+        await rekognitionClient.send(
+          new DeleteCollectionCommand({
+            CollectionId: collectionId,
+          })
+        );
+      } catch (innerError: any) {
+        if (innerError.name !== 'ResourceNotFoundException') {
+          throw innerError;
+        }
+      }
+    }
 
     return { success: true };
   } catch (error: any) {
@@ -149,7 +226,7 @@ export async function indexFacesFromImage(
   error?: string;
 }> {
   try {
-    const collectionId = getCollectionId(eventId);
+    const collectionId = getEventCollectionId(eventId);
 
     const response = await rekognitionClient.send(
       new IndexFacesCommand({
@@ -211,15 +288,11 @@ export async function searchFacesByImage(
   error?: string;
 }> {
   try {
-    const collectionId = getCollectionId(eventId);
-
-    const response = await rekognitionClient.send(
-      new SearchFacesByImageCommand({
-        CollectionId: collectionId,
-        Image: { Bytes: imageBytes },
-        MaxFaces: maxResults,
-        FaceMatchThreshold: similarityThreshold,
-      })
+    const { response } = await searchEventCollectionWithFallback(
+      eventId,
+      imageBytes,
+      maxResults,
+      similarityThreshold
     );
 
     const matches: FaceSearchResult[] = (response.FaceMatches || []).map((match: FaceMatch) => ({
@@ -263,14 +336,21 @@ export async function deleteFaces(
   }
 
   try {
-    const collectionId = getCollectionId(eventId);
-
-    await rekognitionClient.send(
-      new DeleteFacesCommand({
-        CollectionId: collectionId,
-        FaceIds: faceIds,
-      })
-    );
+    const collectionIds = getEventCollectionIds(eventId);
+    for (const collectionId of collectionIds) {
+      try {
+        await rekognitionClient.send(
+          new DeleteFacesCommand({
+            CollectionId: collectionId,
+            FaceIds: faceIds,
+          })
+        );
+      } catch (innerError: any) {
+        if (innerError.name !== 'ResourceNotFoundException') {
+          throw innerError;
+        }
+      }
+    }
 
     return { success: true };
   } catch (error: any) {

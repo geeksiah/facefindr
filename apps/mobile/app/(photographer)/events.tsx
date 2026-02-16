@@ -1,5 +1,5 @@
 /**
- * Photographer Events Screen
+ * Creator Events Screen
  * 
  * List and manage events.
  */

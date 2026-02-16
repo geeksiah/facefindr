@@ -1,6 +1,6 @@
 # Local Development Guide
 
-This guide explains how to run all FaceFindr applications locally for development and testing.
+This guide explains how to run all Ferchr applications locally for development and testing.
 
 ## Prerequisites
 
@@ -13,7 +13,7 @@ This guide explains how to run all FaceFindr applications locally for developmen
 ## Project Structure
 
 ```
-facefindr/
+ferchr/
 ├── apps/
 │   ├── web/          # Main web app (photographers & attendees)
 │   ├── admin/        # Admin dashboard (separate deployment)
@@ -97,7 +97,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=your-access-key
 AWS_SECRET_ACCESS_KEY=your-secret-key
-AWS_REKOGNITION_COLLECTION_ID=facefindr-faces
+AWS_REKOGNITION_COLLECTION_ID=ferchr-faces
 
 # Stripe
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_xxx
@@ -130,6 +130,12 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 EXPO_PUBLIC_API_URL=http://localhost:3000
 ```
 
+### Android Emulator Networking Notes
+
+1. The mobile app normalizes Android emulator localhost traffic to `10.0.2.2`.
+2. If `EXPO_PUBLIC_API_URL` points to `http://localhost:3000`, Android requests resolve to `http://10.0.2.2:3000`.
+3. Canonical app scheme is `ferchr://` with legacy `facefindr://` accepted during transition.
+
 ## Testing the Full Flow
 
 ### 1. Start All Services
@@ -152,7 +158,7 @@ cd apps/mobile && npx expo start
 
 | Application | URL | Purpose |
 |-------------|-----|---------|
-| Web App | http://localhost:3000 | Photographer/Attendee portal |
+| Web App | http://localhost:3000 | Creator/Attendee portal |
 | Admin Dashboard | http://localhost:3001 | Platform administration |
 | Expo DevTools | http://localhost:8081 | Mobile app development |
 | Supabase Studio | http://localhost:54323 | Database management (local) |
@@ -160,7 +166,7 @@ cd apps/mobile && npx expo start
 ### 3. Test Accounts
 
 **Admin Dashboard**
-- Email: `admin@facefindr.com`
+- Email: `admin@ferchr.com`
 - Password: `changeme123!`
 
 ### 4. Mobile App Testing

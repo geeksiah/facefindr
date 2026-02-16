@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { normalizeUserType } from '@/lib/user-type';
 import { createClient, createClientWithAccessToken } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
@@ -26,8 +27,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const userType = user.user_metadata?.user_type;
-    if (userType === 'photographer') {
+    const userType = normalizeUserType(user.user_metadata?.user_type);
+    if (userType === 'creator') {
       return NextResponse.json(
         { error: 'Drop-in discovery is only available for attendee profiles' },
         { status: 403 }

@@ -105,7 +105,7 @@ export async function GET(
       .eq('status', 'accepted');
     
     // Build all photographers list (owner + collaborators)
-    const allPhotographers = [
+    const allCreators = [
       photographer,
       ...(collaborators || [])
         .map((c: any) => c.photographers)
@@ -196,7 +196,7 @@ export async function GET(
         // Primary photographer
         photographer: photographer,
         // All photographers (for multi-photographer events)
-        all_photographers: allPhotographers.length > 1 ? allPhotographers : undefined,
+        all_photographers: allCreators.length > 1 ? allCreators : undefined,
       },
       // No photos returned - only visible after face scan
       photos: [],

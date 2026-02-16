@@ -43,7 +43,7 @@ export async function POST(request: Request) {
 
     if (photographerError || !photographer) {
       return NextResponse.json(
-        { error: 'Photographer profile not found' },
+        { error: 'Creator profile not found' },
         { status: 404 }
       );
     }
@@ -129,7 +129,7 @@ export async function POST(request: Request) {
         accountBank,
         accountNumber,
         splitType: 'percentage',
-        splitValue: 85, // Photographer gets 85%, platform gets 15%
+        splitValue: 85, // Creator gets 85%, platform gets 15%
         photographerId: user.id,
       });
 

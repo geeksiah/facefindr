@@ -79,7 +79,7 @@ export const QRCodeWithLogo = React.forwardRef<HTMLDivElement, QRCodeWithLogoPro
           >
             <img
               src="/assets/logos/qr-logo.svg"
-              alt="FaceFindr Logo"
+              alt="Ferchr Logo"
               width={Math.round(logoSize * 0.9)}
               height={Math.round(logoSize * 0.9)}
               className="object-contain"

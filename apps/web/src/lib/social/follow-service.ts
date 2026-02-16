@@ -15,7 +15,7 @@ interface FollowResult {
 /**
  * Follow a photographer
  */
-export async function followPhotographer(
+export async function followCreator(
   photographerId: string
 ): Promise<FollowResult> {
   try {
@@ -34,11 +34,11 @@ export async function followPhotographer(
       .single();
 
     if (!photographer) {
-      return { success: false, error: 'Photographer not found' };
+      return { success: false, error: 'Creator not found' };
     }
 
     if (!photographer.allow_follows) {
-      return { success: false, error: 'This photographer does not accept followers' };
+      return { success: false, error: 'This creator does not accept followers' };
     }
 
     // Create follow
@@ -46,9 +46,12 @@ export async function followPhotographer(
       .from('follows')
       .insert({
         follower_id: user.id,
-        follower_type: user.user_metadata?.user_type === 'photographer' ? 'photographer' : 'attendee',
+        follower_type:
+          user.user_metadata?.user_type === 'creator' || user.user_metadata?.user_type === 'photographer'
+            ? 'creator'
+            : 'attendee',
         following_id: photographerId,
-        following_type: 'photographer',
+        following_type: 'creator',
       });
 
     if (error) {
@@ -68,7 +71,7 @@ export async function followPhotographer(
 /**
  * Unfollow a photographer
  */
-export async function unfollowPhotographer(
+export async function unfollowCreator(
   photographerId: string
 ): Promise<FollowResult> {
   try {
@@ -241,7 +244,7 @@ export async function updateFollowPreferences(
 /**
  * Search for photographers by FaceTag or name
  */
-export async function searchPhotographers(
+export async function searchCreators(
   query: string,
   limit: number = 20
 ): Promise<{ success: boolean; photographers?: any[]; error?: string }> {

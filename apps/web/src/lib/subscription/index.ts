@@ -18,7 +18,7 @@ export * from './enforcement';
 // TYPES
 // ============================================
 
-export type PlanType = 'photographer' | 'drop_in' | 'payg';
+export type PlanType = 'creator' | 'photographer' | 'drop_in' | 'payg';
 
 export interface SubscriptionPlan {
   id: string;
@@ -112,7 +112,9 @@ export async function getAllPlans(planType?: PlanType): Promise<FullPlanDetails[
       .eq('is_active', true)
       .order('base_price_usd', { ascending: true });
     
-    if (planType) {
+    if (planType === 'creator' || planType === 'photographer') {
+      query = query.in('plan_type', ['creator', 'photographer']);
+    } else if (planType) {
       query = query.eq('plan_type', planType);
     }
     
@@ -169,7 +171,7 @@ export async function getAllPlans(planType?: PlanType): Promise<FullPlanDetails[
         code: plan.code,
         name: plan.name,
         description: plan.description || '',
-        planType: plan.plan_type || 'photographer',
+        planType: (plan.plan_type === 'photographer' ? 'creator' : plan.plan_type) || 'creator',
         basePriceUsd: plan.base_price_usd || 0,
         prices: plan.prices || {},
         isActive: plan.is_active,
@@ -215,7 +217,7 @@ export async function getPlanById(planId: string): Promise<FullPlanDetails | nul
   return plans.find(p => p.id === planId) || null;
 }
 
-export async function getPlanByCode(code: string, planType: PlanType = 'photographer'): Promise<FullPlanDetails | null> {
+export async function getPlanByCode(code: string, planType: PlanType = 'creator'): Promise<FullPlanDetails | null> {
   const plans = await getAllPlans(planType);
   return plans.find(p => p.code === code) || null;
 }
@@ -224,7 +226,7 @@ export async function getPlanByCode(code: string, planType: PlanType = 'photogra
 // GET USER'S CURRENT PLAN
 // ============================================
 
-export async function getUserPlan(userId: string, userType: 'photographer' | 'attendee'): Promise<FullPlanDetails | null> {
+export async function getUserPlan(userId: string, userType: 'creator' | 'photographer' | 'attendee'): Promise<FullPlanDetails | null> {
   try {
     const supabase = createServiceClient();
     
@@ -232,7 +234,7 @@ export async function getUserPlan(userId: string, userType: 'photographer' | 'at
     const { data: subscription } = await supabase
       .from('subscriptions')
       .select('plan_id, plan_code, status')
-      .eq(userType === 'photographer' ? 'photographer_id' : 'attendee_id', userId)
+      .eq((userType === 'creator' || userType === 'photographer') ? 'photographer_id' : 'attendee_id', userId)
       .in('status', ['active', 'trialing'])
       .order('created_at', { ascending: false })
       .limit(1)
@@ -240,7 +242,7 @@ export async function getUserPlan(userId: string, userType: 'photographer' | 'at
 
     if (!subscription) {
       // Return free plan
-      const planType = userType === 'photographer' ? 'photographer' : 'drop_in';
+      const planType = (userType === 'creator' || userType === 'photographer') ? 'creator' : 'drop_in';
       return getPlanByCode('free', planType);
     }
 
@@ -250,7 +252,7 @@ export async function getUserPlan(userId: string, userType: 'photographer' | 'at
     }
 
     // Fallback to plan_code lookup
-    const planType = userType === 'photographer' ? 'photographer' : 'drop_in';
+    const planType = (userType === 'creator' || userType === 'photographer') ? 'creator' : 'drop_in';
     return getPlanByCode(subscription.plan_code, planType);
   } catch (error) {
     console.error('Error getting user plan:', error);

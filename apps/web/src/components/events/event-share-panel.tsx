@@ -177,7 +177,7 @@ export function EventSharePanel({ eventId, onClose }: EventSharePanelProps) {
     if (!shareInfo) return;
     
     const url = shareInfo.urls.directUrl;
-    const text = `Find your photos from "${shareInfo.event.name}" on FaceFindr`;
+    const text = `Find your photos from "${shareInfo.event.name}" on Ferchr`;
     
     const urls: Record<string, string> = {
       twitter: `https://twitter.com/intent/tweet?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`,

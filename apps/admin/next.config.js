@@ -1,4 +1,13 @@
 /** @type {import('next').NextConfig} */
+const reactAliases = {
+  'react$': require.resolve('next/dist/compiled/react'),
+  'react/jsx-runtime': require.resolve('next/dist/compiled/react/jsx-runtime'),
+  'react/jsx-dev-runtime': require.resolve('next/dist/compiled/react/jsx-dev-runtime'),
+  'react-dom$': require.resolve('next/dist/compiled/react-dom'),
+  'react-dom/client': require.resolve('next/dist/compiled/react-dom/client'),
+  'react-dom/server': require.resolve('next/dist/compiled/react-dom/server'),
+};
+
 const nextConfig = {
   // Enable standalone output for Docker deployment
   output: 'standalone',
@@ -61,6 +70,15 @@ const nextConfig = {
         ],
       },
     ];
+  },
+
+  webpack: (config) => {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      ...reactAliases,
+    };
+
+    return config;
   },
 
 };

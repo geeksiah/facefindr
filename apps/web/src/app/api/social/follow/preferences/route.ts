@@ -30,7 +30,7 @@ export async function PUT(request: NextRequest) {
     const { photographerId, notifyNewEvent, notifyPhotoDrop } = body;
 
     if (!photographerId) {
-      return NextResponse.json({ error: 'Photographer ID required' }, { status: 400 });
+      return NextResponse.json({ error: 'Creator ID required' }, { status: 400 });
     }
 
     const updateData: Record<string, boolean> = {};

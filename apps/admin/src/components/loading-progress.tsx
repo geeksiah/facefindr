@@ -23,6 +23,7 @@ function setProgressValue(value: number) {
 
 export function LoadingProgress() {
   const pathname = usePathname();
+  const safePathname = pathname ?? '';
   const searchParams = useSearchParams();
   const progress = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const timersRef = useRef<NodeJS.Timeout[]>([]);
@@ -72,3 +73,5 @@ export function LoadingProgress() {
     </div>
   );
 }
+
+

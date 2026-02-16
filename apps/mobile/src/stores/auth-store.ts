@@ -5,7 +5,9 @@
  */
 
 import { create } from 'zustand';
+
 import { supabase, Session, User } from '@/lib/supabase';
+import { isCreatorUserType, normalizeUserType, type AnyUserType } from '@/lib/user-type';
 
 interface Profile {
   id: string;
@@ -14,7 +16,7 @@ interface Profile {
   username: string | null;
   faceTag: string | null;
   profilePhotoUrl: string | null;
-  userType: 'photographer' | 'attendee';
+  userType: 'creator' | 'attendee';
 }
 
 interface AuthState {
@@ -22,12 +24,18 @@ interface AuthState {
   user: User | null;
   profile: Profile | null;
   isAuthenticated: boolean;
-  userType: 'photographer' | 'attendee' | null;
+  userType: 'creator' | 'attendee' | null;
   isLoading: boolean;
   isInitialized: boolean;
   initialize: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
-  signUp: (email: string, password: string, userType: 'photographer' | 'attendee', displayName: string, username?: string) => Promise<{ error: string | null }>;
+  signUp: (
+    email: string,
+    password: string,
+    userType: AnyUserType,
+    displayName: string,
+    username?: string
+  ) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -52,8 +60,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const { data: { session } } = await supabase.auth.getSession();
       
       if (session?.user) {
-        const userType = session.user.user_metadata?.user_type || 'attendee';
-        const table = userType === 'photographer' ? 'photographers' : 'attendees';
+        const userType = normalizeUserType(session.user.user_metadata?.user_type) || 'attendee';
+        const table = isCreatorUserType(userType) ? 'photographers' : 'attendees';
         
         const { data: profile } = await supabase
           .from(table)
@@ -82,8 +90,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           set({ session: null, user: null, profile: null });
           // Navigation is handled by Root Layout based on state changes
         } else if (session?.user) {
-          const userType = session.user.user_metadata?.user_type || 'attendee';
-          const table = userType === 'photographer' ? 'photographers' : 'attendees';
+          const userType = normalizeUserType(session.user.user_metadata?.user_type) || 'attendee';
+          const table = isCreatorUserType(userType) ? 'photographers' : 'attendees';
           
           const { data: profile } = await supabase
             .from(table)
@@ -132,12 +140,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   signUp: async (email, password, userType, displayName, username) => {
     set({ isLoading: true });
     try {
+      const normalizedUserType = normalizeUserType(userType);
+      if (!normalizedUserType) {
+        return { error: 'Invalid user type' };
+      }
+
       const { error } = await supabase.auth.signUp({
         email,
         password,
         options: {
           data: {
-            user_type: userType,
+            user_type: normalizedUserType,
             display_name: displayName,
             username: username, // Stored in user_metadata, used by trigger to generate FaceTag
           },
@@ -172,8 +185,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (!session?.user) return;
 
     try {
-      const userType = session.user.user_metadata?.user_type || 'attendee';
-      const table = userType === 'photographer' ? 'photographers' : 'attendees';
+      const userType = normalizeUserType(session.user.user_metadata?.user_type) || 'attendee';
+      const table = isCreatorUserType(userType) ? 'photographers' : 'attendees';
       
       const { data: profile } = await supabase
         .from(table)

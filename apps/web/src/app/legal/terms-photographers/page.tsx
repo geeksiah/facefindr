@@ -1,13 +1,13 @@
 import { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Terms of Service for Photographers | FaceFind',
+  title: 'Terms of Service for Creators | FaceFind',
 };
 
-export default function TermsPhotographersPage() {
+export default function TermsCreatorsPage() {
   return (
     <article className="prose prose-gray max-w-none">
-      <h1>Terms of Service for Photographers</h1>
+      <h1>Terms of Service for Creators</h1>
       <p className="lead">Last updated: January 14, 2026</p>
 
       <h2>1. Acceptance of Terms</h2>

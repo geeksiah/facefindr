@@ -112,7 +112,7 @@ export function PayoutQueue({ payouts }: { payouts: PendingPayout[] }) {
               />
             </th>
             <th className="text-left px-6 py-3 text-sm font-medium text-muted-foreground">
-              Photographer
+              Creator
             </th>
             <th className="text-left px-6 py-3 text-sm font-medium text-muted-foreground">
               Provider

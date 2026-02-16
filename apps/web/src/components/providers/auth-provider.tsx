@@ -5,6 +5,7 @@ import { useEffect, useRef, useCallback } from 'react';
 
 import { useAuthStore } from '@/hooks/use-auth-store';
 import { createClient } from '@/lib/supabase/client';
+import { normalizeUserType } from '@/lib/user-type';
 
 interface AuthProviderProps {
   children: React.ReactNode;
@@ -35,7 +36,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const fetchProfile = useCallback(async (userId: string, userType: string | undefined) => {
     const supabase = supabaseRef.current;
     
-    if (userType === 'photographer') {
+    if (userType === 'creator' || userType === 'photographer') {
       const { data } = await supabase
         .from('photographers')
         .select('*')
@@ -75,7 +76,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           return;
         }
 
-        const userType = user.user_metadata?.user_type as 'photographer' | 'attendee' | undefined;
+        const userType = normalizeUserType(user.user_metadata?.user_type) || 'attendee';
         const profile = await fetchProfile(user.id, userType);
 
         if (isMounted) {
@@ -114,7 +115,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         
         try {
           if (event === 'SIGNED_IN' && session?.user) {
-            const userType = session.user.user_metadata?.user_type as 'photographer' | 'attendee' | undefined;
+            const userType = normalizeUserType(session.user.user_metadata?.user_type) || 'attendee';
             const profile = await fetchProfile(session.user.id, userType);
 
             if (isMounted) {

@@ -2,7 +2,7 @@
   "name": "@facefind/shared",
   "version": "0.1.0",
   "private": true,
-  "description": "Shared types, constants, and utilities for FaceFindr",
+  "description": "Shared types, constants, and utilities for Ferchr",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",

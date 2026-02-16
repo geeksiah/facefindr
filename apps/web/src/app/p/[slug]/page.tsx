@@ -34,7 +34,7 @@ import { formatEventDateDisplay } from '@/lib/events/time';
 import { cn } from '@/lib/utils';
 
 
-interface PhotographerProfile {
+interface CreatorProfile {
   id: string;
   display_name: string;
   face_tag: string;
@@ -59,13 +59,13 @@ interface PhotographerProfile {
   eventCount: number;
 }
 
-export default function PhotographerProfilePage() {
+export default function CreatorProfilePage() {
   const params = useParams();
   const searchParams = useSearchParams();
-  const slug = params.slug as string;
-  const openInApp = searchParams.get('app') === '1';
+  const slug = params?.slug as string;
+  const openInApp = searchParams?.get('app') === '1';
 
-  const [profile, setProfile] = useState<PhotographerProfile | null>(null);
+  const [profile, setProfile] = useState<CreatorProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isFollowing, setIsFollowing] = useState(false);
@@ -92,7 +92,7 @@ export default function PhotographerProfilePage() {
 
   async function loadProfile() {
     try {
-      const res = await fetch(`/api/profiles/photographer/${slug}`);
+      const res = await fetch(`/api/profiles/creator/${slug}`);
       const data = await res.json();
 
       if (res.ok) {
@@ -101,7 +101,7 @@ export default function PhotographerProfilePage() {
         fetch('/api/profiles/view', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ profileId: data.profile.id, profileType: 'photographer' }),
+          body: JSON.stringify({ profileId: data.profile.id, profileType: 'creator' }),
         }).catch(() => {});
       } else {
         setError(data.error);
@@ -128,7 +128,7 @@ export default function PhotographerProfilePage() {
   function attemptDeepLink() {
     if (!profile) return;
     
-    const appUrl = `facefindr://photographer/${profile.id}`;
+    const appUrl = `ferchr://creator/${profile.id}`;
     const timeout = setTimeout(() => {
       // App not installed or didn't open - stay on web
     }, 2000);
@@ -178,7 +178,7 @@ export default function PhotographerProfilePage() {
 
   async function handleShare(platform: string) {
     const url = window.location.href;
-    const text = `Check out ${profile?.display_name} on FaceFindr`;
+    const text = `Check out ${profile?.display_name} on Ferchr`;
 
     switch (platform) {
       case 'copy':
@@ -199,7 +199,7 @@ export default function PhotographerProfilePage() {
     setShowShareMenu(false);
   }
 
-  function formatDate(eventData: PhotographerProfile['events'][number]) {
+  function formatDate(eventData: CreatorProfile['events'][number]) {
     return formatEventDateDisplay(
       {
         event_date: eventData.event_date,
@@ -337,7 +337,7 @@ export default function PhotographerProfilePage() {
             {/* Stats */}
             <div className="flex items-center justify-center sm:justify-start gap-6 mt-4 text-sm">
               <Link 
-                href={`/p/${profile.public_profile_slug || profile.id}/followers`}
+                href={`/c/${profile.public_profile_slug || profile.id}/followers`}
                 className="text-center hover:opacity-80 transition-opacity cursor-pointer"
               >
                 <p className="font-bold text-foreground">{profile.follower_count || 0}</p>
@@ -509,7 +509,7 @@ export default function PhotographerProfilePage() {
             </div>
             
             <p className="text-sm text-secondary text-center mb-4">
-              Scan this QR code to view {profile.display_name}'s profile in the FaceFindr app
+              Scan this QR code to view {profile.display_name}'s profile in the Ferchr app
             </p>
             
             <button
@@ -545,4 +545,6 @@ export default function PhotographerProfilePage() {
     </div>
   );
 }
+
+
 

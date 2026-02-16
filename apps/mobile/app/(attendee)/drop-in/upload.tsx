@@ -32,6 +32,7 @@ import {
 import { Button } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { getApiBaseUrl } from '@/lib/api-base';
 
 interface DropInUploadScreenProps {
   noHeader?: boolean;
@@ -53,8 +54,7 @@ export default function DropInUploadScreen({ noHeader = false }: DropInUploadScr
 
   useEffect(() => {
     const loadPricing = async () => {
-      const appUrl = process.env.EXPO_PUBLIC_APP_URL;
-      if (!appUrl) throw new Error('EXPO_PUBLIC_APP_URL is not set');
+      const appUrl = getApiBaseUrl();
 
       const response = await fetch(`${appUrl}/api/runtime/drop-in/pricing`);
       const data = await response.json();
@@ -140,7 +140,7 @@ export default function DropInUploadScreen({ noHeader = false }: DropInUploadScr
       }
 
       const uploadResponse = await fetch(
-        `${process.env.EXPO_PUBLIC_APP_URL || 'https://app.facefindr.com'}/api/drop-in/upload`,
+        `${getApiBaseUrl()}/api/drop-in/upload`,
         {
           method: 'POST',
           body: formData,

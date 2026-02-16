@@ -1,4 +1,6 @@
 import { useState, useCallback } from 'react';
+
+import { getApiBaseUrl } from '@/lib/api-base';
 import { useAuthStore } from '@/stores/auth-store';
 
 interface LivenessResult {
@@ -35,7 +37,7 @@ export function useLivenessVerification(): UseLivenessVerificationReturn {
 
     try {
       const response = await fetch(
-        `${process.env.EXPO_PUBLIC_API_URL}/api/faces/liveness`,
+        `${getApiBaseUrl()}/api/faces/liveness`,
         {
           method: 'POST',
           headers: {

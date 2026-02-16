@@ -1,4 +1,4 @@
--- FaceFindr Database Migration
+-- Ferchr Database Migration
 -- Migration: 009_analytics
 -- Description: Analytics tracking for views, revenue, and event performance
 

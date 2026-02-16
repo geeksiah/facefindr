@@ -76,7 +76,7 @@ export async function POST(
           .single();
 
         if (!photographer) {
-          return NextResponse.json({ error: 'Photographer not found' }, { status: 404 });
+          return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
         }
 
         // Generate password reset via Supabase Auth
@@ -105,7 +105,7 @@ export async function POST(
           .single();
 
         if (!photographer) {
-          return NextResponse.json({ error: 'Photographer not found' }, { status: 404 });
+          return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
         }
 
         // Send verification email via Supabase Auth
@@ -141,7 +141,7 @@ export async function POST(
         return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
     }
   } catch (error) {
-    console.error('Photographer action error:', error);
+    console.error('Creator action error:', error);
     return NextResponse.json(
       { error: 'An error occurred' },
       { status: 500 }

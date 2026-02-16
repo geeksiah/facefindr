@@ -364,7 +364,7 @@ function InviteCollaboratorModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-semibold text-foreground">Invite Photographer</h3>
+          <h3 className="text-lg font-semibold text-foreground">Invite Creator</h3>
           <button onClick={onClose} className="p-1 rounded-lg hover:bg-muted">
             <X className="h-5 w-5 text-secondary" />
           </button>
@@ -374,7 +374,7 @@ function InviteCollaboratorModal({
           {/* FaceTag Input */}
           <div>
             <label className="block text-sm font-medium text-foreground mb-2">
-              Photographer FaceTag
+              Creator FaceTag
             </label>
             <Input
               value={faceTag}
@@ -562,7 +562,7 @@ function PermissionsModal({
               onChange={(e) => setRole(e.target.value as typeof role)}
               className="w-full rounded-xl border border-border bg-background px-4 py-2.5 text-foreground"
             >
-              <option value="lead">Lead Photographer</option>
+              <option value="lead">Lead Creator</option>
               <option value="collaborator">Collaborator</option>
               <option value="assistant">Assistant</option>
             </select>

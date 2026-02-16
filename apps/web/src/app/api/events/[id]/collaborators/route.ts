@@ -159,8 +159,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // Find photographer by ID or FaceTag
-    let targetPhotographerId = photographerId;
-    if (!targetPhotographerId && photographerFaceTag) {
+    let targetCreatorId = photographerId;
+    if (!targetCreatorId && photographerFaceTag) {
       const { data: photographer } = await supabase
         .from('photographers')
         .select('id')
@@ -168,13 +168,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         .single();
 
       if (!photographer) {
-        return NextResponse.json({ error: 'Photographer not found' }, { status: 404 });
+        return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
       }
-      targetPhotographerId = photographer.id;
+      targetCreatorId = photographer.id;
     }
 
-    if (!targetPhotographerId) {
-      return NextResponse.json({ error: 'Photographer ID or FaceTag required' }, { status: 400 });
+    if (!targetCreatorId) {
+      return NextResponse.json({ error: 'Creator ID or FaceTag required' }, { status: 400 });
     }
 
     // Check if already a collaborator
@@ -182,7 +182,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       .from('event_collaborators')
       .select('id, status')
       .eq('event_id', eventId)
-      .eq('photographer_id', targetPhotographerId)
+      .eq('photographer_id', targetCreatorId)
       .single();
 
     if (existing) {
@@ -197,7 +197,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Create or update collaborator invitation
     const collaboratorData = {
       event_id: eventId,
-      photographer_id: targetPhotographerId,
+      photographer_id: targetCreatorId,
       role: role === 'owner' ? 'collaborator' : role, // Can't invite as owner
       can_upload: permissions.canUpload ?? true,
       can_edit_own_photos: permissions.canEditOwnPhotos ?? true,

@@ -2,7 +2,7 @@
 
 Complete settings management for photographers and attendees.
 
-## Photographer Settings
+## Creator Settings
 
 ### Profile Tab
 - **Profile Photo**: Upload/remove with Supabase Storage
@@ -62,7 +62,7 @@ Complete settings management for photographers and attendees.
 
 ## API Endpoints
 
-### Photographer Profile
+### Creator Profile
 ```
 GET  /api/photographer/profile
 PUT  /api/photographer/profile

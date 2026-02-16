@@ -67,30 +67,66 @@ export default function UploadScreen() {
 
   useEffect(() => {
     const loadEvents = async () => {
-      const { data } = await supabase
-        .from('events')
-        .select('id, name, event_date')
-        .eq('photographer_id', profile?.id)
-        .in('status', ['active', 'draft'])
-        .order('created_at', { ascending: false });
+      const { data: authData } = await supabase.auth.getUser();
+      const creatorId = profile?.id || authData.user?.id;
+      if (!creatorId) {
+        setEvents([]);
+        setSelectedEvent(null);
+        return;
+      }
 
-      if (data) {
-        setEvents(data.map((e: any) => ({
-          id: e.id,
-          name: e.name,
-          eventDate: e.event_date,
-        })));
-        if (data.length > 0) {
-          setSelectedEvent({
-            id: data[0].id,
-            name: data[0].name,
-            eventDate: data[0].event_date,
-          });
+      const [{ data: ownedEvents }, { data: collaboratorRows }] = await Promise.all([
+        supabase
+          .from('events')
+          .select('id, name, event_date')
+          .eq('photographer_id', creatorId)
+          .in('status', ['active', 'draft', 'closed'])
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('event_collaborators')
+          .select('event_id')
+          .eq('photographer_id', creatorId)
+          .eq('status', 'active'),
+      ]);
+
+      const collaboratorEventIds = (collaboratorRows || []).map((row: any) => row.event_id).filter(Boolean);
+      let collaboratorEvents: any[] = [];
+      if (collaboratorEventIds.length > 0) {
+        const { data } = await supabase
+          .from('events')
+          .select('id, name, event_date')
+          .in('id', collaboratorEventIds)
+          .in('status', ['active', 'draft', 'closed'])
+          .order('created_at', { ascending: false });
+        collaboratorEvents = data || [];
+      }
+
+      const eventMap = new Map<string, any>();
+      for (const event of ownedEvents || []) {
+        eventMap.set(event.id, event);
+      }
+      for (const event of collaboratorEvents) {
+        if (!eventMap.has(event.id)) {
+          eventMap.set(event.id, event);
         }
       }
+
+      const combinedEvents = Array.from(eventMap.values()).map((e: any) => ({
+        id: e.id,
+        name: e.name,
+        eventDate: e.event_date,
+      }));
+
+      setEvents(combinedEvents);
+      setSelectedEvent((prev) => {
+        if (prev && eventMap.has(prev.id)) {
+          return prev;
+        }
+        return combinedEvents[0] || null;
+      });
     };
     loadEvents();
-  }, []);
+  }, [profile?.id]);
 
   const handlePickImages = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();

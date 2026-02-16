@@ -25,27 +25,27 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
   if (!photographer) {
     return {
-      title: 'Photographer | FaceFindr',
-      description: 'Find event photographers on FaceFindr',
+      title: 'Creator | Ferchr',
+      description: 'Find event creators on Ferchr',
     };
   }
 
-  const displayName = photographer.display_name || 'FaceFindr Photographer';
+  const displayName = photographer.display_name || 'Ferchr Creator';
   const profileImage = photographer.profile_photo_url || `${APP_URL}/og-default.png`;
-  const bio = photographer.bio || `Professional event photographer on FaceFindr.`;
+  const bio = photographer.bio || `Professional event creator on Ferchr.`;
   const description = `${bio} FaceTag: ${photographer.face_tag}. Book for your events and let attendees find their photos instantly.`;
   
   // Generate OG image URL
   const ogImageUrl = `${APP_URL}/api/og/profile?faceTag=${encodeURIComponent(photographer.face_tag || '')}&name=${encodeURIComponent(displayName)}${photographer.profile_photo_url ? `&photo=${encodeURIComponent(photographer.profile_photo_url)}` : ''}`;
 
   return {
-    title: `${displayName} | FaceFindr Photographer`,
+    title: `${displayName} | Ferchr Creator`,
     description,
     openGraph: {
-      title: `${displayName} - Photographer on FaceFindr`,
+      title: `${displayName} - Creator on Ferchr`,
       description,
-      url: `${APP_URL}/p/${slug}`,
-      siteName: 'FaceFindr',
+      url: `${APP_URL}/c/${slug}`,
+      siteName: 'Ferchr',
       images: [
         {
           url: profileImage,
@@ -57,20 +57,20 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
           url: ogImageUrl,
           width: 1200,
           height: 630,
-          alt: `${displayName} on FaceFindr`,
+          alt: `${displayName} on Ferchr`,
         },
       ],
       type: 'profile',
     },
     twitter: {
       card: 'summary_large_image',
-      title: `${displayName} - Photographer on FaceFindr`,
+      title: `${displayName} - Creator on Ferchr`,
       description,
       images: [ogImageUrl],
     },
   };
 }
 
-export default function PhotographerProfileLayout({ children }: Props) {
+export default function CreatorProfileLayout({ children }: Props) {
   return <>{children}</>;
 }

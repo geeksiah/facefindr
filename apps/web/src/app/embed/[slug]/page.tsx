@@ -20,14 +20,14 @@ interface Photo {
 export default function EmbedGalleryPage() {
   const params = useParams();
   const searchParams = useSearchParams();
-  const slug = params.slug as string;
+  const slug = params?.slug as string;
   
   // Get customization params
-  const theme = searchParams.get('theme') || 'auto';
-  const color = searchParams.get('color') || '#0A84FF';
-  const type = searchParams.get('type') || 'gallery';
-  const columns = parseInt(searchParams.get('columns') || '3');
-  const maxPhotos = parseInt(searchParams.get('max') || '12');
+  const theme = searchParams?.get('theme') || 'auto';
+  const color = searchParams?.get('color') || '#0A84FF';
+  const type = searchParams?.get('type') || 'gallery';
+  const columns = parseInt(searchParams?.get('columns') || '3');
+  const maxPhotos = parseInt(searchParams?.get('max') || '12');
 
   const [event, setEvent] = useState<any>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -200,7 +200,7 @@ export default function EmbedGalleryPage() {
               {/* Watermark */}
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">
                 <div className="bg-black/50 rounded-lg px-2 py-1">
-                  <span className="text-white text-xs">View on FaceFindr</span>
+                  <span className="text-white text-xs">View on Ferchr</span>
                 </div>
               </div>
             </a>
@@ -246,9 +246,11 @@ export default function EmbedGalleryPage() {
           className="font-medium hover:underline"
           style={{ color }}
         >
-          FaceFindr
+          Ferchr
         </a>
       </div>
     </div>
   );
 }
+
+

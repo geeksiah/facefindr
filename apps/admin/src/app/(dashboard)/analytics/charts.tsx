@@ -127,7 +127,7 @@ export function AnalyticsCharts({ data }: { data: AnalyticsData }) {
                     labelFormatter={(label) => new Date(label).toLocaleDateString()}
                   />
                   <Legend />
-                  <Bar dataKey="photographers" name="Photographers" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="photographers" name="Creators" fill="#3b82f6" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="attendees" name="Attendees" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>

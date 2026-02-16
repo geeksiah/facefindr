@@ -58,7 +58,7 @@ export default function PrivacyPolicyPage() {
       <p>We do not sell your personal information. We may share information with:</p>
       <ul>
         <li><strong>Service Providers:</strong> AWS (facial recognition), Stripe (payments), Vercel (hosting)</li>
-        <li><strong>Photographers:</strong> Anonymous aggregate statistics only; never individual identification</li>
+        <li><strong>Creators:</strong> Anonymous aggregate statistics only; never individual identification</li>
         <li><strong>Legal Requirements:</strong> When required by law or to protect rights</li>
       </ul>
 

@@ -22,6 +22,7 @@ import {
 } from 'lucide-react-native';
 
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { isCreatorUserType } from '@/lib/user-type';
 import { useAuthStore } from '@/stores/auth-store';
 
 export default function NotFoundScreen() {
@@ -32,8 +33,8 @@ export default function NotFoundScreen() {
 
   const goHome = () => {
     if (isAuthenticated) {
-      if (profile?.userType === 'photographer') {
-        router.replace('/(photographer)' as any);
+      if (isCreatorUserType(profile?.userType)) {
+        router.replace('/(creator)' as any);
       } else {
         router.replace('/(attendee)' as any);
       }
@@ -113,7 +114,7 @@ export default function NotFoundScreen() {
       {/* Footer */}
       <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.lg }]}>
         <Camera size={16} color={colors.secondary} />
-        <Text style={styles.footerText}>FaceFindr</Text>
+        <Text style={styles.footerText}>Ferchr</Text>
       </View>
     </View>
   );

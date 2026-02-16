@@ -1,4 +1,4 @@
--- FaceFindr Database Migration
+-- Ferchr Database Migration
 -- Migration: 003_payout_settings
 -- Description: Photographer payout preferences and admin controls
 

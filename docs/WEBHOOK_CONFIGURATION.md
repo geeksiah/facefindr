@@ -1,7 +1,7 @@
 # Webhook Configuration Guide
 
 ## Overview
-This document outlines webhook configuration for all payment gateways used in FaceFindr.
+This document outlines webhook configuration for all payment gateways used in Ferchr.
 
 ## Payment Gateways
 

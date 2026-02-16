@@ -8,7 +8,9 @@ import { generateQRCode } from '@/lib/sharing/qr-service';
 import { createClient } from '@/lib/supabase/server';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || '';
-const APP_SCHEME = 'facefindr://';
+const APP_SCHEME = 'ferchr://';
+
+type ProfileType = 'creator' | 'photographer' | 'attendee';
 
 interface ProfileResult {
   success: boolean;
@@ -17,9 +19,9 @@ interface ProfileResult {
 }
 
 /**
- * Get photographer public profile
+ * Get creator public profile
  */
-export async function getPhotographerProfile(
+export async function getCreatorProfile(
   slugOrId: string
 ): Promise<ProfileResult> {
   try {
@@ -124,7 +126,7 @@ export async function getAttendeeProfile(
  * Generate profile sharing URLs
  */
 export function generateProfileUrls(
-  profileType: 'photographer' | 'attendee',
+  profileType: ProfileType,
   slug: string,
   id: string
 ): {
@@ -133,10 +135,11 @@ export function generateProfileUrls(
   universalLink: string;
   qrUrl: string;
 } {
-  const prefix = profileType === 'photographer' ? 'p' : 'u';
+  const normalizedType = profileType === 'photographer' ? 'creator' : profileType;
+  const prefix = normalizedType === 'creator' ? 'c' : 'u';
   
   const webUrl = `${APP_URL}/${prefix}/${slug}`;
-  const appDeepLink = `${APP_SCHEME}profile/${profileType}/${id}`;
+  const appDeepLink = `${APP_SCHEME}profile/${normalizedType}/${id}`;
   const universalLink = `${webUrl}?app=1`; // Web page will attempt deep link first
   
   return {
@@ -151,7 +154,7 @@ export function generateProfileUrls(
  * Generate profile QR code
  */
 export async function generateProfileQRCode(
-  profileType: 'photographer' | 'attendee',
+  profileType: ProfileType,
   slug: string,
   id: string,
   options?: { size?: number; theme?: 'light' | 'dark' }
@@ -171,7 +174,7 @@ export async function generateProfileQRCode(
  */
 export async function trackProfileView(
   profileId: string,
-  profileType: 'photographer' | 'attendee',
+  profileType: ProfileType,
   source?: string,
   deviceType?: string
 ): Promise<void> {
@@ -181,7 +184,7 @@ export async function trackProfileView(
 
     await supabase.from('profile_views').insert({
       profile_id: profileId,
-      profile_type: profileType,
+      profile_type: profileType === 'photographer' ? 'creator' : profileType,
       viewer_id: user?.id,
       source,
       device_type: deviceType,
@@ -197,7 +200,7 @@ export async function trackProfileView(
  */
 export async function updateProfileSlug(
   userId: string,
-  userType: 'photographer' | 'attendee',
+  userType: ProfileType,
   newSlug: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
@@ -237,7 +240,7 @@ export async function updateProfileSlug(
     }
 
     // Update the appropriate table
-    const table = userType === 'photographer' ? 'photographers' : 'attendees';
+    const table = userType === 'attendee' ? 'attendees' : 'photographers';
     const { error } = await supabase
       .from(table)
       .update({ public_profile_slug: slug })

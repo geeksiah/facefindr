@@ -1,4 +1,4 @@
--- FaceFindr Database Migration
+-- Ferchr Database Migration
 -- Migration: 008_notifications_system
 -- Description: Comprehensive notification system with SMS, WhatsApp, Email, OTP verification, and ad placements
 
@@ -133,8 +133,8 @@ VALUES
     -- Photo Drop
     ('photo_drop', 'Photo Drop', 'New photos matching user face', 'transactional',
      'New photos from {{event_name}}!',
-     'Hi {{user_name}},\n\nGreat news! {{photo_count}} new photos from {{event_name}} match your face profile.\n\nView them now: {{view_url}}\n\nBest,\nFaceFindr',
-     'FaceFindr: {{photo_count}} new photos from {{event_name}} match you! View: {{short_url}}',
+     'Hi {{user_name}},\n\nGreat news! {{photo_count}} new photos from {{event_name}} match your face profile.\n\nView them now: {{view_url}}\n\nBest,\nFerchr',
+     'Ferchr: {{photo_count}} new photos from {{event_name}} match you! View: {{short_url}}',
      'New Photos!',
      '{{photo_count}} photos from {{event_name}} match your face',
      '["user_name", "event_name", "photo_count", "view_url", "short_url"]'),
@@ -142,8 +142,8 @@ VALUES
     -- Payout Success
     ('payout_success', 'Payout Success', 'Photographer payout completed', 'transactional',
      'Payout of {{amount}} sent!',
-     'Hi {{user_name}},\n\nYour payout of {{amount}} has been sent to your {{payout_method}}.\n\nTransaction ID: {{transaction_id}}\n\nBest,\nFaceFindr',
-     'FaceFindr: Payout of {{amount}} sent to your {{payout_method}}. Ref: {{transaction_id}}',
+     'Hi {{user_name}},\n\nYour payout of {{amount}} has been sent to your {{payout_method}}.\n\nTransaction ID: {{transaction_id}}\n\nBest,\nFerchr',
+     'Ferchr: Payout of {{amount}} sent to your {{payout_method}}. Ref: {{transaction_id}}',
      'Payout Sent!',
      '{{amount}} has been sent to your account',
      '["user_name", "amount", "payout_method", "transaction_id"]'),
@@ -151,17 +151,17 @@ VALUES
     -- Order Shipped
     ('order_shipped', 'Order Shipped', 'Print order has shipped', 'transactional',
      'Your order is on its way!',
-     'Hi {{user_name}},\n\nYour order #{{order_number}} has shipped!\n\nTracking: {{tracking_url}}\n\nEstimated delivery: {{delivery_date}}\n\nBest,\nFaceFindr',
-     'FaceFindr: Order #{{order_number}} shipped! Track: {{short_url}}',
+     'Hi {{user_name}},\n\nYour order #{{order_number}} has shipped!\n\nTracking: {{tracking_url}}\n\nEstimated delivery: {{delivery_date}}\n\nBest,\nFerchr',
+     'Ferchr: Order #{{order_number}} shipped! Track: {{short_url}}',
      'Order Shipped!',
      'Your order #{{order_number}} is on the way',
      '["user_name", "order_number", "tracking_url", "short_url", "delivery_date"]'),
     
     -- Verification OTP
     ('verification_otp', 'Verification OTP', 'Phone/Email verification code', 'verification',
-     'Your FaceFindr verification code',
+     'Your Ferchr verification code',
      'Your verification code is: {{otp_code}}\n\nThis code expires in {{expiry_minutes}} minutes.\n\nIf you didn''t request this, please ignore this message.',
-     'FaceFindr: Your verification code is {{otp_code}}. Expires in {{expiry_minutes}} min.',
+     'Ferchr: Your verification code is {{otp_code}}. Expires in {{expiry_minutes}} min.',
      'Verification Code',
      'Your code: {{otp_code}}',
      '["otp_code", "expiry_minutes"]'),
@@ -169,8 +169,8 @@ VALUES
     -- Event Live
     ('event_live', 'Event Live', 'Event is now accepting photos', 'transactional',
      '{{event_name}} is now live!',
-     'Hi {{user_name}},\n\nThe event "{{event_name}}" is now live and accepting photos.\n\nScan your face to find your photos: {{scan_url}}\n\nBest,\nFaceFindr',
-     'FaceFindr: {{event_name}} is live! Find your photos: {{short_url}}',
+     'Hi {{user_name}},\n\nThe event "{{event_name}}" is now live and accepting photos.\n\nScan your face to find your photos: {{scan_url}}\n\nBest,\nFerchr',
+     'Ferchr: {{event_name}} is live! Find your photos: {{short_url}}',
      'Event Live!',
      '{{event_name}} is now accepting photos',
      '["user_name", "event_name", "scan_url", "short_url"]'),
@@ -178,8 +178,8 @@ VALUES
     -- Purchase Complete
     ('purchase_complete', 'Purchase Complete', 'Photo purchase confirmation', 'transactional',
      'Your purchase is complete!',
-     'Hi {{user_name}},\n\nThank you for your purchase!\n\nOrder: #{{order_number}}\nTotal: {{total_amount}}\n\nDownload your photos: {{download_url}}\n\nBest,\nFaceFindr',
-     'FaceFindr: Purchase complete! Order #{{order_number}}. Download: {{short_url}}',
+     'Hi {{user_name}},\n\nThank you for your purchase!\n\nOrder: #{{order_number}}\nTotal: {{total_amount}}\n\nDownload your photos: {{download_url}}\n\nBest,\nFerchr',
+     'Ferchr: Purchase complete! Order #{{order_number}}. Download: {{short_url}}',
      'Purchase Complete!',
      'Your photos are ready to download',
      '["user_name", "order_number", "total_amount", "download_url", "short_url"]')

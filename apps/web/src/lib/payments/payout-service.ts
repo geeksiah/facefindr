@@ -18,7 +18,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 
 import { createMomoTransfer, isFlutterwaveConfigured } from './flutterwave';
 import {
-  getPhotographerPayoutSettings,
+  getCreatorPayoutSettings,
   areAutoPayoutsEnabled,
   PayoutFrequency,
   DEFAULT_PAYOUT_MINIMUMS,
@@ -190,8 +190,8 @@ async function processMomoPayout(
       currency: request.currency,
       phoneNumber: wallet.momo_account_number,
       network: wallet.momo_provider as 'MTN' | 'VODAFONE' | 'TIGO' | 'AIRTEL',
-      beneficiaryName: wallet.photographers?.display_name || 'FaceFindr Photographer',
-      narration: `FaceFindr earnings payout - ${reference}`,
+      beneficiaryName: wallet.photographers?.display_name || 'Ferchr Creator',
+      narration: `Ferchr earnings payout - ${reference}`,
     });
 
     if (result.status === 'success') {

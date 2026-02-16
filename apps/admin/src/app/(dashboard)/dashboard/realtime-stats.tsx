@@ -9,7 +9,7 @@ import { formatCurrency, formatNumber } from '@/lib/utils';
 interface Stats {
   totalRevenue: number;
   monthlyRevenue: number;
-  totalPhotographers: number;
+  totalCreators: number;
   totalAttendees: number;
   pendingPayouts: number;
   activeEvents: number;
@@ -61,7 +61,7 @@ export function RealtimeStats({ initialStats }: { initialStats: Stats }) {
     () => {
       setStats(prev => ({
         ...prev,
-        totalPhotographers: prev.totalPhotographers + 1,
+        totalCreators: prev.totalCreators + 1,
       }));
     }
   );
@@ -122,7 +122,7 @@ export function RealtimeStats({ initialStats }: { initialStats: Stats }) {
         />
         <MetricBadge
           label="Total Users"
-          value={formatNumber(stats.totalPhotographers + stats.totalAttendees)}
+          value={formatNumber(stats.totalCreators + stats.totalAttendees)}
         />
         <MetricBadge
           label="Active Events"

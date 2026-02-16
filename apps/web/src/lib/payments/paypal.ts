@@ -177,7 +177,7 @@ export async function createOrder(params: CreateOrderParams): Promise<PayPalOrde
         },
       ],
       applicationContext: {
-        brandName: 'FaceFindr',
+        brandName: 'Ferchr',
         landingPage: OrderApplicationContextLandingPage.NoPreference,
         userAction: OrderApplicationContextUserAction.PayNow,
         returnUrl: params.returnUrl,

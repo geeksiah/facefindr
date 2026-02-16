@@ -52,7 +52,7 @@ export function ExportButton({ data }: { data: ExportData }) {
       const link = document.createElement('a');
       const url = URL.createObjectURL(blob);
       link.setAttribute('href', url);
-      link.setAttribute('download', `facefindr-analytics-${new Date().toISOString().split('T')[0]}.csv`);
+      link.setAttribute('download', `ferchr-analytics-${new Date().toISOString().split('T')[0]}.csv`);
       link.style.visibility = 'hidden';
       document.body.appendChild(link);
       link.click();

@@ -10,13 +10,13 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://facefindr.app'),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://ferchr.app'),
   title: {
-    default: 'FaceFindr - Find Your Event Photos Instantly',
-    template: '%s | FaceFindr',
+    default: 'Ferchr - Find Your Event Photos Instantly',
+    template: '%s | Ferchr',
   },
   description:
-    'AI-powered facial recognition photo delivery platform. Photographers upload, attendees find their photos instantly.',
+    'AI-powered facial recognition photo delivery platform. Creators upload, attendees find their photos instantly.',
   keywords: [
     'event photography',
     'facial recognition',
@@ -25,30 +25,30 @@ export const metadata: Metadata = {
     'conference photos',
     'marathon photos',
   ],
-  authors: [{ name: 'FaceFindr' }],
-  creator: 'FaceFindr',
+  authors: [{ name: 'Ferchr' }],
+  creator: 'Ferchr',
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    url: 'https://facefindr.app',
-    siteName: 'FaceFindr',
-    title: 'FaceFindr - Find Your Event Photos Instantly',
+    url: 'https://ferchr.app',
+    siteName: 'Ferchr',
+    title: 'Ferchr - Find Your Event Photos Instantly',
     description:
-      'AI-powered facial recognition photo delivery platform. Photographers upload, attendees find their photos instantly.',
+      'AI-powered facial recognition photo delivery platform. Creators upload, attendees find their photos instantly.',
     images: [
       {
         url: '/assets/logos/og-logo.png',
         width: 1200,
         height: 630,
-        alt: 'FaceFindr',
+        alt: 'Ferchr',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'FaceFindr - Find Your Event Photos Instantly',
+    title: 'Ferchr - Find Your Event Photos Instantly',
     description:
-      'AI-powered facial recognition photo delivery platform. Photographers upload, attendees find their photos instantly.',
+      'AI-powered facial recognition photo delivery platform. Creators upload, attendees find their photos instantly.',
     images: ['/assets/logos/twitter-card.png'],
   },
   robots: {

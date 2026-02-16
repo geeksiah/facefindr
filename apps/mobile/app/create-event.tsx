@@ -105,7 +105,7 @@ export default function CreateEventScreen() {
           },
           {
             text: 'Upload Photos',
-            onPress: () => router.replace('/(photographer)/upload'),
+            onPress: () => router.replace('/(creator)/upload' as any),
           },
         ]
       );
@@ -473,3 +473,5 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
 });
+
+

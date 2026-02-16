@@ -555,7 +555,7 @@ async function sendPush(
   }
 
   const supabase = createServiceClient();
-  const title = template.pushTitle ? renderTemplate(template.pushTitle, variables) : 'FaceFindr';
+  const title = template.pushTitle ? renderTemplate(template.pushTitle, variables) : 'Ferchr';
   const body = renderTemplate(template.pushBody, variables);
 
   // Store notification record

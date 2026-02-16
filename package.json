@@ -16,7 +16,7 @@
     "build": "turbo run build",
     "build:web": "turbo run build --filter=@facefind/web",
     "build:admin": "turbo run build --filter=@facefind/admin",
-    "ci:verify": "pnpm --filter @facefind/web build && pnpm --filter @facefind/admin build && pnpm --filter @facefindr/mobile type-check",
+    "ci:verify": "pnpm --filter @facefind/web build && pnpm --filter @facefind/admin build && pnpm --filter @ferchr/mobile type-check",
     "lint": "turbo run lint",
     "lint:fix": "turbo run lint:fix",
     "type-check": "turbo run type-check",
@@ -30,6 +30,7 @@
     "db:studio": "supabase studio",
     "db:migrate": "supabase migration up",
     "db:reset": "supabase db reset",
+    "rekognition:backfill": "node scripts/rekognition-backfill-collections.mjs",
     "prepare": "husky install"
   },
   "dependencies": {},

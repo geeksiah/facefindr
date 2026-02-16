@@ -105,7 +105,7 @@ export async function areAutoPayoutsEnabled(): Promise<boolean> {
 
 export type PayoutFrequency = 'instant' | 'daily' | 'weekly' | 'monthly' | 'manual';
 
-export interface PhotographerPayoutSettings {
+export interface CreatorPayoutSettings {
   payoutFrequency: PayoutFrequency;
   weeklyPayoutDay: number; // 1-7 (Monday-Sunday)
   monthlyPayoutDay: number; // 1-28
@@ -116,7 +116,7 @@ export interface PhotographerPayoutSettings {
   notifyOnThreshold: boolean;
 }
 
-export const DEFAULT_PHOTOGRAPHER_SETTINGS: PhotographerPayoutSettings = {
+export const DEFAULT_PHOTOGRAPHER_SETTINGS: CreatorPayoutSettings = {
   payoutFrequency: 'weekly',
   weeklyPayoutDay: 1, // Monday
   monthlyPayoutDay: 1,
@@ -127,9 +127,9 @@ export const DEFAULT_PHOTOGRAPHER_SETTINGS: PhotographerPayoutSettings = {
   notifyOnThreshold: true,
 };
 
-export async function getPhotographerPayoutSettings(
+export async function getCreatorPayoutSettings(
   photographerId: string
-): Promise<PhotographerPayoutSettings> {
+): Promise<CreatorPayoutSettings> {
   try {
     const supabase = createServiceClient();
     const { data } = await supabase
@@ -157,9 +157,9 @@ export async function getPhotographerPayoutSettings(
   return DEFAULT_PHOTOGRAPHER_SETTINGS;
 }
 
-export async function updatePhotographerPayoutSettings(
+export async function updateCreatorPayoutSettings(
   photographerId: string,
-  settings: Partial<PhotographerPayoutSettings>
+  settings: Partial<CreatorPayoutSettings>
 ): Promise<boolean> {
   try {
     const supabase = createServiceClient();

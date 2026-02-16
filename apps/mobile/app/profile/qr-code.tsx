@@ -184,7 +184,7 @@ export default function QRCodeScreen() {
       } else {
         // Fallback to text sharing if image sharing is not available
         await Share.share({
-          message: `Find me on FaceFindr!\n${profile?.faceTag}\n${profileUrl}`,
+          message: `Find me on Ferchr!\n${profile?.faceTag}\n${profileUrl}`,
           url: profileUrl,
         });
       }
@@ -193,7 +193,7 @@ export default function QRCodeScreen() {
       // Fallback to text sharing on error
       try {
         await Share.share({
-          message: `Find me on FaceFindr!\n${profile?.faceTag}\n${profileUrl}`,
+          message: `Find me on Ferchr!\n${profile?.faceTag}\n${profileUrl}`,
           url: profileUrl,
         });
       } catch (fallbackError) {

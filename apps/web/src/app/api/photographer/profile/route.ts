@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 /**
- * Photographer Profile API
+ * Creator Profile API
  * 
  * Get and update photographer profile information.
  */

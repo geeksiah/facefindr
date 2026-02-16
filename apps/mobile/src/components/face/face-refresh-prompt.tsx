@@ -5,6 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 
 import { useAuthStore } from '@/stores/auth-store';
+import { getApiBaseUrl } from '@/lib/api-base';
 
 interface RefreshStatus {
   needsRefresh: boolean;
@@ -52,7 +53,7 @@ export function FaceRefreshPrompt({ onRefresh, onDismiss, inline = false }: Face
 
   const checkRefreshStatus = async () => {
     try {
-      const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/api/faces/refresh-status`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/faces/refresh-status`, {
         headers: {
           Authorization: `Bearer ${session?.access_token}`,
         },
@@ -78,7 +79,7 @@ export function FaceRefreshPrompt({ onRefresh, onDismiss, inline = false }: Face
     
     setIsResponding(true);
     try {
-      await fetch(`${process.env.EXPO_PUBLIC_API_URL}/api/faces/refresh`, {
+      await fetch(`${getApiBaseUrl()}/api/faces/refresh`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -102,7 +103,7 @@ export function FaceRefreshPrompt({ onRefresh, onDismiss, inline = false }: Face
 
   const handleAppearanceChange = async (changeType: string) => {
     try {
-      await fetch(`${process.env.EXPO_PUBLIC_API_URL}/api/faces/appearance-change`, {
+      await fetch(`${getApiBaseUrl()}/api/faces/appearance-change`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

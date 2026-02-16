@@ -180,7 +180,7 @@ export async function generateWatermarkedPreview(
   const settings = await getWatermarkSettings(photographerId);
   
   if (!settings || (!settings.textContent && !settings.logoUrl)) {
-    // No watermark configured - use default FaceFindr watermark
+    // No watermark configured - use default Ferchr watermark
     return {
       success: true,
       previewUrl: options.originalUrl, // For now, return original

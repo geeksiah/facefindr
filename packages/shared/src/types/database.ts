@@ -1,5 +1,5 @@
 /**
- * FaceFindr Database Types
+ * Ferchr Database Types
  * Auto-generated types should be placed here after running:
  * pnpm db:generate
  */
@@ -10,7 +10,9 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
 // ENUMS
 // ============================================
 
-export type UserRole = 'photographer' | 'attendee';
+export type CanonicalUserRole = 'creator' | 'attendee';
+export type LegacyCreatorRole = 'photographer';
+export type UserRole = CanonicalUserRole | LegacyCreatorRole;
 export type AccountStatus = 'active' | 'suspended' | 'pending_verification';
 export type SubscriptionStatus = 'active' | 'past_due' | 'canceled' | 'trialing';
 export type SubscriptionPlan = 'free' | 'starter' | 'pro' | 'studio';
@@ -25,7 +27,7 @@ export type AccessTokenRole = 'event_owner' | 'attendee';
 // CORE TABLES
 // ============================================
 
-export interface Photographer {
+export interface Creator {
   id: string;
   email: string;
   password_hash?: string;
@@ -224,7 +226,7 @@ export interface DownloadLog {
 
 export interface AuditLog {
   id: string;
-  actor_type: 'photographer' | 'attendee' | 'system' | 'admin';
+  actor_type: 'creator' | 'photographer' | 'attendee' | 'system' | 'admin';
   actor_id: string | null;
   action: string;
   resource_type: string;
@@ -242,9 +244,9 @@ export interface Database {
   public: {
     Tables: {
       photographers: {
-        Row: Photographer;
-        Insert: Omit<Photographer, 'id' | 'created_at' | 'updated_at'>;
-        Update: Partial<Omit<Photographer, 'id'>>;
+        Row: Creator;
+        Insert: Omit<Creator, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<Creator, 'id'>>;
       };
       attendees: {
         Row: Attendee;

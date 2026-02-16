@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { normalizeUserType } from '@/lib/user-type';
 import { createClient } from '@/lib/supabase/server';
 
 export async function POST(request: NextRequest) {
@@ -22,6 +23,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const { username, userType } = body;
+    const normalizedUserType = normalizeUserType(userType);
 
     if (!username) {
       return NextResponse.json(
@@ -30,7 +32,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!userType || !['attendee', 'photographer'].includes(userType)) {
+    if (!normalizedUserType) {
       return NextResponse.json(
         { error: 'Valid user type is required' },
         { status: 400 }
@@ -110,13 +112,13 @@ export async function POST(request: NextRequest) {
     // Insert into registry
     const { error: insertError } = await supabase
       .from('username_registry')
-      .insert({
-        username: cleanUsername,
-        sequence_number: randomNumber!,
-        user_id: user.id,
-        user_type: userType,
-        face_tag: faceTag!,
-      });
+        .insert({
+          username: cleanUsername,
+          sequence_number: randomNumber!,
+          user_id: user.id,
+          user_type: normalizedUserType,
+          face_tag: faceTag!,
+        });
 
     if (insertError) {
       // Handle race condition - someone else claimed this number
@@ -132,13 +134,13 @@ export async function POST(request: NextRequest) {
               username: cleanUsername,
               sequence_number: retryNumber,
               user_id: user.id,
-              user_type: userType,
+              user_type: normalizedUserType,
               face_tag: retryTag,
             });
 
           if (!retryError) {
             // Update user's profile with the FaceTag
-            const table = userType === 'photographer' ? 'photographers' : 'attendees';
+            const table = normalizedUserType === 'creator' ? 'photographers' : 'attendees';
             await supabase
               .from(table)
               .update({ face_tag: retryTag, username: cleanUsername })
@@ -167,7 +169,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Update user's profile with the FaceTag
-    const table = userType === 'photographer' ? 'photographers' : 'attendees';
+    const table = normalizedUserType === 'creator' ? 'photographers' : 'attendees';
     await supabase
       .from(table)
       .update({ face_tag: faceTag!, username: cleanUsername })

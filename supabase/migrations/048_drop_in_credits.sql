@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS drop_in_search_results (
     attendee_id UUID NOT NULL REFERENCES attendees(id) ON DELETE CASCADE,
     search_id UUID REFERENCES drop_in_searches(id) ON DELETE CASCADE,
     media_id UUID REFERENCES media(id) ON DELETE SET NULL,
-    source VARCHAR(50) DEFAULT 'facefindr', -- 'facefindr', 'external'
+    source VARCHAR(50) DEFAULT 'ferchr', -- 'ferchr', 'external'
     external_url TEXT,
     confidence REAL DEFAULT 0.0,
     is_viewed BOOLEAN DEFAULT FALSE,

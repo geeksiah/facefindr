@@ -26,17 +26,17 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     .eq('face_tag', faceTag)
     .single();
 
-  const displayName = attendee?.display_name || 'FaceFindr User';
+  const displayName = attendee?.display_name || 'Ferchr User';
   const profileImage = attendee?.profile_photo_url || `${APP_URL}/og-default.png`;
   
   return {
-    title: `${displayName} on FaceFindr`,
-    description: `Connect with ${displayName} on FaceFindr. FaceTag: ${faceTag}. Find and share event photos with AI-powered face recognition.`,
+    title: `${displayName} on Ferchr`,
+    description: `Connect with ${displayName} on Ferchr. FaceTag: ${faceTag}. Find and share event photos with AI-powered face recognition.`,
     openGraph: {
-      title: `${displayName} on FaceFindr`,
-      description: `Connect with ${displayName} on FaceFindr. FaceTag: ${faceTag}`,
+      title: `${displayName} on Ferchr`,
+      description: `Connect with ${displayName} on Ferchr. FaceTag: ${faceTag}`,
       url: `${APP_URL}/u/${params.faceTag}`,
-      siteName: 'FaceFindr',
+      siteName: 'Ferchr',
       images: [
         {
           url: profileImage,
@@ -48,14 +48,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
           url: `${APP_URL}/api/og/profile?faceTag=${faceTag}&name=${encodeURIComponent(displayName)}`,
           width: 1200,
           height: 630,
-          alt: `${displayName} on FaceFindr`,
+          alt: `${displayName} on Ferchr`,
         },
       ],
       type: 'profile',
     },
     twitter: {
       card: 'summary_large_image',
-      title: `${displayName} on FaceFindr`,
+      title: `${displayName} on Ferchr`,
       description: `Connect with ${displayName}. FaceTag: ${faceTag}`,
       images: [`${APP_URL}/api/og/profile?faceTag=${faceTag}&name=${encodeURIComponent(displayName)}`],
     },
@@ -118,7 +118,7 @@ export default async function ShareProfilePage({ params }: Props) {
 
             {/* Description */}
             <p className="text-secondary mb-8">
-              Connect with me on FaceFindr to share and find event photos together.
+              Connect with me on Ferchr to share and find event photos together.
             </p>
 
             {/* Actions */}
@@ -132,7 +132,7 @@ export default async function ShareProfilePage({ params }: Props) {
 
               <Button asChild variant="outline" size="lg" className="w-full">
                 <Link href="/register">
-                  Join FaceFindr
+                  Join Ferchr
                 </Link>
               </Button>
             </div>
@@ -149,7 +149,7 @@ export default async function ShareProfilePage({ params }: Props) {
       {/* Footer */}
       <footer className="px-6 py-4 text-center">
         <p className="text-sm text-muted-foreground">
-          © {new Date().getFullYear()} FaceFindr • Find yourself in every moment
+          © {new Date().getFullYear()} Ferchr • Find yourself in every moment
         </p>
       </footer>
     </div>

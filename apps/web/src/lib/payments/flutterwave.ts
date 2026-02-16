@@ -87,7 +87,7 @@ export type PayoutDestination = MomoPayoutDestination | BankPayoutDestination;
 // PHOTOGRAPHER PAYOUT PROFILE (No subaccount needed)
 // ============================================
 
-export interface PhotographerPayoutProfile {
+export interface CreatorPayoutProfile {
   photographerId: string;
   displayName: string;
   email: string;
@@ -140,7 +140,7 @@ export async function initializePayment(
         phonenumber: params.customerPhone,
       },
       customizations: {
-        title: 'FaceFindr',
+        title: 'Ferchr',
         description: `Photos from ${params.eventName}`,
         logo: process.env.NEXT_PUBLIC_APP_URL + '/assets/logos/icon.svg',
       },
@@ -330,7 +330,7 @@ export async function createMomoTransfer(
       beneficiary_name: params.beneficiaryName,
       meta: {
         mobile_number: params.phoneNumber,
-        sender: 'FaceFindr',
+        sender: 'Ferchr',
       },
     }),
   });

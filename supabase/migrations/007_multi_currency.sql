@@ -1,4 +1,4 @@
--- FaceFindr Database Migration
+-- Ferchr Database Migration
 -- Migration: 007_multi_currency
 -- Description: Multi-currency support for events, pricing, and user preferences
 

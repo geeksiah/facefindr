@@ -36,6 +36,7 @@ import {
 
 import { useAuthStore } from '@/stores/auth-store';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { getApiBaseUrl } from '@/lib/api-base';
 
 const { width } = Dimensions.get('window');
 const PHOTO_SIZE = (width - spacing.lg * 2 - spacing.sm * 2) / 3;
@@ -71,7 +72,7 @@ interface StoragePlan {
   is_popular: boolean;
 }
 
-const API_URL = process.env.EXPO_PUBLIC_APP_URL || 'https://app.facefindr.com';
+const API_URL = getApiBaseUrl();
 
 export default function VaultScreen() {
   const router = useRouter();

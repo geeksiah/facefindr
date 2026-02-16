@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 /**
- * Photographer Usage API
+ * Creator Usage API
  * 
  * Get real-time usage statistics and plan limits.
  */

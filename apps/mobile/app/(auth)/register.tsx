@@ -21,8 +21,9 @@ import { Button, Input, Card } from '@/components/ui';
 import { UsernameSelector } from '@/components/auth';
 import { useAuthStore } from '@/stores/auth-store';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { isCreatorUserType } from '@/lib/user-type';
 
-type UserType = 'attendee' | 'photographer';
+type UserType = 'attendee' | 'creator';
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -110,7 +111,7 @@ export default function RegisterScreen() {
           <View style={styles.content}>
             <Text style={styles.title}>Create account</Text>
             <Text style={styles.subtitle}>
-              Join FaceFindr to find and share your photos
+              Join Ferchr to find and share your photos
             </Text>
 
             {/* User Type Selection */}
@@ -150,28 +151,28 @@ export default function RegisterScreen() {
               <TouchableOpacity
                 style={[
                   styles.userTypeOption,
-                  userType === 'photographer' && styles.userTypeSelected,
+                  isCreatorUserType(userType) && styles.userTypeSelected,
                 ]}
-                onPress={() => setUserType('photographer')}
+                onPress={() => setUserType('creator')}
               >
                 <View
                   style={[
                     styles.userTypeIcon,
-                    userType === 'photographer' && styles.userTypeIconSelected,
+                    isCreatorUserType(userType) && styles.userTypeIconSelected,
                   ]}
                 >
                   <Camera
                     size={24}
-                    color={userType === 'photographer' ? '#fff' : colors.secondary}
+                    color={isCreatorUserType(userType) ? '#fff' : colors.secondary}
                   />
                 </View>
                 <Text
                   style={[
                     styles.userTypeTitle,
-                    userType === 'photographer' && styles.userTypeTitleSelected,
+                    isCreatorUserType(userType) && styles.userTypeTitleSelected,
                   ]}
                 >
-                  Photographer
+                  Creator
                 </Text>
                 <Text style={styles.userTypeDescription}>
                   Upload and sell photos

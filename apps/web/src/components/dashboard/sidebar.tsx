@@ -108,6 +108,7 @@ function PlanBadge({ plan }: { plan: string }) {
 
 export function DashboardSidebar({ user }: DashboardSidebarProps) {
   const pathname = usePathname();
+  const safePathname = pathname ?? '';
   const [mobileOpen, setMobileOpen] = useState(false);
   const { confirm, ConfirmDialog } = useConfirm();
 
@@ -128,9 +129,9 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
   // Check if a nav item is active
   const isActive = (item: NavItem) => {
     if (item.exact) {
-      return pathname === item.href;
+      return safePathname === item.href;
     }
-    return pathname === item.href || pathname.startsWith(`${item.href}/`);
+    return safePathname === item.href || safePathname.startsWith(`${item.href}/`);
   };
 
   const NavLink = ({ item }: { item: NavItem }) => {

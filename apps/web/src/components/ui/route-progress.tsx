@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 
 export function RouteProgress() {
   const pathname = usePathname();
+  const safePathname = pathname ?? '';
   const searchParams = useSearchParams();
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -23,8 +24,8 @@ export function RouteProgress() {
 
   const currentUrl = useMemo(() => {
     const query = searchParams?.toString();
-    return `${pathname}${query ? `?${query}` : ''}`;
-  }, [pathname, searchParams]);
+    return `${safePathname}${query ? `?${query}` : ''}`;
+  }, [safePathname, searchParams]);
 
   const stopTimers = () => {
     if (progressTimerRef.current) {

@@ -1,4 +1,4 @@
--- FaceFindr Database Migration
+-- Ferchr Database Migration
 -- Migration: 004_subscription_plans
 -- Description: Subscription plans, features, and print products
 

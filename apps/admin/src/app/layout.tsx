@@ -7,8 +7,8 @@ import { ThemeProvider } from '@/components/theme-provider';
 import { ToastProvider } from '@/components/ui/toast';
 
 export const metadata: Metadata = {
-  title: 'FaceFindr Admin',
-  description: 'FaceFindr Admin Dashboard',
+  title: 'Ferchr Admin',
+  description: 'Ferchr Admin Dashboard',
   robots: 'noindex, nofollow', // Prevent search engines from indexing admin
 };
 

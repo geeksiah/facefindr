@@ -146,13 +146,13 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* For Photographers */}
+      {/* For Creators */}
       <section className="py-24 px-6">
         <div className="mx-auto max-w-6xl">
           <div className="grid lg:grid-cols-2 gap-16 items-center">
             <div>
               <span className="text-sm font-semibold text-accent uppercase tracking-wider">
-                For Photographers
+                For Creators
               </span>
               <h2 className="mt-4 text-3xl sm:text-4xl font-bold text-foreground">
                 Deliver photos effortlessly
@@ -377,7 +377,7 @@ export default function HomePage() {
               </Link>
             </div>
             <p className="text-sm text-muted-foreground">
-              © {new Date().getFullYear()} FaceFindr
+              © {new Date().getFullYear()} Ferchr
             </p>
           </div>
         </div>

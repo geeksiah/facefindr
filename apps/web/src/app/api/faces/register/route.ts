@@ -1,9 +1,9 @@
 export const dynamic = 'force-dynamic';
 
-import { IndexFacesCommand, SearchFacesByImageCommand } from '@aws-sdk/client-rekognition';
+import { IndexFacesCommand } from '@aws-sdk/client-rekognition';
 import { NextRequest, NextResponse } from 'next/server';
 
-import { rekognitionClient, ATTENDEE_COLLECTION_ID } from '@/lib/aws/rekognition';
+import { rekognitionClient, ATTENDEE_COLLECTION_ID, searchEventCollectionWithFallback } from '@/lib/aws/rekognition';
 import { checkRateLimit, getClientIP, rateLimitHeaders, rateLimits } from '@/lib/rate-limit';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
@@ -184,17 +184,13 @@ export async function POST(request: NextRequest) {
       if (events && events.length > 0) {
         // For each event, search for matches
         for (const event of events) {
-          const collectionId = `facefindr-event-${event.id}`;
-          
           try {
-            const searchCommand = new SearchFacesByImageCommand({
-              CollectionId: collectionId,
-              Image: { Bytes: imageBuffer },
-              MaxFaces: 100,
-              FaceMatchThreshold: 90,
-            });
-
-            const searchResult = await rekognitionClient.send(searchCommand);
+            const { response: searchResult } = await searchEventCollectionWithFallback(
+              event.id,
+              imageBuffer,
+              100,
+              90
+            );
             if (searchResult.FaceMatches) {
               matchCount += searchResult.FaceMatches.length;
             }

@@ -99,7 +99,7 @@ export function GallerySearch() {
     if (result.type === 'event') {
       router.push(`/gallery/events/${result.id}`);
     } else {
-      router.push(`/p/${result.id}`);
+      router.push(`/c/${result.id}`);
     }
   };
 
@@ -167,7 +167,7 @@ export function GallerySearch() {
                             },
                             'en-US'
                           )
-                        : 'Photographer'
+                        : 'Creator'
                       }
                     </p>
                   </div>

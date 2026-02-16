@@ -1,4 +1,4 @@
--- FaceFindr Database Migration
+-- Ferchr Database Migration
 -- Migration: 010_payment_methods
 -- Description: User payment methods for subscriptions and purchases
 

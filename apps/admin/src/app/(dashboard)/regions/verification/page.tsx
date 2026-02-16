@@ -147,7 +147,7 @@ export default function VerificationSettingsPage() {
           <div className="grid gap-4 md:grid-cols-2">
             <label className="flex items-center justify-between p-4 rounded-lg bg-muted/50">
               <div>
-                <p className="font-medium text-foreground">Required for Photographers</p>
+                <p className="font-medium text-foreground">Required for Creators</p>
                 <p className="text-sm text-muted-foreground">Must verify email to access platform</p>
               </div>
               <input
@@ -211,7 +211,7 @@ export default function VerificationSettingsPage() {
           <div className="grid gap-4 md:grid-cols-2">
             <label className="flex items-center justify-between p-4 rounded-lg bg-muted/50">
               <div>
-                <p className="font-medium text-foreground">Required for Photographers</p>
+                <p className="font-medium text-foreground">Required for Creators</p>
                 <p className="text-sm text-muted-foreground">Must verify phone to access platform</p>
               </div>
               <input

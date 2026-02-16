@@ -13,6 +13,7 @@ import { useRouter } from 'expo-router';
 
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/auth-store';
+import { isCreatorUserType } from '@/lib/user-type';
 
 // Configure notification handler
 Notifications.setNotificationHandler({
@@ -148,12 +149,12 @@ export function useNotifications() {
         router.push('/(attendee)' as any);
         break;
       case 'payout_success':
-        router.push('/(photographer)' as any);
+        router.push('/(creator)' as any);
         break;
       default:
         // Default to notifications screen
-        if (profile?.userType === 'photographer') {
-          router.push('/(photographer)' as any);
+        if (isCreatorUserType(profile?.userType)) {
+          router.push('/(creator)' as any);
         } else {
           router.push('/(attendee)/notifications' as any);
         }

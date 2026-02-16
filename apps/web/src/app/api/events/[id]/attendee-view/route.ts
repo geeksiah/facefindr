@@ -80,7 +80,7 @@ export async function GET(
       .eq('attendee_id', user.id)
       .eq('event_id', eventId)
       .is('withdrawn_at', null)
-      .single();
+      .maybeSingle();
 
     // Allow access if:
     // 1. Event is public (is_public = true), OR
@@ -110,32 +110,28 @@ export async function GET(
       .eq('attendee_id', user.id)
       .eq('event_id', eventId);
 
-    const matchedPhotos = await Promise.all(
-      (matches || [])
-        .map((match: any) => match.media)
-        .filter(Boolean)
-        .map(async (media: any) => {
-          const rawThumbnailPath = media.thumbnail_path || media.storage_path;
-          const thumbnailPath = rawThumbnailPath?.startsWith('/') ? rawThumbnailPath.slice(1) : rawThumbnailPath;
-          const watermarkedPath = media.watermarked_path?.startsWith('/')
-            ? media.watermarked_path.slice(1)
-            : media.watermarked_path;
-          const { data: thumbData } = thumbnailPath
-            ? await serviceClient.storage.from('media').createSignedUrl(thumbnailPath, 3600)
-            : { data: null };
-          const { data: watermarkedData } = watermarkedPath
-            ? await serviceClient.storage.from('media').createSignedUrl(watermarkedPath, 3600)
-            : { data: null };
+    const mediaRecords = (matches || [])
+      .map((match: any) => match.media)
+      .filter(Boolean);
 
-          return {
-            id: media.id,
-            storage_path: media.storage_path,
-            thumbnailUrl: thumbData?.signedUrl || null,
-            watermarkedUrl: watermarkedData?.signedUrl || null,
-            createdAt: media.created_at,
-          };
-        })
+    const toCleanPath = (path: string | null | undefined) =>
+      path ? (path.startsWith('/') ? path.slice(1) : path) : null;
+
+    const thumbnailPaths = Array.from(
+      new Set(mediaRecords.map((media: any) => toCleanPath(media.thumbnail_path || media.storage_path)).filter(Boolean))
+    ) as string[];
+    const displayPaths = Array.from(
+      new Set(mediaRecords.map((media: any) => toCleanPath(media.watermarked_path || media.storage_path)).filter(Boolean))
+    ) as string[];
+
+    const uniquePaths = Array.from(new Set([...thumbnailPaths, ...displayPaths]));
+    const signedPathEntries = await Promise.all(
+      uniquePaths.map(async (path) => {
+        const { data } = await serviceClient.storage.from('media').createSignedUrl(path, 3600);
+        return [path, data?.signedUrl || null] as const;
+      })
     );
+    const signedPathMap = new Map<string, string | null>(signedPathEntries);
 
     // Get purchased photos
     const { data: entitlements } = await supabase
@@ -152,7 +148,18 @@ export async function GET(
     const { count: totalPhotos } = await serviceClient
       .from('media')
       .select('id', { count: 'exact', head: true })
-      .eq('event_id', eventId);
+      .eq('event_id', eventId)
+      .is('deleted_at', null);
+
+    const coverPath = event.cover_image_url?.startsWith('/')
+      ? event.cover_image_url.slice(1)
+      : event.cover_image_url;
+    const coverImage = coverPath?.startsWith('http')
+      ? coverPath
+      : coverPath
+      ? serviceClient.storage.from('covers').getPublicUrl(coverPath).data.publicUrl ||
+        serviceClient.storage.from('events').getPublicUrl(coverPath).data.publicUrl
+      : null;
 
     return NextResponse.json({
       id: event.id,
@@ -176,20 +183,34 @@ export async function GET(
       eventTimezone: event.event_timezone || 'UTC',
       eventStartAtUtc: event.event_start_at_utc || null,
       location: event.location,
-      coverImage: event.cover_image_url,
+      coverImage,
       photographerId: event.photographer_id || photographer?.id,
-      photographerName: photographer?.display_name || 'Unknown Photographer',
+      photographerName: photographer?.display_name || 'Unknown Creator',
       photographerAvatar: photographer?.profile_photo_url,
       totalPhotos: totalPhotos || 0,
-      matchedPhotos: matchedPhotos.map(photo => ({
-        id: photo.id,
-        url: photo.storage_path,
-        thumbnailUrl: photo.thumbnailUrl || photo.storage_path,
-        watermarkedUrl: photo.watermarkedUrl,
-        isPurchased: purchasedMediaIds.has(photo.id),
-        isWatermarked: !pricing?.is_free && !purchasedMediaIds.has(photo.id),
-        price: pricing?.price_per_media || 0,
-      })),
+      matchedPhotos: mediaRecords
+        .map((media: any) => {
+        const thumbnailPath = toCleanPath(media.thumbnail_path || media.storage_path);
+        const displayPath = toCleanPath(media.watermarked_path || media.storage_path);
+        const thumbnailUrl = thumbnailPath ? signedPathMap.get(thumbnailPath) : null;
+        const displayUrl = displayPath ? signedPathMap.get(displayPath) : null;
+        const resolvedThumbnail = thumbnailUrl || displayUrl;
+
+        if (!resolvedThumbnail) {
+          return null;
+        }
+
+        return {
+          id: media.id,
+          url: displayUrl || resolvedThumbnail,
+          thumbnailUrl: resolvedThumbnail,
+          watermarkedUrl: displayUrl || null,
+          isPurchased: purchasedMediaIds.has(media.id),
+          isWatermarked: !pricing?.is_free && !purchasedMediaIds.has(media.id),
+          price: pricing?.price_per_media || 0,
+        };
+      })
+        .filter(Boolean),
       pricing: {
         pricePerPhoto: pricing?.price_per_media || 0,
         unlockAllPrice: pricing?.unlock_all_price,

@@ -25,15 +25,5 @@ export function EventDetailRealtime({ eventId }: EventDetailRealtimeProps) {
     },
   });
 
-  // Subscribe to media changes for real-time photo count updates
-  useRealtimeSubscription({
-    table: 'media',
-    filter: `event_id=eq.${eventId}`,
-    onChange: () => {
-      // Refresh page when photos are added/removed
-      router.refresh();
-    },
-  });
-
   return null; // This component doesn't render anything
 }

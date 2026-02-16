@@ -18,7 +18,7 @@ import { createPortal } from 'react-dom';
 
 import { formatDate, getInitials } from '@/lib/utils';
 
-interface Photographer {
+interface Creator {
   id: string;
   email: string;
   display_name: string | null;
@@ -35,8 +35,8 @@ interface Photographer {
   events: Array<{ id: string }>;
 }
 
-interface PhotographerListProps {
-  photographers: Photographer[];
+interface CreatorListProps {
+  photographers: Creator[];
   total: number;
   page: number;
   limit: number;
@@ -48,7 +48,7 @@ interface MenuState {
   right: number;
 }
 
-export function PhotographerList({ photographers, total, page, limit }: PhotographerListProps) {
+export function CreatorList({ photographers, total, page, limit }: CreatorListProps) {
   const router = useRouter();
   const [activeMenu, setActiveMenu] = useState<MenuState | null>(null);
   const [isLoading, setIsLoading] = useState<string | null>(null);
@@ -151,7 +151,7 @@ export function PhotographerList({ photographers, total, page, limit }: Photogra
           <thead>
             <tr className="border-b border-border bg-muted/50">
               <th className="text-left px-6 py-3 text-sm font-medium text-muted-foreground">
-                Photographer
+                Creator
               </th>
               <th className="text-left px-6 py-3 text-sm font-medium text-muted-foreground">
                 Plan

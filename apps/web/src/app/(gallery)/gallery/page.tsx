@@ -14,10 +14,11 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { useRealtimeSubscription } from '@/hooks/use-realtime';
+import { createClient } from '@/lib/supabase/client';
 
 // ============================================
 // PHOTO PASSPORT - MAIN ATTENDEE GALLERY
@@ -54,55 +55,48 @@ export default function PhotoPassportPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [hasScanned, setHasScanned] = useState(false);
   const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
+  const [attendeeId, setAttendeeId] = useState<string | null>(null);
+
+  const refreshMatches = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/attendee/matches');
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to load matches');
+      }
+      setHasScanned(!!data.hasScanned);
+      setEventGroups(data.eventGroups || []);
+    } catch (error) {
+      console.error('Failed to fetch photos:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const fetchPhotos = async () => {
-      try {
-        const response = await fetch('/api/attendee/matches');
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.error || 'Failed to load matches');
-        }
-
-        setHasScanned(!!data.hasScanned);
-        setEventGroups(data.eventGroups || []);
-      } catch (error) {
-        console.error('Failed to fetch photos:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchPhotos();
-  }, []);
+    const supabase = createClient();
+    supabase.auth
+      .getUser()
+      .then(({ data }) => setAttendeeId(data.user?.id || null))
+      .catch(() => setAttendeeId(null));
+    refreshMatches();
+  }, [refreshMatches]);
 
   useRealtimeSubscription({
     table: 'photo_drop_matches',
-    onChange: () => {
-      setIsLoading(true);
-      fetch('/api/attendee/matches')
-        .then((res) => res.json())
-        .then((data) => {
-          setHasScanned(!!data.hasScanned);
-          setEventGroups(data.eventGroups || []);
-        })
-        .finally(() => setIsLoading(false));
-    },
+    filter: attendeeId
+      ? `attendee_id=eq.${attendeeId}`
+      : 'attendee_id=eq.00000000-0000-0000-0000-000000000000',
+    onChange: refreshMatches,
   });
 
   useRealtimeSubscription({
     table: 'entitlements',
-    onChange: () => {
-      setIsLoading(true);
-      fetch('/api/attendee/matches')
-        .then((res) => res.json())
-        .then((data) => {
-          setHasScanned(!!data.hasScanned);
-          setEventGroups(data.eventGroups || []);
-        })
-        .finally(() => setIsLoading(false));
-    },
+    filter: attendeeId
+      ? `attendee_id=eq.${attendeeId}`
+      : 'attendee_id=eq.00000000-0000-0000-0000-000000000000',
+    onChange: refreshMatches,
   });
 
   const togglePhotoSelection = (photoId: string) => {
@@ -238,7 +232,7 @@ export default function PhotoPassportPage() {
           </div>
           <h2 className="text-xl font-semibold text-foreground mb-3">No photos found yet</h2>
           <p className="text-secondary max-w-md mx-auto mb-6">
-            We haven&apos;t found any photos with your face yet. As photographers upload photos 
+            We haven&apos;t found any photos with your face yet. As creators upload photos 
             from events you attend, they&apos;ll appear here automatically.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">

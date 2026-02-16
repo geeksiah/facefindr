@@ -1,4 +1,4 @@
--- FaceFindr Database Schema
+-- Ferchr Database Schema
 -- Migration: 001_initial_schema
 -- Description: Initial database setup with all core tables
 
