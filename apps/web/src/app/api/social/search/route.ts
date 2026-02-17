@@ -8,11 +8,36 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/server';
+
+function scoreSearchMatch(faceTag: string | null | undefined, displayName: string | null | undefined, normalizedQuery: string) {
+  const normalizedFaceTag = (faceTag || '').toLowerCase().replace(/^@/, '');
+  const normalizedName = (displayName || '').toLowerCase();
+
+  if (normalizedFaceTag === normalizedQuery) return 0;
+  if (normalizedFaceTag.startsWith(normalizedQuery)) return 1;
+  if (normalizedName.startsWith(normalizedQuery)) return 2;
+  if (normalizedFaceTag.includes(normalizedQuery)) return 3;
+  if (normalizedName.includes(normalizedQuery)) return 4;
+  return 10;
+}
+
+function dedupeById<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const output: T[] = [];
+
+  for (const item of items) {
+    if (!item.id || seen.has(item.id)) continue;
+    seen.add(item.id);
+    output.push(item);
+  }
+
+  return output;
+}
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const serviceClient = createServiceClient();
     const { searchParams } = new URL(request.url);
     
     const query = searchParams.get('q');
@@ -26,26 +51,41 @@ export async function GET(request: NextRequest) {
 
     // Clean search term
     const searchTerm = query.replace('@', '').trim().toLowerCase();
+    const safeSearchTerm = searchTerm.replace(/[,%()]/g, ' ').trim();
     if (!searchTerm) {
       return NextResponse.json({ error: 'Search query is required' }, { status: 400 });
     }
+    if (!safeSearchTerm) {
+      return NextResponse.json({ photographers: [], users: [] });
+    }
+
     const results: any = { photographers: [], users: [] };
-    const serviceClient = createServiceClient();
+    const exactFaceTag = `@${searchTerm}`;
 
     // Search photographers
     if (type === 'all' || type === 'photographers') {
-      const { data: photographers } = await supabase
+      const { data: exactPhotographers } = await serviceClient
         .from('photographers')
         .select(`
           id, display_name, face_tag, profile_photo_url, bio, 
           follower_count, public_profile_slug, is_public_profile, allow_follows
         `)
         .eq('is_public_profile', true)
-        .or(`face_tag.ilike.%${searchTerm}%,display_name.ilike.%${searchTerm}%`)
-        .order('follower_count', { ascending: false })
-        .limit(limit);
+        .eq('face_tag', exactFaceTag)
+        .limit(1);
 
-      const creatorCandidates = photographers || [];
+      const { data: photographers } = await serviceClient
+        .from('photographers')
+        .select(`
+          id, display_name, face_tag, profile_photo_url, bio, 
+          follower_count, public_profile_slug, is_public_profile, allow_follows
+        `)
+        .eq('is_public_profile', true)
+        .or(`face_tag.ilike.%${safeSearchTerm}%,display_name.ilike.%${safeSearchTerm}%`)
+        .order('follower_count', { ascending: false })
+        .limit(Math.min(limit * 3, 100));
+
+      const creatorCandidates = dedupeById([...(exactPhotographers || []), ...(photographers || [])]);
       const creatorIds = creatorCandidates.map((p: any) => p.id);
 
       const { data: creatorPrivacy } = creatorIds.length
@@ -63,25 +103,41 @@ export async function GET(request: NextRequest) {
 
       results.photographers = creatorCandidates
         .filter((p: any) => !hiddenCreatorIds.has(p.id))
+        .sort((a: any, b: any) => {
+          const scoreDiff = scoreSearchMatch(a.face_tag, a.display_name, searchTerm) - scoreSearchMatch(b.face_tag, b.display_name, searchTerm);
+          if (scoreDiff !== 0) return scoreDiff;
+          return (b.follower_count || 0) - (a.follower_count || 0);
+        })
+        .slice(0, limit)
         .map((p: any) => ({
-        ...p,
-        userType: 'photographer',
+          ...p,
+          userType: 'photographer',
         }));
     }
 
     // Search users/attendees (only if they have public profiles)
     if (type === 'all' || type === 'users') {
-      const { data: users } = await supabase
+      const { data: exactUsers } = await serviceClient
         .from('attendees')
         .select(`
           id, display_name, face_tag, profile_photo_url, 
-          public_profile_slug, is_public_profile
+          public_profile_slug, is_public_profile, following_count
         `)
         .eq('is_public_profile', true)
-        .or(`face_tag.ilike.%${searchTerm}%,display_name.ilike.%${searchTerm}%`)
-        .limit(limit);
+        .eq('face_tag', exactFaceTag)
+        .limit(1);
 
-      const attendeeCandidates = users || [];
+      const { data: users } = await serviceClient
+        .from('attendees')
+        .select(`
+          id, display_name, face_tag, profile_photo_url, 
+          public_profile_slug, is_public_profile, following_count
+        `)
+        .eq('is_public_profile', true)
+        .or(`face_tag.ilike.%${safeSearchTerm}%,display_name.ilike.%${safeSearchTerm}%`)
+        .limit(Math.min(limit * 3, 100));
+
+      const attendeeCandidates = dedupeById([...(exactUsers || []), ...(users || [])]);
       const attendeeIds = attendeeCandidates.map((u: any) => u.id);
 
       const { data: attendeePrivacy } = attendeeIds.length
@@ -99,9 +155,15 @@ export async function GET(request: NextRequest) {
 
       results.users = attendeeCandidates
         .filter((u: any) => !hiddenAttendeeIds.has(u.id))
+        .sort((a: any, b: any) => {
+          const scoreDiff = scoreSearchMatch(a.face_tag, a.display_name, searchTerm) - scoreSearchMatch(b.face_tag, b.display_name, searchTerm);
+          if (scoreDiff !== 0) return scoreDiff;
+          return (b.following_count || 0) - (a.following_count || 0);
+        })
+        .slice(0, limit)
         .map((u: any) => ({
-        ...u,
-        userType: 'attendee',
+          ...u,
+          userType: 'attendee',
         }));
     }
 

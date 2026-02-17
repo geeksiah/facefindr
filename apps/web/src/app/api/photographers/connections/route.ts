@@ -8,7 +8,38 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
+
+async function resolveCreatorId(userId: string) {
+  const serviceClient = createServiceClient();
+
+  const byIdResult = await serviceClient
+    .from('photographers')
+    .select('id')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (byIdResult.data?.id) {
+    return byIdResult.data.id as string;
+  }
+
+  const byUserIdResult = await serviceClient
+    .from('photographers')
+    .select('id')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  const missingUserIdColumn =
+    byUserIdResult.error?.code === '42703' ||
+    (typeof byUserIdResult.error?.message === 'string' &&
+      byUserIdResult.error.message.includes('user_id'));
+
+  if (missingUserIdColumn) {
+    return null;
+  }
+
+  return byUserIdResult.data?.id || null;
+}
 
 // POST - Add a connection (attendee by FaceTag)
 export async function POST(request: NextRequest) {
@@ -20,14 +51,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Get photographer profile
-    const { data: photographer } = await supabase
-      .from('photographers')
-      .select('id')
-      .eq('user_id', user.id)
-      .single();
-
-    if (!photographer) {
+    const creatorId = await resolveCreatorId(user.id);
+    if (!creatorId) {
       return NextResponse.json({ error: 'Not a photographer' }, { status: 403 });
     }
 
@@ -66,9 +91,9 @@ export async function POST(request: NextRequest) {
     const { data: existing } = await supabase
       .from('photographer_connections')
       .select('id')
-      .eq('photographer_id', photographer.id)
+      .eq('photographer_id', creatorId)
       .eq('attendee_id', attendee.id)
-      .single();
+      .maybeSingle();
 
     if (existing) {
       return NextResponse.json({
@@ -82,7 +107,7 @@ export async function POST(request: NextRequest) {
     const { data: connection, error: insertError } = await supabase
       .from('photographer_connections')
       .insert({
-        photographer_id: photographer.id,
+        photographer_id: creatorId,
         attendee_id: attendee.id,
         nickname: attendee.display_name,
       })
@@ -122,14 +147,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Get photographer profile
-    const { data: photographer } = await supabase
-      .from('photographers')
-      .select('id')
-      .eq('user_id', user.id)
-      .single();
-
-    if (!photographer) {
+    const creatorId = await resolveCreatorId(user.id);
+    if (!creatorId) {
       return NextResponse.json({ error: 'Not a photographer' }, { status: 403 });
     }
 
@@ -146,7 +165,7 @@ export async function GET(request: NextRequest) {
           id, display_name, face_tag, profile_photo_url
         )
       `)
-      .eq('photographer_id', photographer.id)
+      .eq('photographer_id', creatorId)
       .order('created_at', { ascending: false });
 
     if (search) {
@@ -181,14 +200,8 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Get photographer profile
-    const { data: photographer } = await supabase
-      .from('photographers')
-      .select('id')
-      .eq('user_id', user.id)
-      .single();
-
-    if (!photographer) {
+    const creatorId = await resolveCreatorId(user.id);
+    if (!creatorId) {
       return NextResponse.json({ error: 'Not a photographer' }, { status: 403 });
     }
 
@@ -206,7 +219,7 @@ export async function DELETE(request: NextRequest) {
     let deleteQuery = supabase
       .from('photographer_connections')
       .delete()
-      .eq('photographer_id', photographer.id);
+      .eq('photographer_id', creatorId);
 
     if (connectionId) {
       deleteQuery = deleteQuery.eq('id', connectionId);

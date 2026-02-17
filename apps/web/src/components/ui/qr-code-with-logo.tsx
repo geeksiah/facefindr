@@ -164,7 +164,21 @@ export async function downloadQRCodeWithLogo(
     // Draw center white box + logo.
     const logoImageNode = element.querySelector('img[alt="Ferchr Logo"]') as HTMLImageElement | null;
     const logoSrc = logoImageNode?.currentSrc || logoImageNode?.src || '/assets/logos/qr-logo.svg';
-    const logoImage = await loadImage(logoSrc);
+    let logoImage: HTMLImageElement | null = null;
+
+    if (logoImageNode?.complete && logoImageNode.naturalWidth > 0) {
+      logoImage = logoImageNode;
+    } else {
+      try {
+        logoImage = await loadImage(logoSrc);
+      } catch {
+        try {
+          logoImage = await loadImage('/assets/logos/icon.svg');
+        } catch {
+          logoImage = null;
+        }
+      }
+    }
 
     const overlaySize = exportSize * 0.32;
     const overlayPadding = overlaySize * 0.05;
@@ -176,7 +190,9 @@ export async function downloadQRCodeWithLogo(
 
     ctx.fillStyle = '#FFFFFF';
     drawRoundedRect(ctx, overlayX, overlayY, overlaySize, overlaySize, overlaySize * 0.08);
-    ctx.drawImage(logoImage, logoX, logoY, logoDrawSize, logoDrawSize);
+    if (logoImage) {
+      ctx.drawImage(logoImage, logoX, logoY, logoDrawSize, logoDrawSize);
+    }
 
     const mimeType = format === 'jpg' ? 'image/jpeg' : 'image/png';
     const finalFilename = /\.(png|jpg|jpeg)$/i.test(filename)

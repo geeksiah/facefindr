@@ -14,44 +14,16 @@ import { isFlutterwaveConfigured, initializePayment } from '@/lib/payments/flutt
 import { GatewaySelectionError, selectPaymentGateway } from '@/lib/payments/gateway-selector';
 import { isPayPalConfigured, createOrder, getApprovalUrl } from '@/lib/payments/paypal';
 import { stripe } from '@/lib/payments/stripe';
-import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
+import { resolveDropInPricingConfig } from '@/lib/drop-in/pricing';
+import { createClient, createClientWithAccessToken } from '@/lib/supabase/server';
 
 async function getDropInPricing() {
-  const supabase = createServiceClient();
-  const { data, error } = await supabase
-    .from('platform_settings')
-    .select('*')
-    .in('setting_key', ['drop_in_upload_fee_cents', 'drop_in_gift_fee_cents', 'drop_in_currency']);
-
-  if (error || !data) {
-    throw new Error('Drop-in pricing settings are not configured');
-  }
-
-  const byKey = new Map<string, any>();
-  for (const row of data as any[]) {
-    const value = row.setting_value ?? row.value;
-    byKey.set(row.setting_key, value);
-  }
-
-  const uploadFee = Number(byKey.get('drop_in_upload_fee_cents'));
-  const giftFee = Number(byKey.get('drop_in_gift_fee_cents'));
-  const currencyRaw = String(byKey.get('drop_in_currency') || '').trim().toUpperCase();
-
-  if (!Number.isFinite(uploadFee) || uploadFee <= 0) {
-    throw new Error('drop_in_upload_fee_cents must be configured with a positive value');
-  }
-  if (!Number.isFinite(giftFee) || giftFee < 0) {
-    throw new Error('drop_in_gift_fee_cents must be configured');
-  }
-  if (!currencyRaw) {
-    throw new Error('drop_in_currency must be configured');
-  }
-
+  const pricing = await resolveDropInPricingConfig();
   return {
-    uploadFeeCents: Math.round(uploadFee),
-    giftFeeCents: Math.round(giftFee),
-    currencyCode: currencyRaw,
-    currencyLower: currencyRaw.toLowerCase(),
+    uploadFeeCents: pricing.uploadFeeCents,
+    giftFeeCents: pricing.giftFeeCents,
+    currencyCode: pricing.currencyCode,
+    currencyLower: pricing.currencyLower,
   };
 }
 
@@ -70,7 +42,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const dropInPricing = await getDropInPricing();
+    let dropInPricing;
+    try {
+      dropInPricing = await getDropInPricing();
+    } catch (pricingError) {
+      const message = pricingError instanceof Error
+        ? pricingError.message
+        : 'Drop-in pricing is not configured by admin';
+      return NextResponse.json({ error: message, failClosed: true }, { status: 503 });
+    }
 
     // Get attendee profile
     const { data: attendee } = await supabase

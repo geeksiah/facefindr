@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createServiceClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // GET - Get public event by slug
 export async function GET(
@@ -24,6 +24,7 @@ export async function GET(
 
     const { searchParams } = new URL(request.url);
     const code = searchParams.get('code');
+    const previewRequested = searchParams.get('preview') === '1';
 
     // Use service client to bypass RLS completely - we'll validate access manually
     const serviceClient = createServiceClient();
@@ -140,9 +141,8 @@ export async function GET(
 
     // Backward compatibility: if DB migration for event_start_at_utc is not applied yet.
     const missingStartAtUtcColumn =
-      slugError?.code === '42703' &&
-      typeof slugError?.message === 'string' &&
-      slugError.message.includes('event_start_at_utc');
+      slugError?.code === '42703' ||
+      (typeof slugError?.message === 'string' && slugError.message.includes('event_start_at_utc'));
 
     if (missingStartAtUtcColumn) {
       const legacyLookup = await lookupEventBySlug(legacyEventSelect);
@@ -161,8 +161,31 @@ export async function GET(
       return NextResponse.json({ error: 'Event not found' }, { status: 404 });
     }
 
-    // Check if event is active (required for public access)
-    if (eventBySlug.status !== 'active') {
+    let previewAuthorized = false;
+    if (previewRequested) {
+      const authClient = createClient();
+      const {
+        data: { user },
+      } = await authClient.auth.getUser();
+
+      if (user?.id) {
+        if (user.id === eventBySlug.photographer_id) {
+          previewAuthorized = true;
+        } else {
+          const { data: collaborator } = await serviceClient
+            .from('event_collaborators')
+            .select('id')
+            .eq('event_id', eventBySlug.id)
+            .eq('photographer_id', user.id)
+            .in('status', ['accepted', 'active'])
+            .maybeSingle();
+          previewAuthorized = Boolean(collaborator);
+        }
+      }
+    }
+
+    // Check if event is active (required for public access unless preview is authorized)
+    if (eventBySlug.status !== 'active' && !previewAuthorized) {
       return NextResponse.json(
         { 
           error: 'Event not active',
@@ -213,7 +236,7 @@ export async function GET(
     // 3. If event is public OR has valid code OR allows anonymous scan, grant access
     
     // Check access code if required
-    if (event.require_access_code) {
+    if (!previewAuthorized && event.require_access_code) {
       if (!code) {
         // Show access code entry form
         const coverPath = event.cover_image_url?.startsWith('/')
@@ -246,7 +269,7 @@ export async function GET(
 
     // For private events without code, check if anonymous scan is allowed
     // (This allows face scanning even for private events if photographer enabled it)
-    if (!event.is_public && !event.require_access_code && !event.allow_anonymous_scan) {
+    if (!previewAuthorized && !event.is_public && !event.require_access_code && !event.allow_anonymous_scan) {
       return NextResponse.json(
         { error: 'Event is private', message: 'This event is not publicly accessible.' },
         { status: 403 }

@@ -131,7 +131,7 @@ export default async function EventPage({ params }: EventPageProps) {
       
       {/* Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="flex items-start gap-4">
+        <div className="flex min-w-0 items-start gap-4">
           <Link
             href="/dashboard/events"
             className="mt-1 rounded-xl p-2.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
@@ -140,7 +140,7 @@ export default async function EventPage({ params }: EventPageProps) {
           </Link>
           <div>
             <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              <h1 className="text-2xl font-bold text-foreground">{event.name}</h1>
+              <h1 className="text-2xl font-bold text-foreground break-words">{event.name}</h1>
               <span className={cn('rounded-full px-2.5 py-0.5 text-xs font-medium', statusColors[event.status])}>
                 {event.status.charAt(0).toUpperCase() + event.status.slice(1)}
               </span>

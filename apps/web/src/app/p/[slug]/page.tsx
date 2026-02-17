@@ -19,6 +19,7 @@ import {
   UserCheck,
   X,
   Download,
+  Loader2,
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -73,6 +74,7 @@ export default function CreatorProfilePage() {
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [showQRCode, setShowQRCode] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [downloadingQr, setDownloadingQr] = useState(false);
   const qrCodeRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -514,7 +516,8 @@ export default function CreatorProfilePage() {
             
             <button
               onClick={async () => {
-                if (!qrCodeRef.current) return;
+                if (!qrCodeRef.current || downloadingQr) return;
+                setDownloadingQr(true);
                 try {
                   await downloadQRCodeWithLogo(
                     qrCodeRef.current,
@@ -523,12 +526,15 @@ export default function CreatorProfilePage() {
                   );
                 } catch (error) {
                   console.error('Download error:', error);
+                } finally {
+                  setDownloadingQr(false);
                 }
               }}
+              disabled={downloadingQr}
               className="flex items-center justify-center gap-2 w-full py-2 px-4 bg-muted rounded-xl text-foreground hover:bg-muted/70 transition-colors"
             >
-              <Download className="h-4 w-4" />
-              Download QR Code
+              {downloadingQr ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {downloadingQr ? 'Downloading...' : 'Download QR Code'}
             </button>
           </div>
         </div>

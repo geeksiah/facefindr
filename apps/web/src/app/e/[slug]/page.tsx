@@ -96,6 +96,7 @@ export default function PublicEventPage() {
   const searchParams = useSearchParams();
   const slug = params?.slug as string;
   const codeFromUrl = searchParams?.get('code');
+  const previewFromUrl = searchParams?.get('preview');
 
   const [event, setEvent] = useState<Event | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -124,7 +125,7 @@ export default function PublicEventPage() {
 
   useEffect(() => {
     loadEvent();
-  }, [slug]);
+  }, [slug, codeFromUrl, previewFromUrl]);
 
   async function loadEvent(code?: string) {
     try {
@@ -133,7 +134,15 @@ export default function PublicEventPage() {
       setCodeError('');
 
       const codeParam = code || codeFromUrl || '';
-      const res = await fetch(`/api/events/public/${slug}${codeParam ? `?code=${codeParam}` : ''}`);
+      const queryParams = new URLSearchParams();
+      if (codeParam) {
+        queryParams.set('code', codeParam);
+      }
+      if (previewFromUrl === '1') {
+        queryParams.set('preview', '1');
+      }
+      const queryString = queryParams.toString();
+      const res = await fetch(`/api/events/public/${slug}${queryString ? `?${queryString}` : ''}`);
       const data = await res.json();
 
       if (!res.ok) {
@@ -145,7 +154,7 @@ export default function PublicEventPage() {
         } else if (data.error === 'Invalid access code') {
           setCodeError('Invalid access code. Please try again.');
         } else {
-          setError(data.error || 'Event not found');
+          setError(data.message || data.error || 'Event not found');
         }
         return;
       }

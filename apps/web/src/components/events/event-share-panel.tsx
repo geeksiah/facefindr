@@ -16,6 +16,7 @@ import {
   MessageCircle,
   Mail,
   RefreshCw,
+  Loader2,
   Plus,
   Trash2,
   Eye,
@@ -95,6 +96,7 @@ export function EventSharePanel({ eventId, onClose }: EventSharePanelProps) {
   const [activeTab, setActiveTab] = useState<'link' | 'qr' | 'embed' | 'advanced'>('link');
   const [copied, setCopied] = useState<string | null>(null);
   const [showCode, setShowCode] = useState(false);
+  const [downloadingQr, setDownloadingQr] = useState(false);
   const qrCodeRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -400,11 +402,13 @@ export function EventSharePanel({ eventId, onClose }: EventSharePanelProps) {
             <div className="flex justify-center gap-4">
               <Button 
                 onClick={async () => {
+                  if (downloadingQr) return;
+                  setDownloadingQr(true);
                   // Download QR code with logo using html2canvas
                   try {
                     if (!qrCodeRef.current) {
                       // Fallback to API-generated QR if component not found
-                      downloadQR();
+                      await downloadQR();
                       return;
                     }
                     
@@ -416,12 +420,19 @@ export function EventSharePanel({ eventId, onClose }: EventSharePanelProps) {
                   } catch (error) {
                     console.error('Download error:', error);
                     // Fallback to API-generated QR
-                    downloadQR();
+                    await downloadQR();
+                  } finally {
+                    setDownloadingQr(false);
                   }
                 }}
+                disabled={downloadingQr}
               >
-                <Download className="h-4 w-4 mr-2" />
-                Download PNG
+                {downloadingQr ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4 mr-2" />
+                )}
+                {downloadingQr ? 'Downloading...' : 'Download PNG'}
               </Button>
               <Button
                 variant="outline"

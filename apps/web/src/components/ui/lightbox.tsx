@@ -2,6 +2,7 @@
 
 import { X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 
 interface LightboxProps {
   images: Array<{ id: string; url: string; alt?: string }>;
@@ -13,6 +14,11 @@ interface LightboxProps {
 
 export function Lightbox({ images, initialIndex = 0, isOpen, onClose, showReactions = false }: LightboxProps) {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     setCurrentIndex(initialIndex);
@@ -60,13 +66,13 @@ export function Lightbox({ images, initialIndex = 0, isOpen, onClose, showReacti
     }
   }, [isOpen]);
 
-  if (!isOpen || images.length === 0) return null;
+  if (!mounted || !isOpen || images.length === 0) return null;
 
   const currentImage = images[currentIndex];
 
-  return (
+  const lightboxContent = (
     <div
-      className="fixed z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm"
       style={{ 
         margin: 0, 
         padding: 0,
@@ -156,4 +162,6 @@ export function Lightbox({ images, initialIndex = 0, isOpen, onClose, showReacti
       )}
     </div>
   );
+
+  return createPortal(lightboxContent, document.body);
 }

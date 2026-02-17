@@ -1,6 +1,6 @@
 'use client';
 
-import { Image as ImageIcon, Trash2, Download, Eye, Loader2 } from 'lucide-react';
+import { Image as ImageIcon, Trash2, Eye, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 
@@ -11,7 +11,7 @@ import { useRealtimeSubscription } from '@/hooks/use-realtime';
 import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
 
-import { deletePhoto, getPhotoUrl } from './actions';
+import { deletePhoto } from './actions';
 
 
 interface Photo {
@@ -64,7 +64,6 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
 
   useEffect(() => {
     let isMounted = true;
-    const abortController = new AbortController();
 
     async function loadPhotoUrls() {
       try {
@@ -77,7 +76,9 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
           return;
         }
 
-        setLoading(true);
+        if (Object.keys(photoUrls).length === 0) {
+          setLoading(true);
+        }
 
         // Process photos in batches to avoid overwhelming the API
         const batchSize = 10;
@@ -93,6 +94,11 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
                 // Skip if no path available
                 if (!path) {
                   console.warn(`Photo ${photo.id} has no storage path`);
+                  return;
+                }
+
+                if (path.startsWith('http://') || path.startsWith('https://')) {
+                  existingUrls[photo.id] = path;
                   return;
                 }
                 
@@ -123,14 +129,10 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
 
           if (isMounted) {
             setPhotoUrls((prev) => ({ ...prev, ...existingUrls }));
-            if (i === 0) {
-              setLoading(false);
-            }
           }
         }
 
         if (isMounted) {
-          setPhotoUrls((prev) => ({ ...prev, ...existingUrls }));
           setLoading(false);
         }
       } catch (error) {
@@ -156,9 +158,8 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
 
     return () => {
       isMounted = false;
-      abortController.abort();
     };
-  }, [photos, photoUrls]);
+  }, [photos]);
 
   const toggleSelect = (photoId: string) => {
     setSelectedPhotos((prev) => {
@@ -275,6 +276,14 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
+  const lightboxImages = photos
+    .filter((photo) => Boolean(photoUrls[photo.id]))
+    .map((photo, index) => ({
+      id: photo.id,
+      url: photoUrls[photo.id],
+      alt: photo.original_filename || `Photo ${index + 1}`,
+    }));
+
   if (photos.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -339,8 +348,10 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
                 isDeleting && 'opacity-50 pointer-events-none'
               )}
               onClick={() => {
+                if (!url) return;
                 // Open in lightbox on click
-                const photoIndex = photos.findIndex((p) => p.id === photo.id);
+                const photoIndex = lightboxImages.findIndex((image) => image.id === photo.id);
+                if (photoIndex < 0) return;
                 setLightboxIndex(photoIndex);
                 setLightboxOpen(true);
               }}
@@ -390,8 +401,10 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (!url) return;
                     // Open in lightbox
-                    const photoIndex = photos.findIndex((p) => p.id === photo.id);
+                    const photoIndex = lightboxImages.findIndex((image) => image.id === photo.id);
+                    if (photoIndex < 0) return;
                     setLightboxIndex(photoIndex);
                     setLightboxOpen(true);
                   }}
@@ -424,11 +437,7 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
 
       {/* Lightbox */}
       <Lightbox
-        images={photos.map((photo, index) => ({
-          id: photo.id,
-          url: photoUrls[photo.id] || '',
-          alt: photo.original_filename || `Photo ${index + 1}`,
-        }))}
+        images={lightboxImages}
         initialIndex={lightboxIndex}
         isOpen={lightboxOpen}
         onClose={() => setLightboxOpen(false)}

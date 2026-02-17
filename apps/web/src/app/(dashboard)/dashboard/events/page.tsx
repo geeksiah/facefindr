@@ -88,6 +88,7 @@ export default async function EventsPage() {
       eventDate: event.event_date,
       eventStartAtUtc: event.event_start_at_utc,
       eventTimezone: event.event_timezone,
+      publicSlug: event.public_slug || event.short_link || event.id,
       status: event.status,
       isPublic: event.is_public,
       coverImageUrl: buildCoverImageUrl(event.cover_image_url || event.cover_image_path),
@@ -247,7 +248,7 @@ export default async function EventsPage() {
                 </Link>
                 <div className="flex items-center gap-1 self-end sm:self-auto">
                   <Link
-                    href={`/e/${event.id}`}
+                    href={`/e/${event.publicSlug || event.id}?preview=1`}
                     target="_blank"
                     className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
                     title="Preview public event page"

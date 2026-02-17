@@ -52,7 +52,7 @@ export default async function DashboardLayout({
         {/* Fixed Header */}
         <DashboardHeader />
         {/* Scrollable Content */}
-        <main className="flex-1 p-6 lg:p-8 min-w-0 overflow-y-auto overflow-x-hidden">{children}</main>
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 min-w-0 overflow-y-auto overflow-x-hidden">{children}</main>
       </div>
     </div>
   );

@@ -2,50 +2,28 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 
-import { createServiceClient } from '@/lib/supabase/server';
+import { resolveDropInPricingConfig } from '@/lib/drop-in/pricing';
 
 export async function GET() {
   try {
-    const supabase = createServiceClient();
-    const { data, error } = await supabase
-      .from('platform_settings')
-      .select('*')
-      .in('setting_key', ['drop_in_upload_fee_cents', 'drop_in_gift_fee_cents', 'drop_in_currency']);
-
-    if (error || !data) {
-      throw error || new Error('Missing platform settings rows');
-    }
-
-    const byKey = new Map<string, string>();
-    for (const row of data as any[]) {
-      byKey.set(row.setting_key, String(row.setting_value ?? row.value ?? ''));
-    }
-
-    const uploadFeeCents = Number(byKey.get('drop_in_upload_fee_cents'));
-    const giftFeeCents = Number(byKey.get('drop_in_gift_fee_cents'));
-    const currency = String(byKey.get('drop_in_currency') || '').toUpperCase();
-
-    if (!Number.isFinite(uploadFeeCents) || uploadFeeCents <= 0 || !Number.isFinite(giftFeeCents) || !currency) {
-      return NextResponse.json(
-        { error: 'Drop-in pricing is not configured in admin settings', failClosed: true },
-        { status: 503 }
-      );
-    }
+    const pricing = await resolveDropInPricingConfig();
 
     return NextResponse.json({
-      uploadFeeCents: Math.round(uploadFeeCents),
-      giftFeeCents: Math.round(giftFeeCents),
-      currency,
-      uploadFee: Math.round(uploadFeeCents) / 100,
-      giftFee: Math.round(giftFeeCents) / 100,
+      uploadFeeCents: pricing.uploadFeeCents,
+      giftFeeCents: pricing.giftFeeCents,
+      currency: pricing.currencyCode,
+      uploadFee: pricing.uploadFeeCents / 100,
+      giftFee: pricing.giftFeeCents / 100,
+      source: pricing.source,
       updatedAt: new Date().toISOString(),
     });
   } catch (error) {
     console.error('Runtime drop-in pricing error:', error);
+    const message = error instanceof Error ? error.message : 'Failed to load drop-in pricing';
+    const notConfigured = message.toLowerCase().includes('not configured');
     return NextResponse.json(
-      { error: 'Failed to load drop-in pricing', failClosed: true },
-      { status: 500 }
+      { error: message, failClosed: true },
+      { status: notConfigured ? 503 : 500 }
     );
   }
 }
-

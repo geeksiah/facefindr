@@ -8,6 +8,7 @@ import {
   Check,
   X,
   Download,
+  Loader2,
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -36,6 +37,7 @@ export default function AttendeeProfilePage() {
   const [error, setError] = useState<string | null>(null);
   const [showQRCode, setShowQRCode] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [downloadingQr, setDownloadingQr] = useState(false);
   const qrCodeValue = typeof window !== 'undefined' ? `${window.location.href}?app=1` : '';
   const qrCodeRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -194,14 +196,21 @@ export default function AttendeeProfilePage() {
             
             <button
               onClick={async () => {
+                if (!qrCodeRef.current || downloadingQr) return;
+                setDownloadingQr(true);
                 if (qrCodeRef.current) {
-                  await downloadQRCodeWithLogo(qrCodeRef.current, `${profile.display_name}-qr-code.png`);
+                  try {
+                    await downloadQRCodeWithLogo(qrCodeRef.current, `${profile.display_name}-qr-code.png`);
+                  } finally {
+                    setDownloadingQr(false);
+                  }
                 }
               }}
+              disabled={downloadingQr}
               className="flex items-center justify-center gap-2 w-full py-2 px-4 bg-muted rounded-xl text-foreground hover:bg-muted/70 transition-colors"
             >
-              <Download className="h-4 w-4" />
-              Download QR Code
+              {downloadingQr ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {downloadingQr ? 'Downloading...' : 'Download QR Code'}
             </button>
           </div>
         </div>

@@ -15,6 +15,8 @@ interface SearchResult {
   id: string;
   name?: string;
   display_name?: string;
+  face_tag?: string;
+  public_profile_slug?: string;
   event_date?: string;
   event_start_at_utc?: string;
   event_timezone?: string;
@@ -32,6 +34,8 @@ export function DashboardHeader() {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   const supabase = createClient();
+  const activeSearchRequestRef = useRef(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Avoid hydration mismatch
   useEffect(() => {
@@ -50,57 +54,93 @@ export function DashboardHeader() {
   }, []);
 
   const performSearch = useCallback(async (query: string) => {
-    if (query.length < 2) {
+    const trimmedQuery = query.trim();
+    if (trimmedQuery.length < 1) {
       setSearchResults([]);
       setShowResults(false);
       return;
     }
 
+    const requestId = activeSearchRequestRef.current + 1;
+    activeSearchRequestRef.current = requestId;
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setIsSearching(true);
     setShowResults(true);
 
     try {
-      const searchTerm = query.toLowerCase();
+      const searchTerm = trimmedQuery.toLowerCase();
       const results: SearchResult[] = [];
 
-      // Search events
-      const { data: events } = await supabase
-        .from('events')
-        .select('id, name, event_date, event_timezone')
-        .ilike('name', `%${searchTerm}%`)
-        .limit(5);
+      const socialResponse = await fetch(
+        `/api/social/search?q=${encodeURIComponent(searchTerm)}&type=all&limit=8`,
+        { signal: controller.signal, cache: 'no-store' }
+      );
 
-      if (events) {
-        results.push(...events.map(e => ({ ...e, type: 'event' as const })));
+      if (socialResponse.ok) {
+        const socialData = await socialResponse.json();
+        const photographers = (socialData.photographers || []).map((person: any) => ({
+          ...person,
+          type: 'photographer' as const,
+        }));
+        const users = (socialData.users || []).map((person: any) => ({
+          ...person,
+          type: 'attendee' as const,
+        }));
+        results.push(...photographers, ...users);
       }
 
-      // Search photographers
-      const { data: photographers } = await supabase
-        .from('photographers')
-        .select('id, display_name')
-        .or(`display_name.ilike.%${searchTerm}%,face_tag.ilike.%${searchTerm}%`)
-        .limit(5);
+      // Keep event search for creator dashboard usability.
+      if (trimmedQuery.length >= 2) {
+        const { data: events } = await supabase
+          .from('events')
+          .select('id, name, event_date, event_timezone')
+          .ilike('name', `%${searchTerm}%`)
+          .limit(5);
 
-      if (photographers) {
-        results.push(...photographers.map(p => ({ ...p, type: 'photographer' as const })));
+        if (events) {
+          results.push(...events.map(e => ({ ...e, type: 'event' as const })));
+        }
       }
 
-      setSearchResults(results);
+      if (requestId === activeSearchRequestRef.current) {
+        setSearchResults(results);
+      }
     } catch (error) {
-      console.error('Search error:', error);
-      setSearchResults([]);
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
+      if (requestId === activeSearchRequestRef.current) {
+        console.error('Search error:', error);
+        setSearchResults([]);
+      }
     } finally {
-      setIsSearching(false);
+      if (requestId === activeSearchRequestRef.current) {
+        setIsSearching(false);
+      }
     }
   }, [supabase]);
 
   // Debounced search
   useEffect(() => {
     const timer = setTimeout(() => {
-      performSearch(searchQuery);
+      void performSearch(searchQuery);
     }, 300);
     return () => clearTimeout(timer);
   }, [searchQuery, performSearch]);
+
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   const handleResultClick = (result: SearchResult) => {
     setShowResults(false);
@@ -109,7 +149,11 @@ export function DashboardHeader() {
     if (result.type === 'event') {
       router.push(`/dashboard/events/${result.id}`);
     } else if (result.type === 'creator' || result.type === 'photographer') {
-      router.push(`/c/${result.id}`);
+      const creatorSlug = result.public_profile_slug || result.face_tag?.replace(/^@/, '') || result.id;
+      router.push(`/c/${creatorSlug}`);
+    } else if (result.type === 'attendee') {
+      const attendeeSlug = result.public_profile_slug || result.face_tag?.replace(/^@/, '') || result.id;
+      router.push(`/u/${attendeeSlug}`);
     }
   };
 
@@ -121,7 +165,7 @@ export function DashboardHeader() {
   };
 
   return (
-    <header className="flex-shrink-0 z-20 flex h-16 items-center justify-between border-b border-border bg-card px-6">
+    <header className="flex-shrink-0 z-20 flex h-16 items-center justify-between border-b border-border bg-card px-4 sm:px-6">
       {/* Left side */}
       <div className="flex items-center gap-4">
         {/* Mobile spacer for menu button */}
@@ -136,10 +180,10 @@ export function DashboardHeader() {
             autoComplete="off"
             autoCorrect="off"
             spellCheck="false"
-            placeholder="Search events, photographers..."
+            placeholder="Search people by name or @FaceTag"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            onFocus={() => searchQuery.length >= 2 && setShowResults(true)}
+            onFocus={() => searchQuery.trim().length >= 1 && setShowResults(true)}
             onKeyDown={handleKeyDown}
             className="h-10 w-72 rounded-xl border border-border bg-background pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground transition-all duration-200 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-accent"
           />
@@ -172,10 +216,16 @@ export function DashboardHeader() {
                       className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted text-left transition-colors"
                     >
                       <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                        result.type === 'event' ? 'bg-accent/10 text-accent' : 'bg-purple-500/10 text-purple-500'
+                        result.type === 'event'
+                          ? 'bg-accent/10 text-accent'
+                          : result.type === 'attendee'
+                          ? 'bg-emerald-500/10 text-emerald-500'
+                          : 'bg-purple-500/10 text-purple-500'
                       }`}>
                         {result.type === 'event' ? (
                           <Calendar className="h-4 w-4" />
+                        ) : result.type === 'attendee' ? (
+                          <User className="h-4 w-4" />
                         ) : (
                           <Camera className="h-4 w-4" />
                         )}
@@ -194,7 +244,7 @@ export function DashboardHeader() {
                                 },
                                 'en-US'
                               )
-                            : 'Creator'
+                            : result.face_tag || (result.type === 'attendee' ? 'Attendee' : 'Creator')
                           }
                         </p>
                       </div>
@@ -272,7 +322,7 @@ export function DashboardHeader() {
           </div>
           
           {/* Mobile search results */}
-          {showResults && searchQuery.length >= 2 && (
+          {showResults && searchQuery.trim().length >= 1 && (
             <div className="mt-2 bg-card border border-border rounded-xl overflow-hidden">
               {isSearching ? (
                 <div className="p-4 text-center text-muted-foreground text-sm">
@@ -294,10 +344,16 @@ export function DashboardHeader() {
                       className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted text-left transition-colors"
                     >
                       <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                        result.type === 'event' ? 'bg-accent/10 text-accent' : 'bg-purple-500/10 text-purple-500'
+                        result.type === 'event'
+                          ? 'bg-accent/10 text-accent'
+                          : result.type === 'attendee'
+                          ? 'bg-emerald-500/10 text-emerald-500'
+                          : 'bg-purple-500/10 text-purple-500'
                       }`}>
                         {result.type === 'event' ? (
                           <Calendar className="h-4 w-4" />
+                        ) : result.type === 'attendee' ? (
+                          <User className="h-4 w-4" />
                         ) : (
                           <Camera className="h-4 w-4" />
                         )}
@@ -316,7 +372,7 @@ export function DashboardHeader() {
                                 },
                                 'en-US'
                               )
-                            : 'Creator'
+                            : result.face_tag || (result.type === 'attendee' ? 'Attendee' : 'Creator')
                           }
                         </p>
                       </div>

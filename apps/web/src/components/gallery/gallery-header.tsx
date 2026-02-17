@@ -5,22 +5,24 @@ import { useRouter } from 'next/navigation';
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 import { formatEventDateDisplay } from '@/lib/events/time';
-import { createClient } from '@/lib/supabase/client';
 
 interface SearchResult {
   id: string;
   name?: string;
   display_name?: string;
+  face_tag?: string;
+  public_profile_slug?: string;
   event_date?: string;
   event_start_at_utc?: string;
   event_timezone?: string;
-  type: 'event' | 'photographer';
+  type: 'event' | 'photographer' | 'attendee';
 }
 
 export function GallerySearch() {
   const router = useRouter();
-  const supabase = createClient();
   const searchRef = useRef<HTMLDivElement>(null);
+  const activeSearchRequestRef = useRef(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
   
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -39,58 +41,75 @@ export function GallerySearch() {
   }, []);
 
   const performSearch = useCallback(async (searchQuery: string) => {
-    if (searchQuery.length < 2) {
+    const trimmedQuery = searchQuery.trim();
+    if (trimmedQuery.length < 1) {
       setResults([]);
       setShowResults(false);
       return;
     }
 
+    const requestId = activeSearchRequestRef.current + 1;
+    activeSearchRequestRef.current = requestId;
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setIsSearching(true);
     setShowResults(true);
 
     try {
-      const searchTerm = searchQuery.toLowerCase();
+      const searchTerm = trimmedQuery.toLowerCase();
       const newResults: SearchResult[] = [];
 
-      // Search events
-      const { data: events } = await supabase
-        .from('events')
-        .select('id, name, event_date, event_timezone')
-        .ilike('name', `%${searchTerm}%`)
-        .limit(5);
+      const response = await fetch(
+        `/api/social/search?q=${encodeURIComponent(searchTerm)}&type=all&limit=10`,
+        { signal: controller.signal, cache: 'no-store' }
+      );
 
-      if (events) {
-        newResults.push(...events.map(e => ({ ...e, type: 'event' as const })));
+      if (response.ok) {
+        const data = await response.json();
+        newResults.push(
+          ...(data.photographers || []).map((person: any) => ({ ...person, type: 'photographer' as const })),
+          ...(data.users || []).map((person: any) => ({ ...person, type: 'attendee' as const }))
+        );
       }
 
-      // Search photographers
-      const { data: photographers } = await supabase
-        .from('photographers')
-        .select('id, display_name')
-        .or(`display_name.ilike.%${searchTerm}%,face_tag.ilike.%${searchTerm}%`)
-        .eq('is_public_profile', true)
-        .limit(5);
-
-      if (photographers) {
-        newResults.push(...photographers.map(p => ({ ...p, type: 'photographer' as const })));
+      if (requestId === activeSearchRequestRef.current) {
+        setResults(newResults);
       }
-
-      setResults(newResults);
     } catch (error) {
-      console.error('Search error:', error);
-      setResults([]);
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
+      if (requestId === activeSearchRequestRef.current) {
+        console.error('Search error:', error);
+        setResults([]);
+      }
     } finally {
-      setIsSearching(false);
+      if (requestId === activeSearchRequestRef.current) {
+        setIsSearching(false);
+      }
     }
-  }, [supabase]);
+  }, []);
 
   // Debounced search
   useEffect(() => {
     const timer = setTimeout(() => {
-      performSearch(query);
+      void performSearch(query);
     }, 300);
     return () => clearTimeout(timer);
   }, [query, performSearch]);
+
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   const handleResultClick = (result: SearchResult) => {
     setShowResults(false);
@@ -98,8 +117,12 @@ export function GallerySearch() {
     
     if (result.type === 'event') {
       router.push(`/gallery/events/${result.id}`);
+    } else if (result.type === 'attendee') {
+      const attendeeSlug = result.public_profile_slug || result.face_tag?.replace(/^@/, '') || result.id;
+      router.push(`/u/${attendeeSlug}`);
     } else {
-      router.push(`/c/${result.id}`);
+      const creatorSlug = result.public_profile_slug || result.face_tag?.replace(/^@/, '') || result.id;
+      router.push(`/c/${creatorSlug}`);
     }
   };
 
@@ -112,7 +135,7 @@ export function GallerySearch() {
           placeholder="Search events, photographers..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onFocus={() => query.length >= 2 && setShowResults(true)}
+          onFocus={() => query.trim().length >= 1 && setShowResults(true)}
           className="h-10 w-full rounded-xl border border-border bg-background pl-10 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:border-transparent focus:outline-none focus:ring-2 focus:ring-accent"
         />
         {query && (
@@ -145,10 +168,16 @@ export function GallerySearch() {
                   className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted text-left transition-colors"
                 >
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                    result.type === 'event' ? 'bg-accent/10 text-accent' : 'bg-purple-500/10 text-purple-500'
+                    result.type === 'event'
+                      ? 'bg-accent/10 text-accent'
+                      : result.type === 'attendee'
+                      ? 'bg-emerald-500/10 text-emerald-500'
+                      : 'bg-purple-500/10 text-purple-500'
                   }`}>
                     {result.type === 'event' ? (
                       <Calendar className="h-4 w-4" />
+                    ) : result.type === 'attendee' ? (
+                      <User className="h-4 w-4" />
                     ) : (
                       <Camera className="h-4 w-4" />
                     )}
@@ -167,7 +196,7 @@ export function GallerySearch() {
                             },
                             'en-US'
                           )
-                        : 'Creator'
+                        : result.face_tag || (result.type === 'attendee' ? 'Attendee' : 'Creator')
                       }
                     </p>
                   </div>
