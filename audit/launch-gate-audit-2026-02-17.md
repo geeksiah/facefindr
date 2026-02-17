@@ -2,58 +2,65 @@
 Date: 2026-02-17
 Auditor: Codex
 Branch: `main`
-Commit audited: `9871825e`
+Commit audited: `807605a6`
 
 ## Verdict
-- Decision: `NO-GO` for real-user launch sign-off in this environment.
-- Reason: automated code/build gates are now passing, but required MB1 runtime smoke evidence is still missing and production-env readiness items remain.
+- Decision: `NO-GO` for final real-user launch sign-off from this environment.
+- Reason: automated build/type gates are passing after blocker fixes, but required runtime smoke evidence (MB1) is still missing and launch env readiness has unresolved warnings.
 
 ## Scope
 - Web app (`apps/web`)
 - Admin app (`apps/admin`)
 - Mobile app (`apps/mobile`)
-- Shared package (`packages/shared`)
 
 ## Evidence Summary
 
 ### 1. Commit and push state
-- `git log -1 --oneline --decorate`:
-  - `9871825e (HEAD -> main, origin/main) Fix launch blockers: mobile TS errors, web/admin build stability, QR/event regressions`
+- `git log -1 --oneline --decorate`
+  - `807605a6 (HEAD -> main, origin/main) Fix launch blockers across web event, search, drop-in pricing, and QR UX`
+- `git push origin main`
+  - `main -> main` successful
 
-### 2. CI verify gate (current HEAD)
-- Command: `pnpm run ci:verify`
-- Result: `PASS`
-- Includes:
-  - `pnpm --filter @facefind/web build` -> pass
-  - `pnpm --filter @facefind/admin build` -> pass
-  - `pnpm --filter @ferchr/mobile type-check` -> pass
-
-### 3. Targeted quality checks
+### 2. Build/type gates (current HEAD)
+- `pnpm --filter @facefind/web build` -> `PASS`
+- `pnpm --filter @facefind/admin build` -> `PASS` (with warnings)
+- `pnpm --filter @ferchr/mobile type-check` -> `PASS`
 - `pnpm --filter @facefind/web lint -- --quiet` -> `PASS`
 - `pnpm --filter @facefind/admin type-check` -> `PASS`
 - `pnpm --filter @ferchr/mobile lint` -> `PASS with warnings` (`631 warnings`, `0 errors`)
 
-## Blockers Cleared
-1. Mobile TypeScript hard errors in attendee profile/vault are fixed.
-2. Web/admin React runtime build mismatch (`ReactCurrentDispatcher`) is fixed.
-3. Corrupted dependency state (`caniuse-lite`) repaired; web build is stable.
-4. Next build worker spawn `EPERM` issues mitigated via worker-thread build config.
+### 3. CI verify command status
+- `pnpm run ci:verify` -> timed out in this shell session due command timeout limit, but the three underlying checks were rerun individually and all passed:
+  - web build pass
+  - admin build pass
+  - mobile type-check pass
 
-## What Is Left Before Real-User GO
-1. MB1 runtime smoke evidence is still missing for commit `9871825e`.
+## Blockers Cleared in `807605a6`
+1. Event public page access/lookup hardening (slug fallback and preview path).
+2. Drop-in pricing resolution now reads admin plan configuration (with legacy fallback).
+3. Event gallery URL loading/lightbox behavior fixed (blank thumbs/open failures addressed).
+4. Social search relevance and exact FaceTag matching improved; suggestion routing corrected.
+5. Creator connections API no longer false-fails with `Not a photographer` for valid creators.
+6. Lightbox overlay now portals to `document.body` to avoid top-gap clipping.
+7. QR download UX now shows loading state; QR logo export path hardened.
+8. Dashboard mobile responsiveness tuned for event management pages.
+
+## Remaining Launch Risks (Blocking Real-User GO)
+1. MB1 runtime smoke evidence is still missing for commit `807605a6`.
    - Required by `audit/release-gate-matrix.md` and `docs/MOBILE_EMULATOR_STABILITY.md`.
-   - Must record pass/fail for auth, event view, upload/scan, checkout start, notifications, deep links, and cold boot.
-2. Payments env readiness is incomplete in current local env context.
-   - Build logs still warn: `STRIPE_SECRET_KEY is not set. Stripe payments will not work.`
-   - For launch with payments enabled, production secrets must be verified.
-3. Admin build logs emit non-fatal revalidation URL warnings:
-   - `http://localhost:undefined?key=undefined&method=revalidateTag...`
-   - Build passes, but this indicates runtime revalidation config/env should be validated before launch.
+   - Must include auth, event view, upload/scan, checkout start, notifications, deep links, and cold boot repeat.
+2. Payment env readiness not confirmed in launch env.
+   - Web build warning persists in local run: `STRIPE_SECRET_KEY is not set. Stripe payments will not work.`
+3. Admin revalidation env/config warning still appears during build:
+   - `TypeError: Failed to parse URL from http://localhost:undefined?key=undefined&method=revalidateTag...`
+   - Build passes, but this must be verified in production-config context.
+4. Mobile dependency doctor could not be executed in this offline-restricted session:
+   - `expo doctor` unsupported via local CLI; `npx expo-doctor` failed due cached-only registry access.
 
-## Recommended Final Launch Checklist (Tomorrow)
-1. Execute MB1 smoke on `Medium Phone API 36.1` and paste run log into `audit/release-gate-matrix.md`.
-2. Validate production secrets (`Stripe`, `PayPal/Flutterwave` if used, Supabase keys) in deploy environment.
-3. Run one live-like sanity pass after deploy:
-   - Web attendee flow (`/s/...` -> `/e/...`, QR download+scan, mobile web layout),
-   - Admin pricing/storage operations,
-   - Mobile release build startup + face scan + event join path.
+## Required Final Steps Before GO
+1. Run MB1 on `Medium Phone API 36.1` and record results in `audit/release-gate-matrix.md`.
+2. Validate production secrets/config for payments and revalidation endpoints.
+3. Run one post-deploy live sanity sweep:
+   - Web attendee flow (`/s/...` -> `/e/...`, QR download + scan, mobile web layout),
+   - Admin pricing/settings paths,
+   - Mobile release build cold boot + scan + event link open.
