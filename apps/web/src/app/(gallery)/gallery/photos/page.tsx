@@ -61,7 +61,6 @@ export default function PhotosPage() {
               id,
               name,
               event_date,
-              event_start_at_utc,
               event_timezone,
               photographer:photographer_id (
                 display_name

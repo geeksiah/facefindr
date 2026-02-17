@@ -257,10 +257,32 @@ export async function PUT(
       }
     }
 
-    const { error: updateError } = await serviceClient
-      .from('events')
-      .update(updates)
-      .eq('id', id);
+    const runEventUpdate = (payload: Record<string, any>) =>
+      serviceClient
+        .from('events')
+        .update(payload)
+        .eq('id', id);
+
+    let { error: updateError } = await runEventUpdate(updates);
+
+    const missingDateTimeColumns =
+      updateError?.code === '42703' &&
+      typeof updateError?.message === 'string' &&
+      (updateError.message.includes('event_start_at_utc') ||
+        updateError.message.includes('event_end_at_utc'));
+
+    if (missingDateTimeColumns) {
+      const legacyUpdates = { ...updates };
+      delete legacyUpdates.event_start_at_utc;
+      delete legacyUpdates.event_end_at_utc;
+
+      if (Object.keys(legacyUpdates).length > 0) {
+        const legacyUpdate = await runEventUpdate(legacyUpdates);
+        updateError = legacyUpdate.error;
+      } else {
+        updateError = null;
+      }
+    }
 
     if (updateError) {
       throw updateError;

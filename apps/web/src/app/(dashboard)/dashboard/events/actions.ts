@@ -24,6 +24,14 @@ import {
   normalizeIsoDate,
 } from '@/lib/events/time';
 
+function isMissingEventStartAtUtcColumnError(error: any) {
+  return (
+    error?.code === '42703' &&
+    typeof error?.message === 'string' &&
+    error.message.includes('event_start_at_utc')
+  );
+}
+
 // ============================================
 // CREATE EVENT
 // ============================================
@@ -94,25 +102,41 @@ export async function createEvent(formData: CreateEventInput) {
   );
   const eventStartAtUtc = deriveEventStartAtUtc(eventDate, eventTimezone);
 
+  const insertPayload: Record<string, any> = {
+    photographer_id: user.id,
+    name: validated.data.name,
+    description: validated.data.description || null,
+    location: validated.data.location || null,
+    event_date: eventDate,
+    event_timezone: eventTimezone,
+    event_start_at_utc: eventStartAtUtc,
+    is_public: validated.data.isPublic,
+    face_recognition_enabled: validated.data.faceRecognitionEnabled,
+    live_mode_enabled: validated.data.liveModeEnabled,
+    attendee_access_enabled: validated.data.attendeeAccessEnabled,
+    status: 'draft',
+  };
+
   // Create the event
-  const { data: event, error } = await supabase
+  let { data: event, error } = await supabase
     .from('events')
-    .insert({
-      photographer_id: user.id,
-      name: validated.data.name,
-      description: validated.data.description || null,
-      location: validated.data.location || null,
-      event_date: eventDate,
-      event_timezone: eventTimezone,
-      event_start_at_utc: eventStartAtUtc,
-      is_public: validated.data.isPublic,
-      face_recognition_enabled: validated.data.faceRecognitionEnabled,
-      live_mode_enabled: validated.data.liveModeEnabled,
-      attendee_access_enabled: validated.data.attendeeAccessEnabled,
-      status: 'draft',
-    })
+    .insert(insertPayload)
     .select()
     .single();
+
+  if (isMissingEventStartAtUtcColumnError(error)) {
+    const legacyPayload = { ...insertPayload };
+    delete legacyPayload.event_start_at_utc;
+
+    const legacyInsert = await supabase
+      .from('events')
+      .insert(legacyPayload)
+      .select()
+      .single();
+
+    event = legacyInsert.data;
+    error = legacyInsert.error;
+  }
 
   if (error) {
     console.error('Error creating event:', error);
@@ -224,22 +248,36 @@ export async function updateEvent(eventId: string, formData: UpdateEventInput) {
   );
   const eventStartAtUtc = deriveEventStartAtUtc(eventDate, eventTimezone);
 
+  const updates: Record<string, any> = {
+    name: validated.data.name,
+    description: validated.data.description,
+    location: validated.data.location,
+    event_date: eventDate,
+    event_timezone: eventTimezone,
+    event_start_at_utc: eventStartAtUtc,
+    is_public: validated.data.isPublic,
+    face_recognition_enabled: validated.data.faceRecognitionEnabled,
+    live_mode_enabled: validated.data.liveModeEnabled,
+    attendee_access_enabled: validated.data.attendeeAccessEnabled,
+  };
+
   // Update the event
-  const { error } = await supabase
+  let { error } = await supabase
     .from('events')
-    .update({
-      name: validated.data.name,
-      description: validated.data.description,
-      location: validated.data.location,
-      event_date: eventDate,
-      event_timezone: eventTimezone,
-      event_start_at_utc: eventStartAtUtc,
-      is_public: validated.data.isPublic,
-      face_recognition_enabled: validated.data.faceRecognitionEnabled,
-      live_mode_enabled: validated.data.liveModeEnabled,
-      attendee_access_enabled: validated.data.attendeeAccessEnabled,
-    })
+    .update(updates)
     .eq('id', eventId);
+
+  if (isMissingEventStartAtUtcColumnError(error)) {
+    const legacyUpdates = { ...updates };
+    delete legacyUpdates.event_start_at_utc;
+
+    const legacyUpdate = await supabase
+      .from('events')
+      .update(legacyUpdates)
+      .eq('id', eventId);
+
+    error = legacyUpdate.error;
+  }
 
   if (error) {
     console.error('Error updating event:', error);

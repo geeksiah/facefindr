@@ -359,8 +359,8 @@ export default function EventSettingsPage() {
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3 sm:items-center sm:gap-4">
           <Link
             href={`/dashboard/events/${eventId}`}
             className="rounded-xl p-2.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
@@ -372,7 +372,7 @@ export default function EventSettingsPage() {
             <p className="text-sm text-muted-foreground">{settings.name}</p>
           </div>
         </div>
-        <Button onClick={handleSave} disabled={saving}>
+        <Button onClick={handleSave} disabled={saving} className="w-full sm:w-auto">
           {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
           Save Changes
         </Button>
@@ -396,7 +396,7 @@ export default function EventSettingsPage() {
       <div className="rounded-2xl border border-border bg-card p-6">
         <h2 className="font-semibold text-foreground mb-4">Event Status</h2>
         
-        <div className="flex items-center justify-between p-4 bg-muted rounded-xl mb-4">
+        <div className="mb-4 flex flex-col gap-3 rounded-xl bg-muted p-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="font-medium text-foreground">Current Status</p>
             <p className="text-sm text-muted-foreground mt-1">
@@ -407,7 +407,7 @@ export default function EventSettingsPage() {
             </p>
           </div>
           <span className={cn(
-            'rounded-full px-3 py-1 text-sm font-medium',
+            'self-start rounded-full px-3 py-1 text-sm font-medium sm:self-auto',
             settings.status === 'draft' && 'bg-muted-foreground/10 text-muted-foreground',
             settings.status === 'active' && 'bg-success/10 text-success',
             settings.status === 'closed' && 'bg-warning/10 text-warning',
@@ -480,7 +480,7 @@ export default function EventSettingsPage() {
           </div>
         )}
 
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           {settings.cover_image_url && (
             <div
               {...getRootProps()}
@@ -569,7 +569,7 @@ export default function EventSettingsPage() {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="block text-sm font-medium text-foreground mb-2">
                 <Calendar className="h-4 w-4 inline mr-1" />
@@ -613,8 +613,8 @@ export default function EventSettingsPage() {
         <h2 className="font-semibold text-foreground mb-4">Privacy & Access</h2>
         
         <div className="space-y-4">
-          <div className="flex items-center justify-between py-3 border-b border-border">
-            <div className="flex-1 mr-4">
+          <div className="flex flex-col gap-3 border-b border-border py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mr-0 flex-1 sm:mr-4">
               <div className="flex items-center gap-2">
                 <Globe className="h-4 w-4 text-muted-foreground" />
                 <span className="font-medium text-foreground">Public Event</span>
@@ -629,8 +629,8 @@ export default function EventSettingsPage() {
             />
           </div>
 
-          <div className="flex items-center justify-between py-3 border-b border-border">
-            <div className="flex-1 mr-4">
+          <div className="flex flex-col gap-3 border-b border-border py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mr-0 flex-1 sm:mr-4">
               <div className="flex items-center gap-2">
                 <Eye className="h-4 w-4 text-muted-foreground" />
                 <span className="font-medium text-foreground">Allow Anonymous Scanning</span>
@@ -645,8 +645,8 @@ export default function EventSettingsPage() {
             />
           </div>
 
-          <div className="flex items-center justify-between py-3 border-b border-border">
-            <div className="flex-1 mr-4">
+          <div className="flex flex-col gap-3 border-b border-border py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mr-0 flex-1 sm:mr-4">
               <div className="flex items-center gap-2">
                 <Lock className="h-4 w-4 text-muted-foreground" />
                 <span className="font-medium text-foreground">Require Access Code</span>
@@ -661,8 +661,8 @@ export default function EventSettingsPage() {
             />
           </div>
 
-          <div className="flex items-center justify-between py-3">
-            <div className="flex-1 mr-4">
+          <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mr-0 flex-1 sm:mr-4">
               <div className="flex items-center gap-2">
                 <Eye className="h-4 w-4 text-muted-foreground" />
                 <span className="font-medium text-foreground">Include in Public Profile</span>
@@ -678,7 +678,7 @@ export default function EventSettingsPage() {
           </div>
 
           {settings.require_access_code && (
-            <div className="pl-6 pt-2">
+            <div className="pt-2 sm:pl-6">
               <label className="block text-sm font-medium text-foreground mb-2">
                 Access Code
               </label>
@@ -698,8 +698,8 @@ export default function EventSettingsPage() {
         <h2 className="font-semibold text-foreground mb-4">Features</h2>
         
         <div className="space-y-4">
-          <div className="flex items-center justify-between py-3 border-b border-border">
-            <div className="flex-1 mr-4">
+          <div className="flex flex-col gap-3 border-b border-border py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mr-0 flex-1 sm:mr-4">
               <span className="font-medium text-foreground">Face Recognition</span>
               <p className="text-sm text-muted-foreground mt-1">
                 Enable AI-powered face matching for photos
@@ -711,8 +711,8 @@ export default function EventSettingsPage() {
             />
           </div>
 
-          <div className="flex items-center justify-between py-3 border-b border-border">
-            <div className="flex-1 mr-4">
+          <div className="flex flex-col gap-3 border-b border-border py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mr-0 flex-1 sm:mr-4">
               <span className="font-medium text-foreground">Live Mode</span>
               <p className="text-sm text-muted-foreground mt-1">
                 Automatically upload photos during the event
@@ -724,8 +724,8 @@ export default function EventSettingsPage() {
             />
           </div>
 
-          <div className="flex items-center justify-between py-3">
-            <div className="flex-1 mr-4">
+          <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mr-0 flex-1 sm:mr-4">
               <span className="font-medium text-foreground">Watermark Photos</span>
               <p className="text-sm text-muted-foreground mt-1">
                 Add watermark to preview images
@@ -748,7 +748,7 @@ export default function EventSettingsPage() {
         
         <div className="space-y-4">
           {/* Pricing Type Selection */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <button
               onClick={() => setSettings({ ...settings, pricing_type: 'free' })}
               className={cn(
@@ -797,7 +797,7 @@ export default function EventSettingsPage() {
                 <label className="block text-sm font-medium text-foreground mb-2">
                   Price per Photo
                 </label>
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <div className="relative flex-1">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
                       {getCurrencySymbol(settings.currency_code || 'USD')}
@@ -857,7 +857,7 @@ export default function EventSettingsPage() {
           {/* Bulk Pricing Tiers */}
           {settings.pricing_type === 'bulk' && (
             <div className="p-4 bg-muted rounded-xl space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <label className="text-sm font-medium text-foreground">Pricing Tiers</label>
                 <button
                   onClick={() => {
@@ -881,7 +881,7 @@ export default function EventSettingsPage() {
               ) : (
                 <div className="space-y-3">
                   {settings.bulk_tiers.map((tier, index) => (
-                    <div key={index} className="flex items-center gap-2 p-3 bg-card rounded-lg">
+                    <div key={index} className="flex flex-wrap items-center gap-2 rounded-lg bg-card p-3">
                       <input
                         type="number"
                         value={tier.min_photos}
@@ -987,7 +987,7 @@ export default function EventSettingsPage() {
               Are you sure you want to delete this event? This action cannot be undone.
               All photos and data will be permanently deleted.
             </p>
-            <div className="flex gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row">
               <Button variant="destructive" onClick={handleDelete} disabled={saving}>
                 {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2" />}
                 Yes, Delete Event

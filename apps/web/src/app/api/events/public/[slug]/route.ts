@@ -54,63 +54,100 @@ export async function GET(
         status
       `;
 
-    let eventBySlug: any = null;
-    let slugError: any = null;
+    const legacyEventSelect = `
+        id,
+        name,
+        description,
+        event_date,
+        event_timezone,
+        location,
+        cover_image_url,
+        public_slug,
+        short_link,
+        is_public,
+        is_publicly_listed,
+        allow_anonymous_scan,
+        require_access_code,
+        public_access_code,
+        photographer_id,
+        status
+      `;
 
-    if (isUuid) {
-      const uuidResult = await serviceClient
-        .from('events')
-        .select(eventSelect)
-        .eq('id', slug)
-        .maybeSingle();
-      eventBySlug = uuidResult.data;
-      slugError = uuidResult.error;
-    } else {
-      const byPublicSlug = await serviceClient
-        .from('events')
-        .select(eventSelect)
-        .eq('public_slug', slug)
-        .maybeSingle();
+    const lookupEventBySlug = async (selectClause: string) => {
+      let eventBySlug: any = null;
+      let slugError: any = null;
 
-      eventBySlug = byPublicSlug.data;
-      slugError = byPublicSlug.error;
-
-      if (!eventBySlug && !slugError) {
-        const byShortLink = await serviceClient
+      if (isUuid) {
+        const uuidResult = await serviceClient
           .from('events')
-          .select(eventSelect)
-          .eq('short_link', slug)
+          .select(selectClause)
+          .eq('id', slug)
           .maybeSingle();
-        eventBySlug = byShortLink.data;
-        slugError = byShortLink.error;
-      }
+        eventBySlug = uuidResult.data;
+        slugError = uuidResult.error;
+      } else {
+        const byPublicSlug = await serviceClient
+          .from('events')
+          .select(selectClause)
+          .eq('public_slug', slug)
+          .maybeSingle();
 
-      if (!eventBySlug && !slugError) {
-        const lower = slug.toLowerCase();
-        const upper = slug.toUpperCase();
-        const variants = Array.from(new Set([slug, lower, upper]));
+        eventBySlug = byPublicSlug.data;
+        slugError = byPublicSlug.error;
 
-        if (variants.length > 1) {
-          const byPublicSlugVariants = await serviceClient
+        if (!eventBySlug && !slugError) {
+          const byShortLink = await serviceClient
             .from('events')
-            .select(eventSelect)
-            .in('public_slug', variants)
+            .select(selectClause)
+            .eq('short_link', slug)
             .maybeSingle();
+          eventBySlug = byShortLink.data;
+          slugError = byShortLink.error;
+        }
 
-          eventBySlug = byPublicSlugVariants.data;
-          slugError = byPublicSlugVariants.error;
+        if (!eventBySlug && !slugError) {
+          const lower = slug.toLowerCase();
+          const upper = slug.toUpperCase();
+          const variants = Array.from(new Set([slug, lower, upper]));
 
-          if (!eventBySlug && !slugError) {
-            const byShortLinkVariants = await serviceClient
+          if (variants.length > 1) {
+            const byPublicSlugVariants = await serviceClient
               .from('events')
-              .select(eventSelect)
-              .in('short_link', variants)
+              .select(selectClause)
+              .in('public_slug', variants)
               .maybeSingle();
-            eventBySlug = byShortLinkVariants.data;
-            slugError = byShortLinkVariants.error;
+
+            eventBySlug = byPublicSlugVariants.data;
+            slugError = byPublicSlugVariants.error;
+
+            if (!eventBySlug && !slugError) {
+              const byShortLinkVariants = await serviceClient
+                .from('events')
+                .select(selectClause)
+                .in('short_link', variants)
+                .maybeSingle();
+              eventBySlug = byShortLinkVariants.data;
+              slugError = byShortLinkVariants.error;
+            }
           }
         }
       }
+
+      return { eventBySlug, slugError };
+    };
+
+    let { eventBySlug, slugError } = await lookupEventBySlug(eventSelect);
+
+    // Backward compatibility: if DB migration for event_start_at_utc is not applied yet.
+    const missingStartAtUtcColumn =
+      slugError?.code === '42703' &&
+      typeof slugError?.message === 'string' &&
+      slugError.message.includes('event_start_at_utc');
+
+    if (missingStartAtUtcColumn) {
+      const legacyLookup = await lookupEventBySlug(legacyEventSelect);
+      eventBySlug = legacyLookup.eventBySlug;
+      slugError = legacyLookup.slugError;
     }
 
     // If event doesn't exist, return 404

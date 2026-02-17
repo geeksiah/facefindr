@@ -66,7 +66,7 @@ export function DashboardHeader() {
       // Search events
       const { data: events } = await supabase
         .from('events')
-        .select('id, name, event_date, event_start_at_utc, event_timezone')
+        .select('id, name, event_date, event_timezone')
         .ilike('name', `%${searchTerm}%`)
         .limit(5);
 

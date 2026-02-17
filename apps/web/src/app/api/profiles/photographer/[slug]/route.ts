@@ -57,7 +57,7 @@ export async function GET(
     // Get recent events
     const { data: events } = await supabase
       .from('events')
-      .select('id, name, cover_image_url, event_date, event_start_at_utc, event_timezone, location, public_slug')
+      .select('id, name, cover_image_url, event_date, event_timezone, location, public_slug')
       .eq('photographer_id', profile.id)
       .eq('status', 'active')
       .order('event_date', { ascending: false })

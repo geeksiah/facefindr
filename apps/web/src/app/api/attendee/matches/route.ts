@@ -44,7 +44,6 @@ export async function GET() {
           id,
           name,
           event_date,
-          event_start_at_utc,
           event_timezone,
           location,
           cover_image_url,

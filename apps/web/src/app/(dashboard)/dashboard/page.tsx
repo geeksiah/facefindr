@@ -162,7 +162,7 @@ export default async function DashboardPage() {
   const [eventsResult, photosResult, transactionsResult, lastMonthTransactions] = await Promise.all([
     supabase
       .from('events')
-      .select('id, name, event_date, event_start_at_utc, event_timezone, status, media:media(count)', { count: 'exact' })
+      .select('id, name, event_date, event_timezone, status, media:media(count)', { count: 'exact' })
       .eq('photographer_id', user.id)
       .order('created_at', { ascending: false })
       .limit(5),

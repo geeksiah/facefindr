@@ -130,7 +130,7 @@ export default async function EventPage({ params }: EventPageProps) {
       <EventDetailRealtime eventId={event.id} />
       
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="flex items-start gap-4">
           <Link
             href="/dashboard/events"
@@ -139,7 +139,7 @@ export default async function EventPage({ params }: EventPageProps) {
             <ArrowLeft className="h-5 w-5" />
           </Link>
           <div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               <h1 className="text-2xl font-bold text-foreground">{event.name}</h1>
               <span className={cn('rounded-full px-2.5 py-0.5 text-xs font-medium', statusColors[event.status])}>
                 {event.status.charAt(0).toUpperCase() + event.status.slice(1)}
@@ -189,8 +189,8 @@ export default async function EventPage({ params }: EventPageProps) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" asChild>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+          <Button variant="outline" size="sm" asChild className="w-full sm:w-auto">
             <Link href={`/dashboard/events/${event.id}/settings`}>
               <Settings className="h-4 w-4 mr-2" />
               Settings
@@ -288,7 +288,7 @@ export default async function EventPage({ params }: EventPageProps) {
 
       {/* Gallery */}
       <div className="rounded-2xl border border-border bg-card p-6">
-        <div className="flex items-center justify-between mb-4">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="font-semibold text-foreground">Photos ({mediaCount})</h2>
           {mediaCount > 0 && (
             <Button variant="outline" size="sm">

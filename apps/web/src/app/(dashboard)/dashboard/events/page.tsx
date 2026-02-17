@@ -129,7 +129,7 @@ export default async function EventsPage() {
             className="h-10 w-full rounded-lg border border-border bg-card pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
           />
         </div>
-        <Button variant="outline" className="gap-2">
+        <Button variant="outline" className="gap-2 sm:w-auto w-full sm:min-w-0">
           <Filter className="h-4 w-4" />
           Filters
         </Button>
@@ -238,14 +238,14 @@ export default async function EventsPage() {
               </div>
 
               {/* Actions */}
-              <div className="flex items-center justify-between border-t border-border px-4 py-3">
+              <div className="flex flex-col gap-3 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <Link
                   href={`/dashboard/events/${event.id}`}
                   className="text-sm font-medium text-accent hover:text-accent/80"
                 >
                   Manage Event
                 </Link>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 self-end sm:self-auto">
                   <Link
                     href={`/e/${event.id}`}
                     target="_blank"

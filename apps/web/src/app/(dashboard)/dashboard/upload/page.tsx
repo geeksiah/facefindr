@@ -46,7 +46,7 @@ export default function UploadPage() {
       const [{ data: ownedEventsRes, error: ownedEventsError }, { data: collaboratorRows, error: collaboratorError }] = await Promise.all([
         supabase
         .from('events')
-        .select('id, name, event_date, event_start_at_utc, event_timezone, status')
+        .select('id, name, event_date, event_timezone, status')
           .eq('photographer_id', currentCreatorId)
           .in('status', ['draft', 'active', 'closed'])
           .order('created_at', { ascending: false }),
@@ -72,7 +72,7 @@ export default function UploadPage() {
       if (collaboratorEventIds.length > 0) {
         const { data: collaboratorEventsRes, error: collaboratorEventsError } = await supabase
           .from('events')
-          .select('id, name, event_date, event_start_at_utc, event_timezone, status')
+          .select('id, name, event_date, event_timezone, status')
           .in('id', collaboratorEventIds)
           .in('status', ['draft', 'active', 'closed'])
           .order('created_at', { ascending: false });

@@ -26,10 +26,7 @@ export async function GET(
     // We'll validate access manually below
     const serviceClient = createServiceClient();
 
-    // Get event details
-    const { data: event, error: eventError } = await serviceClient
-      .from('events')
-      .select(`
+    const eventSelect = `
         id,
         name,
         description,
@@ -56,9 +53,57 @@ export async function GET(
           currency,
           is_free
         )
-      `)
+      `;
+
+    const legacyEventSelect = `
+        id,
+        name,
+        description,
+        event_date,
+        event_timezone,
+        location,
+        cover_image_url,
+        status,
+        is_public,
+        photographer_id,
+        public_slug,
+        allow_anonymous_scan,
+        require_access_code,
+        public_access_code,
+        photographers (
+          id,
+          display_name,
+          profile_photo_url
+        ),
+        event_pricing (
+          price_per_media,
+          unlock_all_price,
+          currency,
+          is_free
+        )
+      `;
+
+    // Get event details
+    let { data: event, error: eventError } = await serviceClient
+      .from('events')
+      .select(eventSelect)
       .eq('id', eventId)
       .single();
+
+    const missingStartAtUtcColumn =
+      eventError?.code === '42703' &&
+      typeof eventError?.message === 'string' &&
+      eventError.message.includes('event_start_at_utc');
+
+    if (missingStartAtUtcColumn) {
+      const legacyResult = await serviceClient
+        .from('events')
+        .select(legacyEventSelect)
+        .eq('id', eventId)
+        .single();
+      event = legacyResult.data;
+      eventError = legacyResult.error;
+    }
 
     if (eventError || !event) {
       console.error('Event fetch error:', eventError);
