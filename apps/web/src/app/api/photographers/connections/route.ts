@@ -10,9 +10,10 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
-async function resolveCreatorId(userId: string) {
+async function resolveCreatorId(userId: string, userEmail?: string) {
   const serviceClient = createServiceClient();
 
+  // Try direct ID match (most common case: photographer.id === auth user.id)
   const byIdResult = await serviceClient
     .from('photographers')
     .select('id')
@@ -23,6 +24,7 @@ async function resolveCreatorId(userId: string) {
     return byIdResult.data.id as string;
   }
 
+  // Try user_id column (if it exists)
   const byUserIdResult = await serviceClient
     .from('photographers')
     .select('id')
@@ -34,11 +36,24 @@ async function resolveCreatorId(userId: string) {
     (typeof byUserIdResult.error?.message === 'string' &&
       byUserIdResult.error.message.includes('user_id'));
 
-  if (missingUserIdColumn) {
-    return null;
+  if (!missingUserIdColumn && byUserIdResult.data?.id) {
+    return byUserIdResult.data.id as string;
   }
 
-  return byUserIdResult.data?.id || null;
+  // Try email lookup as final fallback
+  if (userEmail) {
+    const byEmailResult = await serviceClient
+      .from('photographers')
+      .select('id')
+      .eq('email', userEmail)
+      .maybeSingle();
+
+    if (byEmailResult.data?.id) {
+      return byEmailResult.data.id as string;
+    }
+  }
+
+  return null;
 }
 
 // POST - Add a connection (attendee by FaceTag)
@@ -51,7 +66,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const creatorId = await resolveCreatorId(user.id);
+    const creatorId = await resolveCreatorId(user.id, user.email);
     if (!creatorId) {
       return NextResponse.json({ error: 'Not a photographer' }, { status: 403 });
     }
@@ -147,7 +162,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const creatorId = await resolveCreatorId(user.id);
+    const creatorId = await resolveCreatorId(user.id, user.email);
     if (!creatorId) {
       return NextResponse.json({ error: 'Not a photographer' }, { status: 403 });
     }
@@ -200,7 +215,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const creatorId = await resolveCreatorId(user.id);
+    const creatorId = await resolveCreatorId(user.id, user.email);
     if (!creatorId) {
       return NextResponse.json({ error: 'Not a photographer' }, { status: 403 });
     }

@@ -102,6 +102,7 @@ export default function PublicEventPage() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorType, setErrorType] = useState<'not_found' | 'not_active' | 'private' | 'failed'>('not_found');
   const [needsCode, setNeedsCode] = useState(false);
   const [accessCode, setAccessCode] = useState(codeFromUrl || '');
   const [codeError, setCodeError] = useState('');
@@ -131,6 +132,7 @@ export default function PublicEventPage() {
     try {
       setLoading(true);
       setError(null);
+      setErrorType('not_found');
       setCodeError('');
 
       const codeParam = code || codeFromUrl || '';
@@ -154,6 +156,15 @@ export default function PublicEventPage() {
         } else if (data.error === 'Invalid access code') {
           setCodeError('Invalid access code. Please try again.');
         } else {
+          if (data.error === 'Event not active') {
+            setErrorType('not_active');
+          } else if (data.error === 'Event is private') {
+            setErrorType('private');
+          } else if (res.status === 500) {
+            setErrorType('failed');
+          } else {
+            setErrorType('not_found');
+          }
           setError(data.message || data.error || 'Event not found');
         }
         return;
@@ -234,14 +245,23 @@ export default function PublicEventPage() {
     const homeUrl = isLoggedIn ? '/dashboard' : '/';
     const homeLabel = isLoggedIn ? 'Go to Dashboard' : 'Go Home';
     const HomeIcon = isLoggedIn ? LayoutDashboard : Home;
-    
+
+    const errorHeadings: Record<string, string> = {
+      not_active: 'Event Not Published',
+      private: 'Event is Private',
+      failed: 'Something Went Wrong',
+      not_found: 'Event Not Found',
+    };
+    const heading = errorHeadings[errorType] || 'Event Not Found';
+    const ErrorIcon = errorType === 'private' ? Lock : Camera;
+
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-6">
         <div className="text-center max-w-md">
           <div className="w-20 h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-6">
-            <Camera className="w-10 h-10 text-muted-foreground" />
+            <ErrorIcon className="w-10 h-10 text-muted-foreground" />
           </div>
-          <h1 className="text-2xl font-bold text-foreground mb-2">Event Not Found</h1>
+          <h1 className="text-2xl font-bold text-foreground mb-2">{heading}</h1>
           <p className="text-secondary mb-6">{error}</p>
           <Link href={homeUrl}>
             <Button>

@@ -68,13 +68,13 @@ export async function GET(request: NextRequest) {
 
     // Search photographers
     if (type === 'all' || type === 'photographers') {
+      // Exact facetag match: return even if profile is not public
       const exactPhotographersQuery = await serviceClient
         .from('photographers')
         .select(`
-          id, display_name, face_tag, profile_photo_url, bio, 
+          id, display_name, face_tag, profile_photo_url, bio,
           follower_count, public_profile_slug, is_public_profile, allow_follows
         `)
-        .eq('is_public_profile', true)
         .eq('face_tag', exactFaceTag)
         .limit(1);
 
@@ -147,13 +147,13 @@ export async function GET(request: NextRequest) {
 
     // Search users/attendees (only if they have public profiles)
     if (type === 'all' || type === 'users') {
+      // Exact facetag match: return even if profile is not public
       const exactUsersQuery = await serviceClient
         .from('attendees')
         .select(`
-          id, display_name, face_tag, profile_photo_url, 
+          id, display_name, face_tag, profile_photo_url,
           public_profile_slug, is_public_profile, following_count
         `)
-        .eq('is_public_profile', true)
         .eq('face_tag', exactFaceTag)
         .limit(1);
 

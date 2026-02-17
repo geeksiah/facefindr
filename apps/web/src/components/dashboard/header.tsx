@@ -17,6 +17,7 @@ interface SearchResult {
   display_name?: string;
   face_tag?: string;
   public_profile_slug?: string;
+  profile_photo_url?: string;
   event_date?: string;
   event_start_at_utc?: string;
   event_timezone?: string;
@@ -219,27 +220,35 @@ export function DashboardHeader() {
                       onClick={() => handleResultClick(result)}
                       className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted text-left transition-colors"
                     >
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                        result.type === 'event'
-                          ? 'bg-accent/10 text-accent'
-                          : result.type === 'attendee'
-                          ? 'bg-emerald-500/10 text-emerald-500'
-                          : 'bg-purple-500/10 text-purple-500'
-                      }`}>
-                        {result.type === 'event' ? (
-                          <Calendar className="h-4 w-4" />
-                        ) : result.type === 'attendee' ? (
-                          <User className="h-4 w-4" />
-                        ) : (
-                          <Camera className="h-4 w-4" />
-                        )}
-                      </div>
+                      {result.type !== 'event' && result.profile_photo_url ? (
+                        <img
+                          src={result.profile_photo_url}
+                          alt={result.display_name || ''}
+                          className="w-8 h-8 rounded-full object-cover"
+                        />
+                      ) : (
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                          result.type === 'event'
+                            ? 'bg-accent/10 text-accent'
+                            : result.type === 'attendee'
+                            ? 'bg-emerald-500/10 text-emerald-500'
+                            : 'bg-purple-500/10 text-purple-500'
+                        }`}>
+                          {result.type === 'event' ? (
+                            <Calendar className="h-4 w-4" />
+                          ) : result.type === 'attendee' ? (
+                            <User className="h-4 w-4" />
+                          ) : (
+                            <Camera className="h-4 w-4" />
+                          )}
+                        </div>
+                      )}
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-foreground truncate">
                           {result.name || result.display_name}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {result.type === 'event' 
+                          {result.type === 'event'
                             ? formatEventDateDisplay(
                                 {
                                   event_date: result.event_date,
@@ -347,27 +356,35 @@ export function DashboardHeader() {
                       }}
                       className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted text-left transition-colors"
                     >
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                        result.type === 'event'
-                          ? 'bg-accent/10 text-accent'
-                          : result.type === 'attendee'
-                          ? 'bg-emerald-500/10 text-emerald-500'
-                          : 'bg-purple-500/10 text-purple-500'
-                      }`}>
-                        {result.type === 'event' ? (
-                          <Calendar className="h-4 w-4" />
-                        ) : result.type === 'attendee' ? (
-                          <User className="h-4 w-4" />
-                        ) : (
-                          <Camera className="h-4 w-4" />
-                        )}
-                      </div>
+                      {result.type !== 'event' && result.profile_photo_url ? (
+                        <img
+                          src={result.profile_photo_url}
+                          alt={result.display_name || ''}
+                          className="w-8 h-8 rounded-full object-cover"
+                        />
+                      ) : (
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                          result.type === 'event'
+                            ? 'bg-accent/10 text-accent'
+                            : result.type === 'attendee'
+                            ? 'bg-emerald-500/10 text-emerald-500'
+                            : 'bg-purple-500/10 text-purple-500'
+                        }`}>
+                          {result.type === 'event' ? (
+                            <Calendar className="h-4 w-4" />
+                          ) : result.type === 'attendee' ? (
+                            <User className="h-4 w-4" />
+                          ) : (
+                            <Camera className="h-4 w-4" />
+                          )}
+                        </div>
+                      )}
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-foreground truncate">
                           {result.name || result.display_name}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {result.type === 'event' 
+                          {result.type === 'event'
                             ? formatEventDateDisplay(
                                 {
                                   event_date: result.event_date,

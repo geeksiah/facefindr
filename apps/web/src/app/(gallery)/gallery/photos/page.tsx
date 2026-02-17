@@ -23,6 +23,7 @@ interface Photo {
   id: string;
   thumbnailUrl: string;
   fullUrl: string;
+  storagePath: string;
   eventId: string;
   eventName: string;
   eventDate: string;
@@ -50,40 +51,68 @@ export default function PhotosPage() {
       if (!user) return;
 
       // Get all photos the user owns (via entitlements)
-      const { data: entitlements, error } = await supabase
-        .from('entitlements')
-        .select(`
-          media:media_id (
+      // Try with event_timezone first, fallback without it
+      const fullSelect = `
+        media:media_id (
+          id,
+          thumbnail_path,
+          storage_path,
+          event:event_id (
             id,
-            thumbnail_path,
-            storage_path,
-            event:event_id (
-              id,
-              name,
-              event_date,
-              event_timezone,
-              photographer:photographer_id (
-                display_name
-              )
+            name,
+            event_date,
+            event_timezone,
+            photographer:photographer_id (
+              display_name
             )
           )
-        `)
+        )
+      `;
+      const minimalSelect = `
+        media:media_id (
+          id,
+          thumbnail_path,
+          storage_path,
+          event:event_id (
+            id,
+            name,
+            event_date,
+            photographer:photographer_id (
+              display_name
+            )
+          )
+        )
+      `;
+
+      let { data: entitlements, error } = await supabase
+        .from('entitlements')
+        .select(fullSelect)
         .eq('attendee_id', user.id)
         .order('created_at', { ascending: false });
+
+      // Fallback if event_timezone column doesn't exist
+      if (error?.code === '42703') {
+        const fallback = await supabase
+          .from('entitlements')
+          .select(minimalSelect)
+          .eq('attendee_id', user.id)
+          .order('created_at', { ascending: false });
+        entitlements = fallback.data;
+        error = fallback.error;
+      }
 
       if (error) {
         console.error('Error loading photos:', error);
         return;
       }
 
-      const photoList: Photo[] = (entitlements || [])
+      // Build photo list and generate signed URLs for thumbnails
+      const rawPhotos = (entitlements || [])
         .filter((e: any) => e.media)
         .map((e: any) => ({
           id: e.media.id,
-          thumbnailUrl: e.media.thumbnail_path 
-            ? supabase.storage.from('media').getPublicUrl(e.media.thumbnail_path).data.publicUrl
-            : '',
-          fullUrl: e.media.storage_path,
+          storagePath: e.media.storage_path || '',
+          thumbnailPath: e.media.thumbnail_path || '',
           eventId: e.media.event?.id || '',
           eventName: e.media.event?.name || 'Unknown Event',
           eventDate: e.media.event?.event_date || '',
@@ -91,6 +120,54 @@ export default function PhotosPage() {
           eventTimezone: e.media.event?.event_timezone || null,
           photographerName: e.media.event?.photographer?.display_name || 'Unknown',
         }));
+
+      // Generate signed URLs in batches
+      const photoList: Photo[] = [];
+      const batchSize = 20;
+      for (let i = 0; i < rawPhotos.length; i += batchSize) {
+        const batch = rawPhotos.slice(i, i + batchSize);
+        const thumbPaths = batch
+          .map((p: any) => (p.thumbnailPath || p.storagePath).replace(/^\/?(media\/)?/, ''))
+          .filter(Boolean);
+        const fullPaths = batch
+          .map((p: any) => p.storagePath.replace(/^\/?(media\/)?/, ''))
+          .filter(Boolean);
+
+        const [thumbResult, fullResult] = await Promise.all([
+          thumbPaths.length > 0
+            ? supabase.storage.from('media').createSignedUrls(thumbPaths, 3600)
+            : { data: null },
+          fullPaths.length > 0
+            ? supabase.storage.from('media').createSignedUrls(fullPaths, 3600)
+            : { data: null },
+        ]);
+
+        const thumbUrls = new Map<string, string>();
+        const fullUrls = new Map<string, string>();
+        (thumbResult.data || []).forEach((item: any) => {
+          if (item.signedUrl) thumbUrls.set(item.path, item.signedUrl);
+        });
+        (fullResult.data || []).forEach((item: any) => {
+          if (item.signedUrl) fullUrls.set(item.path, item.signedUrl);
+        });
+
+        for (const raw of batch) {
+          const thumbKey = (raw.thumbnailPath || raw.storagePath).replace(/^\/?(media\/)?/, '');
+          const fullKey = raw.storagePath.replace(/^\/?(media\/)?/, '');
+          photoList.push({
+            id: raw.id,
+            thumbnailUrl: thumbUrls.get(thumbKey) || '',
+            fullUrl: fullUrls.get(fullKey) || '',
+            storagePath: raw.storagePath,
+            eventId: raw.eventId,
+            eventName: raw.eventName,
+            eventDate: raw.eventDate,
+            eventStartAtUtc: raw.eventStartAtUtc,
+            eventTimezone: raw.eventTimezone,
+            photographerName: raw.photographerName,
+          });
+        }
+      }
 
       setPhotos(photoList);
     } catch (err) {
@@ -102,7 +179,8 @@ export default function PhotosPage() {
 
   const downloadPhoto = async (photo: Photo) => {
     try {
-      const { data } = await supabase.storage.from('media').createSignedUrl(photo.fullUrl, 3600);
+      const path = photo.storagePath.replace(/^\/?(media\/)?/, '');
+      const { data } = await supabase.storage.from('media').createSignedUrl(path, 3600, { download: true });
       if (data?.signedUrl) {
         const a = document.createElement('a');
         a.href = data.signedUrl;

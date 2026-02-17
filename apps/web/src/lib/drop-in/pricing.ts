@@ -126,6 +126,20 @@ export async function resolveDropInPricingConfig(): Promise<DropInPricingConfig>
     throw new Error(`Failed to load drop-in plan pricing: ${planError.message}`);
   }
 
+  // If no drop_in/payg plans found, also search all active plans for ones with
+  // drop-in related codes/names (admin may have created the plan with wrong type)
+  if ((!planData || planData.length === 0) && !missingPlanTypeColumn) {
+    const allPlansResult = await supabase
+      .from('subscription_plans')
+      .select(planSelect)
+      .eq('is_active', true)
+      .order('is_popular', { ascending: false })
+      .order('base_price_usd', { ascending: true });
+    if (!allPlansResult.error && allPlansResult.data?.length) {
+      planData = allPlansResult.data;
+    }
+  }
+
   const plans = (planData || []) as Array<{
     id: string;
     code: string;

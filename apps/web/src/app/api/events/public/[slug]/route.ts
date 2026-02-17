@@ -4,12 +4,10 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
-function isMissingColumnError(error: any, column: string): boolean {
-  return (
-    error?.code === '42703' &&
-    typeof error?.message === 'string' &&
-    error.message.includes(column)
-  );
+function isMissingColumnError(error: any, column?: string): boolean {
+  if (error?.code !== '42703') return false;
+  if (!column) return true; // Any missing column
+  return typeof error?.message === 'string' && error.message.includes(column);
 }
 
 function isUuidPrefixSlug(value: string): boolean {
@@ -79,7 +77,6 @@ export async function GET(
         name,
         description,
         event_date,
-        event_timezone,
         location,
         cover_image_url,
         public_slug,
@@ -204,27 +201,15 @@ export async function GET(
 
     let { eventBySlug, slugError } = await lookupEventBySlug(eventSelect);
 
-    // Backward compatibility: if DB migration for event_start_at_utc is not applied yet.
-    const missingStartAtUtcColumn =
-      isMissingColumnError(slugError, 'event_start_at_utc') ||
-      isMissingColumnError(slugError, 'event_timezone');
-
-    if (missingStartAtUtcColumn) {
+    // Backward compatibility: cascade through progressively simpler SELECT clauses
+    // when columns are missing (migration not yet applied).
+    if (isMissingColumnError(slugError)) {
       const legacyLookup = await lookupEventBySlug(legacyEventSelect);
       eventBySlug = legacyLookup.eventBySlug;
       slugError = legacyLookup.slugError;
     }
 
-    const missingPublicLinkColumns =
-      isMissingColumnError(slugError, 'public_slug') ||
-      isMissingColumnError(slugError, 'short_link');
-
-    const missingPublicAccessColumns =
-      isMissingColumnError(slugError, 'allow_anonymous_scan') ||
-      isMissingColumnError(slugError, 'require_access_code') ||
-      isMissingColumnError(slugError, 'public_access_code');
-
-    if (missingPublicLinkColumns || missingPublicAccessColumns) {
+    if (isMissingColumnError(slugError)) {
       const compatibilityLookup = await lookupEventBySlug(compatibilityEventSelect, {
         allowPublicSlug: false,
         allowShortLink: false,

@@ -16,6 +16,7 @@ import { redirect } from 'next/navigation';
 
 import { LogoutButton } from '@/components/auth/logout-button';
 import { GallerySearch } from '@/components/gallery';
+import { MobileMenu } from '@/components/gallery/mobile-menu';
 import { Logo } from '@/components/ui/logo';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { normalizeUserType } from '@/lib/user-type';
@@ -47,13 +48,14 @@ export default async function GalleryLayout({
     .eq('id', user.id)
     .single();
 
-  // Navigation items - desktop sidebar shows all, mobile shows first 5
+  // Navigation items - desktop sidebar shows all, mobile bottom nav shows first 5
+  // mobileLabel is the short label for the mobile bottom nav
   const navItems = [
-    { href: '/gallery', label: 'Dashboard', icon: LayoutDashboard },
-    { href: '/gallery/photos', label: 'My Photos', icon: ImageIcon },
-    { href: '/gallery/scan', label: 'Find Photos', icon: Scan },
-    { href: '/gallery/events', label: 'My Events', icon: Camera },
-    { href: '/gallery/vault', label: 'Photo Vault', icon: Lock },
+    { href: '/gallery', label: 'Dashboard', mobileLabel: 'Home', icon: LayoutDashboard },
+    { href: '/gallery/photos', label: 'My Photos', mobileLabel: 'Photos', icon: ImageIcon },
+    { href: '/gallery/scan', label: 'Find Photos', mobileLabel: 'Scan', icon: Scan },
+    { href: '/gallery/events', label: 'My Events', mobileLabel: 'Events', icon: Camera },
+    { href: '/gallery/vault', label: 'Photo Vault', mobileLabel: 'Vault', icon: Lock },
     { href: '/gallery/drop-in', label: 'Drop-In', icon: Zap },
     { href: '/gallery/following', label: 'Following', icon: Users },
     { href: '/gallery/notifications', label: 'Notifications', icon: Bell },
@@ -120,15 +122,15 @@ export default async function GalleryLayout({
       {/* Mobile Header - Hidden on desktop */}
       <header className="fixed top-0 left-0 right-0 z-50 flex h-16 items-center justify-between border-b border-border bg-card/95 backdrop-blur-sm px-4 lg:hidden">
         <Logo variant="combo" size="sm" href="/gallery" />
-        
-        <div className="flex items-center gap-3">
+
+        <div className="flex items-center gap-1">
           <ThemeToggle />
-          <Link
-            href="/gallery/profile"
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-white font-medium text-sm"
-          >
-            {profile?.display_name?.charAt(0).toUpperCase() || 'U'}
-          </Link>
+          <MobileMenu
+            profileInitial={profile?.display_name?.charAt(0).toUpperCase() || 'U'}
+            profilePhotoUrl={profile?.profile_photo_url}
+            faceTag={profile?.face_tag}
+            displayName={profile?.display_name}
+          />
         </div>
       </header>
 
@@ -142,7 +144,7 @@ export default async function GalleryLayout({
               className="flex flex-col items-center gap-1 p-2 text-secondary transition-colors hover:text-accent"
             >
               <item.icon className="h-5 w-5" />
-              <span className="text-[10px] font-medium">{item.label.split(' ')[0]}</span>
+              <span className="text-[10px] font-medium">{item.mobileLabel || item.label}</span>
             </Link>
           ))}
         </div>
