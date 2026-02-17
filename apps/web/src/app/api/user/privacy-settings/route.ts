@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { normalizeUserType } from '@/lib/user-type';
-import { createClient, createClientWithAccessToken } from '@/lib/supabase/server';
+import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
 async function getAuthClient(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
@@ -41,15 +41,16 @@ export async function GET(request: NextRequest) {
     const userType = normalizeUserType(user.user_metadata?.user_type) || 'attendee';
     const profileTable = getProfileTable(userType);
 
-    const { data: currentProfileRecord } = await supabase
+    const serviceClient = createServiceClient();
+    const { data: currentProfileRecord } = await serviceClient
       .from(profileTable)
       .select('is_public_profile')
       .eq('id', user.id)
       .single();
     let profileRecord = currentProfileRecord;
 
-    // Try to get existing settings
-    let { data: settings } = await supabase
+    // Try to get existing settings (use service client to bypass RLS)
+    let { data: settings } = await serviceClient
       .from('user_privacy_settings')
       .select('*')
       .eq('user_id', user.id)
@@ -57,7 +58,7 @@ export async function GET(request: NextRequest) {
 
     // If no settings exist, create default ones
     if (!settings) {
-      const { data: newSettings, error: insertError } = await supabase
+      const { data: newSettings, error: insertError } = await serviceClient
         .from('user_privacy_settings')
         .insert({
           user_id: user.id,
@@ -90,7 +91,7 @@ export async function GET(request: NextRequest) {
       profileRecord &&
       settings.profile_visible !== profileRecord.is_public_profile
     ) {
-      await supabase
+      await serviceClient
         .from(profileTable)
         .update({ is_public_profile: settings.profile_visible })
         .eq('id', user.id);
@@ -140,8 +141,11 @@ export async function PUT(request: NextRequest) {
     const userType = normalizeUserType(user.user_metadata?.user_type) || 'attendee';
     const profileTable = getProfileTable(userType);
 
+    // Use service client to bypass RLS for settings operations
+    const serviceClient = createServiceClient();
+
     // Check if settings exist
-    const { data: existing } = await supabase
+    const { data: existing } = await serviceClient
       .from('user_privacy_settings')
       .select('id')
       .eq('user_id', user.id)
@@ -163,7 +167,7 @@ export async function PUT(request: NextRequest) {
 
     if (existing) {
       // Update existing settings
-      result = await supabase
+      result = await serviceClient
         .from('user_privacy_settings')
         .update(updateData)
         .eq('user_id', user.id)
@@ -171,8 +175,7 @@ export async function PUT(request: NextRequest) {
         .single();
     } else {
       // Insert new settings
-      const userType = normalizeUserType(user.user_metadata?.user_type) || 'attendee';
-      result = await supabase
+      result = await serviceClient
         .from('user_privacy_settings')
         .insert({
           user_id: user.id,
@@ -192,7 +195,8 @@ export async function PUT(request: NextRequest) {
     }
 
     if (typeof profileVisible === 'boolean') {
-      const { error: profileUpdateError } = await supabase
+      const serviceClient = createServiceClient();
+      const { error: profileUpdateError } = await serviceClient
         .from(profileTable)
         .update({ is_public_profile: profileVisible })
         .eq('id', user.id);

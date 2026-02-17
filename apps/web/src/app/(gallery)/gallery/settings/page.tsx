@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 import { logout } from '@/app/(auth)/actions';
 import { Button } from '@/components/ui/button';
@@ -24,11 +24,36 @@ export default function SettingsPage() {
   const [showDeleteAccount, setShowDeleteAccount] = useState(false);
   const [showDeleteFace, setShowDeleteFace] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isLoadingSettings, setIsLoadingSettings] = useState(true);
   const [privacySettings, setPrivacySettings] = useState({
     allowTagging: true,
     publicProfile: false,
     showInSearch: true,
   });
+
+  // Load saved privacy settings on mount
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const res = await fetch('/api/user/privacy-settings');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.settings) {
+            setPrivacySettings({
+              allowTagging: data.settings.allowPhotoTagging ?? true,
+              publicProfile: data.settings.profileVisible ?? false,
+              showInSearch: data.settings.showInSearch ?? true,
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load privacy settings:', err);
+      } finally {
+        setIsLoadingSettings(false);
+      }
+    };
+    loadSettings();
+  }, []);
 
   const handleLogout = async () => {
     await logout();
@@ -88,15 +113,30 @@ export default function SettingsPage() {
     }
   };
 
+  // Map local field names to API field names
+  const fieldMap: Record<string, string> = {
+    allowTagging: 'allowPhotoTagging',
+    publicProfile: 'profileVisible',
+    showInSearch: 'showInSearch',
+  };
+
   const updatePrivacySetting = async (key: keyof typeof privacySettings, value: boolean) => {
-    setPrivacySettings((prev) => ({ ...prev, [key]: value }));
+    const prev = { ...privacySettings };
+    setPrivacySettings((p) => ({ ...p, [key]: value }));
     try {
-      await fetch('/api/attendee/privacy-settings', {
-        method: 'PATCH',
+      const apiField = fieldMap[key] || key;
+      const res = await fetch('/api/user/privacy-settings', {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [key]: value }),
+        body: JSON.stringify({ [apiField]: value }),
       });
+      if (!res.ok) {
+        // Revert on failure
+        setPrivacySettings(prev);
+        console.error('Failed to update privacy setting:', await res.text());
+      }
     } catch (error) {
+      setPrivacySettings(prev);
       console.error('Failed to update privacy setting:', error);
     }
   };

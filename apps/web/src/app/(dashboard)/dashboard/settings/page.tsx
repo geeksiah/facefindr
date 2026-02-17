@@ -121,6 +121,13 @@ export default function SettingsPage() {
   const [currentPlan, setCurrentPlan] = useState<string>('free');
   const isStudioPlan = currentPlan === 'studio';
 
+  // Privacy state
+  const [privacySettings, setPrivacySettings] = useState({
+    profileVisible: true,
+    showInSearch: true,
+    shareActivityWithCreators: false,
+  });
+
   // Handle URL params for tab switching
   useEffect(() => {
     const tab = searchParams?.get('tab');
@@ -164,6 +171,19 @@ export default function SettingsPage() {
           const data = await notifRes.json();
           setNotifications(data.settings);
         }
+
+        // Load privacy settings
+        const privRes = await fetch('/api/user/privacy-settings');
+        if (privRes.ok) {
+          const data = await privRes.json();
+          if (data.settings) {
+            setPrivacySettings({
+              profileVisible: data.settings.profileVisible ?? true,
+              showInSearch: data.settings.showInSearch ?? true,
+              shareActivityWithCreators: data.settings.shareActivityWithCreators ?? false,
+            });
+          }
+        }
       } catch (error) {
         console.error('Failed to load settings:', error);
       } finally {
@@ -173,6 +193,26 @@ export default function SettingsPage() {
 
     loadData();
   }, []);
+
+  // Update a single privacy setting
+  const updatePrivacySetting = async (key: keyof typeof privacySettings, value: boolean) => {
+    const prev = { ...privacySettings };
+    setPrivacySettings((p) => ({ ...p, [key]: value }));
+    try {
+      const res = await fetch('/api/user/privacy-settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [key]: value }),
+      });
+      if (!res.ok) {
+        setPrivacySettings(prev);
+        toast.error('Error', 'Failed to update privacy setting');
+      }
+    } catch {
+      setPrivacySettings(prev);
+      toast.error('Error', 'Failed to update privacy setting');
+    }
+  };
 
   // Save profile
   const handleSaveProfile = async () => {
@@ -820,21 +860,30 @@ export default function SettingsPage() {
                   <p className="font-medium text-foreground">Profile Visibility</p>
                   <p className="text-sm text-secondary">Allow others to find and view your profile</p>
                 </div>
-                <Switch defaultChecked />
+                <Switch
+                  checked={privacySettings.profileVisible}
+                  onCheckedChange={(checked) => updatePrivacySetting('profileVisible', checked)}
+                />
               </div>
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-medium text-foreground">Show in Search</p>
                   <p className="text-sm text-secondary">Appear in photographer search results</p>
                 </div>
-                <Switch defaultChecked />
+                <Switch
+                  checked={privacySettings.showInSearch}
+                  onCheckedChange={(checked) => updatePrivacySetting('showInSearch', checked)}
+                />
               </div>
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-medium text-foreground">Analytics Sharing</p>
                   <p className="text-sm text-secondary">Help improve Ferchr with anonymous usage data</p>
                 </div>
-                <Switch defaultChecked />
+                <Switch
+                  checked={privacySettings.shareActivityWithCreators}
+                  onCheckedChange={(checked) => updatePrivacySetting('shareActivityWithCreators', checked)}
+                />
               </div>
             </div>
           </div>
