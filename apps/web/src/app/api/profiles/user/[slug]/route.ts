@@ -21,8 +21,8 @@ export async function GET(
 
     // Determine query method
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(slug);
-    // FaceTag can be @username+suffix (new) or @username1234 (legacy)
-    const isFaceTag = slug.includes('+') || /^@?[a-z0-9_]+\d{4,5}$/i.test(slug);
+    // FaceTag: @username.1234, @username+k7x2, @username1234, etc.
+    const isFaceTag = slug.includes('+') || /^@?[a-z0-9_.]+[+.]?\d{3,5}$/i.test(slug);
 
     const fullSelect = `
       id, display_name, face_tag, profile_photo_url,

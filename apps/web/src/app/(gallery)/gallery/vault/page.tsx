@@ -12,6 +12,7 @@ interface VaultPhoto {
   id: string;
   thumbnailUrl: string;
   fullUrl: string;
+  storagePath: string;
   eventName: string;
   purchasedAt: string;
   expiresAt: string | null;
@@ -58,18 +59,62 @@ export default function VaultPage() {
         return;
       }
 
-      const vaultPhotos: VaultPhoto[] = (entitlements || [])
+      // Build raw list first
+      const rawPhotos = (entitlements || [])
         .filter((e: any) => e.media)
         .map((e: any) => ({
           id: e.media.id,
-          thumbnailUrl: e.media.thumbnail_path 
-            ? supabase.storage.from('media').getPublicUrl(e.media.thumbnail_path).data.publicUrl
-            : '',
-          fullUrl: e.media.storage_path,
+          thumbnailPath: e.media.thumbnail_path || '',
+          storagePath: e.media.storage_path || '',
           eventName: e.media.event?.name || 'Unknown Event',
           purchasedAt: e.created_at,
           expiresAt: e.expires_at,
         }));
+
+      // Generate signed URLs in batches (private bucket)
+      const vaultPhotos: VaultPhoto[] = [];
+      const batchSize = 20;
+      for (let i = 0; i < rawPhotos.length; i += batchSize) {
+        const batch = rawPhotos.slice(i, i + batchSize);
+        const thumbPaths = batch
+          .map((p) => (p.thumbnailPath || p.storagePath).replace(/^\/?(media\/)?/, ''))
+          .filter(Boolean);
+        const fullPaths = batch
+          .map((p) => p.storagePath.replace(/^\/?(media\/)?/, ''))
+          .filter(Boolean);
+
+        const [thumbResult, fullResult] = await Promise.all([
+          thumbPaths.length > 0
+            ? supabase.storage.from('media').createSignedUrls(thumbPaths, 3600)
+            : { data: null },
+          fullPaths.length > 0
+            ? supabase.storage.from('media').createSignedUrls(fullPaths, 3600)
+            : { data: null },
+        ]);
+
+        const thumbUrls = new Map<string, string>();
+        const fullUrls = new Map<string, string>();
+        (thumbResult.data || []).forEach((item: any) => {
+          if (item.signedUrl) thumbUrls.set(item.path, item.signedUrl);
+        });
+        (fullResult.data || []).forEach((item: any) => {
+          if (item.signedUrl) fullUrls.set(item.path, item.signedUrl);
+        });
+
+        for (const raw of batch) {
+          const thumbKey = (raw.thumbnailPath || raw.storagePath).replace(/^\/?(media\/)?/, '');
+          const fullKey = raw.storagePath.replace(/^\/?(media\/)?/, '');
+          vaultPhotos.push({
+            id: raw.id,
+            thumbnailUrl: thumbUrls.get(thumbKey) || '',
+            fullUrl: fullUrls.get(fullKey) || '',
+            storagePath: raw.storagePath,
+            eventName: raw.eventName,
+            purchasedAt: raw.purchasedAt,
+            expiresAt: raw.expiresAt,
+          });
+        }
+      }
 
       setPhotos(vaultPhotos);
     } catch (err) {
@@ -102,7 +147,8 @@ export default function VaultPage() {
     for (const photoId of selectedPhotos) {
       const photo = photos.find(p => p.id === photoId);
       if (photo) {
-        const { data } = await supabase.storage.from('media').createSignedUrl(photo.fullUrl, 3600);
+        const path = photo.storagePath.replace(/^\/?(media\/)?/, '');
+        const { data } = await supabase.storage.from('media').createSignedUrl(path, 3600, { download: true });
         if (data?.signedUrl) {
           const a = document.createElement('a');
           a.href = data.signedUrl;

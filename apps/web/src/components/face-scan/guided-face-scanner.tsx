@@ -187,23 +187,29 @@ export function GuidedFaceScanner({
     }
   }, []);
 
-  // Initialize everything
+  // Initialize everything - camera first, then model in background
   const initialize = useCallback(async () => {
     setState('initializing');
     setError(null);
+    setUseAutoCapture(false); // Start in manual mode, upgrade if model loads
 
     const cameraReady = await initializeCamera();
     if (!cameraReady) {
-      setError(cameraMessage || 'Failed to access camera. Please check permissions.');
+      setError('Failed to access camera. Please check permissions.');
       setState('error');
       return;
     }
 
-    // Try to load face detection, but don't fail if it doesn't work
-    await initializeDetector();
-
+    // Camera is ready - show it immediately in manual mode
     setState('ready');
-  }, [initializeCamera, initializeDetector, cameraMessage]);
+
+    // Load face detection model in background for auto-capture
+    initializeDetector().then((loaded) => {
+      if (loaded) {
+        setUseAutoCapture(true);
+      }
+    });
+  }, [initializeCamera, initializeDetector]);
 
   const requestCameraAccess = useCallback(async () => {
     const ok = await initializeCamera();
@@ -309,9 +315,10 @@ export function GuidedFaceScanner({
   const captureCurrentPosition = useCallback(() => {
     if (!videoRef.current || !canvasRef.current) return;
 
+    // In manual mode without model, always allow capture
+    // With model loaded, only warn but still allow capture
     if (!useAutoCapture && modelLoaded && !positionMatch) {
-      setError(`Adjust to "${positionConfig.label}" before capturing.`);
-      return;
+      // Don't block capture - just proceed
     }
 
     const video = videoRef.current;
@@ -546,18 +553,20 @@ export function GuidedFaceScanner({
           </button>
         )}
 
-        {/* Manual capture button */}
+        {/* Shutter / Capture button - centered at bottom */}
         {state === 'ready' && (
-          <button
-            onClick={captureCurrentPosition}
-            className={`absolute top-4 right-4 flex h-14 w-14 items-center justify-center rounded-full border-4 transition-all ${
-              positionMatch
-                ? 'bg-success border-success/50 hover:bg-success/90'
-                : 'bg-white/90 border-white/50 hover:bg-white'
-            }`}
-          >
-            <Camera className={`h-6 w-6 ${positionMatch ? 'text-white' : 'text-foreground'}`} />
-          </button>
+          <div className="absolute bottom-20 left-0 right-0 flex justify-center">
+            <button
+              onClick={captureCurrentPosition}
+              className={`flex h-16 w-16 items-center justify-center rounded-full border-4 transition-all shadow-lg ${
+                positionMatch
+                  ? 'bg-success border-success/50 hover:bg-success/90 scale-110'
+                  : 'bg-white/90 border-white/50 hover:bg-white active:scale-95'
+              }`}
+            >
+              <Camera className={`h-7 w-7 ${positionMatch ? 'text-white' : 'text-foreground'}`} />
+            </button>
+          </div>
         )}
       </div>
 

@@ -16,13 +16,12 @@ import {
   Zap,
   LayoutDashboard,
   LogOut,
-  Calendar,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 
-import { formatEventDateDisplay } from '@/lib/events/time';
 import { cn } from '@/lib/utils';
 
 interface MobileMenuProps {
@@ -39,9 +38,6 @@ interface SearchResult {
   face_tag?: string;
   public_profile_slug?: string;
   profile_photo_url?: string;
-  event_date?: string;
-  event_start_at_utc?: string;
-  event_timezone?: string;
   type: 'event' | 'photographer' | 'attendee';
 }
 
@@ -67,13 +63,18 @@ export function MobileMenu({ profileInitial, profilePhotoUrl, faceTag, displayNa
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const requestRef = useRef(0);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { setMounted(true); }, []);
 
   // Close menu on navigation
   useEffect(() => {
     setMenuOpen(false);
     setSearchOpen(false);
+    setQuery('');
   }, [pathname]);
 
   // Prevent body scroll when menu is open
@@ -83,6 +84,19 @@ export function MobileMenu({ profileInitial, profilePhotoUrl, faceTag, displayNa
       return () => { document.body.style.overflow = ''; };
     }
   }, [menuOpen]);
+
+  // Close search on outside click
+  useEffect(() => {
+    if (!searchOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
+        setSearchOpen(false);
+        setQuery('');
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [searchOpen]);
 
   const performSearch = useCallback(async (searchQuery: string) => {
     const trimmed = searchQuery.trim();
@@ -135,6 +149,147 @@ export function MobileMenu({ profileInitial, profilePhotoUrl, faceTag, displayNa
     }
   };
 
+  // Render overlays via portal to escape header stacking context
+  const searchOverlay = searchOpen && mounted ? createPortal(
+    <div
+      ref={searchContainerRef}
+      className="fixed left-0 right-0 border-b border-border bg-card p-4 shadow-lg"
+      style={{ top: '64px', zIndex: 9998 }}
+    >
+      <div className="relative">
+        <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+        <input
+          type="search"
+          autoComplete="off"
+          placeholder="Search people by name or @FaceTag"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="h-11 w-full rounded-xl border border-border bg-background pl-10 pr-10 text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-accent"
+          style={{ fontSize: '16px' }}
+          autoFocus
+        />
+        {query && (
+          <button
+            onClick={() => { setQuery(''); setResults([]); }}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+
+      {query.trim().length >= 1 && (
+        <div className="mt-2 bg-card border border-border rounded-xl overflow-hidden max-h-60 overflow-y-auto">
+          {isSearching ? (
+            <div className="p-4 text-center text-muted-foreground text-sm">Searching...</div>
+          ) : results.length === 0 ? (
+            <div className="p-4 text-center text-muted-foreground text-sm">No results found</div>
+          ) : (
+            results.map((result) => (
+              <button
+                key={`${result.type}-${result.id}`}
+                onClick={() => handleResultClick(result)}
+                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted text-left transition-colors"
+              >
+                {result.profile_photo_url ? (
+                  <img
+                    src={result.profile_photo_url}
+                    alt={result.display_name || ''}
+                    className="w-8 h-8 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                    result.type === 'attendee'
+                      ? 'bg-emerald-500/10 text-emerald-500'
+                      : 'bg-purple-500/10 text-purple-500'
+                  }`}>
+                    {result.type === 'attendee' ? (
+                      <User className="h-4 w-4" />
+                    ) : (
+                      <Camera className="h-4 w-4" />
+                    )}
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">
+                    {result.name || result.display_name}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {result.face_tag || (result.type === 'attendee' ? 'Attendee' : 'Creator')}
+                  </p>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>,
+    document.body
+  ) : null;
+
+  const menuOverlay = menuOpen && mounted ? createPortal(
+    <div
+      className="fixed left-0 right-0 bottom-0 bg-card overflow-y-auto"
+      style={{ top: '64px', zIndex: 9998 }}
+    >
+      {/* User card */}
+      <div className="flex items-center gap-3 p-4 border-b border-border">
+        {profilePhotoUrl ? (
+          <img
+            src={profilePhotoUrl}
+            alt={displayName || ''}
+            className="h-10 w-10 rounded-full object-cover"
+          />
+        ) : (
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent text-white font-semibold">
+            {profileInitial}
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <p className="font-medium text-foreground truncate">{displayName || 'User'}</p>
+          {faceTag && <p className="text-xs text-accent truncate">{faceTag}</p>}
+        </div>
+      </div>
+
+      {/* Navigation items */}
+      <nav className="p-2">
+        {menuItems.map((item) => {
+          const isActive = pathname === item.href || (item.href !== '/gallery' && pathname?.startsWith(item.href));
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={cn(
+                'flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-colors',
+                isActive
+                  ? 'bg-accent/10 text-accent'
+                  : 'text-secondary hover:bg-muted hover:text-foreground'
+              )}
+            >
+              <item.icon className="h-5 w-5" />
+              {item.label}
+            </Link>
+          );
+        })}
+      </nav>
+
+      {/* Logout */}
+      <div className="p-4 border-t border-border">
+        <button
+          onClick={async () => {
+            await fetch('/api/auth/logout', { method: 'GET' });
+            router.push('/login');
+          }}
+          className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-destructive hover:bg-destructive/10 w-full transition-colors"
+        >
+          <LogOut className="h-5 w-5" />
+          Sign Out
+        </button>
+      </div>
+    </div>,
+    document.body
+  ) : null;
+
   return (
     <>
       {/* Search icon */}
@@ -147,143 +302,14 @@ export function MobileMenu({ profileInitial, profilePhotoUrl, faceTag, displayNa
 
       {/* Menu toggle */}
       <button
-        onClick={() => { setMenuOpen(!menuOpen); setSearchOpen(false); }}
+        onClick={() => { setMenuOpen(!menuOpen); setSearchOpen(false); setQuery(''); }}
         className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
       >
         {menuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
       </button>
 
-      {/* Search overlay */}
-      {searchOpen && (
-        <div className="absolute inset-x-0 top-full border-b border-border bg-card p-4 z-50 shadow-lg">
-          <div className="relative">
-            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-            <input
-              type="search"
-              autoComplete="off"
-              placeholder="Search people by name or @FaceTag"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="h-11 w-full rounded-xl border border-border bg-background pl-10 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-accent"
-              autoFocus
-            />
-            {query && (
-              <button
-                onClick={() => { setQuery(''); setResults([]); }}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-
-          {query.trim().length >= 1 && (
-            <div className="mt-2 bg-card border border-border rounded-xl overflow-hidden max-h-60 overflow-y-auto">
-              {isSearching ? (
-                <div className="p-4 text-center text-muted-foreground text-sm">Searching...</div>
-              ) : results.length === 0 ? (
-                <div className="p-4 text-center text-muted-foreground text-sm">No results found</div>
-              ) : (
-                results.map((result) => (
-                  <button
-                    key={`${result.type}-${result.id}`}
-                    onClick={() => handleResultClick(result)}
-                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted text-left transition-colors"
-                  >
-                    {result.profile_photo_url ? (
-                      <img
-                        src={result.profile_photo_url}
-                        alt={result.display_name || ''}
-                        className="w-8 h-8 rounded-full object-cover"
-                      />
-                    ) : (
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                        result.type === 'attendee'
-                          ? 'bg-emerald-500/10 text-emerald-500'
-                          : 'bg-purple-500/10 text-purple-500'
-                      }`}>
-                        {result.type === 'attendee' ? (
-                          <User className="h-4 w-4" />
-                        ) : (
-                          <Camera className="h-4 w-4" />
-                        )}
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">
-                        {result.name || result.display_name}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {result.face_tag || (result.type === 'attendee' ? 'Attendee' : 'Creator')}
-                      </p>
-                    </div>
-                  </button>
-                ))
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Full screen menu overlay */}
-      {menuOpen && (
-        <div className="fixed inset-0 top-16 z-40 bg-card overflow-y-auto">
-          {/* User card */}
-          <div className="flex items-center gap-3 p-4 border-b border-border">
-            {profilePhotoUrl ? (
-              <img
-                src={profilePhotoUrl}
-                alt={displayName || ''}
-                className="h-10 w-10 rounded-full object-cover"
-              />
-            ) : (
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent text-white font-semibold">
-                {profileInitial}
-              </div>
-            )}
-            <div className="flex-1 min-w-0">
-              <p className="font-medium text-foreground truncate">{displayName || 'User'}</p>
-              {faceTag && <p className="text-xs text-accent truncate">{faceTag}</p>}
-            </div>
-          </div>
-
-          {/* Navigation items */}
-          <nav className="p-2">
-            {menuItems.map((item) => {
-              const isActive = pathname === item.href || (item.href !== '/gallery' && pathname?.startsWith(item.href));
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    'flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-colors',
-                    isActive
-                      ? 'bg-accent/10 text-accent'
-                      : 'text-secondary hover:bg-muted hover:text-foreground'
-                  )}
-                >
-                  <item.icon className="h-5 w-5" />
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
-
-          {/* Logout */}
-          <div className="p-4 border-t border-border">
-            <button
-              onClick={async () => {
-                await fetch('/api/auth/logout', { method: 'GET' });
-                router.push('/login');
-              }}
-              className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-destructive hover:bg-destructive/10 w-full transition-colors"
-            >
-              <LogOut className="h-5 w-5" />
-              Sign Out
-            </button>
-          </div>
-        </div>
-      )}
+      {searchOverlay}
+      {menuOverlay}
     </>
   );
 }

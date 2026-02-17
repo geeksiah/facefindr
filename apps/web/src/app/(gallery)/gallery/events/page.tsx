@@ -186,11 +186,6 @@ export default function MyEventsPage() {
           throw new Error('Camera is not supported in this browser.');
         }
 
-        const BarcodeDetectorCtor = (window as any).BarcodeDetector;
-        if (!BarcodeDetectorCtor) {
-          throw new Error('QR scanning is not supported in this browser.');
-        }
-
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'environment' },
         });
@@ -206,7 +201,19 @@ export default function MyEventsPage() {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
 
-        const detector = new BarcodeDetectorCtor({ formats: ['qr_code'] });
+        // Try native BarcodeDetector first, fall back to jsQR
+        const BarcodeDetectorCtor = (window as any).BarcodeDetector;
+        const useNative = !!BarcodeDetectorCtor;
+        let nativeDetector: any = null;
+        let jsQRModule: any = null;
+
+        if (useNative) {
+          nativeDetector = new BarcodeDetectorCtor({ formats: ['qr_code'] });
+        } else {
+          // Load jsQR as fallback for browsers without BarcodeDetector
+          jsQRModule = (await import('jsqr')).default;
+        }
+
         const scanFrame = async () => {
           if (isCancelled || !videoRef.current || !canvasRef.current) return;
 
@@ -218,9 +225,24 @@ export default function MyEventsPage() {
             const context = canvas.getContext('2d');
             if (context) {
               context.drawImage(video, 0, 0, canvas.width, canvas.height);
-              const barcodes = await detector.detect(canvas);
-              if (barcodes.length > 0 && barcodes[0]?.rawValue) {
-                handleQrPayload(barcodes[0].rawValue);
+
+              let qrValue: string | null = null;
+
+              if (useNative && nativeDetector) {
+                const barcodes = await nativeDetector.detect(canvas);
+                if (barcodes.length > 0 && barcodes[0]?.rawValue) {
+                  qrValue = barcodes[0].rawValue;
+                }
+              } else if (jsQRModule) {
+                const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                const code = jsQRModule(imageData.data, canvas.width, canvas.height);
+                if (code?.data) {
+                  qrValue = code.data;
+                }
+              }
+
+              if (qrValue) {
+                handleQrPayload(qrValue);
                 return;
               }
             }

@@ -15,7 +15,7 @@ import { GatewaySelectionError, selectPaymentGateway } from '@/lib/payments/gate
 import { isPayPalConfigured, createOrder, getApprovalUrl } from '@/lib/payments/paypal';
 import { stripe } from '@/lib/payments/stripe';
 import { resolveDropInPricingConfig } from '@/lib/drop-in/pricing';
-import { createClient, createClientWithAccessToken } from '@/lib/supabase/server';
+import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
 async function getDropInPricing() {
   const pricing = await resolveDropInPricingConfig();
@@ -52,15 +52,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: message, failClosed: true }, { status: 503 });
     }
 
-    // Get attendee profile
-    const { data: attendee } = await supabase
+    // Get attendee profile (use service client to bypass RLS)
+    const serviceClient = createServiceClient();
+    let { data: attendee } = await serviceClient
       .from('attendees')
-      .select('id')
+      .select('id, display_name')
       .eq('id', user.id)
-      .single();
+      .maybeSingle();
 
     if (!attendee) {
-      return NextResponse.json({ error: 'Attendee profile not found' }, { status: 404 });
+      // Auto-create attendee profile if it doesn't exist yet
+      const { data: newAttendee, error: createError } = await serviceClient
+        .from('attendees')
+        .insert({
+          id: user.id,
+          display_name: user.user_metadata?.display_name || user.email?.split('@')[0] || 'User',
+          email: user.email,
+        })
+        .select('id, display_name')
+        .single();
+
+      if (createError || !newAttendee) {
+        return NextResponse.json({ error: 'Failed to create attendee profile' }, { status: 500 });
+      }
+
+      attendee = newAttendee;
     }
 
     const formData = await request.formData();

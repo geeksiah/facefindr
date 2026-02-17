@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { normalizeUserType } from '@/lib/user-type';
-import { createClient, createClientWithAccessToken } from '@/lib/supabase/server';
+import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
   try {
@@ -35,12 +35,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get attendee profile
-    const { data: attendee } = await supabase
+    // Get attendee profile (use service client to bypass RLS)
+    const serviceClient = createServiceClient();
+    const { data: attendee } = await serviceClient
       .from('attendees')
       .select('id')
       .eq('id', user.id)
-      .single();
+      .maybeSingle();
 
     if (!attendee) {
       return NextResponse.json({ error: 'Attendee profile not found' }, { status: 404 });

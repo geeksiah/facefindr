@@ -2,78 +2,130 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Creator Profile API
- * 
+ *
  * Get public photographer profile by slug, ID, or FaceTag.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/server';
+
+function isMissingColumnError(error: any): boolean {
+  return error?.code === '42703' || error?.code === '42P01';
+}
 
 export async function GET(
   request: NextRequest,
   { params }: { params: { slug: string } }
 ) {
   try {
-    const supabase = createClient();
+    const supabase = createServiceClient();
     const { slug } = params;
 
     // Determine query method
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(slug);
-    // FaceTag can be @username+suffix (new) or @username1234 (legacy)
-    const isFaceTag = slug.includes('+') || /^@?[a-z0-9_]+\d{4,5}$/i.test(slug);
+    // FaceTag: @username.1234, @username+k7x2, @username1234, etc.
+    const isFaceTag = slug.includes('+') || /^@?[a-z0-9_.]+[+.]?\d{3,5}$/i.test(slug);
 
-    let query = supabase
-      .from('photographers')
-      .select(`
-        id, display_name, face_tag, bio, profile_photo_url,
-        website_url, instagram_url, twitter_url, facebook_url,
-        is_public_profile, allow_follows, follower_count,
-        public_profile_slug, created_at
-      `);
+    const fullSelect = `
+      id, display_name, face_tag, bio, profile_photo_url,
+      website_url, instagram_url, twitter_url, facebook_url,
+      is_public_profile, allow_follows, follower_count,
+      public_profile_slug, created_at
+    `;
+    const minimalSelect = 'id, display_name, face_tag, bio, profile_photo_url, created_at';
 
-    if (isUuid) {
-      query = query.eq('id', slug);
-    } else if (isFaceTag) {
-      // Could be face_tag like @username+k7x2 (new) or @username1234 (legacy)
-      const tag = slug.startsWith('@') ? slug : `@${slug}`;
-      query = query.eq('face_tag', tag);
-    } else {
-      // Assume it's a slug
-      query = query.eq('public_profile_slug', slug);
+    async function queryProfile(selectClause: string) {
+      let q = supabase.from('photographers').select(selectClause);
+
+      if (isUuid) {
+        q = q.eq('id', slug);
+      } else if (isFaceTag) {
+        const tag = slug.startsWith('@') ? slug : `@${slug}`;
+        q = q.eq('face_tag', tag);
+      } else {
+        q = q.eq('public_profile_slug', slug);
+      }
+
+      return q.maybeSingle();
     }
 
-    const { data: profile, error } = await query.single();
+    let { data: profile, error } = await queryProfile(fullSelect);
+
+    // Fallback if columns don't exist
+    if (isMissingColumnError(error)) {
+      const fallback = await queryProfile(minimalSelect);
+      profile = fallback.data;
+      error = fallback.error;
+    }
+
+    // If not found by slug, also try as a facetag
+    if (!profile && !isUuid && !isFaceTag) {
+      const tag = slug.startsWith('@') ? slug : `@${slug}`;
+      const { data: tagProfile } = await supabase
+        .from('photographers')
+        .select(minimalSelect)
+        .eq('face_tag', tag)
+        .maybeSingle();
+      if (tagProfile) {
+        profile = tagProfile;
+      }
+    }
 
     if (error || !profile) {
       return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
     }
 
-    // Check if profile is public
-    if (!profile.is_public_profile) {
-      return NextResponse.json({ error: 'Profile is private' }, { status: 403 });
-    }
+    // Get recent events (with column fallback)
+    const eventFullSelect = 'id, name, cover_image_url, event_date, event_timezone, location, public_slug';
+    const eventMinimalSelect = 'id, name, cover_image_url, event_date, location';
 
-    // Get recent events
-    const { data: events } = await supabase
+    let events: any[] | null = null;
+    let eventCount: number | null = null;
+
+    const eventsResult = await supabase
       .from('events')
-      .select('id, name, cover_image_url, event_date, event_timezone, location, public_slug')
+      .select(eventFullSelect)
       .eq('photographer_id', profile.id)
       .eq('status', 'active')
       .order('event_date', { ascending: false })
       .limit(6);
 
+    if (isMissingColumnError(eventsResult.error)) {
+      const fallbackEvents = await supabase
+        .from('events')
+        .select(eventMinimalSelect)
+        .eq('photographer_id', profile.id)
+        .eq('status', 'active')
+        .order('event_date', { ascending: false })
+        .limit(6);
+      events = fallbackEvents.data;
+    } else {
+      events = eventsResult.data;
+    }
+
     // Get total event count
-    const { count: eventCount } = await supabase
+    const { count } = await supabase
       .from('events')
       .select('id', { count: 'exact', head: true })
       .eq('photographer_id', profile.id)
       .eq('status', 'active');
+    eventCount = count;
+
+    // Generate signed cover image URLs for events
+    const eventsWithCovers = (events || []).map((event: any) => {
+      if (event.cover_image_url && !event.cover_image_url.startsWith('http')) {
+        const coverPath = event.cover_image_url.replace(/^\/+/, '');
+        const { data } = supabase.storage.from('covers').getPublicUrl(coverPath);
+        return { ...event, cover_image_url: data.publicUrl };
+      }
+      return event;
+    });
 
     return NextResponse.json({
       profile: {
         ...profile,
-        events: events || [],
+        events: eventsWithCovers,
         eventCount: eventCount || 0,
       },
     });
@@ -83,4 +135,3 @@ export async function GET(
     return NextResponse.json({ error: 'Failed to load profile' }, { status: 500 });
   }
 }
-
