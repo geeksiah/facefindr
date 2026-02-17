@@ -4,7 +4,7 @@
  * Manual entry of event codes.
  */
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -16,7 +16,7 @@ import {
   Platform,
   Alert,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, Hash, Loader2 } from 'lucide-react-native';
 
 import { Button } from '@/components/ui';
@@ -27,10 +27,24 @@ const CODE_LENGTH = 6;
 
 export default function EnterCodeScreen() {
   const router = useRouter();
+  const { code: prefillCode } = useLocalSearchParams<{ code?: string }>();
   const [code, setCode] = useState<string[]>(Array(CODE_LENGTH).fill(''));
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRefs = useRef<(TextInput | null)[]>([]);
+
+  useEffect(() => {
+    if (!prefillCode) return;
+
+    const cleaned = String(prefillCode).replace(/[^0-9]/g, '').slice(0, CODE_LENGTH);
+    if (!cleaned) return;
+
+    const newCode = Array(CODE_LENGTH).fill('');
+    cleaned.split('').forEach((char, index) => {
+      newCode[index] = char;
+    });
+    setCode(newCode);
+  }, [prefillCode]);
 
   const handleCodeChange = (value: string, index: number) => {
     // Allow only digits

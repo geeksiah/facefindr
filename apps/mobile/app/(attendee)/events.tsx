@@ -67,7 +67,7 @@ export default function MyEventsScreen() {
 
   const loadEvents = async () => {
     try {
-      // Load events user has joined
+      // Load only events user has joined/registered for.
       const { data: joinedEvents, error: joinedError } = await supabase
         .from('event_attendees')
         .select(`
@@ -82,15 +82,6 @@ export default function MyEventsScreen() {
         .eq('attendee_id', profile?.id)
         .order('created_at', { ascending: false });
 
-      // Load publicly listed events
-      const { data: publicEvents, error: publicError } = await supabase
-        .from('events')
-        .select('id, name, cover_image_url, event_date, location')
-        .eq('is_publicly_listed', true)
-        .eq('status', 'active')
-        .order('created_at', { ascending: false })
-        .limit(50);
-
       const joinedEventsList = (joinedEvents || []).map((item: any) => ({
         id: item.event?.id,
         name: item.event?.name,
@@ -102,20 +93,9 @@ export default function MyEventsScreen() {
         photoCount: 0,
       }));
 
-      const publicEventsList = (publicEvents || []).map((item: any) => ({
-        id: item.id,
-        name: item.name,
-        coverImageUrl: item.cover_image_url
-          ? getCoverImageUrl(item.cover_image_url)
-          : null,
-        eventDate: item.event_date,
-        location: item.location,
-        photoCount: 0,
-      }));
-
-      // Combine and deduplicate by event ID
+      // Deduplicate by event ID.
       const allEventsMap = new Map<string, Event>();
-      [...joinedEventsList, ...publicEventsList].forEach(event => {
+      joinedEventsList.forEach(event => {
         if (event.id && !allEventsMap.has(event.id)) {
           allEventsMap.set(event.id, event);
         }
@@ -146,9 +126,6 @@ export default function MyEventsScreen() {
 
       if (joinedError) {
         console.error('Error loading joined events:', joinedError);
-      }
-      if (publicError) {
-        console.error('Error loading public events:', publicError);
       }
     } catch (err) {
       console.error('Error loading events:', err);

@@ -10,7 +10,18 @@ export async function GET(
   { params }: { params: { slug: string } }
 ) {
   try {
-    const { slug } = params;
+    const rawSlug = params.slug || '';
+    const slug = (() => {
+      try {
+        return decodeURIComponent(rawSlug).trim();
+      } catch {
+        return rawSlug.trim();
+      }
+    })();
+    if (!slug) {
+      return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+    }
+
     const { searchParams } = new URL(request.url);
     const code = searchParams.get('code');
 
@@ -23,9 +34,7 @@ export async function GET(
     // Check if slug is a UUID (for direct ID lookup)
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(slug);
     
-    let eventQuery = serviceClient
-      .from('events')
-      .select(`
+    const eventSelect = `
         id,
         name,
         description,
@@ -43,7 +52,11 @@ export async function GET(
         public_access_code,
         photographer_id,
         status
-      `);
+      `;
+
+    let eventQuery = serviceClient
+      .from('events')
+      .select(eventSelect);
     
     // Build the query based on slug type
     if (isUuid) {
@@ -53,7 +66,20 @@ export async function GET(
       eventQuery = eventQuery.or(`public_slug.eq.${slug},short_link.eq.${slug}`);
     }
     
-    const { data: eventBySlug, error: slugError } = await eventQuery.maybeSingle();
+    let { data: eventBySlug, error: slugError } = await eventQuery.maybeSingle();
+
+    // Fallback for mixed-case links when exact match misses
+    if (!eventBySlug && !slugError && !isUuid) {
+      const { data: caseInsensitiveEvent, error: caseInsensitiveError } = await serviceClient
+        .from('events')
+        .select(eventSelect)
+        .or(`public_slug.ilike.${slug},short_link.ilike.${slug}`)
+        .maybeSingle();
+
+      if (!caseInsensitiveError && caseInsensitiveEvent) {
+        eventBySlug = caseInsensitiveEvent;
+      }
+    }
 
     // If event doesn't exist, return 404
     if (slugError) {

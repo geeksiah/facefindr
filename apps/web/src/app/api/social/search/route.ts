@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
   try {
@@ -20,13 +20,17 @@ export async function GET(request: NextRequest) {
     const rawLimit = parseInt(searchParams.get('limit') || '20');
     const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 50) : 20;
 
-    if (!query || query.length < 2) {
-      return NextResponse.json({ error: 'Search query too short' }, { status: 400 });
+    if (!query || query.trim().length < 1) {
+      return NextResponse.json({ error: 'Search query is required' }, { status: 400 });
     }
 
     // Clean search term
-    const searchTerm = query.replace('@', '').toLowerCase();
+    const searchTerm = query.replace('@', '').trim().toLowerCase();
+    if (!searchTerm) {
+      return NextResponse.json({ error: 'Search query is required' }, { status: 400 });
+    }
     const results: any = { photographers: [], users: [] };
+    const serviceClient = createServiceClient();
 
     // Search photographers
     if (type === 'all' || type === 'photographers') {
@@ -41,10 +45,28 @@ export async function GET(request: NextRequest) {
         .order('follower_count', { ascending: false })
         .limit(limit);
 
-      results.photographers = (photographers || []).map((p: any) => ({
+      const creatorCandidates = photographers || [];
+      const creatorIds = creatorCandidates.map((p: any) => p.id);
+
+      const { data: creatorPrivacy } = creatorIds.length
+        ? await serviceClient
+            .from('user_privacy_settings')
+            .select('user_id, show_in_search')
+            .in('user_id', creatorIds)
+        : { data: [] as any[] };
+
+      const hiddenCreatorIds = new Set(
+        (creatorPrivacy || [])
+          .filter((setting: any) => setting.show_in_search === false)
+          .map((setting: any) => setting.user_id)
+      );
+
+      results.photographers = creatorCandidates
+        .filter((p: any) => !hiddenCreatorIds.has(p.id))
+        .map((p: any) => ({
         ...p,
         userType: 'photographer',
-      }));
+        }));
     }
 
     // Search users/attendees (only if they have public profiles)
@@ -59,10 +81,28 @@ export async function GET(request: NextRequest) {
         .or(`face_tag.ilike.%${searchTerm}%,display_name.ilike.%${searchTerm}%`)
         .limit(limit);
 
-      results.users = (users || []).map((u: any) => ({
+      const attendeeCandidates = users || [];
+      const attendeeIds = attendeeCandidates.map((u: any) => u.id);
+
+      const { data: attendeePrivacy } = attendeeIds.length
+        ? await serviceClient
+            .from('user_privacy_settings')
+            .select('user_id, show_in_search')
+            .in('user_id', attendeeIds)
+        : { data: [] as any[] };
+
+      const hiddenAttendeeIds = new Set(
+        (attendeePrivacy || [])
+          .filter((setting: any) => setting.show_in_search === false)
+          .map((setting: any) => setting.user_id)
+      );
+
+      results.users = attendeeCandidates
+        .filter((u: any) => !hiddenAttendeeIds.has(u.id))
+        .map((u: any) => ({
         ...u,
         userType: 'attendee',
-      }));
+        }));
     }
 
     return NextResponse.json(results);

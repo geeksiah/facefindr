@@ -16,6 +16,8 @@ import {
   Gift,
   Settings,
   AlertCircle,
+  HardDrive,
+  Users,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
@@ -46,6 +48,23 @@ interface Currency {
   name: string;
   symbol: string;
   rate_to_usd: number;
+}
+
+interface StoragePlan {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  storage_limit_mb: number;
+  photo_limit: number;
+  price_monthly: number;
+  price_yearly: number;
+  currency: string;
+  features: string[];
+  is_popular: boolean;
+  is_active: boolean;
+  sort_order: number;
+  activeSubscriptions?: number;
 }
 
 const defaultCurrencies: Currency[] = [
@@ -693,6 +712,432 @@ function FeatureManagementUI({ plans }: { plans: Plan[] }) {
   );
 }
 
+function formatStorageLimit(limitMb: number) {
+  if (limitMb === -1) return 'Unlimited';
+  if (limitMb >= 1024) return `${(limitMb / 1024).toFixed(0)} GB`;
+  return `${limitMb} MB`;
+}
+
+function StoragePlansUI() {
+  const toast = useToast();
+  const [plans, setPlans] = useState<StoragePlan[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<StoragePlan | null>(null);
+  const [showModal, setShowModal] = useState(false);
+
+  useEffect(() => {
+    loadStoragePlans();
+  }, []);
+
+  async function loadStoragePlans() {
+    try {
+      const response = await fetch('/api/admin/storage/plans');
+      if (!response.ok) {
+        throw new Error('Failed to load storage plans');
+      }
+      const payload = await response.json();
+      setPlans(payload.plans || []);
+    } catch (error) {
+      console.error('Failed to load storage plans:', error);
+      toast.error('Failed to load storage plans');
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  function openCreateModal() {
+    setEditingPlan({
+      id: '',
+      name: '',
+      slug: '',
+      description: '',
+      storage_limit_mb: 1024,
+      photo_limit: 100,
+      price_monthly: 0,
+      price_yearly: 0,
+      currency: 'USD',
+      features: [],
+      is_popular: false,
+      is_active: true,
+      sort_order: plans.length,
+    });
+    setShowModal(true);
+  }
+
+  function openEditModal(plan: StoragePlan) {
+    setEditingPlan({
+      ...plan,
+      features: Array.isArray(plan.features) ? plan.features : [],
+    });
+    setShowModal(true);
+  }
+
+  async function saveStoragePlan() {
+    if (!editingPlan) return;
+    if (!editingPlan.name.trim() || !editingPlan.slug.trim()) {
+      toast.error('Name and slug are required');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const method = editingPlan.id ? 'PUT' : 'POST';
+      const response = await fetch('/api/admin/storage/plans', {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(editingPlan.id ? { id: editingPlan.id } : {}),
+          name: editingPlan.name.trim(),
+          slug: editingPlan.slug.trim().toLowerCase(),
+          description: editingPlan.description?.trim() || null,
+          storage_limit_mb: editingPlan.storage_limit_mb,
+          photo_limit: editingPlan.photo_limit,
+          price_monthly: editingPlan.price_monthly,
+          price_yearly: editingPlan.price_yearly,
+          currency: editingPlan.currency || 'USD',
+          features: editingPlan.features || [],
+          is_popular: editingPlan.is_popular,
+          is_active: editingPlan.is_active,
+          sort_order: editingPlan.sort_order ?? 0,
+        }),
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || 'Failed to save storage plan');
+      }
+
+      toast.success(editingPlan.id ? 'Storage plan updated' : 'Storage plan created');
+      setShowModal(false);
+      setEditingPlan(null);
+      await loadStoragePlans();
+    } catch (error: any) {
+      console.error('Save storage plan failed:', error);
+      toast.error(error?.message || 'Failed to save storage plan');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function deactivateStoragePlan(plan: StoragePlan) {
+    const accepted = window.confirm(
+      `Deactivate "${plan.name}"? Existing users keep access; new users cannot subscribe.`
+    );
+    if (!accepted) return;
+
+    try {
+      const response = await fetch(`/api/admin/storage/plans?id=${plan.id}`, {
+        method: 'DELETE',
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || 'Failed to deactivate storage plan');
+      }
+      toast.success('Storage plan deactivated');
+      await loadStoragePlans();
+    } catch (error: any) {
+      console.error('Deactivate storage plan failed:', error);
+      toast.error(error?.message || 'Failed to deactivate storage plan');
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-8 flex items-center justify-center">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">Vault Storage Plans</h2>
+          <p className="text-sm text-muted-foreground">
+            Manage attendee vault storage tiers used in the mobile app.
+          </p>
+        </div>
+        <button
+          onClick={openCreateModal}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90 transition-colors"
+        >
+          <Plus className="h-4 w-4" />
+          Add Storage Plan
+        </button>
+      </div>
+
+      {plans.length === 0 ? (
+        <div className="rounded-xl border border-border bg-card p-10 text-center">
+          <HardDrive className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
+          <p className="font-medium text-foreground">No storage plans configured</p>
+          <p className="text-muted-foreground text-sm mt-1">
+            Create a vault storage plan so attendees can see and subscribe to tiers.
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {plans.map((plan) => (
+            <div
+              key={plan.id}
+              className={`rounded-xl border bg-card p-5 ${
+                plan.is_popular ? 'border-primary shadow-md' : 'border-border'
+              } ${plan.is_active ? '' : 'opacity-60'}`}
+            >
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <h3 className="font-semibold text-foreground">{plan.name}</h3>
+                  <p className="text-xs font-mono text-muted-foreground">{plan.slug}</p>
+                </div>
+                <span
+                  className={`px-2 py-1 rounded-full text-xs font-medium ${
+                    plan.is_active
+                      ? 'bg-green-500/10 text-green-500'
+                      : 'bg-gray-500/10 text-gray-500'
+                  }`}
+                >
+                  {plan.is_active ? 'Active' : 'Inactive'}
+                </span>
+              </div>
+
+              <p className="text-sm text-muted-foreground mb-3">{plan.description || 'No description'}</p>
+              <p className="text-2xl font-bold text-foreground mb-2">
+                ${Number(plan.price_monthly || 0).toFixed(2)}
+                <span className="text-sm font-normal text-muted-foreground">/mo</span>
+              </p>
+              <p className="text-xs text-muted-foreground mb-3">
+                ${Number(plan.price_yearly || 0).toFixed(2)}/year
+              </p>
+
+              <div className="space-y-2 mb-4 text-sm">
+                <div className="flex items-center gap-2 text-foreground">
+                  <HardDrive className="h-4 w-4 text-primary" />
+                  {formatStorageLimit(plan.storage_limit_mb)}
+                </div>
+                <div className="flex items-center gap-2 text-foreground">
+                  <Users className="h-4 w-4 text-primary" />
+                  {plan.photo_limit === -1 ? 'Unlimited photos' : `${plan.photo_limit} photos`}
+                </div>
+              </div>
+
+              <div className="text-xs text-muted-foreground mb-4">
+                {plan.activeSubscriptions || 0} active subscriptions
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => openEditModal(plan)}
+                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-border hover:bg-muted transition-colors"
+                >
+                  <Pencil className="h-4 w-4" />
+                  Edit
+                </button>
+                <button
+                  onClick={() => deactivateStoragePlan(plan)}
+                  className="px-3 py-2 rounded-lg border border-border text-destructive hover:bg-destructive/10 transition-colors"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showModal && editingPlan && (
+        <div
+          className="fixed bg-black/50 flex items-center justify-center z-50"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100dvw',
+            height: '100dvh',
+          }}
+        >
+          <div className="bg-card border border-border rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto mx-4 my-4">
+            <div className="px-6 py-4 border-b border-border flex items-center justify-between sticky top-0 bg-card">
+              <h2 className="text-xl font-bold text-foreground">
+                {editingPlan.id ? 'Edit Storage Plan' : 'Create Storage Plan'}
+              </h2>
+              <button
+                onClick={() => {
+                  setShowModal(false);
+                  setEditingPlan(null);
+                }}
+                className="p-2 rounded-lg hover:bg-muted transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">Plan Name</label>
+                  <input
+                    type="text"
+                    value={editingPlan.name}
+                    onChange={(e) => setEditingPlan({ ...editingPlan, name: e.target.value })}
+                    className="w-full px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">Slug</label>
+                  <input
+                    type="text"
+                    value={editingPlan.slug}
+                    onChange={(e) => setEditingPlan({ ...editingPlan, slug: e.target.value })}
+                    className="w-full px-4 py-2 rounded-lg bg-muted border border-input text-foreground font-mono"
+                    disabled={!!editingPlan.id}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">Description</label>
+                <textarea
+                  value={editingPlan.description || ''}
+                  onChange={(e) => setEditingPlan({ ...editingPlan, description: e.target.value })}
+                  rows={2}
+                  className="w-full px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
+                />
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">Storage Limit (MB)</label>
+                  <input
+                    type="number"
+                    value={editingPlan.storage_limit_mb}
+                    onChange={(e) =>
+                      setEditingPlan({
+                        ...editingPlan,
+                        storage_limit_mb: Number(e.target.value || 0),
+                      })
+                    }
+                    className="w-full px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">Photo Limit</label>
+                  <input
+                    type="number"
+                    value={editingPlan.photo_limit}
+                    onChange={(e) =>
+                      setEditingPlan({
+                        ...editingPlan,
+                        photo_limit: Number(e.target.value || 0),
+                      })
+                    }
+                    className="w-full px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">Monthly Price</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editingPlan.price_monthly}
+                    onChange={(e) =>
+                      setEditingPlan({
+                        ...editingPlan,
+                        price_monthly: Number(e.target.value || 0),
+                      })
+                    }
+                    className="w-full px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">Yearly Price</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editingPlan.price_yearly}
+                    onChange={(e) =>
+                      setEditingPlan({
+                        ...editingPlan,
+                        price_yearly: Number(e.target.value || 0),
+                      })
+                    }
+                    className="w-full px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Features (one per line)
+                </label>
+                <textarea
+                  value={(editingPlan.features || []).join('\n')}
+                  onChange={(e) =>
+                    setEditingPlan({
+                      ...editingPlan,
+                      features: e.target.value
+                        .split('\n')
+                        .map((feature) => feature.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                  rows={4}
+                  className="w-full px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
+                />
+              </div>
+
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 text-sm text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={editingPlan.is_popular}
+                    onChange={(e) => setEditingPlan({ ...editingPlan, is_popular: e.target.checked })}
+                  />
+                  Popular plan
+                </label>
+                <label className="flex items-center gap-2 text-sm text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={editingPlan.is_active}
+                    onChange={(e) => setEditingPlan({ ...editingPlan, is_active: e.target.checked })}
+                  />
+                  Active
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-border">
+                <button
+                  onClick={() => {
+                    setShowModal(false);
+                    setEditingPlan(null);
+                  }}
+                  className="px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveStoragePlan}
+                  disabled={isSaving}
+                  className="px-4 py-2 rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors flex items-center gap-2"
+                >
+                  {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function PricingPage() {
   const toast = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
@@ -702,7 +1147,7 @@ export default function PricingPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
-  const [activeTab, setActiveTab] = useState<'plans' | 'features' | 'currencies'>('plans');
+  const [activeTab, setActiveTab] = useState<'plans' | 'features' | 'currencies' | 'storage'>('plans');
   
   // Available features for plan creation
   const [availablePlanFeatures, setAvailablePlanFeatures] = useState<any[]>([]);
@@ -1051,6 +1496,16 @@ export default function PricingPage() {
         >
           Currencies
         </button>
+        <button
+          onClick={() => setActiveTab('storage')}
+          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            activeTab === 'storage'
+              ? 'bg-card text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          Vault Storage
+        </button>
       </div>
 
       {activeTab === 'plans' && (
@@ -1190,6 +1645,8 @@ export default function PricingPage() {
           </table>
         </div>
       )}
+
+      {activeTab === 'storage' && <StoragePlansUI />}
 
       {/* Create/Edit Modal */}
       {showCreateModal && (

@@ -38,17 +38,26 @@ const API_URL = getApiBaseUrl();
 interface FollowingItem {
   id: string;
   following_id: string;
+  following_type: 'creator' | 'attendee' | 'photographer';
   notify_new_event: boolean;
   notify_photo_drop: boolean;
   created_at: string;
-  photographers: {
+  photographers?: {
     id: string;
     display_name: string;
     face_tag: string;
     profile_photo_url: string | null;
     bio: string | null;
     public_profile_slug: string | null;
-  };
+  } | null;
+  attendees?: {
+    id: string;
+    display_name: string;
+    face_tag: string;
+    profile_photo_url: string | null;
+    bio?: string | null;
+    public_profile_slug: string | null;
+  } | null;
 }
 
 export default function FollowingScreen() {
@@ -64,15 +73,30 @@ export default function FollowingScreen() {
 
   const loadFollowing = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/social/follow?type=following`, {
+      const response = await fetch(`${API_URL}/api/social/follow?type=following&includeAttendees=true`, {
         headers: session?.access_token
           ? { Authorization: `Bearer ${session.access_token}` }
           : {},
       });
       if (response.ok) {
         const data = await response.json();
-        setFollowing(data.following || []);
-        setTotal(data.total || 0);
+        const creatorFollowing: FollowingItem[] = (data.following || []).map((item: any) => ({
+          ...item,
+          following_type: 'creator',
+        }));
+
+        const attendeeFollowing: FollowingItem[] = (data.followingUsers || []).map((item: any) => ({
+          ...item,
+          notify_new_event: false,
+          notify_photo_drop: false,
+          following_type: 'attendee',
+        }));
+
+        const merged = [...creatorFollowing, ...attendeeFollowing].sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        setFollowing(merged);
+        setTotal(data.total || merged.length);
       }
     } catch (error) {
       console.error('Error loading following:', error);
@@ -99,7 +123,7 @@ export default function FollowingScreen() {
     }
   };
 
-  const handleUnfollow = (photographerId: string, name: string) => {
+  const handleUnfollow = (targetId: string, targetType: 'creator' | 'attendee' | 'photographer', name: string) => {
     Alert.alert(
       'Unfollow',
       `Are you sure you want to unfollow ${name}?`,
@@ -110,13 +134,19 @@ export default function FollowingScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await fetch(`${API_URL}/api/social/follow?photographerId=${photographerId}`, {
+              const params = new URLSearchParams({
+                targetId,
+                targetType: targetType === 'attendee' ? 'attendee' : 'creator',
+              });
+              await fetch(`${API_URL}/api/social/follow?${params.toString()}`, {
                 method: 'DELETE',
                 headers: session?.access_token
                   ? { Authorization: `Bearer ${session.access_token}` }
                   : {},
               });
-              setFollowing(prev => prev.filter(f => f.following_id !== photographerId));
+              setFollowing(prev =>
+                prev.filter(f => !(f.following_id === targetId && f.following_type === targetType))
+              );
               setTotal(prev => prev - 1);
             } catch (error) {
               console.error('Unfollow error:', error);
@@ -160,7 +190,12 @@ export default function FollowingScreen() {
   };
 
   const renderItem = ({ item }: { item: FollowingItem }) => {
-    const photographer = item.photographers;
+    const isAttendee = item.following_type === 'attendee';
+    const profileData = isAttendee ? item.attendees : item.photographers;
+
+    if (!profileData) {
+      return null;
+    }
     
     return (
       <View style={styles.itemContainer}>
@@ -169,74 +204,86 @@ export default function FollowingScreen() {
             styles.itemContent,
             pressed && styles.itemPressed,
           ]}
-          onPress={() =>
-            router.push({
-              pathname: '/p/[slug]',
-              params: { slug: photographer.public_profile_slug || photographer.id },
-            })
-          }
+          onPress={() => {
+            if (isAttendee) {
+              router.push(`/u/${profileData.public_profile_slug || profileData.id}`);
+            } else {
+              router.push({
+                pathname: '/p/[slug]',
+                params: { slug: profileData.public_profile_slug || profileData.id },
+              });
+            }
+          }}
         >
-          {photographer.profile_photo_url ? (
-            <Image source={{ uri: photographer.profile_photo_url }} style={styles.avatar} />
+          {profileData.profile_photo_url ? (
+            <Image source={{ uri: profileData.profile_photo_url }} style={styles.avatar} />
           ) : (
             <View style={[styles.avatar, styles.avatarPlaceholder]}>
-              <Camera size={24} color={colors.secondary} />
+              {isAttendee ? (
+                <Camera size={24} color={colors.secondary} />
+              ) : (
+                <Camera size={24} color={colors.secondary} />
+              )}
             </View>
           )}
           <View style={styles.itemInfo}>
-            <Text style={styles.itemName} numberOfLines={1}>{photographer.display_name}</Text>
-            <Text style={styles.itemFaceTag}>{photographer.face_tag}</Text>
-            {photographer.bio && (
-              <Text style={styles.itemBio} numberOfLines={1}>{photographer.bio}</Text>
+            <Text style={styles.itemName} numberOfLines={1}>{profileData.display_name}</Text>
+            <Text style={styles.itemFaceTag}>{profileData.face_tag}</Text>
+            {profileData.bio && (
+              <Text style={styles.itemBio} numberOfLines={1}>{profileData.bio}</Text>
             )}
           </View>
           <ChevronRight size={20} color={colors.secondary} />
         </Pressable>
 
         <View style={styles.itemActions}>
-          <TouchableOpacity
-            style={[
-              styles.actionButton,
-              item.notify_new_event && styles.actionButtonActive,
-            ]}
-            onPress={() => toggleNotifications(item.id, item.following_id, 'notify_new_event')}
-          >
-            {item.notify_new_event ? (
-              <Bell size={16} color={colors.accent} />
-            ) : (
-              <BellOff size={16} color={colors.secondary} />
-            )}
-            <Text style={[
-              styles.actionButtonText,
-              item.notify_new_event && styles.actionButtonTextActive,
-            ]}>
-              Events
-            </Text>
-          </TouchableOpacity>
+          {!isAttendee && (
+            <>
+              <TouchableOpacity
+                style={[
+                  styles.actionButton,
+                  item.notify_new_event && styles.actionButtonActive,
+                ]}
+                onPress={() => toggleNotifications(item.id, item.following_id, 'notify_new_event')}
+              >
+                {item.notify_new_event ? (
+                  <Bell size={16} color={colors.accent} />
+                ) : (
+                  <BellOff size={16} color={colors.secondary} />
+                )}
+                <Text style={[
+                  styles.actionButtonText,
+                  item.notify_new_event && styles.actionButtonTextActive,
+                ]}>
+                  Events
+                </Text>
+              </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[
-              styles.actionButton,
-              item.notify_photo_drop && styles.actionButtonActive,
-            ]}
-            onPress={() => toggleNotifications(item.id, item.following_id, 'notify_photo_drop')}
-          >
-            {item.notify_photo_drop ? (
-              <Bell size={16} color={colors.accent} />
-            ) : (
-              <BellOff size={16} color={colors.secondary} />
-            )}
-            <Text style={[
-              styles.actionButtonText,
-              item.notify_photo_drop && styles.actionButtonTextActive,
-            ]}>
-              Photos
-            </Text>
-          </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.actionButton,
+                  item.notify_photo_drop && styles.actionButtonActive,
+                ]}
+                onPress={() => toggleNotifications(item.id, item.following_id, 'notify_photo_drop')}
+              >
+                {item.notify_photo_drop ? (
+                  <Bell size={16} color={colors.accent} />
+                ) : (
+                  <BellOff size={16} color={colors.secondary} />
+                )}
+                <Text style={[
+                  styles.actionButtonText,
+                  item.notify_photo_drop && styles.actionButtonTextActive,
+                ]}>
+                  Photos
+                </Text>
+              </TouchableOpacity>
+            </>
+          )}
 
           <TouchableOpacity
             style={styles.unfollowButton}
-            onPress={() => handleUnfollow(item.following_id, photographer.display_name)}
+            onPress={() => handleUnfollow(item.following_id, item.following_type, profileData.display_name)}
           >
             <UserMinus size={16} color="#ef4444" />
           </TouchableOpacity>
@@ -259,7 +306,7 @@ export default function FollowingScreen() {
         </TouchableOpacity>
         <View style={styles.headerContent}>
           <Text style={styles.headerTitle}>Following</Text>
-          <Text style={styles.headerSubtitle}>{total} photographer{total !== 1 ? 's' : ''}</Text>
+          <Text style={styles.headerSubtitle}>{total} account{total !== 1 ? 's' : ''}</Text>
         </View>
         <View style={styles.headerSpacer} />
       </View>

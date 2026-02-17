@@ -53,26 +53,41 @@ export default function ProfileScreen() {
   const { profile, session, signOut } = useAuthStore();
   const [copiedRecently, setCopiedRecently] = useState(false);
   const [followingCount, setFollowingCount] = useState(0);
+  const [followersCount, setFollowersCount] = useState(0);
 
-  // Load following count
+  // Load social counts
   useEffect(() => {
-    const loadFollowingCount = async () => {
+    const loadSocialCounts = async () => {
       try {
-        const response = await fetch(`${API_URL}/api/social/follow?type=following`, {
-          headers: session?.access_token
-            ? { Authorization: `Bearer ${session.access_token}` }
-            : {},
-        });
-        if (response.ok) {
-          const data = await response.json();
+        const headers = session?.access_token
+          ? { Authorization: `Bearer ${session.access_token}` }
+          : {};
+
+        const [followingResponse, followersResponse] = await Promise.all([
+          fetch(`${API_URL}/api/social/follow?type=following&includeAttendees=true`, { headers }),
+          fetch(
+            `${API_URL}/api/social/follow?type=followers&targetType=attendee&targetId=${profile?.id}`,
+            { headers }
+          ),
+        ]);
+
+        if (followingResponse.ok) {
+          const data = await followingResponse.json();
           setFollowingCount(data.total || 0);
         }
+
+        if (followersResponse.ok) {
+          const data = await followersResponse.json();
+          setFollowersCount(data.total || 0);
+        }
       } catch (error) {
-        console.log('Error loading following count:', error);
+        console.log('Error loading social counts:', error);
       }
     };
-    loadFollowingCount();
-  }, [session?.access_token]);
+    if (profile?.id) {
+      loadSocialCounts();
+    }
+  }, [profile?.id, session?.access_token]);
 
   const profileUrl = buildPublicUrl(`/u/${profile?.faceTag?.replace('@', '')}`);
 
@@ -201,17 +216,29 @@ export default function ProfileScreen() {
           </Text>
           <Text style={styles.profileEmail}>{profile?.email}</Text>
 
-          {/* Following Stats - TikTok/Instagram style */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.followingRow,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => router.push('/social/following')}
-          >
-            <Text style={styles.followingCount}>{followingCount}</Text>
-            <Text style={styles.followingLabel}>Following</Text>
-          </Pressable>
+          {/* Social Stats */}
+          <View style={styles.socialStatsRow}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.socialStatPill,
+                pressed && styles.pressed,
+              ]}
+              onPress={() => router.push('/social/following')}
+            >
+              <Text style={styles.followingCount}>{followingCount}</Text>
+              <Text style={styles.followingLabel}>Following</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [
+                styles.socialStatPill,
+                pressed && styles.pressed,
+              ]}
+              onPress={() => router.push('/social/followers')}
+            >
+              <Text style={styles.followingCount}>{followersCount}</Text>
+              <Text style={styles.followingLabel}>Followers</Text>
+            </Pressable>
+          </View>
 
         </View>
 
@@ -396,7 +423,14 @@ const styles = StyleSheet.create({
     color: colors.secondary,
     marginBottom: spacing.sm,
   },
-  followingRow: {
+  socialStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  socialStatPill: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -404,8 +438,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     backgroundColor: colors.muted,
     borderRadius: borderRadius.lg,
-    marginTop: spacing.sm,
-    marginBottom: spacing.md,
   },
   followingCount: {
     fontSize: 18,

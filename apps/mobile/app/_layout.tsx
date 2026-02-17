@@ -7,8 +7,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Stack, useRouter, useSegments, useRootNavigationState } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, Pressable, Image } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
+import { User } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuthStore } from '@/stores/auth-store';
 import { colors } from '@/lib/theme';
@@ -19,6 +21,7 @@ SplashScreen.preventAutoHideAsync();
 export default function RootLayout() {
   const router = useRouter();
   const segments = useSegments();
+  const insets = useSafeAreaInsets();
   const rootSegment = segments[0] as string | undefined;
   const rootNavigationState = useRootNavigationState();
   const { isLoading, isInitialized, initialize, user, profile } = useAuthStore();
@@ -82,6 +85,28 @@ export default function RootLayout() {
     );
   }
 
+  const profileQuickAccessExcluded = new Set([
+    'notifications',
+    'privacy',
+    'help',
+    'about',
+    'profile',
+    'qr-scanner',
+    'face-scan',
+    'enter-code',
+  ]);
+
+  const isAuthOrLanding =
+    rootSegment === '(auth)' || rootSegment === undefined || rootSegment === 'index';
+  const containsExcludedSegment = segments.some((segment) =>
+    profileQuickAccessExcluded.has(segment)
+  );
+  const shouldShowProfileQuickAccess =
+    !!user &&
+    !!profile &&
+    !isAuthOrLanding &&
+    !containsExcludedSegment;
+
   return (
     <>
       <StatusBar style="auto" />
@@ -140,6 +165,39 @@ export default function RootLayout() {
         />
         <Stack.Screen name="+not-found" />
       </Stack>
+      {shouldShowProfileQuickAccess && (
+        <Pressable
+          onPress={() =>
+            router.push(
+              (profile?.userType === 'creator' ? '/(creator)/profile' : '/(attendee)/profile') as any
+            )
+          }
+          style={({ pressed }) => ({
+            position: 'absolute',
+            top: insets.top + 12,
+            right: 16,
+            width: 42,
+            height: 42,
+            borderRadius: 21,
+            backgroundColor: colors.card,
+            borderWidth: 1,
+            borderColor: colors.border,
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: pressed ? 0.75 : 1,
+            transform: [{ scale: pressed ? 0.97 : 1 }],
+          })}
+        >
+          {profile?.profilePhotoUrl ? (
+            <Image
+              source={{ uri: profile.profilePhotoUrl }}
+              style={{ width: 38, height: 38, borderRadius: 19 }}
+            />
+          ) : (
+            <User size={18} color={colors.secondary} />
+          )}
+        </Pressable>
+      )}
     </>
   );
 }

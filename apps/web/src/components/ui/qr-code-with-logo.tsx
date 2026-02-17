@@ -2,7 +2,7 @@
 
 import html2canvas from 'html2canvas';
 import { QRCodeSVG } from 'qrcode.react';
-import React, { useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 interface QRCodeWithLogoProps {
   value: string;
@@ -23,9 +23,42 @@ export const QRCodeWithLogo = React.forwardRef<HTMLDivElement, QRCodeWithLogoPro
 }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const logoSize = useMemo(() => size * 0.32, [size]); // Logo takes 32% of QR size (matching mobile)
+  const [logoSrc, setLogoSrc] = useState('/assets/logos/qr-logo.svg');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const inlineLogoForExport = async () => {
+      try {
+        const response = await fetch('/assets/logos/qr-logo.svg', { cache: 'force-cache' });
+        if (!response.ok) return;
+
+        const svgMarkup = await response.text();
+        const encodedSvg = window.btoa(
+          encodeURIComponent(svgMarkup).replace(
+            /%([0-9A-F]{2})/g,
+            (_, hex: string) => String.fromCharCode(parseInt(hex, 16))
+          )
+        );
+        const dataUri = `data:image/svg+xml;base64,${encodedSvg}`;
+
+        if (!cancelled) {
+          setLogoSrc(dataUri);
+        }
+      } catch {
+        // Keep file path fallback for display if inlining fails.
+      }
+    };
+
+    inlineLogoForExport();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   
   // Combine refs
-  React.useImperativeHandle(ref, () => containerRef.current!);
+  React.useImperativeHandle(ref, () => containerRef.current as HTMLDivElement);
   
   return (
     <div 
@@ -78,11 +111,14 @@ export const QRCodeWithLogo = React.forwardRef<HTMLDivElement, QRCodeWithLogoPro
             }}
           >
             <img
-              src="/assets/logos/qr-logo.svg"
+              src={logoSrc}
               alt="Ferchr Logo"
               width={Math.round(logoSize * 0.9)}
               height={Math.round(logoSize * 0.9)}
               className="object-contain"
+              crossOrigin="anonymous"
+              loading="eager"
+              decoding="sync"
               style={{
                 width: `${logoSize * 0.9}px`,
                 height: `${logoSize * 0.9}px`,
@@ -97,6 +133,32 @@ export const QRCodeWithLogo = React.forwardRef<HTMLDivElement, QRCodeWithLogoPro
 
 QRCodeWithLogo.displayName = 'QRCodeWithLogo';
 
+async function waitForImagesInElement(element: HTMLElement): Promise<void> {
+  const images = Array.from(element.querySelectorAll('img'));
+  if (images.length === 0) return;
+
+  await Promise.all(
+    images.map(
+      (img) =>
+        new Promise<void>((resolve) => {
+          if (img.complete && img.naturalWidth > 0) {
+            resolve();
+            return;
+          }
+
+          const done = () => {
+            img.removeEventListener('load', done);
+            img.removeEventListener('error', done);
+            resolve();
+          };
+
+          img.addEventListener('load', done);
+          img.addEventListener('error', done);
+        })
+    )
+  );
+}
+
 // Export utility function for downloading QR code with logo
 export async function downloadQRCodeWithLogo(
   element: HTMLElement,
@@ -104,31 +166,50 @@ export async function downloadQRCodeWithLogo(
   format: 'png' | 'jpg' = 'png'
 ): Promise<void> {
   try {
+    await waitForImagesInElement(element);
+
+    // Allow DOM paint to settle so html2canvas captures the inlined logo layer.
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+
     // Capture the element as canvas
     const canvas = await html2canvas(element, {
       backgroundColor: '#ffffff',
-      scale: 2, // Higher quality
+      scale: 3, // Higher quality
       logging: false,
       useCORS: true,
-      allowTaint: true,
+      allowTaint: false,
+      foreignObjectRendering: true,
     });
-    
-    // Convert to blob
-    canvas.toBlob((blob) => {
-      if (!blob) {
-        console.error('Failed to create blob');
-        return;
-      }
-      
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${filename}.${format}`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    }, `image/${format}`, 1.0);
+
+    const mimeType = format === 'jpg' ? 'image/jpeg' : 'image/png';
+    const finalFilename = /\.(png|jpg|jpeg)$/i.test(filename)
+      ? filename
+      : `${filename}.${format}`;
+
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (result) => {
+          if (!result) {
+            reject(new Error('Failed to create image blob'));
+            return;
+          }
+          resolve(result);
+        },
+        mimeType,
+        1.0
+      );
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = finalFilename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   } catch (error) {
     console.error('Failed to export QR code:', error);
     throw error;

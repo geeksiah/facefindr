@@ -23,6 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   Archive,
+  ArrowLeft,
   Image as ImageIcon,
   HardDrive,
   ChevronRight,
@@ -86,6 +87,14 @@ export default function VaultScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+
+  const goBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace('/(attendee)/profile');
+  };
 
   const loadVaultData = useCallback(async () => {
     try {
@@ -174,10 +183,20 @@ export default function VaultScreen() {
         
         {/* Header */}
         <View style={styles.header}>
-          <View>
-            <Text style={styles.greeting}>Photo Vault</Text>
-            <Text style={styles.title}>Your Collection</Text>
+          <View style={styles.headerLeft}>
+            <Pressable
+              style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
+              onPress={goBack}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <ArrowLeft size={22} color={colors.foreground} />
+            </Pressable>
+            <View>
+              <Text style={styles.greeting}>Photo Vault</Text>
+              <Text style={styles.title}>Your Collection</Text>
+            </View>
           </View>
+          <View style={styles.headerSpacer} />
         </View>
 
         <ScrollView 
@@ -271,9 +290,18 @@ export default function VaultScreen() {
       
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>Photo Vault</Text>
-          <Text style={styles.title}>Your Collection</Text>
+        <View style={styles.headerLeft}>
+          <Pressable
+            style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
+            onPress={goBack}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <ArrowLeft size={22} color={colors.foreground} />
+          </Pressable>
+          <View>
+            <Text style={styles.greeting}>Photo Vault</Text>
+            <Text style={styles.title}>Your Collection</Text>
+          </View>
         </View>
         <View style={styles.headerActions}>
           <Pressable
@@ -437,13 +465,29 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     paddingHorizontal: spacing.lg,
     paddingTop: 16,
     paddingBottom: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     backgroundColor: colors.background,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.muted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerSpacer: {
+    width: 40,
   },
   greeting: {
     fontSize: 14,

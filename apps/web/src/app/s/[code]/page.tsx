@@ -1,6 +1,6 @@
 import { redirect, notFound } from 'next/navigation';
 
-import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/server';
 
 interface ShortLinkPageProps {
   params: { code: string };
@@ -12,23 +12,35 @@ interface ShortLinkPageProps {
  * Redirects /s/ABC123 to /e/event-slug
  */
 export default async function ShortLinkPage({ params, searchParams }: ShortLinkPageProps) {
-  const supabase = await createClient();
-  const { code } = params;
+  const supabase = createServiceClient();
+  const code = (() => {
+    const rawCode = params.code || '';
+    try {
+      return decodeURIComponent(rawCode).trim();
+    } catch {
+      return rawCode.trim();
+    }
+  })();
+
+  if (!code) {
+    notFound();
+  }
 
   // Find event by short link
   const { data: event, error } = await supabase
     .from('events')
-    .select('public_slug, short_link, require_access_code, public_access_code')
-    .eq('short_link', code)
+    .select('id, public_slug, short_link')
+    .ilike('short_link', code)
     .eq('status', 'active')
-    .single();
+    .maybeSingle();
 
-  if (error || !event || !event.public_slug) {
+  if (error || !event) {
     notFound();
   }
 
   // Build redirect URL
-  let redirectUrl = `/e/${event.public_slug}`;
+  const eventIdentifier = event.public_slug || event.short_link || event.id;
+  let redirectUrl = `/e/${eventIdentifier}`;
   
   // Pass through access code if provided
   if (searchParams.code) {

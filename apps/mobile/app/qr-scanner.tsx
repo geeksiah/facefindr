@@ -20,11 +20,16 @@ import { Camera, CameraView } from 'expo-camera';
 import { X, Flashlight, FlashlightOff, AlertCircle } from 'lucide-react-native';
 
 import { isSupportedAppScheme } from '@/lib/deep-link';
+import { getApiBaseUrl } from '@/lib/api-base';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 import { buttonPress, matchFound, error as hapticError } from '@/lib/haptics';
 
 const { width, height } = Dimensions.get('window');
 const SCAN_AREA_SIZE = width * 0.7;
+const API_URL = getApiBaseUrl();
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export default function ScanScreen() {
   const router = useRouter();
@@ -79,6 +84,55 @@ export default function ScanScreen() {
     }, 100);
   };
 
+  const resolveEventId = useCallback(async (eventKey: string, code?: string) => {
+    const trimmed = eventKey.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    if (UUID_PATTERN.test(trimmed)) {
+      return trimmed;
+    }
+
+    try {
+      const params = new URLSearchParams();
+      if (code) params.set('code', code);
+      const qs = params.toString();
+      const res = await fetch(
+        `${API_URL}/api/events/public/${encodeURIComponent(trimmed)}${qs ? `?${qs}` : ''}`
+      );
+      if (!res.ok) return null;
+      const payload = await res.json();
+      return payload?.event?.id || null;
+    } catch (error) {
+      console.error('Failed to resolve event from QR payload:', error);
+      return null;
+    }
+  }, []);
+
+  const navigateFromEventKey = useCallback(
+    async (eventKey: string, accessCode?: string) => {
+      const resolvedId = await resolveEventId(eventKey, accessCode);
+      if (resolvedId) {
+        await matchFound();
+        router.replace(`/event/${resolvedId}` as any);
+        return true;
+      }
+
+      if (/^\d{6}$/.test(eventKey)) {
+        await matchFound();
+        router.replace({
+          pathname: '/enter-code',
+          params: { code: eventKey },
+        } as any);
+        return true;
+      }
+
+      return false;
+    },
+    [resolveEventId, router]
+  );
+
   const handleBarCodeScanned = async ({ type, data }: { type: string; data: string }) => {
     if (scanned) return;
     setScanned(true);
@@ -91,62 +145,88 @@ export default function ScanScreen() {
     // - Any URL with /e/ or /s/ path patterns
 
     try {
-      const url = new URL(data);
+      const payload = (data || '').trim();
+      if (!payload) {
+        throw new Error('Empty QR payload');
+      }
+
+      // Allow direct six-digit event codes.
+      if (/^\d{6}$/.test(payload)) {
+        await matchFound();
+        router.replace({
+          pathname: '/enter-code',
+          params: { code: payload },
+        } as any);
+        return;
+      }
+
+      const url = new URL(payload);
       const pathParts = url.pathname.split('/').filter(Boolean);
       const isCustomScheme = isSupportedAppScheme(url.protocol);
       const host = url.hostname.toLowerCase();
+      const code = url.searchParams.get('code') || undefined;
       
-      // Check for event path patterns (more lenient matching)
+      // Event slug link - /e/[slug]
       if (pathParts[0] === 'e' && pathParts[1]) {
-        // Event slug - /e/[slug]
-        await matchFound(); // Haptic feedback for successful QR scan
-        router.replace(`/event/${pathParts[1]}` as any);
-        return;
-      } 
-      
+        const ok = await navigateFromEventKey(pathParts[1], code);
+        if (ok) return;
+      }
+
+      // Short link - /s/[code]
       if (pathParts[0] === 's' && pathParts[1]) {
-        // Short code - /s/[code]
-        await matchFound(); // Haptic feedback for successful QR scan
-        router.replace(`/s/${pathParts[1]}` as any);
-        return;
+        const ok = await navigateFromEventKey(pathParts[1], code);
+        if (ok) return;
       }
-      
+
+      // Direct event path - /event/[id|slug]
       if (pathParts[0] === 'event' && pathParts[1]) {
-        // Direct event path - /event/[id]
-        await matchFound(); // Haptic feedback for successful QR scan
-        router.replace(`/event/${pathParts[1]}` as any);
-        return;
+        const ok = await navigateFromEventKey(pathParts[1], code);
+        if (ok) return;
       }
-      
+
+      // Custom scheme: ferchr://event/[id|slug]
       if (isCustomScheme && host === 'event' && pathParts[0]) {
-        // Custom scheme: ferchr://event/[id] and legacy facefindr://event/[id]
-        await matchFound(); // Haptic feedback for successful QR scan
-        router.replace(`/event/${pathParts[0]}` as any);
-        return;
+        const ok = await navigateFromEventKey(pathParts[0], code);
+        if (ok) return;
       }
 
+      // Custom scheme: ferchr://s/[code]
       if (isCustomScheme && host === 's' && pathParts[0]) {
-        await matchFound();
-        router.replace(`/s/${pathParts[0]}` as any);
-        return;
+        const ok = await navigateFromEventKey(pathParts[0], code);
+        if (ok) return;
       }
 
+      // Custom scheme: ferchr://e/[slug]
       if (isCustomScheme && host === 'e' && pathParts[0]) {
-        await matchFound();
-        router.replace(`/event/${pathParts[0]}` as any);
-        return;
+        const ok = await navigateFromEventKey(pathParts[0], code);
+        if (ok) return;
       }
 
+      // Custom scheme fallback: ferchr://<eventIdOrSlug>
       if (isCustomScheme && pathParts[0]) {
-        // Custom scheme fallback: ferchr://<eventId>
-        await matchFound(); // Haptic feedback for successful QR scan
-        router.replace(`/event/${pathParts[0]}` as any);
-        return;
+        const ok = await navigateFromEventKey(pathParts[0], code);
+        if (ok) return;
       }
-      
-      // No valid path found
+
+      // Standard URL fallback: try host as marker, then first path segment.
+      if (!isCustomScheme && pathParts[0]) {
+        const ok = await navigateFromEventKey(pathParts[0], code);
+        if (ok) return;
+      }
+
       throw new Error('Invalid QR code');
-    } catch (error) {
+    } catch (primaryError) {
+      try {
+        // Secondary fallback for plain slugs or short codes that are not valid URLs.
+        const plainPayload = (data || '').trim();
+        const ok = await navigateFromEventKey(plainPayload);
+        if (ok) {
+          return;
+        }
+      } catch (fallbackError) {
+        console.error('QR fallback parsing error:', fallbackError);
+      }
+
       await hapticError(); // Haptic feedback for error
       setShowError(true);
     }

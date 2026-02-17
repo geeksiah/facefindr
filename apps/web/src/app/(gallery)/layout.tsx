@@ -63,7 +63,7 @@ export default async function GalleryLayout({
   ];
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen overflow-x-hidden bg-background">
       {/* Desktop Sidebar - Hidden on mobile */}
       <aside className="fixed left-0 top-0 z-40 hidden h-screen w-64 flex-col border-r border-border bg-card lg:flex">
         {/* Logo */}
@@ -149,7 +149,7 @@ export default async function GalleryLayout({
       </nav>
 
       {/* Main Content */}
-      <main className="pt-16 pb-20 lg:pl-64 lg:pt-0 lg:pb-0 min-h-screen overflow-y-auto">
+      <main className="min-h-screen overflow-x-hidden overflow-y-auto pt-16 pb-20 lg:pl-64 lg:pt-0 lg:pb-0">
         <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           {children}
         </div>

@@ -35,6 +35,7 @@ import {
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
+import { getApiBaseUrl } from '@/lib/api-base';
 
 interface SearchResult {
   id: string;
@@ -53,12 +54,13 @@ interface SearchResults {
 }
 
 type SearchType = 'all' | 'photographers' | 'users';
+const API_URL = getApiBaseUrl();
 
 export default function SearchScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { profile } = useAuthStore();
+  const { profile, session } = useAuthStore();
   const inputRef = useRef<TextInput>(null);
   
   const [query, setQuery] = useState('');
@@ -99,7 +101,8 @@ export default function SearchScreen() {
   };
 
   const performSearch = useCallback(async (searchQuery: string) => {
-    if (searchQuery.length < 2) {
+    const cleanedQuery = searchQuery.replace('@', '').trim();
+    if (cleanedQuery.length < 1) {
       setResults({ photographers: [], users: [] });
       setHasSearched(false);
       return;
@@ -109,55 +112,38 @@ export default function SearchScreen() {
     setHasSearched(true);
 
     try {
-      // Clean search term (remove @ if present)
-      const searchTerm = searchQuery.replace('@', '').toLowerCase();
-      const newResults: SearchResults = { photographers: [], users: [] };
+      const typeParam = searchType === 'all' ? 'all' : searchType;
+      const res = await fetch(
+        `${API_URL}/api/social/search?q=${encodeURIComponent(cleanedQuery)}&type=${encodeURIComponent(typeParam)}&limit=30`,
+        {
+          headers: session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {},
+        }
+      );
 
-      // Search photographers
-      if (searchType === 'all' || searchType === 'photographers') {
-        const { data: photographers } = await supabase
-          .from('photographers')
-          .select(`
-            id, display_name, face_tag, profile_photo_url, bio, 
-            follower_count, public_profile_slug, is_public_profile
-          `)
-          .eq('is_public_profile', true)
-          .or(`face_tag.ilike.%${searchTerm}%,display_name.ilike.%${searchTerm}%`)
-          .order('follower_count', { ascending: false })
-          .limit(30);
-
-        newResults.photographers = photographers || [];
+      if (!res.ok) {
+        throw new Error('Search request failed');
       }
 
-      // Search users/attendees
-      if (searchType === 'all' || searchType === 'users') {
-        const { data: users } = await supabase
-          .from('attendees')
-          .select(`
-            id, display_name, face_tag, profile_photo_url, 
-            public_profile_slug, is_public_profile
-          `)
-          .eq('is_public_profile', true)
-          .or(`face_tag.ilike.%${searchTerm}%,display_name.ilike.%${searchTerm}%`)
-          .limit(30);
-
-        newResults.users = users || [];
-      }
-
-      setResults(newResults);
+      const data = await res.json();
+      setResults({
+        photographers: data.photographers || [],
+        users: data.users || [],
+      });
     } catch (error) {
       console.error('Search error:', error);
       setResults({ photographers: [], users: [] });
     } finally {
       setIsLoading(false);
     }
-  }, [searchType]);
+  }, [searchType, session?.access_token]);
 
   // Debounced search
   useEffect(() => {
     const timer = setTimeout(() => {
       performSearch(query);
-    }, 300);
+    }, 250);
     return () => clearTimeout(timer);
   }, [query, performSearch]);
 

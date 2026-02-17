@@ -24,6 +24,10 @@ export interface PrivacySettings {
   emailMarketing: boolean;
 }
 
+function getProfileTable(userType: 'creator' | 'attendee') {
+  return userType === 'creator' ? 'photographers' : 'attendees';
+}
+
 // GET - Fetch user's privacy settings
 export async function GET(request: NextRequest) {
   try {
@@ -34,8 +38,18 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const userType = normalizeUserType(user.user_metadata?.user_type) || 'attendee';
+    const profileTable = getProfileTable(userType);
+
+    const { data: currentProfileRecord } = await supabase
+      .from(profileTable)
+      .select('is_public_profile')
+      .eq('id', user.id)
+      .single();
+    let profileRecord = currentProfileRecord;
+
     // Try to get existing settings
-    let { data: settings, error } = await supabase
+    let { data: settings } = await supabase
       .from('user_privacy_settings')
       .select('*')
       .eq('user_id', user.id)
@@ -43,14 +57,12 @@ export async function GET(request: NextRequest) {
 
     // If no settings exist, create default ones
     if (!settings) {
-      const userType = normalizeUserType(user.user_metadata?.user_type) || 'attendee';
-      
       const { data: newSettings, error: insertError } = await supabase
         .from('user_privacy_settings')
         .insert({
           user_id: user.id,
           user_type: userType,
-          profile_visible: true,
+          profile_visible: profileRecord?.is_public_profile ?? (userType === 'creator'),
           allow_photo_tagging: true,
           show_in_search: true,
           allow_face_recognition: true,
@@ -71,9 +83,23 @@ export async function GET(request: NextRequest) {
       settings = newSettings;
     }
 
+    // Keep legacy rows in sync with profile visibility for search/public profile usage.
+    if (
+      settings &&
+      typeof settings.profile_visible === 'boolean' &&
+      profileRecord &&
+      settings.profile_visible !== profileRecord.is_public_profile
+    ) {
+      await supabase
+        .from(profileTable)
+        .update({ is_public_profile: settings.profile_visible })
+        .eq('id', user.id);
+      profileRecord = { ...profileRecord, is_public_profile: settings.profile_visible };
+    }
+
     return NextResponse.json({
       settings: {
-        profileVisible: settings.profile_visible,
+        profileVisible: profileRecord?.is_public_profile ?? settings.profile_visible,
         allowPhotoTagging: settings.allow_photo_tagging,
         showInSearch: settings.show_in_search,
         allowFaceRecognition: settings.allow_face_recognition,
@@ -110,6 +136,9 @@ export async function PUT(request: NextRequest) {
       shareActivityWithCreators,
       emailMarketing,
     } = body;
+
+    const userType = normalizeUserType(user.user_metadata?.user_type) || 'attendee';
+    const profileTable = getProfileTable(userType);
 
     // Check if settings exist
     const { data: existing } = await supabase
@@ -160,6 +189,21 @@ export async function PUT(request: NextRequest) {
         { error: 'Failed to update privacy settings' },
         { status: 500 }
       );
+    }
+
+    if (typeof profileVisible === 'boolean') {
+      const { error: profileUpdateError } = await supabase
+        .from(profileTable)
+        .update({ is_public_profile: profileVisible })
+        .eq('id', user.id);
+
+      if (profileUpdateError) {
+        console.error('Error syncing profile visibility:', profileUpdateError);
+        return NextResponse.json(
+          { error: 'Failed to sync profile visibility' },
+          { status: 500 }
+        );
+      }
     }
 
     return NextResponse.json({

@@ -35,13 +35,21 @@ const API_URL = getApiBaseUrl();
 interface FollowerItem {
   id: string;
   follower_id: string;
+  follower_type?: 'attendee' | 'creator' | 'photographer';
   created_at: string;
-  attendees: {
+  attendees?: {
     id: string;
     display_name: string;
     face_tag: string;
     profile_photo_url: string | null;
-  };
+  } | null;
+  photographers?: {
+    id: string;
+    display_name: string;
+    face_tag: string;
+    profile_photo_url: string | null;
+    public_profile_slug?: string | null;
+  } | null;
 }
 
 export default function FollowersScreen() {
@@ -59,8 +67,13 @@ export default function FollowersScreen() {
     if (!profile?.id) return;
     
     try {
+      const isAttendee = profile.userType === 'attendee';
+      const query = isAttendee
+        ? `type=followers&targetType=attendee&targetId=${profile.id}`
+        : `type=followers&photographerId=${profile.id}`;
+
       const response = await fetch(
-        `${API_URL}/api/social/follow?type=followers&photographerId=${profile.id}`,
+        `${API_URL}/api/social/follow?${query}`,
         {
           headers: session?.access_token
             ? { Authorization: `Bearer ${session.access_token}` }
@@ -93,12 +106,17 @@ export default function FollowersScreen() {
     if (navigation.canGoBack()) {
       router.back();
     } else {
-      router.replace('/(creator)/profile' as any);
+      if (profile?.userType === 'attendee') {
+        router.replace('/(attendee)/profile' as any);
+      } else {
+        router.replace('/(creator)/profile' as any);
+      }
     }
   };
 
   const renderItem = ({ item }: { item: FollowerItem }) => {
-    const attendee = item.attendees;
+    const follower = item.attendees || item.photographers;
+    if (!follower) return null;
     
     return (
       <Pressable
@@ -106,18 +124,22 @@ export default function FollowersScreen() {
           styles.itemCard,
           pressed && styles.itemPressed,
         ]}
-        onPress={() => router.push(`/u/${attendee.id}`)}
+        onPress={() =>
+          item.follower_type === 'creator' || item.follower_type === 'photographer'
+            ? router.push(`/p/${item.photographers?.public_profile_slug || follower.id}`)
+            : router.push(`/u/${follower.id}`)
+        }
       >
-        {attendee.profile_photo_url ? (
-          <Image source={{ uri: attendee.profile_photo_url }} style={styles.avatar} />
+        {follower.profile_photo_url ? (
+          <Image source={{ uri: follower.profile_photo_url }} style={styles.avatar} />
         ) : (
           <View style={[styles.avatar, styles.avatarPlaceholder]}>
             <User size={24} color={colors.secondary} />
           </View>
         )}
         <View style={styles.itemInfo}>
-          <Text style={styles.itemName} numberOfLines={1}>{attendee.display_name}</Text>
-          <Text style={styles.itemFaceTag}>{attendee.face_tag}</Text>
+          <Text style={styles.itemName} numberOfLines={1}>{follower.display_name}</Text>
+          <Text style={styles.itemFaceTag}>{follower.face_tag}</Text>
           <Text style={styles.itemDate}>
             Following since {new Date(item.created_at).toLocaleDateString()}
           </Text>

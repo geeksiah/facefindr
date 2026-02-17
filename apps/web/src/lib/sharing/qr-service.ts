@@ -153,7 +153,11 @@ export function generateEventUrls(
   const baseUrl = getBaseUrl();
   
   const directUrl = `${baseUrl}/e/${eventSlug}`;
-  const shortUrl = shortLink || directUrl; // Will be replaced with actual short URL
+  const shortUrl = shortLink
+    ? /^https?:\/\//i.test(shortLink)
+      ? shortLink
+      : `${baseUrl}/s/${shortLink}`
+    : directUrl;
   const embedUrl = `${baseUrl}/embed/${eventSlug}`;
   const scanUrl = `${baseUrl}/e/${eventSlug}/scan`;
   

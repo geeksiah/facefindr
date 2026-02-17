@@ -8,10 +8,13 @@ import {
   Users,
   ChevronRight,
   QrCode,
+  ScanLine,
+  X,
+  AlertCircle,
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,6 +39,13 @@ export default function MyEventsPage() {
   const [isJoining, setIsJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [showCodeInput, setShowCodeInput] = useState(false);
+  const [showQrScanner, setShowQrScanner] = useState(false);
+  const [qrScannerError, setQrScannerError] = useState<string | null>(null);
+  const [isInitializingScanner, setIsInitializingScanner] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const frameRequestRef = useRef<number | null>(null);
 
   useEffect(() => {
     const fetchEvents = async () => {
@@ -92,6 +102,150 @@ export default function MyEventsPage() {
     }
   };
 
+  const stopQrScanner = useCallback(() => {
+    if (frameRequestRef.current !== null) {
+      cancelAnimationFrame(frameRequestRef.current);
+      frameRequestRef.current = null;
+    }
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+  }, []);
+
+  const handleQrPayload = useCallback(
+    (rawValue: string) => {
+      const trimmed = rawValue.trim();
+      if (!trimmed) return;
+
+      stopQrScanner();
+      setShowQrScanner(false);
+      setQrScannerError(null);
+
+      const directCode = trimmed.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+      if (/^[A-Z0-9]{4,12}$/.test(directCode)) {
+        setShowCodeInput(true);
+        setAccessCode(directCode);
+        return;
+      }
+
+      try {
+        const parsed = new URL(trimmed);
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+          window.location.assign(trimmed);
+          return;
+        }
+      } catch {
+        // ignore URL parse errors and try app-link fallback
+      }
+
+      if (trimmed.startsWith('ferchr://') || trimmed.startsWith('facefindr://')) {
+        try {
+          const appUrl = new URL(trimmed);
+          const path = appUrl.pathname.replace(/^\/+/, '');
+          const host = appUrl.hostname.toLowerCase();
+
+          if (host === 'event' && path) {
+            window.location.assign(`/e/${path}`);
+            return;
+          }
+          if ((host === 'e' || host === 's') && path) {
+            window.location.assign(`/${host}/${path}`);
+            return;
+          }
+
+          if (path) {
+            window.location.assign(`/e/${path}`);
+            return;
+          }
+        } catch (error) {
+          console.error('Failed to parse app QR URL:', error);
+        }
+      }
+
+      setShowCodeInput(true);
+      setAccessCode(directCode);
+    },
+    [stopQrScanner]
+  );
+
+  useEffect(() => {
+    if (!showQrScanner) {
+      stopQrScanner();
+      return;
+    }
+
+    let isCancelled = false;
+    setQrScannerError(null);
+    setIsInitializingScanner(true);
+
+    const initScanner = async () => {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error('Camera is not supported in this browser.');
+        }
+
+        const BarcodeDetectorCtor = (window as any).BarcodeDetector;
+        if (!BarcodeDetectorCtor) {
+          throw new Error('QR scanning is not supported in this browser.');
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' },
+        });
+        if (isCancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        streamRef.current = stream;
+        if (!videoRef.current) {
+          throw new Error('Unable to initialize camera preview.');
+        }
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+
+        const detector = new BarcodeDetectorCtor({ formats: ['qr_code'] });
+        const scanFrame = async () => {
+          if (isCancelled || !videoRef.current || !canvasRef.current) return;
+
+          const video = videoRef.current;
+          const canvas = canvasRef.current;
+          if (video.readyState >= 2) {
+            canvas.width = video.videoWidth || 1280;
+            canvas.height = video.videoHeight || 720;
+            const context = canvas.getContext('2d');
+            if (context) {
+              context.drawImage(video, 0, 0, canvas.width, canvas.height);
+              const barcodes = await detector.detect(canvas);
+              if (barcodes.length > 0 && barcodes[0]?.rawValue) {
+                handleQrPayload(barcodes[0].rawValue);
+                return;
+              }
+            }
+          }
+
+          frameRequestRef.current = requestAnimationFrame(scanFrame);
+        };
+
+        frameRequestRef.current = requestAnimationFrame(scanFrame);
+      } catch (error: any) {
+        console.error('QR scanner initialization failed:', error);
+        setQrScannerError(error?.message || 'Failed to start QR scanner.');
+      } finally {
+        setIsInitializingScanner(false);
+      }
+    };
+
+    initScanner();
+
+    return () => {
+      isCancelled = true;
+      stopQrScanner();
+    };
+  }, [showQrScanner, handleQrPayload, stopQrScanner]);
+
   const filteredEvents = events.filter(
     (event) =>
       event.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -113,18 +267,78 @@ export default function MyEventsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 overflow-x-hidden">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">My Events</h1>
           <p className="text-secondary mt-1">Events where your photos were found</p>
         </div>
-        <Button variant="secondary" onClick={() => setShowCodeInput(!showCodeInput)}>
-          <QrCode className="mr-2 h-4 w-4" />
-          Enter Event Code
-        </Button>
+        <div className="grid grid-cols-1 gap-2 sm:flex">
+          <Button
+            variant="secondary"
+            onClick={() => setShowQrScanner(true)}
+            className="w-full sm:w-auto"
+          >
+            <ScanLine className="mr-2 h-4 w-4" />
+            Scan QR
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => setShowCodeInput(!showCodeInput)}
+            className="w-full sm:w-auto"
+          >
+            <QrCode className="mr-2 h-4 w-4" />
+            Enter Event Code
+          </Button>
+        </div>
       </div>
+
+      {showQrScanner && (
+        <div className="fixed inset-0 z-50 bg-black/85 p-3 sm:p-4">
+          <div className="mx-auto flex h-full w-full items-center justify-center">
+            <div className="max-h-full w-full max-w-3xl overflow-hidden rounded-2xl border border-border bg-card">
+              <div className="flex items-center justify-between border-b border-border px-4 py-3">
+                <div>
+                  <h3 className="font-semibold text-foreground">Scan Event QR Code</h3>
+                  <p className="text-xs text-secondary">Point your camera at a Ferchr QR code.</p>
+                </div>
+                <button
+                  onClick={() => {
+                    stopQrScanner();
+                    setShowQrScanner(false);
+                  }}
+                  className="rounded-lg p-2 hover:bg-muted"
+                >
+                  <X className="h-4 w-4 text-foreground" />
+                </button>
+              </div>
+
+              <div className="relative bg-black">
+                <video
+                  ref={videoRef}
+                  className="h-[52vh] min-h-[260px] max-h-[420px] w-full object-cover"
+                  playsInline
+                  muted
+                />
+                <canvas ref={canvasRef} className="hidden" />
+                {isInitializingScanner && (
+                  <div className="absolute inset-0 flex items-center justify-center text-white">
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  </div>
+                )}
+              </div>
+
+              {qrScannerError && (
+                <div className="flex items-center gap-2 border-t border-border px-4 py-3 text-sm text-destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <span>{qrScannerError}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Join Event by Code */}
       {showCodeInput && (
@@ -135,7 +349,7 @@ export default function MyEventsPage() {
               Enter the access code provided by the creator
             </p>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row">
             <Input
               value={accessCode}
               onChange={(e) => setAccessCode(e.target.value.toUpperCase())}
@@ -143,7 +357,12 @@ export default function MyEventsPage() {
               className="uppercase font-mono"
               maxLength={12}
             />
-            <Button variant="primary" onClick={handleJoinEvent} isLoading={isJoining}>
+            <Button
+              variant="primary"
+              onClick={handleJoinEvent}
+              isLoading={isJoining}
+              className="w-full sm:w-auto"
+            >
               Join
             </Button>
           </div>
@@ -196,11 +415,11 @@ export default function MyEventsPage() {
                     {event.status.charAt(0).toUpperCase() + event.status.slice(1)}
                   </span>
                 </div>
-                <div className="flex items-center gap-3 text-sm text-secondary mt-1">
+                <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-secondary">
                   <span>{event.date}</span>
                   {event.location && (
                     <>
-                      <span className="text-muted-foreground">·</span>
+                      <span className="text-muted-foreground">|</span>
                       <div className="flex items-center gap-1">
                         <MapPin className="h-3 w-3" />
                         <span className="truncate">{event.location}</span>
@@ -208,14 +427,14 @@ export default function MyEventsPage() {
                     </>
                   )}
                 </div>
-                <div className="flex items-center gap-4 text-sm mt-2">
+                <div className="mt-2 flex flex-wrap items-center gap-4 text-sm">
                   <div className="flex items-center gap-1 text-secondary">
                     <Camera className="h-3.5 w-3.5" />
                     <span>{event.photographerName}</span>
                   </div>
                   <div className="flex items-center gap-1 text-accent">
                     <Users className="h-3.5 w-3.5" />
-                    <span>{event.matchedPhotos} of {event.totalPhotos} matched</span>
+                    <span>{event.matchedPhotos}/{event.totalPhotos} matched</span>
                   </div>
                 </div>
               </div>
@@ -251,3 +470,4 @@ export default function MyEventsPage() {
     </div>
   );
 }
+
