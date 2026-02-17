@@ -30,7 +30,7 @@ export async function GET(
     `;
     const minimalSelect = 'id, display_name, face_tag, profile_photo_url';
 
-    async function queryProfile(selectClause: string) {
+    const queryProfile = async (selectClause: string) => {
       let query = supabase.from('attendees').select(selectClause);
 
       if (isUuid) {
@@ -43,7 +43,7 @@ export async function GET(
       }
 
       return query.maybeSingle();
-    }
+    };
 
     let { data: profile, error } = await queryProfile(fullSelect);
 

@@ -35,7 +35,7 @@ export async function GET(
     `;
     const minimalSelect = 'id, display_name, face_tag, bio, profile_photo_url, created_at';
 
-    async function queryProfile(selectClause: string) {
+    const queryProfile = async (selectClause: string) => {
       let q = supabase.from('photographers').select(selectClause);
 
       if (isUuid) {
@@ -48,7 +48,7 @@ export async function GET(
       }
 
       return q.maybeSingle();
-    }
+    };
 
     let { data: profile, error } = await queryProfile(fullSelect);
 
