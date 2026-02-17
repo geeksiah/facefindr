@@ -24,10 +24,7 @@ export async function generateEventMetadata(slug: string): Promise<Metadata> {
 
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(normalizedSlug);
 
-    // Find event by slug
-    let query = supabase
-      .from('events')
-      .select(`
+    const eventSelect = `
         id,
         name,
         description,
@@ -38,37 +35,64 @@ export async function generateEventMetadata(slug: string): Promise<Metadata> {
         is_publicly_listed,
         require_access_code,
         photographers (display_name, profile_photo_url)
-      `)
-      .eq('status', 'active');
+      `;
+
+    let event: any = null;
 
     if (isUuid) {
-      query = query.eq('id', normalizedSlug);
-    } else {
-      query = query.or(`public_slug.eq.${normalizedSlug},short_link.eq.${normalizedSlug}`);
-    }
-
-    let { data: event } = await query.maybeSingle();
-
-    if (!event && !isUuid) {
-      const { data: fallbackEvent } = await supabase
+      const byId = await supabase
         .from('events')
-        .select(`
-          id,
-          name,
-          description,
-          cover_image_url,
-          event_date,
-          location,
-          is_public,
-          is_publicly_listed,
-          require_access_code,
-          photographers (display_name, profile_photo_url)
-        `)
+        .select(eventSelect)
         .eq('status', 'active')
-        .or(`public_slug.ilike.${normalizedSlug},short_link.ilike.${normalizedSlug}`)
+        .eq('id', normalizedSlug)
+        .maybeSingle();
+      event = byId.data;
+    } else {
+      const byPublicSlug = await supabase
+        .from('events')
+        .select(eventSelect)
+        .eq('status', 'active')
+        .eq('public_slug', normalizedSlug)
         .maybeSingle();
 
-      event = fallbackEvent;
+      event = byPublicSlug.data;
+
+      if (!event) {
+        const byShortLink = await supabase
+          .from('events')
+          .select(eventSelect)
+          .eq('status', 'active')
+          .eq('short_link', normalizedSlug)
+          .maybeSingle();
+        event = byShortLink.data;
+      }
+
+      if (!event) {
+        const lower = normalizedSlug.toLowerCase();
+        const upper = normalizedSlug.toUpperCase();
+        const variants = Array.from(new Set([normalizedSlug, lower, upper]));
+
+        if (variants.length > 1) {
+          const byPublicSlugVariants = await supabase
+            .from('events')
+            .select(eventSelect)
+            .eq('status', 'active')
+            .in('public_slug', variants)
+            .maybeSingle();
+
+          event = byPublicSlugVariants.data;
+
+          if (!event) {
+            const byShortLinkVariants = await supabase
+              .from('events')
+              .select(eventSelect)
+              .eq('status', 'active')
+              .in('short_link', variants)
+              .maybeSingle();
+            event = byShortLinkVariants.data;
+          }
+        }
+      }
     }
 
     if (!event) {

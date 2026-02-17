@@ -8,9 +8,11 @@ const reactAliases = {
   'react-dom/server': require.resolve('next/dist/compiled/react-dom/server'),
 };
 
+const enableStandaloneOutput = process.env.NEXT_OUTPUT_STANDALONE === '1';
+
 const nextConfig = {
   // Enable standalone output for Docker deployment
-  output: 'standalone',
+  output: enableStandaloneOutput ? 'standalone' : undefined,
   
   reactStrictMode: true,
   
@@ -79,6 +81,10 @@ const nextConfig = {
     };
 
     return config;
+  },
+  experimental: {
+    workerThreads: true,
+    cpus: 1,
   },
 
 };

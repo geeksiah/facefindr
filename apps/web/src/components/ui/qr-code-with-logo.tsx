@@ -1,8 +1,7 @@
 'use client';
 
-import html2canvas from 'html2canvas';
-import { QRCodeSVG } from 'qrcode.react';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { QRCodeCanvas } from 'qrcode.react';
+import React, { useMemo, useRef } from 'react';
 
 interface QRCodeWithLogoProps {
   value: string;
@@ -23,42 +22,9 @@ export const QRCodeWithLogo = React.forwardRef<HTMLDivElement, QRCodeWithLogoPro
 }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const logoSize = useMemo(() => size * 0.32, [size]); // Logo takes 32% of QR size (matching mobile)
-  const [logoSrc, setLogoSrc] = useState('/assets/logos/qr-logo.svg');
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const inlineLogoForExport = async () => {
-      try {
-        const response = await fetch('/assets/logos/qr-logo.svg', { cache: 'force-cache' });
-        if (!response.ok) return;
-
-        const svgMarkup = await response.text();
-        const encodedSvg = window.btoa(
-          encodeURIComponent(svgMarkup).replace(
-            /%([0-9A-F]{2})/g,
-            (_, hex: string) => String.fromCharCode(parseInt(hex, 16))
-          )
-        );
-        const dataUri = `data:image/svg+xml;base64,${encodedSvg}`;
-
-        if (!cancelled) {
-          setLogoSrc(dataUri);
-        }
-      } catch {
-        // Keep file path fallback for display if inlining fails.
-      }
-    };
-
-    inlineLogoForExport();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
   
   // Combine refs
-  React.useImperativeHandle(ref, () => containerRef.current as HTMLDivElement);
+  React.useImperativeHandle(ref, () => containerRef.current!);
   
   return (
     <div 
@@ -77,8 +43,8 @@ export const QRCodeWithLogo = React.forwardRef<HTMLDivElement, QRCodeWithLogoPro
           padding: 0
         }}
       >
-        {/* QR Code SVG */}
-        <QRCodeSVG
+        {/* QR Code canvas */}
+        <QRCodeCanvas
           value={value}
           size={size}
           level="H" // High error correction for logo overlay
@@ -111,14 +77,11 @@ export const QRCodeWithLogo = React.forwardRef<HTMLDivElement, QRCodeWithLogoPro
             }}
           >
             <img
-              src={logoSrc}
+              src="/assets/logos/qr-logo.svg"
               alt="Ferchr Logo"
               width={Math.round(logoSize * 0.9)}
               height={Math.round(logoSize * 0.9)}
               className="object-contain"
-              crossOrigin="anonymous"
-              loading="eager"
-              decoding="sync"
               style={{
                 width: `${logoSize * 0.9}px`,
                 height: `${logoSize * 0.9}px`,
@@ -133,30 +96,37 @@ export const QRCodeWithLogo = React.forwardRef<HTMLDivElement, QRCodeWithLogoPro
 
 QRCodeWithLogo.displayName = 'QRCodeWithLogo';
 
-async function waitForImagesInElement(element: HTMLElement): Promise<void> {
-  const images = Array.from(element.querySelectorAll('img'));
-  if (images.length === 0) return;
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.crossOrigin = 'anonymous';
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(`Failed to load image: ${src}`));
+    image.src = src;
+  });
+}
 
-  await Promise.all(
-    images.map(
-      (img) =>
-        new Promise<void>((resolve) => {
-          if (img.complete && img.naturalWidth > 0) {
-            resolve();
-            return;
-          }
-
-          const done = () => {
-            img.removeEventListener('load', done);
-            img.removeEventListener('error', done);
-            resolve();
-          };
-
-          img.addEventListener('load', done);
-          img.addEventListener('error', done);
-        })
-    )
-  );
+function drawRoundedRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number
+) {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  ctx.fill();
 }
 
 // Export utility function for downloading QR code with logo
@@ -166,22 +136,47 @@ export async function downloadQRCodeWithLogo(
   format: 'png' | 'jpg' = 'png'
 ): Promise<void> {
   try {
-    await waitForImagesInElement(element);
+    const sourceCanvas = element.querySelector('canvas');
+    if (!sourceCanvas) {
+      throw new Error('QR canvas not found in export target');
+    }
 
-    // Allow DOM paint to settle so html2canvas captures the inlined logo layer.
-    await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-    });
+    const rawWidth = sourceCanvas.width || 256;
+    const rawHeight = sourceCanvas.height || 256;
+    const baseSize = Math.max(rawWidth, rawHeight, 256);
+    const exportSize = baseSize * 4;
 
-    // Capture the element as canvas
-    const canvas = await html2canvas(element, {
-      backgroundColor: '#ffffff',
-      scale: 3, // Higher quality
-      logging: false,
-      useCORS: true,
-      allowTaint: false,
-      foreignObjectRendering: true,
-    });
+    const canvas = document.createElement('canvas');
+    canvas.width = exportSize;
+    canvas.height = exportSize;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('Failed to create 2D canvas context');
+    }
+
+    // Base white background.
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, exportSize, exportSize);
+
+    // Draw QR matrix from existing canvas.
+    ctx.drawImage(sourceCanvas, 0, 0, exportSize, exportSize);
+
+    // Draw center white box + logo.
+    const logoImageNode = element.querySelector('img[alt="Ferchr Logo"]') as HTMLImageElement | null;
+    const logoSrc = logoImageNode?.currentSrc || logoImageNode?.src || '/assets/logos/qr-logo.svg';
+    const logoImage = await loadImage(logoSrc);
+
+    const overlaySize = exportSize * 0.32;
+    const overlayPadding = overlaySize * 0.05;
+    const logoDrawSize = overlaySize - overlayPadding * 2;
+    const overlayX = (exportSize - overlaySize) / 2;
+    const overlayY = (exportSize - overlaySize) / 2;
+    const logoX = (exportSize - logoDrawSize) / 2;
+    const logoY = (exportSize - logoDrawSize) / 2;
+
+    ctx.fillStyle = '#FFFFFF';
+    drawRoundedRect(ctx, overlayX, overlayY, overlaySize, overlaySize, overlaySize * 0.08);
+    ctx.drawImage(logoImage, logoX, logoY, logoDrawSize, logoDrawSize);
 
     const mimeType = format === 'jpg' ? 'image/jpeg' : 'image/png';
     const finalFilename = /\.(png|jpg|jpeg)$/i.test(filename)

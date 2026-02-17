@@ -26,20 +26,38 @@ export default async function ShortLinkPage({ params, searchParams }: ShortLinkP
     notFound();
   }
 
-  // Find event by short link
-  const { data: event, error } = await supabase
+  // Find event by short link (exact match first)
+  let { data: event, error } = await supabase
     .from('events')
     .select('id, public_slug, short_link')
-    .ilike('short_link', code)
+    .eq('short_link', code)
     .eq('status', 'active')
     .maybeSingle();
+
+  // Fallback for case variants.
+  if (!event && !error) {
+    const lower = code.toLowerCase();
+    const upper = code.toUpperCase();
+    const variants = Array.from(new Set([code, lower, upper]));
+
+    if (variants.length > 1) {
+      const fallback = await supabase
+        .from('events')
+        .select('id, public_slug, short_link')
+        .in('short_link', variants)
+        .eq('status', 'active')
+        .maybeSingle();
+      event = fallback.data;
+      error = fallback.error;
+    }
+  }
 
   if (error || !event) {
     notFound();
   }
 
   // Build redirect URL
-  const eventIdentifier = event.public_slug || event.short_link || event.id;
+  const eventIdentifier = event.public_slug || event.id;
   let redirectUrl = `/e/${eventIdentifier}`;
   
   // Pass through access code if provided

@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/server';
 
 // GET - Get public event by slug
 export async function GET(
@@ -54,30 +54,62 @@ export async function GET(
         status
       `;
 
-    let eventQuery = serviceClient
-      .from('events')
-      .select(eventSelect);
-    
-    // Build the query based on slug type
-    if (isUuid) {
-      eventQuery = eventQuery.eq('id', slug);
-    } else {
-      // Try public_slug first, then short_link
-      eventQuery = eventQuery.or(`public_slug.eq.${slug},short_link.eq.${slug}`);
-    }
-    
-    let { data: eventBySlug, error: slugError } = await eventQuery.maybeSingle();
+    let eventBySlug: any = null;
+    let slugError: any = null;
 
-    // Fallback for mixed-case links when exact match misses
-    if (!eventBySlug && !slugError && !isUuid) {
-      const { data: caseInsensitiveEvent, error: caseInsensitiveError } = await serviceClient
+    if (isUuid) {
+      const uuidResult = await serviceClient
         .from('events')
         .select(eventSelect)
-        .or(`public_slug.ilike.${slug},short_link.ilike.${slug}`)
+        .eq('id', slug)
+        .maybeSingle();
+      eventBySlug = uuidResult.data;
+      slugError = uuidResult.error;
+    } else {
+      const byPublicSlug = await serviceClient
+        .from('events')
+        .select(eventSelect)
+        .eq('public_slug', slug)
         .maybeSingle();
 
-      if (!caseInsensitiveError && caseInsensitiveEvent) {
-        eventBySlug = caseInsensitiveEvent;
+      eventBySlug = byPublicSlug.data;
+      slugError = byPublicSlug.error;
+
+      if (!eventBySlug && !slugError) {
+        const byShortLink = await serviceClient
+          .from('events')
+          .select(eventSelect)
+          .eq('short_link', slug)
+          .maybeSingle();
+        eventBySlug = byShortLink.data;
+        slugError = byShortLink.error;
+      }
+
+      if (!eventBySlug && !slugError) {
+        const lower = slug.toLowerCase();
+        const upper = slug.toUpperCase();
+        const variants = Array.from(new Set([slug, lower, upper]));
+
+        if (variants.length > 1) {
+          const byPublicSlugVariants = await serviceClient
+            .from('events')
+            .select(eventSelect)
+            .in('public_slug', variants)
+            .maybeSingle();
+
+          eventBySlug = byPublicSlugVariants.data;
+          slugError = byPublicSlugVariants.error;
+
+          if (!eventBySlug && !slugError) {
+            const byShortLinkVariants = await serviceClient
+              .from('events')
+              .select(eventSelect)
+              .in('short_link', variants)
+              .maybeSingle();
+            eventBySlug = byShortLinkVariants.data;
+            slugError = byShortLinkVariants.error;
+          }
+        }
       }
     }
 

@@ -291,7 +291,7 @@ export default function PublicEventPage() {
               value={accessCode}
               onChange={(e) => setAccessCode(e.target.value.toUpperCase())}
               placeholder="Enter code"
-              className="text-center text-2xl tracking-[0.5em] font-mono uppercase"
+              className="px-3 text-center font-mono uppercase text-xl tracking-[0.25em] sm:text-2xl sm:tracking-[0.5em]"
               maxLength={10}
               autoFocus
               error={codeError}

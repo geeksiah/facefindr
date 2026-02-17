@@ -59,9 +59,10 @@ export default function ProfileScreen() {
   useEffect(() => {
     const loadSocialCounts = async () => {
       try {
-        const headers = session?.access_token
-          ? { Authorization: `Bearer ${session.access_token}` }
-          : {};
+        const headers: Record<string, string> = {};
+        if (session?.access_token) {
+          headers.Authorization = `Bearer ${session.access_token}`;
+        }
 
         const [followingResponse, followersResponse] = await Promise.all([
           fetch(`${API_URL}/api/social/follow?type=following&includeAttendees=true`, { headers }),

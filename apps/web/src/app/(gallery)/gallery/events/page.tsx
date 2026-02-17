@@ -390,7 +390,7 @@ export default function MyEventsPage() {
             <Link
               key={event.id}
               href={`/gallery/events/${event.id}`}
-              className="flex items-center gap-4 rounded-2xl border border-border bg-card p-4 transition-all hover:shadow-soft hover:border-accent/20"
+              className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-4 transition-all hover:border-accent/20 hover:shadow-soft sm:flex-row sm:items-center"
             >
               {/* Event Cover */}
               {event.coverImage ? (
@@ -399,19 +399,19 @@ export default function MyEventsPage() {
                   alt={event.name}
                   width={80}
                   height={80}
-                  className="h-20 w-20 rounded-xl object-cover flex-shrink-0"
+                  className="h-36 w-full rounded-xl object-cover sm:h-20 sm:w-20 sm:flex-shrink-0"
                 />
               ) : (
-                <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-muted flex-shrink-0">
+                <div className="flex h-36 w-full items-center justify-center rounded-xl bg-muted sm:h-20 sm:w-20 sm:flex-shrink-0">
                   <Calendar className="h-8 w-8 text-muted-foreground" />
                 </div>
               )}
 
               {/* Event Info */}
               <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                   <h3 className="font-semibold text-foreground truncate">{event.name}</h3>
-                  <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles[event.status]}`}>
+                  <span className={`w-fit rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles[event.status]}`}>
                     {event.status.charAt(0).toUpperCase() + event.status.slice(1)}
                   </span>
                 </div>
@@ -439,7 +439,7 @@ export default function MyEventsPage() {
                 </div>
               </div>
 
-              <ChevronRight className="h-5 w-5 text-secondary flex-shrink-0" />
+              <ChevronRight className="hidden h-5 w-5 flex-shrink-0 self-center text-secondary sm:block" />
             </Link>
           ))}
         </div>

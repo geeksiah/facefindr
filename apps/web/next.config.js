@@ -63,6 +63,8 @@ const nextConfig = {
   },
 
   experimental: {
+    workerThreads: true,
+    cpus: 1,
     serverActions: {
       allowedOrigins: [
         'localhost:3000',
