@@ -10,6 +10,32 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { createClient } from '@/lib/supabase/server';
 
+function isMissingRelationError(error: any) {
+  return error?.code === '42P01' || error?.code === '42703';
+}
+
+function asBoolean(value: unknown, fallback: boolean) {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function defaultSettings() {
+  return {
+    emailEnabled: true,
+    smsEnabled: false,
+    pushEnabled: true,
+    newPhotoSale: true,
+    payoutCompleted: true,
+    newEventView: false,
+    weeklyDigest: true,
+    monthlyReport: true,
+    newFollower: true,
+    eventReminder: true,
+    lowBalance: true,
+    subscriptionReminder: true,
+    marketingEmails: false,
+  };
+}
+
 // GET - Get notification settings
 export async function GET() {
   try {
@@ -20,51 +46,68 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { data: settings } = await supabase
+    const defaults = defaultSettings();
+
+    const { data: settings, error: settingsError } = await supabase
       .from('notification_settings')
       .select('*')
       .eq('user_id', user.id)
-      .single();
+      .maybeSingle();
 
-    // Return defaults if no settings exist
-    const defaultSettings = {
-      emailEnabled: true,
-      smsEnabled: false,
-      pushEnabled: true,
-      
-      // Notification types
-      newPhotoSale: true,
-      payoutCompleted: true,
-      newEventView: false,
-      weeklyDigest: true,
-      monthlyReport: true,
-      newFollower: true,
-      eventReminder: true,
-      lowBalance: true,
-      subscriptionReminder: true,
-      marketingEmails: false,
-    };
+    if (settings && !settingsError) {
+      return NextResponse.json({
+        settings: {
+          emailEnabled: asBoolean(settings.email_enabled, defaults.emailEnabled),
+          smsEnabled: asBoolean(settings.sms_enabled, defaults.smsEnabled),
+          pushEnabled: asBoolean(settings.push_enabled, defaults.pushEnabled),
+          newPhotoSale: asBoolean(settings.new_photo_sale, defaults.newPhotoSale),
+          payoutCompleted: asBoolean(settings.payout_completed, defaults.payoutCompleted),
+          newEventView: asBoolean(settings.new_event_view, defaults.newEventView),
+          weeklyDigest: asBoolean(settings.weekly_digest, defaults.weeklyDigest),
+          monthlyReport: asBoolean(settings.monthly_report, defaults.monthlyReport),
+          newFollower: asBoolean(settings.new_follower, defaults.newFollower),
+          eventReminder: asBoolean(settings.event_reminder, defaults.eventReminder),
+          lowBalance: asBoolean(settings.low_balance, defaults.lowBalance),
+          subscriptionReminder: asBoolean(settings.subscription_reminder, defaults.subscriptionReminder),
+          marketingEmails: asBoolean(settings.marketing_emails, defaults.marketingEmails),
+        },
+      });
+    }
 
-    if (!settings) {
-      return NextResponse.json({ settings: defaultSettings });
+    if (settingsError && !isMissingRelationError(settingsError)) {
+      console.error('Get notification settings error:', settingsError);
+      return NextResponse.json(
+        { error: 'Failed to get settings' },
+        { status: 500 }
+      );
+    }
+
+    // Fallback schema: user_notification_preferences
+    const { data: fallbackPrefs } = await supabase
+      .from('user_notification_preferences')
+      .select('*')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (!fallbackPrefs) {
+      return NextResponse.json({ settings: defaults });
     }
 
     return NextResponse.json({
       settings: {
-        emailEnabled: settings.email_enabled ?? true,
-        smsEnabled: settings.sms_enabled ?? false,
-        pushEnabled: settings.push_enabled ?? true,
-        
-        newPhotoSale: settings.new_photo_sale ?? true,
-        payoutCompleted: settings.payout_completed ?? true,
-        newEventView: settings.new_event_view ?? false,
-        weeklyDigest: settings.weekly_digest ?? true,
-        monthlyReport: settings.monthly_report ?? true,
-        newFollower: settings.new_follower ?? true,
-        eventReminder: settings.event_reminder ?? true,
-        lowBalance: settings.low_balance ?? true,
-        subscriptionReminder: settings.subscription_reminder ?? true,
-        marketingEmails: settings.marketing_emails ?? false,
+        emailEnabled: asBoolean(fallbackPrefs.email_enabled, defaults.emailEnabled),
+        smsEnabled: asBoolean(fallbackPrefs.sms_enabled, defaults.smsEnabled),
+        pushEnabled: asBoolean(fallbackPrefs.push_enabled, defaults.pushEnabled),
+        newPhotoSale: asBoolean(fallbackPrefs.photo_drop_enabled, defaults.newPhotoSale),
+        payoutCompleted: asBoolean(fallbackPrefs.payout_updates_enabled, defaults.payoutCompleted),
+        newEventView: asBoolean(fallbackPrefs.event_updates_enabled, defaults.newEventView),
+        weeklyDigest: defaults.weeklyDigest,
+        monthlyReport: defaults.monthlyReport,
+        newFollower: asBoolean(fallbackPrefs.event_updates_enabled, defaults.newFollower),
+        eventReminder: asBoolean(fallbackPrefs.event_updates_enabled, defaults.eventReminder),
+        lowBalance: asBoolean(fallbackPrefs.payout_updates_enabled, defaults.lowBalance),
+        subscriptionReminder: defaults.subscriptionReminder,
+        marketingEmails: asBoolean(fallbackPrefs.marketing_enabled, defaults.marketingEmails),
       },
     });
 
@@ -106,8 +149,8 @@ export async function PUT(request: NextRequest) {
       }
     }
 
-    // Upsert settings
-    const { error } = await supabase
+    // Attempt legacy table first
+    const { error: legacyError } = await supabase
       .from('notification_settings')
       .upsert({
         user_id: user.id,
@@ -129,8 +172,33 @@ export async function PUT(request: NextRequest) {
         onConflict: 'user_id',
       });
 
-    if (error) {
-      console.error('Update error:', error);
+    if (legacyError && !isMissingRelationError(legacyError)) {
+      console.error('Update error:', legacyError);
+      return NextResponse.json(
+        { error: 'Failed to update settings' },
+        { status: 400 }
+      );
+    }
+
+    // Fallback schema (or dual-write for compatibility)
+    const { error: fallbackError } = await supabase
+      .from('user_notification_preferences')
+      .upsert({
+        user_id: user.id,
+        email_enabled: asBoolean(body.emailEnabled, true),
+        sms_enabled: smsEnabled,
+        push_enabled: asBoolean(body.pushEnabled, true),
+        photo_drop_enabled: asBoolean(body.newPhotoSale, true),
+        event_updates_enabled: asBoolean(body.newEventView, true),
+        payout_updates_enabled: asBoolean(body.payoutCompleted, true),
+        marketing_enabled: asBoolean(body.marketingEmails, false),
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'user_id',
+      });
+
+    if (fallbackError && !isMissingRelationError(fallbackError)) {
+      console.error('Fallback update error:', fallbackError);
       return NextResponse.json(
         { error: 'Failed to update settings' },
         { status: 400 }

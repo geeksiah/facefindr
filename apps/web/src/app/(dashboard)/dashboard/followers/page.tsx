@@ -75,10 +75,32 @@ export default function FollowersPage() {
   }, [loadFollowers]);
 
   // Subscribe to realtime updates
-  useRealtimeSubscription({
+  const { isConnected } = useRealtimeSubscription({
     table: 'follows',
     onChange: () => loadFollowers(),
   });
+
+  // Poll fallback when realtime transport is unavailable.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!isConnected) {
+        void loadFollowers();
+      }
+    }, 12000);
+
+    return () => clearInterval(interval);
+  }, [isConnected, loadFollowers]);
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void loadFollowers();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [loadFollowers]);
 
   const filteredFollowers = followers
     .filter((item) => {

@@ -34,7 +34,7 @@ export function DashboardHeader() {
   const searchRef = useRef<HTMLDivElement>(null);
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
-  const supabase = createClient();
+  const supabaseRef = useRef(createClient());
   const activeSearchRequestRef = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -101,7 +101,7 @@ export function DashboardHeader() {
 
       // Keep event search for creator dashboard usability.
       if (trimmedQuery.length >= 2) {
-        const { data: events } = await supabase
+        const { data: events } = await supabaseRef.current
           .from('events')
           .select('id, name, event_date, event_timezone')
           .ilike('name', `%${searchTerm}%`)
@@ -129,7 +129,7 @@ export function DashboardHeader() {
         setIsSearching(false);
       }
     }
-  }, [supabase]);
+  }, []);
 
   // Debounced search
   useEffect(() => {

@@ -21,11 +21,91 @@ async function getAuthClient(request: NextRequest) {
     : await createClient();
 }
 
+function getOptionalServiceClient() {
+  try {
+    return createServiceClient();
+  } catch {
+    return null;
+  }
+}
+
+function isMissingColumnError(error: any, columnName: string) {
+  return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
+}
+
+async function resolveProfileIdByUser(
+  supabase: any,
+  table: 'attendees' | 'photographers',
+  userId: string
+) {
+  const byUserId = await supabase
+    .from(table)
+    .select('id')
+    .eq('user_id', userId)
+    .single();
+
+  if (!byUserId.error || !isMissingColumnError(byUserId.error, 'user_id')) {
+    return byUserId;
+  }
+
+  return supabase
+    .from(table)
+    .select('id')
+    .eq('id', userId)
+    .single();
+}
+
+async function getAttendeeByIdentifier(supabase: any, identifier: string) {
+  const withUserId = await supabase
+    .from('attendees')
+    .select('id, is_public_profile, public_profile_slug, user_id')
+    .or(`id.eq.${identifier},public_profile_slug.eq.${identifier}`)
+    .single();
+
+  if (!withUserId.error || !isMissingColumnError(withUserId.error, 'user_id')) {
+    return withUserId;
+  }
+
+  const fallback = await supabase
+    .from('attendees')
+    .select('id, is_public_profile, public_profile_slug')
+    .or(`id.eq.${identifier},public_profile_slug.eq.${identifier}`)
+    .single();
+
+  return {
+    data: fallback.data ? { ...fallback.data, user_id: fallback.data.id } : fallback.data,
+    error: fallback.error,
+  };
+}
+
+async function getCreatorByIdentifier(supabase: any, identifier: string) {
+  const withUserId = await supabase
+    .from('photographers')
+    .select('id, is_public_profile, public_profile_slug, user_id')
+    .or(`id.eq.${identifier},public_profile_slug.eq.${identifier}`)
+    .single();
+
+  if (!withUserId.error || !isMissingColumnError(withUserId.error, 'user_id')) {
+    return withUserId;
+  }
+
+  const fallback = await supabase
+    .from('photographers')
+    .select('id, is_public_profile, public_profile_slug')
+    .or(`id.eq.${identifier},public_profile_slug.eq.${identifier}`)
+    .single();
+
+  return {
+    data: fallback.data ? { ...fallback.data, user_id: fallback.data.id } : fallback.data,
+    error: fallback.error,
+  };
+}
+
 // POST - Follow a creator
 export async function POST(request: NextRequest) {
   try {
     const supabase = await getAuthClient(request);
-    const serviceClient = createServiceClient();
+    const serviceClient = getOptionalServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -105,21 +185,23 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
-    await serviceClient.from('audit_logs').insert({
-      actor_type: normalizedFollowerType,
-      actor_id: user.id,
-      action: 'follow_created',
-      resource_type: 'follow',
-      resource_id: `${user.id}:${resolvedTargetType}:${resolvedTargetId}`,
-      metadata: {
-        following_id: resolvedTargetId,
-        following_type: resolvedTargetType,
-      },
-      ip_address:
-        request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-        request.headers.get('x-real-ip') ||
-        null,
-    }).catch(() => {});
+    if (serviceClient) {
+      await serviceClient.from('audit_logs').insert({
+        actor_type: normalizedFollowerType,
+        actor_id: user.id,
+        action: 'follow_created',
+        resource_type: 'follow',
+        resource_id: `${user.id}:${resolvedTargetType}:${resolvedTargetId}`,
+        metadata: {
+          following_id: resolvedTargetId,
+          following_type: resolvedTargetType,
+        },
+        ip_address:
+          request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+          request.headers.get('x-real-ip') ||
+          null,
+      }).catch(() => {});
+    }
 
     return NextResponse.json({ success: true, followingType: resolvedTargetType, followingId: resolvedTargetId });
 
@@ -133,7 +215,7 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await getAuthClient(request);
-    const serviceClient = createServiceClient();
+    const serviceClient = getOptionalServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -171,21 +253,23 @@ export async function DELETE(request: NextRequest) {
       throw error;
     }
 
-    await serviceClient.from('audit_logs').insert({
-      actor_type: normalizedFollowerType,
-      actor_id: user.id,
-      action: 'follow_deleted',
-      resource_type: 'follow',
-      resource_id: `${user.id}:${targetType}:${targetId}`,
-      metadata: {
-        following_id: targetId,
-        following_type: targetType,
-      },
-      ip_address:
-        request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-        request.headers.get('x-real-ip') ||
-        null,
-    }).catch(() => {});
+    if (serviceClient) {
+      await serviceClient.from('audit_logs').insert({
+        actor_type: normalizedFollowerType,
+        actor_id: user.id,
+        action: 'follow_deleted',
+        resource_type: 'follow',
+        resource_id: `${user.id}:${targetType}:${targetId}`,
+        metadata: {
+          following_id: targetId,
+          following_type: targetType,
+        },
+        ip_address:
+          request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+          request.headers.get('x-real-ip') ||
+          null,
+      }).catch(() => {});
+    }
 
     return NextResponse.json({ success: true, followingType: targetType, followingId: targetId });
 
@@ -283,28 +367,21 @@ export async function GET(request: NextRequest) {
         let targetAttendeeId = targetId || attendeeId;
 
         if (!targetAttendeeId) {
-          const { data: attendee } = await supabase
-            .from('attendees')
-            .select('id')
-            .eq('user_id', user.id)
-            .single();
+          const { data: attendee } = await resolveProfileIdByUser(supabase, 'attendees', user.id);
 
           if (!attendee) {
             return NextResponse.json({ error: 'Not an attendee' }, { status: 403 });
           }
           targetAttendeeId = attendee.id;
         } else {
-          const { data: attendee } = await supabase
-            .from('attendees')
-            .select('id, is_public_profile, public_profile_slug, user_id')
-            .or(`id.eq.${targetAttendeeId},public_profile_slug.eq.${targetAttendeeId}`)
-            .single();
+          const { data: attendee } = await getAttendeeByIdentifier(supabase, targetAttendeeId);
 
           if (!attendee) {
             return NextResponse.json({ error: 'User not found' }, { status: 404 });
           }
 
-          const isOwnProfile = user && attendee.user_id === user.id;
+          const ownerUserId = (attendee as any).user_id || attendee.id;
+          const isOwnProfile = user && ownerUserId === user.id;
           if (!isOwnProfile && !attendee.is_public_profile) {
             return NextResponse.json({ error: 'Profile is private' }, { status: 403 });
           }
@@ -383,11 +460,7 @@ export async function GET(request: NextRequest) {
 
       // If no photographerId provided, get current user's followers (for creators)
       if (!targetCreatorId) {
-        const { data: photographer } = await supabase
-          .from('photographers')
-          .select('id')
-          .eq('user_id', user.id)
-          .single();
+        const { data: photographer } = await resolveProfileIdByUser(supabase, 'photographers', user.id);
 
         if (!photographer) {
           return NextResponse.json({ error: 'Not a creator' }, { status: 403 });
@@ -395,11 +468,7 @@ export async function GET(request: NextRequest) {
         targetCreatorId = photographer.id;
       } else {
         // Check if photographer exists and profile is public
-        const { data: photographer } = await supabase
-          .from('photographers')
-          .select('id, is_public_profile, public_profile_slug, user_id')
-          .or(`id.eq.${targetCreatorId},public_profile_slug.eq.${targetCreatorId}`)
-          .single();
+        const { data: photographer } = await getCreatorByIdentifier(supabase, targetCreatorId);
 
         if (!photographer) {
           return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
@@ -408,7 +477,8 @@ export async function GET(request: NextRequest) {
         // Allow access if:
         // 1. User is viewing their own followers, OR
         // 2. Creator profile is public
-        const isOwnProfile = user && photographer.user_id === user.id;
+        const ownerUserId = (photographer as any).user_id || photographer.id;
+        const isOwnProfile = user && ownerUserId === user.id;
         if (!isOwnProfile && !photographer.is_public_profile) {
           return NextResponse.json({ error: 'Profile is private' }, { status: 403 });
         }

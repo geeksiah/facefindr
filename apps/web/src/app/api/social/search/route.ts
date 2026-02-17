@@ -75,7 +75,7 @@ export async function GET(request: NextRequest) {
           id, display_name, face_tag, profile_photo_url, bio,
           follower_count, public_profile_slug, is_public_profile, allow_follows
         `)
-        .eq('face_tag', exactFaceTag)
+        .ilike('face_tag', exactFaceTag)
         .limit(1);
 
       const photographersQuery = await serviceClient
@@ -99,7 +99,7 @@ export async function GET(request: NextRequest) {
           const exactFallbackQuery = await serviceClient
             .from('photographers')
             .select('id, display_name, face_tag, profile_photo_url, bio')
-            .eq('face_tag', exactFaceTag)
+            .ilike('face_tag', exactFaceTag)
             .limit(1);
 
           const fallbackQuery = await serviceClient
@@ -154,7 +154,7 @@ export async function GET(request: NextRequest) {
           id, display_name, face_tag, profile_photo_url,
           public_profile_slug, is_public_profile, following_count
         `)
-        .eq('face_tag', exactFaceTag)
+        .ilike('face_tag', exactFaceTag)
         .limit(1);
 
       const usersQuery = await serviceClient
@@ -177,7 +177,7 @@ export async function GET(request: NextRequest) {
           const exactFallbackQuery = await serviceClient
             .from('attendees')
             .select('id, display_name, face_tag, profile_photo_url')
-            .eq('face_tag', exactFaceTag)
+            .ilike('face_tag', exactFaceTag)
             .limit(1);
 
           const fallbackQuery = await serviceClient
@@ -230,4 +230,3 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Search failed' }, { status: 500 });
   }
 }
-

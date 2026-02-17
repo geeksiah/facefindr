@@ -69,10 +69,32 @@ export default function FollowingPage() {
   }, [loadFollowing]);
 
   // Subscribe to realtime updates
-  useRealtimeSubscription({
+  const { isConnected } = useRealtimeSubscription({
     table: 'follows',
     onChange: () => loadFollowing(),
   });
+
+  // Poll fallback when realtime websocket is unavailable.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!isConnected) {
+        void loadFollowing();
+      }
+    }, 12000);
+
+    return () => clearInterval(interval);
+  }, [isConnected, loadFollowing]);
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void loadFollowing();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [loadFollowing]);
 
   const handleUnfollow = async (photographerId: string, name: string) => {
     if (!confirm(`Are you sure you want to unfollow ${name}?`)) return;

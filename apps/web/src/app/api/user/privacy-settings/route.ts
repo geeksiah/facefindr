@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { normalizeUserType } from '@/lib/user-type';
-import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
+import { createClient, createClientWithAccessToken } from '@/lib/supabase/server';
 
 async function getAuthClient(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
@@ -28,6 +28,34 @@ function getProfileTable(userType: 'creator' | 'attendee') {
   return userType === 'creator' ? 'photographers' : 'attendees';
 }
 
+function asBoolean(value: unknown, fallback: boolean) {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function normalizeSettings(
+  row: any,
+  defaults: {
+    profileVisible: boolean;
+    allowPhotoTagging: boolean;
+    showInSearch: boolean;
+    allowFaceRecognition: boolean;
+    shareActivityWithCreators: boolean;
+    emailMarketing: boolean;
+  }
+): PrivacySettings {
+  return {
+    profileVisible: asBoolean(row?.profile_visible, defaults.profileVisible),
+    allowPhotoTagging: asBoolean(row?.allow_photo_tagging, defaults.allowPhotoTagging),
+    showInSearch: asBoolean(row?.show_in_search, defaults.showInSearch),
+    allowFaceRecognition: asBoolean(row?.allow_face_recognition, defaults.allowFaceRecognition),
+    shareActivityWithCreators: asBoolean(
+      row?.share_activity_with_photographers,
+      defaults.shareActivityWithCreators
+    ),
+    emailMarketing: asBoolean(row?.email_marketing, defaults.emailMarketing),
+  };
+}
+
 // GET - Fetch user's privacy settings
 export async function GET(request: NextRequest) {
   try {
@@ -40,30 +68,28 @@ export async function GET(request: NextRequest) {
 
     const userType = normalizeUserType(user.user_metadata?.user_type) || 'attendee';
     const profileTable = getProfileTable(userType);
-
-    const serviceClient = createServiceClient();
-    const { data: currentProfileRecord } = await serviceClient
+    const { data: currentProfileRecord } = await supabase
       .from(profileTable)
       .select('is_public_profile')
       .eq('id', user.id)
-      .single();
+      .maybeSingle();
     let profileRecord = currentProfileRecord;
-
-    // Try to get existing settings (use service client to bypass RLS)
-    let { data: settings } = await serviceClient
+    let { data: settings } = await supabase
       .from('user_privacy_settings')
       .select('*')
       .eq('user_id', user.id)
-      .single();
+      .maybeSingle();
 
     // If no settings exist, create default ones
     if (!settings) {
-      const { data: newSettings, error: insertError } = await serviceClient
+      const defaultProfileVisible =
+        profileRecord?.is_public_profile ?? (userType === 'creator');
+      const { data: newSettings, error: insertError } = await supabase
         .from('user_privacy_settings')
         .insert({
           user_id: user.id,
           user_type: userType,
-          profile_visible: profileRecord?.is_public_profile ?? (userType === 'creator'),
+          profile_visible: defaultProfileVisible,
           allow_photo_tagging: true,
           show_in_search: true,
           allow_face_recognition: true,
@@ -74,38 +100,58 @@ export async function GET(request: NextRequest) {
         .single();
 
       if (insertError) {
-        console.error('Error creating privacy settings:', insertError);
-        return NextResponse.json(
-          { error: 'Failed to create privacy settings' },
-          { status: 500 }
-        );
+        if (insertError.code === '23505') {
+          const { data: existingRow } = await supabase
+            .from('user_privacy_settings')
+            .select('*')
+            .eq('user_id', user.id)
+            .maybeSingle();
+          settings = existingRow;
+        } else {
+          console.error('Error creating privacy settings:', insertError);
+          return NextResponse.json(
+            { error: 'Failed to create privacy settings' },
+            { status: 500 }
+          );
+        }
+      } else {
+        settings = newSettings;
       }
-
-      settings = newSettings;
     }
 
-    // Keep legacy rows in sync with profile visibility for search/public profile usage.
+    const normalized = normalizeSettings(settings, {
+      profileVisible: profileRecord?.is_public_profile ?? (userType === 'creator'),
+      allowPhotoTagging: true,
+      showInSearch: true,
+      allowFaceRecognition: true,
+      shareActivityWithCreators: false,
+      emailMarketing: false,
+    });
+
+    // Keep profile visibility in sync.
     if (
-      settings &&
-      typeof settings.profile_visible === 'boolean' &&
       profileRecord &&
-      settings.profile_visible !== profileRecord.is_public_profile
+      normalized.profileVisible !== profileRecord.is_public_profile
     ) {
-      await serviceClient
+      const { error: syncError } = await supabase
         .from(profileTable)
-        .update({ is_public_profile: settings.profile_visible })
+        .update({ is_public_profile: normalized.profileVisible })
         .eq('id', user.id);
-      profileRecord = { ...profileRecord, is_public_profile: settings.profile_visible };
+
+      if (!syncError) {
+        profileRecord = {
+          ...profileRecord,
+          is_public_profile: normalized.profileVisible,
+        };
+      } else {
+        console.error('Error syncing profile visibility:', syncError);
+      }
     }
 
     return NextResponse.json({
       settings: {
-        profileVisible: profileRecord?.is_public_profile ?? settings.profile_visible,
-        allowPhotoTagging: settings.allow_photo_tagging,
-        showInSearch: settings.show_in_search,
-        allowFaceRecognition: settings.allow_face_recognition,
-        shareActivityWithCreators: settings.share_activity_with_photographers,
-        emailMarketing: settings.email_marketing,
+        ...normalized,
+        profileVisible: profileRecord?.is_public_profile ?? normalized.profileVisible,
       },
     });
 
@@ -129,76 +175,76 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json();
-    const {
-      profileVisible,
-      allowPhotoTagging,
-      showInSearch,
-      allowFaceRecognition,
-      shareActivityWithCreators,
-      emailMarketing,
-    } = body;
-
     const userType = normalizeUserType(user.user_metadata?.user_type) || 'attendee';
     const profileTable = getProfileTable(userType);
 
-    // Use service client to bypass RLS for settings operations
-    const serviceClient = createServiceClient();
+    const { data: profileRecord } = await supabase
+      .from(profileTable)
+      .select('is_public_profile')
+      .eq('id', user.id)
+      .maybeSingle();
 
-    // Check if settings exist
-    const { data: existing } = await serviceClient
+    const { data: existingSettings } = await supabase
       .from('user_privacy_settings')
-      .select('id')
+      .select('*')
       .eq('user_id', user.id)
-      .single();
+      .maybeSingle();
 
-    const updateData: Record<string, any> = {
-      updated_at: new Date().toISOString(),
+    const defaults = normalizeSettings(existingSettings, {
+      profileVisible: profileRecord?.is_public_profile ?? (userType === 'creator'),
+      allowPhotoTagging: true,
+      showInSearch: true,
+      allowFaceRecognition: true,
+      shareActivityWithCreators: false,
+      emailMarketing: false,
+    });
+
+    const nextSettings: PrivacySettings = {
+      profileVisible: asBoolean(
+        body.profileVisible ?? body.publicProfile,
+        defaults.profileVisible
+      ),
+      allowPhotoTagging: asBoolean(
+        body.allowPhotoTagging ?? body.allowTagging,
+        defaults.allowPhotoTagging
+      ),
+      showInSearch: asBoolean(body.showInSearch, defaults.showInSearch),
+      allowFaceRecognition: asBoolean(body.allowFaceRecognition, defaults.allowFaceRecognition),
+      shareActivityWithCreators: asBoolean(
+        body.shareActivityWithCreators,
+        defaults.shareActivityWithCreators
+      ),
+      emailMarketing: asBoolean(body.emailMarketing, defaults.emailMarketing),
     };
 
-    // Only update fields that were provided
-    if (typeof profileVisible === 'boolean') updateData.profile_visible = profileVisible;
-    if (typeof allowPhotoTagging === 'boolean') updateData.allow_photo_tagging = allowPhotoTagging;
-    if (typeof showInSearch === 'boolean') updateData.show_in_search = showInSearch;
-    if (typeof allowFaceRecognition === 'boolean') updateData.allow_face_recognition = allowFaceRecognition;
-    if (typeof shareActivityWithCreators === 'boolean') updateData.share_activity_with_photographers = shareActivityWithCreators;
-    if (typeof emailMarketing === 'boolean') updateData.email_marketing = emailMarketing;
+    const { data: savedSettings, error: upsertError } = await supabase
+      .from('user_privacy_settings')
+      .upsert({
+        user_id: user.id,
+        user_type: userType,
+        profile_visible: nextSettings.profileVisible,
+        allow_photo_tagging: nextSettings.allowPhotoTagging,
+        show_in_search: nextSettings.showInSearch,
+        allow_face_recognition: nextSettings.allowFaceRecognition,
+        share_activity_with_photographers: nextSettings.shareActivityWithCreators,
+        email_marketing: nextSettings.emailMarketing,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' })
+      .select()
+      .single();
 
-    let result;
-
-    if (existing) {
-      // Update existing settings
-      result = await serviceClient
-        .from('user_privacy_settings')
-        .update(updateData)
-        .eq('user_id', user.id)
-        .select()
-        .single();
-    } else {
-      // Insert new settings
-      result = await serviceClient
-        .from('user_privacy_settings')
-        .insert({
-          user_id: user.id,
-          user_type: userType,
-          ...updateData,
-        })
-        .select()
-        .single();
-    }
-
-    if (result.error) {
-      console.error('Error updating privacy settings:', result.error);
+    if (upsertError) {
+      console.error('Error updating privacy settings:', upsertError);
       return NextResponse.json(
         { error: 'Failed to update privacy settings' },
         { status: 500 }
       );
     }
 
-    if (typeof profileVisible === 'boolean') {
-      const serviceClient = createServiceClient();
-      const { error: profileUpdateError } = await serviceClient
+    if (!profileRecord || profileRecord.is_public_profile !== nextSettings.profileVisible) {
+      const { error: profileUpdateError } = await supabase
         .from(profileTable)
-        .update({ is_public_profile: profileVisible })
+        .update({ is_public_profile: nextSettings.profileVisible })
         .eq('id', user.id);
 
       if (profileUpdateError) {
@@ -210,16 +256,11 @@ export async function PUT(request: NextRequest) {
       }
     }
 
+    const normalizedSaved = normalizeSettings(savedSettings, nextSettings);
+
     return NextResponse.json({
       success: true,
-      settings: {
-        profileVisible: result.data.profile_visible,
-        allowPhotoTagging: result.data.allow_photo_tagging,
-        showInSearch: result.data.show_in_search,
-        allowFaceRecognition: result.data.allow_face_recognition,
-        shareActivityWithCreators: result.data.share_activity_with_photographers,
-        emailMarketing: result.data.email_marketing,
-      },
+      settings: normalizedSaved,
     });
 
   } catch (error) {
@@ -231,3 +272,6 @@ export async function PUT(request: NextRequest) {
   }
 }
 
+export async function PATCH(request: NextRequest) {
+  return PUT(request);
+}

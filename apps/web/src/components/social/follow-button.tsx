@@ -42,16 +42,29 @@ export function FollowButton({
   }, [photographerId]);
 
   // Subscribe to real-time follow updates
-  useRealtimeSubscription({
+  const { isConnected } = useRealtimeSubscription({
     table: 'follows',
     filter: `following_id=eq.${photographerId}`,
-    onUpdate: () => {
+    onChange: () => {
       checkFollowStatus();
       if (showCount) {
         loadFollowerCount();
       }
     },
   });
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!isConnected) {
+        void checkFollowStatus();
+        if (showCount) {
+          void loadFollowerCount();
+        }
+      }
+    }, 12000);
+
+    return () => clearInterval(interval);
+  }, [isConnected, photographerId, showCount]);
 
   const checkFollowStatus = async () => {
     try {

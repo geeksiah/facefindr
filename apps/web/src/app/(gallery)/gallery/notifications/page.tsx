@@ -27,6 +27,14 @@ interface Notification {
   createdAt: string;
 }
 
+function mapNotificationType(templateCode?: string): Notification['type'] {
+  const code = (templateCode || '').toLowerCase();
+  if (code.includes('photo')) return 'photo_match';
+  if (code.includes('event')) return 'new_event';
+  if (code.includes('update')) return 'event_update';
+  return 'system';
+}
+
 interface NotificationSettings {
   photoMatches: boolean;
   newEvents: boolean;
@@ -51,10 +59,20 @@ export default function NotificationsPage() {
     const fetchData = async () => {
       try {
         // Fetch notifications
-        const notifResponse = await fetch('/api/attendee/notifications');
+        const notifResponse = await fetch('/api/notifications?limit=100');
         if (notifResponse.ok) {
           const data = await notifResponse.json();
-          setNotifications(data.notifications || []);
+          const mapped = (data.notifications || []).map((item: any) => ({
+            id: item.id,
+            type: mapNotificationType(item.templateCode || item.template_code),
+            title: item.subject || 'Notification',
+            message: item.body,
+            eventId: item.metadata?.event_id || item.metadata?.eventId,
+            eventName: item.metadata?.event_name || item.metadata?.eventName,
+            isRead: !!(item.readAt || item.read_at),
+            createdAt: item.createdAt || item.created_at || new Date().toISOString(),
+          })) as Notification[];
+          setNotifications(mapped);
         }
 
         // Fetch settings
@@ -79,8 +97,10 @@ export default function NotificationsPage() {
     );
 
     try {
-      await fetch(`/api/attendee/notifications/${notificationId}/read`, {
+      await fetch('/api/notifications', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notificationId }),
       });
     } catch (error) {
       console.error('Failed to mark as read:', error);
@@ -91,7 +111,11 @@ export default function NotificationsPage() {
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
 
     try {
-      await fetch('/api/attendee/notifications/read-all', { method: 'POST' });
+      await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ markAllRead: true }),
+      });
     } catch (error) {
       console.error('Failed to mark all as read:', error);
     }
@@ -101,9 +125,7 @@ export default function NotificationsPage() {
     setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
 
     try {
-      await fetch(`/api/attendee/notifications/${notificationId}`, {
-        method: 'DELETE',
-      });
+      // No hard-delete endpoint; UI-level dismissal only.
     } catch (error) {
       console.error('Failed to delete notification:', error);
     }
