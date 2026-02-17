@@ -28,6 +28,27 @@ interface EventGalleryProps {
   photos: Photo[];
 }
 
+function buildStoragePathCandidates(path: string | null | undefined): string[] {
+  if (!path) {
+    return [];
+  }
+
+  const trimmed = path.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return [trimmed];
+  }
+
+  const normalized = trimmed.replace(/^\/+/, '');
+  const withoutBucketPrefix = normalized.replace(/^media\//, '');
+  const withBucketPrefix = normalized.startsWith('media/') ? normalized : `media/${normalized}`;
+
+  return Array.from(new Set([normalized, withoutBucketPrefix, withBucketPrefix].filter(Boolean)));
+}
+
 export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryProps) {
   const router = useRouter();
   const toast = useToast();
@@ -89,33 +110,56 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
           await Promise.all(
             batch.map(async (photo) => {
               try {
-                const path = photo.thumbnail_path || photo.storage_path;
-                
-                // Skip if no path available
-                if (!path) {
+                const candidatePaths = [
+                  ...buildStoragePathCandidates(photo.thumbnail_path),
+                  ...buildStoragePathCandidates(photo.storage_path),
+                ];
+
+                if (candidatePaths.length === 0) {
                   console.warn(`Photo ${photo.id} has no storage path`);
                   return;
                 }
 
-                if (path.startsWith('http://') || path.startsWith('https://')) {
-                  existingUrls[photo.id] = path;
+                const directUrl = candidatePaths.find(
+                  (candidatePath) =>
+                    candidatePath.startsWith('http://') || candidatePath.startsWith('https://')
+                );
+
+                if (directUrl) {
+                  existingUrls[photo.id] = directUrl;
                   return;
                 }
-                
-                // Clean path (remove leading slash if present)
-                const cleanPath = path.startsWith('/') ? path.slice(1) : path;
-                
-                const { data, error: urlError } = await supabase.storage
-                  .from('media')
-                  .createSignedUrl(cleanPath, 3600);
-                
-                if (urlError) {
-                  console.error(`Failed to create signed URL for photo ${photo.id}:`, urlError);
-                  return;
+
+                const pathsToTry = Array.from(
+                  new Set(
+                    candidatePaths.filter(
+                      (candidatePath) =>
+                        !candidatePath.startsWith('http://') &&
+                        !candidatePath.startsWith('https://')
+                    )
+                  )
+                );
+
+                let signedUrl: string | null = null;
+                let lastError: unknown = null;
+
+                for (const candidatePath of pathsToTry) {
+                  const { data, error: urlError } = await supabase.storage
+                    .from('media')
+                    .createSignedUrl(candidatePath, 3600);
+
+                  if (!urlError && data?.signedUrl) {
+                    signedUrl = data.signedUrl;
+                    break;
+                  }
+
+                  lastError = urlError;
                 }
-                
-                if (data?.signedUrl && isMounted) {
-                  existingUrls[photo.id] = data.signedUrl;
+
+                if (signedUrl && isMounted) {
+                  existingUrls[photo.id] = signedUrl;
+                } else if (lastError) {
+                  console.warn(`Failed to create signed URL for photo ${photo.id}:`, lastError);
                 }
               } catch (error) {
                 // Silently ignore individual photo errors

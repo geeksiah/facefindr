@@ -10,6 +10,10 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { createServiceClient } from '@/lib/supabase/server';
 
+function isSchemaCompatibilityError(error: any): boolean {
+  return error?.code === '42703' || error?.code === '42P01';
+}
+
 function scoreSearchMatch(faceTag: string | null | undefined, displayName: string | null | undefined, normalizedQuery: string) {
   const normalizedFaceTag = (faceTag || '').toLowerCase().replace(/^@/, '');
   const normalizedName = (displayName || '').toLowerCase();
@@ -64,7 +68,7 @@ export async function GET(request: NextRequest) {
 
     // Search photographers
     if (type === 'all' || type === 'photographers') {
-      const { data: exactPhotographers } = await serviceClient
+      const exactPhotographersQuery = await serviceClient
         .from('photographers')
         .select(`
           id, display_name, face_tag, profile_photo_url, bio, 
@@ -74,7 +78,7 @@ export async function GET(request: NextRequest) {
         .eq('face_tag', exactFaceTag)
         .limit(1);
 
-      const { data: photographers } = await serviceClient
+      const photographersQuery = await serviceClient
         .from('photographers')
         .select(`
           id, display_name, face_tag, profile_photo_url, bio, 
@@ -84,6 +88,32 @@ export async function GET(request: NextRequest) {
         .or(`face_tag.ilike.%${safeSearchTerm}%,display_name.ilike.%${safeSearchTerm}%`)
         .order('follower_count', { ascending: false })
         .limit(Math.min(limit * 3, 100));
+
+      let exactPhotographers = exactPhotographersQuery.data || [];
+      let photographers = photographersQuery.data || [];
+
+      if (exactPhotographersQuery.error || photographersQuery.error) {
+        const compatibilityError = exactPhotographersQuery.error || photographersQuery.error;
+
+        if (isSchemaCompatibilityError(compatibilityError)) {
+          const exactFallbackQuery = await serviceClient
+            .from('photographers')
+            .select('id, display_name, face_tag, profile_photo_url, bio')
+            .eq('face_tag', exactFaceTag)
+            .limit(1);
+
+          const fallbackQuery = await serviceClient
+            .from('photographers')
+            .select('id, display_name, face_tag, profile_photo_url, bio')
+            .or(`face_tag.ilike.%${safeSearchTerm}%,display_name.ilike.%${safeSearchTerm}%`)
+            .limit(Math.min(limit * 3, 100));
+
+          exactPhotographers = exactFallbackQuery.data || [];
+          photographers = fallbackQuery.data || [];
+        } else {
+          console.error('Photographer search query error:', exactPhotographersQuery.error || photographersQuery.error);
+        }
+      }
 
       const creatorCandidates = dedupeById([...(exactPhotographers || []), ...(photographers || [])]);
       const creatorIds = creatorCandidates.map((p: any) => p.id);
@@ -117,7 +147,7 @@ export async function GET(request: NextRequest) {
 
     // Search users/attendees (only if they have public profiles)
     if (type === 'all' || type === 'users') {
-      const { data: exactUsers } = await serviceClient
+      const exactUsersQuery = await serviceClient
         .from('attendees')
         .select(`
           id, display_name, face_tag, profile_photo_url, 
@@ -127,7 +157,7 @@ export async function GET(request: NextRequest) {
         .eq('face_tag', exactFaceTag)
         .limit(1);
 
-      const { data: users } = await serviceClient
+      const usersQuery = await serviceClient
         .from('attendees')
         .select(`
           id, display_name, face_tag, profile_photo_url, 
@@ -136,6 +166,32 @@ export async function GET(request: NextRequest) {
         .eq('is_public_profile', true)
         .or(`face_tag.ilike.%${safeSearchTerm}%,display_name.ilike.%${safeSearchTerm}%`)
         .limit(Math.min(limit * 3, 100));
+
+      let exactUsers = exactUsersQuery.data || [];
+      let users = usersQuery.data || [];
+
+      if (exactUsersQuery.error || usersQuery.error) {
+        const compatibilityError = exactUsersQuery.error || usersQuery.error;
+
+        if (isSchemaCompatibilityError(compatibilityError)) {
+          const exactFallbackQuery = await serviceClient
+            .from('attendees')
+            .select('id, display_name, face_tag, profile_photo_url')
+            .eq('face_tag', exactFaceTag)
+            .limit(1);
+
+          const fallbackQuery = await serviceClient
+            .from('attendees')
+            .select('id, display_name, face_tag, profile_photo_url')
+            .or(`face_tag.ilike.%${safeSearchTerm}%,display_name.ilike.%${safeSearchTerm}%`)
+            .limit(Math.min(limit * 3, 100));
+
+          exactUsers = exactFallbackQuery.data || [];
+          users = fallbackQuery.data || [];
+        } else {
+          console.error('Attendee search query error:', exactUsersQuery.error || usersQuery.error);
+        }
+      }
 
       const attendeeCandidates = dedupeById([...(exactUsers || []), ...(users || [])]);
       const attendeeIds = attendeeCandidates.map((u: any) => u.id);

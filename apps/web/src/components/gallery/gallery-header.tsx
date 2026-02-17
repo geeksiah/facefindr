@@ -56,6 +56,7 @@ export function GallerySearch() {
     }
     const controller = new AbortController();
     abortControllerRef.current = controller;
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
 
     setIsSearching(true);
     setShowResults(true);
@@ -69,13 +70,15 @@ export function GallerySearch() {
         { signal: controller.signal, cache: 'no-store' }
       );
 
-      if (response.ok) {
-        const data = await response.json();
-        newResults.push(
-          ...(data.photographers || []).map((person: any) => ({ ...person, type: 'photographer' as const })),
-          ...(data.users || []).map((person: any) => ({ ...person, type: 'attendee' as const }))
-        );
+      if (!response.ok) {
+        throw new Error(`Search request failed (${response.status})`);
       }
+
+      const data = await response.json();
+      newResults.push(
+        ...(data.photographers || []).map((person: any) => ({ ...person, type: 'photographer' as const })),
+        ...(data.users || []).map((person: any) => ({ ...person, type: 'attendee' as const }))
+      );
 
       if (requestId === activeSearchRequestRef.current) {
         setResults(newResults);
@@ -89,6 +92,7 @@ export function GallerySearch() {
         setResults([]);
       }
     } finally {
+      clearTimeout(timeoutId);
       if (requestId === activeSearchRequestRef.current) {
         setIsSearching(false);
       }

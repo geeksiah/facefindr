@@ -4,6 +4,26 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
+function isMissingColumnError(error: any, column: string): boolean {
+  return (
+    error?.code === '42703' &&
+    typeof error?.message === 'string' &&
+    error.message.includes(column)
+  );
+}
+
+function isUuidPrefixSlug(value: string): boolean {
+  return /^[0-9a-f]{8}$/i.test(value);
+}
+
+function getUuidPrefixBounds(prefix: string) {
+  const normalized = prefix.toLowerCase();
+  return {
+    lower: `${normalized}-0000-0000-0000-000000000000`,
+    upper: `${normalized}-ffff-ffff-ffff-ffffffffffff`,
+  };
+}
+
 // GET - Get public event by slug
 export async function GET(
   request: NextRequest,
@@ -47,7 +67,6 @@ export async function GET(
         public_slug,
         short_link,
         is_public,
-        is_publicly_listed,
         allow_anonymous_scan,
         require_access_code,
         public_access_code,
@@ -66,7 +85,6 @@ export async function GET(
         public_slug,
         short_link,
         is_public,
-        is_publicly_listed,
         allow_anonymous_scan,
         require_access_code,
         public_access_code,
@@ -74,7 +92,31 @@ export async function GET(
         status
       `;
 
-    const lookupEventBySlug = async (selectClause: string) => {
+    const compatibilityEventSelect = `
+        id,
+        name,
+        description,
+        event_date,
+        location,
+        cover_image_url,
+        is_public,
+        photographer_id,
+        status
+      `;
+
+    const isUuidPrefix = isUuidPrefixSlug(slug);
+
+    const lookupEventBySlug = async (
+      selectClause: string,
+      options?: {
+        allowPublicSlug?: boolean;
+        allowShortLink?: boolean;
+        allowUuidPrefix?: boolean;
+      }
+    ) => {
+      const allowPublicSlug = options?.allowPublicSlug ?? true;
+      const allowShortLink = options?.allowShortLink ?? true;
+      const allowUuidPrefix = options?.allowUuidPrefix ?? true;
       let eventBySlug: any = null;
       let slugError: any = null;
 
@@ -87,16 +129,18 @@ export async function GET(
         eventBySlug = uuidResult.data;
         slugError = uuidResult.error;
       } else {
-        const byPublicSlug = await serviceClient
-          .from('events')
-          .select(selectClause)
-          .eq('public_slug', slug)
-          .maybeSingle();
+        if (allowPublicSlug) {
+          const byPublicSlug = await serviceClient
+            .from('events')
+            .select(selectClause)
+            .eq('public_slug', slug)
+            .maybeSingle();
 
-        eventBySlug = byPublicSlug.data;
-        slugError = byPublicSlug.error;
+          eventBySlug = byPublicSlug.data;
+          slugError = byPublicSlug.error;
+        }
 
-        if (!eventBySlug && !slugError) {
+        if (!eventBySlug && !slugError && allowShortLink) {
           const byShortLink = await serviceClient
             .from('events')
             .select(selectClause)
@@ -106,12 +150,12 @@ export async function GET(
           slugError = byShortLink.error;
         }
 
-        if (!eventBySlug && !slugError) {
+        if (!eventBySlug && !slugError && (allowPublicSlug || allowShortLink)) {
           const lower = slug.toLowerCase();
           const upper = slug.toUpperCase();
           const variants = Array.from(new Set([slug, lower, upper]));
 
-          if (variants.length > 1) {
+          if (variants.length > 1 && allowPublicSlug) {
             const byPublicSlugVariants = await serviceClient
               .from('events')
               .select(selectClause)
@@ -120,16 +164,37 @@ export async function GET(
 
             eventBySlug = byPublicSlugVariants.data;
             slugError = byPublicSlugVariants.error;
+          }
 
-            if (!eventBySlug && !slugError) {
-              const byShortLinkVariants = await serviceClient
-                .from('events')
-                .select(selectClause)
-                .in('short_link', variants)
-                .maybeSingle();
-              eventBySlug = byShortLinkVariants.data;
-              slugError = byShortLinkVariants.error;
-            }
+          if (variants.length > 1 && !eventBySlug && !slugError && allowShortLink) {
+            const byShortLinkVariants = await serviceClient
+              .from('events')
+              .select(selectClause)
+              .in('short_link', variants)
+              .maybeSingle();
+            eventBySlug = byShortLinkVariants.data;
+            slugError = byShortLinkVariants.error;
+          }
+        }
+
+        if (!eventBySlug && !slugError && allowUuidPrefix && isUuidPrefix) {
+          const bounds = getUuidPrefixBounds(slug);
+          const byUuidPrefix = await serviceClient
+            .from('events')
+            .select(selectClause)
+            .gte('id', bounds.lower)
+            .lte('id', bounds.upper)
+            .order('status', { ascending: false })
+            .limit(2);
+
+          if (byUuidPrefix.error) {
+            slugError = byUuidPrefix.error;
+          } else {
+            const prefixMatches = byUuidPrefix.data || [];
+            eventBySlug =
+              prefixMatches.find((candidate: any) => candidate.status === 'active') ||
+              prefixMatches[0] ||
+              null;
           }
         }
       }
@@ -141,13 +206,32 @@ export async function GET(
 
     // Backward compatibility: if DB migration for event_start_at_utc is not applied yet.
     const missingStartAtUtcColumn =
-      slugError?.code === '42703' ||
-      (typeof slugError?.message === 'string' && slugError.message.includes('event_start_at_utc'));
+      isMissingColumnError(slugError, 'event_start_at_utc') ||
+      isMissingColumnError(slugError, 'event_timezone');
 
     if (missingStartAtUtcColumn) {
       const legacyLookup = await lookupEventBySlug(legacyEventSelect);
       eventBySlug = legacyLookup.eventBySlug;
       slugError = legacyLookup.slugError;
+    }
+
+    const missingPublicLinkColumns =
+      isMissingColumnError(slugError, 'public_slug') ||
+      isMissingColumnError(slugError, 'short_link');
+
+    const missingPublicAccessColumns =
+      isMissingColumnError(slugError, 'allow_anonymous_scan') ||
+      isMissingColumnError(slugError, 'require_access_code') ||
+      isMissingColumnError(slugError, 'public_access_code');
+
+    if (missingPublicLinkColumns || missingPublicAccessColumns) {
+      const compatibilityLookup = await lookupEventBySlug(compatibilityEventSelect, {
+        allowPublicSlug: false,
+        allowShortLink: false,
+        allowUuidPrefix: true,
+      });
+      eventBySlug = compatibilityLookup.eventBySlug;
+      slugError = compatibilityLookup.slugError;
     }
 
     // If event doesn't exist, return 404
@@ -198,6 +282,11 @@ export async function GET(
     }
 
     const event = eventBySlug;
+    const eventTimezone = event.event_timezone || 'UTC';
+    const isPublicEvent = event.is_public ?? false;
+    const requireAccessCode = event.require_access_code ?? false;
+    const allowAnonymousScan = event.allow_anonymous_scan ?? true;
+    const eventAccessCode = event.public_access_code ?? null;
 
     // Now get photographer details (using service client for consistency)
     const { data: photographer } = await serviceClient
@@ -236,7 +325,7 @@ export async function GET(
     // 3. If event is public OR has valid code OR allows anonymous scan, grant access
     
     // Check access code if required
-    if (!previewAuthorized && event.require_access_code) {
+    if (!previewAuthorized && requireAccessCode) {
       if (!code) {
         // Show access code entry form
         const coverPath = event.cover_image_url?.startsWith('/')
@@ -253,7 +342,7 @@ export async function GET(
             event: {
               id: event.id,
               name: event.name,
-              require_access_code: true,
+              require_access_code: requireAccessCode,
               cover_image_url: coverImageUrl,
             },
           },
@@ -262,14 +351,14 @@ export async function GET(
       }
 
       // Validate access code
-      if (code.toUpperCase() !== event.public_access_code?.toUpperCase()) {
+      if (code.toUpperCase() !== eventAccessCode?.toUpperCase()) {
         return NextResponse.json({ error: 'Invalid access code' }, { status: 403 });
       }
     }
 
     // For private events without code, check if anonymous scan is allowed
     // (This allows face scanning even for private events if photographer enabled it)
-    if (!previewAuthorized && !event.is_public && !event.require_access_code && !event.allow_anonymous_scan) {
+    if (!previewAuthorized && !isPublicEvent && !requireAccessCode && !allowAnonymousScan) {
       return NextResponse.json(
         { error: 'Event is private', message: 'This event is not publicly accessible.' },
         { status: 403 }
@@ -304,13 +393,13 @@ export async function GET(
         date: event.event_date,
         event_date: event.event_date,
         event_start_at_utc: event.event_start_at_utc || null,
-        event_timezone: event.event_timezone || 'UTC',
+        event_timezone: eventTimezone,
         location: event.location,
         cover_image_url: coverImageUrl,
         photo_count: photoCount || 0,
-        allow_anonymous_scan: event.allow_anonymous_scan,
-        require_access_code: event.require_access_code,
-        is_public: event.is_public,
+        allow_anonymous_scan: allowAnonymousScan,
+        require_access_code: requireAccessCode,
+        is_public: isPublicEvent,
         // Primary photographer
         photographer: photographer,
         // All photographers (for multi-photographer events)

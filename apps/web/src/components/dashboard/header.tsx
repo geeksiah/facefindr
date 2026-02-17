@@ -69,6 +69,7 @@ export function DashboardHeader() {
     }
     const controller = new AbortController();
     abortControllerRef.current = controller;
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
 
     setIsSearching(true);
     setShowResults(true);
@@ -82,18 +83,20 @@ export function DashboardHeader() {
         { signal: controller.signal, cache: 'no-store' }
       );
 
-      if (socialResponse.ok) {
-        const socialData = await socialResponse.json();
-        const photographers = (socialData.photographers || []).map((person: any) => ({
-          ...person,
-          type: 'photographer' as const,
-        }));
-        const users = (socialData.users || []).map((person: any) => ({
-          ...person,
-          type: 'attendee' as const,
-        }));
-        results.push(...photographers, ...users);
+      if (!socialResponse.ok) {
+        throw new Error(`Search request failed (${socialResponse.status})`);
       }
+
+      const socialData = await socialResponse.json();
+      const photographers = (socialData.photographers || []).map((person: any) => ({
+        ...person,
+        type: 'photographer' as const,
+      }));
+      const users = (socialData.users || []).map((person: any) => ({
+        ...person,
+        type: 'attendee' as const,
+      }));
+      results.push(...photographers, ...users);
 
       // Keep event search for creator dashboard usability.
       if (trimmedQuery.length >= 2) {
@@ -120,6 +123,7 @@ export function DashboardHeader() {
         setSearchResults([]);
       }
     } finally {
+      clearTimeout(timeoutId);
       if (requestId === activeSearchRequestRef.current) {
         setIsSearching(false);
       }
