@@ -8,7 +8,6 @@ import { Button } from '@/components/ui/button';
 import { Lightbox } from '@/components/ui/lightbox';
 import { useToast, useConfirm } from '@/components/ui/toast';
 import { useRealtimeSubscription } from '@/hooks/use-realtime';
-import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
 
 import { deletePhoto } from './actions';
@@ -44,9 +43,7 @@ function buildStoragePathCandidates(path: string | null | undefined): string[] {
 
   const normalized = trimmed.replace(/^\/+/, '');
   const withoutBucketPrefix = normalized.replace(/^media\//, '');
-  const withBucketPrefix = normalized.startsWith('media/') ? normalized : `media/${normalized}`;
-
-  return Array.from(new Set([normalized, withoutBucketPrefix, withBucketPrefix].filter(Boolean)));
+  return Array.from(new Set([normalized, withoutBucketPrefix].filter(Boolean)));
 }
 
 export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryProps) {
@@ -88,7 +85,6 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
 
     async function loadPhotoUrls() {
       try {
-        const supabase = createClient();
         const existingUrls: Record<string, string> = {};
         const missingPhotos = photos.filter((photo) => !photoUrls[photo.id]);
 
@@ -107,69 +103,37 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
           if (!isMounted) break;
           
           const batch = missingPhotos.slice(i, i + batchSize);
-          await Promise.all(
-            batch.map(async (photo) => {
-              try {
-                const candidatePaths = [
-                  ...buildStoragePathCandidates(photo.thumbnail_path),
-                  ...buildStoragePathCandidates(photo.storage_path),
-                ];
+          const sanitizedBatch = batch.map((photo) => ({
+            id: photo.id,
+            storage_path: buildStoragePathCandidates(photo.storage_path)[0] || photo.storage_path || null,
+            thumbnail_path: buildStoragePathCandidates(photo.thumbnail_path)[0] || photo.thumbnail_path || null,
+          }));
 
-                if (candidatePaths.length === 0) {
-                  console.warn(`Photo ${photo.id} has no storage path`);
-                  return;
+          try {
+            const response = await fetch(`/api/events/${eventId}/media/signed-urls`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ photos: sanitizedBatch }),
+              cache: 'no-store',
+            });
+
+            if (!response.ok) {
+              console.warn(`Failed to load signed URLs for batch ${i / batchSize + 1}:`, response.status);
+            } else {
+              const data = await response.json();
+              const batchUrls = data?.urls || {};
+              for (const [photoId, signedUrl] of Object.entries(batchUrls)) {
+                if (typeof signedUrl === 'string' && signedUrl.length > 0) {
+                  existingUrls[photoId] = signedUrl;
                 }
-
-                const directUrl = candidatePaths.find(
-                  (candidatePath) =>
-                    candidatePath.startsWith('http://') || candidatePath.startsWith('https://')
-                );
-
-                if (directUrl) {
-                  existingUrls[photo.id] = directUrl;
-                  return;
-                }
-
-                const pathsToTry = Array.from(
-                  new Set(
-                    candidatePaths.filter(
-                      (candidatePath) =>
-                        !candidatePath.startsWith('http://') &&
-                        !candidatePath.startsWith('https://')
-                    )
-                  )
-                );
-
-                let signedUrl: string | null = null;
-                let lastError: unknown = null;
-
-                for (const candidatePath of pathsToTry) {
-                  const { data, error: urlError } = await supabase.storage
-                    .from('media')
-                    .createSignedUrl(candidatePath, 3600);
-
-                  if (!urlError && data?.signedUrl) {
-                    signedUrl = data.signedUrl;
-                    break;
-                  }
-
-                  lastError = urlError;
-                }
-
-                if (signedUrl && isMounted) {
-                  existingUrls[photo.id] = signedUrl;
-                } else if (lastError) {
-                  console.warn(`Failed to create signed URL for photo ${photo.id}:`, lastError);
-                }
-              } catch (error) {
-                // Silently ignore individual photo errors
-                if (error instanceof Error && error.name === 'AbortError') {
-                  return;
-                }
-                console.error(`Failed to load photo ${photo.id}:`, error);
               }
-            })
-          );
+            }
+          } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+              continue;
+            }
+            console.error(`Failed to load signed URLs for batch ${i / batchSize + 1}:`, error);
+          }
 
           if (isMounted) {
             setPhotoUrls((prev) => ({ ...prev, ...existingUrls }));

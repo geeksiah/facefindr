@@ -58,6 +58,7 @@ export function useSSEWithPolling<T>({
     if (!enabled) return;
 
     let cancelled = false;
+    let streamErrorCount = 0;
     lastMessageAtRef.current = Date.now();
     healthRef.current = 'stale';
 
@@ -65,13 +66,35 @@ export function useSSEWithPolling<T>({
     void onPoll().catch((error) => onError?.(error));
     schedulePolling();
 
+    const resolvedUrl = (() => {
+      try {
+        if (typeof window === 'undefined') return url;
+        return new URL(url, window.location.origin).toString();
+      } catch (error) {
+        onError?.(error);
+        return null;
+      }
+    })();
+
     try {
-      const es = new EventSource(url);
+      if (!resolvedUrl) {
+        return () => {
+          cancelled = true;
+          clearPolling();
+          if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+            eventSourceRef.current = null;
+          }
+        };
+      }
+
+      const es = new EventSource(resolvedUrl);
       eventSourceRef.current = es;
 
       const markHealthy = () => {
         lastMessageAtRef.current = Date.now();
         healthRef.current = 'healthy';
+        streamErrorCount = 0;
       };
 
       es.addEventListener('ready', markHealthy);
@@ -87,6 +110,12 @@ export function useSSEWithPolling<T>({
 
       es.onerror = (error) => {
         healthRef.current = 'stale';
+        streamErrorCount += 1;
+        // Stop SSE after repeated failures and rely on polling fallback.
+        if (streamErrorCount >= 3) {
+          es.close();
+          eventSourceRef.current = null;
+        }
         onError?.(error);
       };
     } catch (error) {
@@ -122,4 +151,3 @@ export function useSSEWithPolling<T>({
     url,
   ]);
 }
-
