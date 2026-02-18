@@ -31,6 +31,8 @@ interface AttendeeProfile {
   createdAt: string;
   totalPhotos: number;
   totalEvents: number;
+  followersCount: number;
+  followingCount: number;
 }
 
 export default function ProfilePage() {
@@ -235,6 +237,23 @@ export default function ProfilePage() {
               </p>
               <p className="text-xs text-secondary">Face Profiles</p>
             </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Link
+              href="/gallery/followers"
+              className="text-center p-3 rounded-xl bg-muted/30 hover:bg-muted/50 transition-colors"
+            >
+              <p className="text-2xl font-bold text-foreground">{profile.followersCount || 0}</p>
+              <p className="text-xs text-secondary">Followers</p>
+            </Link>
+            <Link
+              href="/gallery/following"
+              className="text-center p-3 rounded-xl bg-muted/30 hover:bg-muted/50 transition-colors"
+            >
+              <p className="text-2xl font-bold text-foreground">{profile.followingCount || 0}</p>
+              <p className="text-xs text-secondary">Following</p>
+            </Link>
           </div>
         </div>
       </div>

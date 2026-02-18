@@ -48,6 +48,7 @@ const menuItems = [
   { href: '/gallery/events', label: 'My Events', icon: Camera },
   { href: '/gallery/vault', label: 'Photo Vault', icon: Lock },
   { href: '/gallery/drop-in', label: 'Drop-In', icon: Zap },
+  { href: '/gallery/followers', label: 'Followers', icon: Users },
   { href: '/gallery/following', label: 'Following', icon: Users },
   { href: '/gallery/notifications', label: 'Notifications', icon: Bell },
   { href: '/gallery/billing', label: 'Billing', icon: CreditCard },

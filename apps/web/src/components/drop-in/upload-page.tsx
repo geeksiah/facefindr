@@ -1,6 +1,7 @@
 'use client';
 
-import { AlertCircle, Check, DollarSign, Gift, Loader2, MapPin, Upload, X } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Check, DollarSign, Gift, Loader2, MapPin, Upload, X } from 'lucide-react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
@@ -124,6 +125,13 @@ export function DropInUploadPage({ basePath }: DropInUploadPageProps) {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
+      <Button asChild variant="ghost" className="w-fit px-0 text-muted-foreground hover:text-foreground">
+        <Link href={basePath}>
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Back to Drop-In Hub
+        </Link>
+      </Button>
+
       <div>
         <h1 className="text-3xl font-bold text-foreground">Upload Drop-In Photo</h1>
         <p className="mt-2 text-secondary">

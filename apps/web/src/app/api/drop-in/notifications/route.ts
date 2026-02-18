@@ -151,27 +151,29 @@ export async function POST(request: NextRequest) {
 
     const uploaderId = dropInPhoto?.uploader_id || null;
 
-    // Check premium access if required
-    if (notification.requires_premium && !notification.is_gifted) {
-      const { data: subscription } = await supabase
-        .from('attendee_subscriptions')
-        .select('plan_code, status')
-        .eq('attendee_id', user.id)
-        .eq('status', 'active')
-        .single();
-
-      if (!subscription || !['premium', 'premium_plus'].includes(subscription.plan_code)) {
-        return NextResponse.json(
-          { error: 'Premium subscription required' },
-          { status: 403 }
-        );
-      }
-    }
-
     // Update notification based on action
     const updates: any = {};
 
     if (action === 'view') {
+      if (notification.requires_premium && !notification.is_gifted && !notification.viewed_at) {
+        const { data: creditsConsumed, error: creditsError } = await supabase.rpc('use_drop_in_credits', {
+          p_attendee_id: user.id,
+          p_action: 'drop_in_recipient_unlock',
+          p_credits_needed: 1,
+          p_metadata: {
+            notification_id: notification.id,
+            drop_in_photo_id: notification.drop_in_photo_id,
+          },
+        });
+
+        if (creditsError || !creditsConsumed) {
+          return NextResponse.json(
+            { error: 'Drop-In credit required to open this photo' },
+            { status: 402 }
+          );
+        }
+      }
+
       updates.status = 'viewed';
       updates.viewed_at = new Date().toISOString();
 

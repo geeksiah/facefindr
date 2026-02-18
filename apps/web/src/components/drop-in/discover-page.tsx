@@ -1,6 +1,7 @@
 'use client';
 
-import { Calendar, Eye, Gift, Loader2, Lock, MapPin, Sparkles, User } from 'lucide-react';
+import { ArrowLeft, Calendar, Eye, Gift, Loader2, Lock, MapPin, Sparkles, User } from 'lucide-react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
@@ -20,6 +21,7 @@ interface DropInPhoto {
     id: string;
     display_name: string;
     face_tag: string;
+    profile_photo_url?: string | null;
   } | null;
   isGifted: boolean;
   giftMessage: string | null;
@@ -37,7 +39,6 @@ export function DropInDiscoverPage({ basePath, upgradePath }: DropInDiscoverPage
   const [photos, setPhotos] = useState<DropInPhoto[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPhoto, setSelectedPhoto] = useState<DropInPhoto | null>(null);
-  const [showGiftMessage, setShowGiftMessage] = useState(false);
   const [decisionLoading, setDecisionLoading] = useState<'accept_connection' | 'decline_connection' | null>(null);
 
   useEffect(() => {
@@ -76,7 +77,7 @@ export function DropInDiscoverPage({ basePath, upgradePath }: DropInDiscoverPage
 
   const handleViewPhoto = async (photo: DropInPhoto) => {
     try {
-      await fetch('/api/drop-in/notifications', {
+      const response = await fetch('/api/drop-in/notifications', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -84,14 +85,23 @@ export function DropInDiscoverPage({ basePath, upgradePath }: DropInDiscoverPage
           action: 'view',
         }),
       });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        if (response.status === 402) {
+          toast.error('Payment required', data.error || 'Buy Drop-In credits to open this photo');
+          router.push(upgradePath);
+          return;
+        }
+        throw new Error(data.error || 'Unable to open Drop-In photo');
+      }
     } catch (error) {
       console.error('Failed to mark as viewed:', error);
+      toast.error('Open failed', 'Unable to open this Drop-In photo right now');
+      return;
     }
 
     setSelectedPhoto(photo);
-    if (photo.isGifted && photo.giftMessage) {
-      setShowGiftMessage(true);
-    }
   };
 
   const handleConnectionDecision = async (action: 'accept_connection' | 'decline_connection') => {
@@ -145,6 +155,13 @@ export function DropInDiscoverPage({ basePath, upgradePath }: DropInDiscoverPage
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
+      <Button asChild variant="ghost" className="w-fit px-0 text-muted-foreground hover:text-foreground">
+        <Link href={basePath}>
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Back to Drop-In Hub
+        </Link>
+      </Button>
+
       <div>
         <h1 className="text-3xl font-bold text-foreground">Drop-In Photos</h1>
         <p className="mt-2 text-secondary">Photos of you uploaded by people outside your contacts</p>
@@ -253,7 +270,6 @@ export function DropInDiscoverPage({ basePath, upgradePath }: DropInDiscoverPage
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-4"
           onClick={() => {
             setSelectedPhoto(null);
-            setShowGiftMessage(false);
           }}
         >
           <div
@@ -269,9 +285,19 @@ export function DropInDiscoverPage({ basePath, upgradePath }: DropInDiscoverPage
                 <div>
                   {selectedPhoto.uploader && (
                     <div className="mb-2 flex items-center gap-2">
-                      <User className="h-4 w-4 text-secondary" />
-                      <span className="font-semibold text-foreground">{selectedPhoto.uploader.display_name}</span>
-                      <span className="text-sm text-secondary">{selectedPhoto.uploader.face_tag}</span>
+                      {selectedPhoto.uploader.profile_photo_url ? (
+                        <img
+                          src={selectedPhoto.uploader.profile_photo_url}
+                          alt={selectedPhoto.uploader.display_name}
+                          className="h-8 w-8 rounded-full object-cover"
+                        />
+                      ) : (
+                        <User className="h-4 w-4 text-secondary" />
+                      )}
+                      <div>
+                        <p className="font-semibold text-foreground">{selectedPhoto.uploader.display_name}</p>
+                        <p className="text-sm text-secondary">{selectedPhoto.uploader.face_tag}</p>
+                      </div>
                     </div>
                   )}
                   {selectedPhoto.locationName && (
@@ -291,28 +317,20 @@ export function DropInDiscoverPage({ basePath, upgradePath }: DropInDiscoverPage
                 </div>
               </div>
 
-              {selectedPhoto.isGifted && selectedPhoto.giftMessage && showGiftMessage && (
+              {selectedPhoto.giftMessage && (
                 <div className="rounded-xl border border-accent/20 bg-accent/5 p-4">
                   <div className="mb-2 flex items-center gap-2">
                     <Gift className="h-4 w-4 text-accent" />
-                    <span className="font-semibold text-foreground">Gift Message</span>
+                    <span className="font-semibold text-foreground">Sender Message</span>
                   </div>
                   <p className="text-foreground">{selectedPhoto.giftMessage}</p>
                 </div>
-              )}
-
-              {selectedPhoto.isGifted && selectedPhoto.giftMessage && !showGiftMessage && (
-                <Button onClick={() => setShowGiftMessage(true)} variant="outline" className="w-full">
-                  <Gift className="mr-2 h-4 w-4" />
-                  View Gift Message
-                </Button>
               )}
 
               <div className="flex gap-4 border-t border-border pt-4">
                 <Button
                   onClick={() => {
                     setSelectedPhoto(null);
-                    setShowGiftMessage(false);
                   }}
                   variant="outline"
                   className="flex-1"

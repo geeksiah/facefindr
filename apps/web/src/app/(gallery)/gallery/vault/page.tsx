@@ -20,9 +20,9 @@ interface VaultPhoto {
 
 export default function VaultPage() {
   const toast = useToast();
-  const supabase = createClient();
   const [photos, setPhotos] = useState<VaultPhoto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -30,10 +30,15 @@ export default function VaultPage() {
   }, []);
 
   const loadVaultPhotos = async () => {
+    const supabase = createClient();
     try {
       setIsLoading(true);
+      setErrorMessage(null);
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        setPhotos([]);
+        return;
+      }
 
       // Get entitlements (purchased photos)
       const { data: entitlements, error } = await supabase
@@ -56,6 +61,7 @@ export default function VaultPage() {
 
       if (error) {
         console.error('Error loading vault:', error);
+        setErrorMessage('Unable to load your vault right now.');
         return;
       }
 
@@ -70,6 +76,11 @@ export default function VaultPage() {
           purchasedAt: e.created_at,
           expiresAt: e.expires_at,
         }));
+
+      if (rawPhotos.length === 0) {
+        setPhotos([]);
+        return;
+      }
 
       // Generate signed URLs in batches (private bucket)
       const vaultPhotos: VaultPhoto[] = [];
@@ -91,6 +102,11 @@ export default function VaultPage() {
             ? supabase.storage.from('media').createSignedUrls(fullPaths, 3600)
             : { data: null },
         ]);
+
+        if ((thumbResult as any).error || (fullResult as any).error) {
+          console.error('Vault signed URL error:', (thumbResult as any).error || (fullResult as any).error);
+          setErrorMessage('Some photos could not be loaded. Please refresh.');
+        }
 
         const thumbUrls = new Map<string, string>();
         const fullUrls = new Map<string, string>();
@@ -119,6 +135,7 @@ export default function VaultPage() {
       setPhotos(vaultPhotos);
     } catch (err) {
       console.error('Failed to load vault:', err);
+      setErrorMessage('Failed to load your vault.');
     } finally {
       setIsLoading(false);
     }
@@ -143,6 +160,7 @@ export default function VaultPage() {
     }
 
     toast.success('Download Started', `Downloading ${selectedPhotos.size} photos...`);
+    const supabase = createClient();
     
     for (const photoId of selectedPhotos) {
       const photo = photos.find(p => p.id === photoId);
@@ -219,6 +237,12 @@ export default function VaultPage() {
           </div>
         </div>
       </div>
+
+      {errorMessage && (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-foreground">
+          {errorMessage}
+        </div>
+      )}
 
       {/* Photo Grid */}
       {photos.length === 0 ? (

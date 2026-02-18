@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertCircle, Check, Loader2 } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Check, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 
 type VerifyState = 'processing' | 'completed' | 'failed_payment' | 'processing_failed' | 'timeout';
+type DropInStatusViewState = VerifyState | 'awaiting_payment' | 'idle';
 
 const MAX_ATTEMPTS = 30;
 const POLL_INTERVAL_MS = 2000;
@@ -18,13 +19,9 @@ interface DropInSuccessPageProps {
 
 export function DropInSuccessPage({ basePath }: DropInSuccessPageProps) {
   const searchParams = useSearchParams();
-  const [state, setState] = useState<VerifyState>('processing');
-  const [message, setMessage] = useState('Verifying payment and processing your Drop-In upload...');
-  const [attempts, setAttempts] = useState(0);
-
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
-    const keys = ['session_id', 'tx_ref', 'order_id', 'reference', 'provider'];
+    const keys = ['session_id', 'tx_ref', 'order_id', 'reference', 'provider', 'photo_id'];
 
     for (const key of keys) {
       const value = searchParams?.get(key);
@@ -35,6 +32,17 @@ export function DropInSuccessPage({ basePath }: DropInSuccessPageProps) {
 
     return params.toString();
   }, [searchParams]);
+
+  const hasTrackingParams = queryString.length > 0;
+  const [state, setState] = useState<DropInStatusViewState>(
+    hasTrackingParams ? 'processing' : 'idle'
+  );
+  const [message, setMessage] = useState(
+    hasTrackingParams
+      ? 'Verifying payment and processing your Drop-In upload...'
+      : 'No upload session selected. Start an upload to track live status.'
+  );
+  const [attempts, setAttempts] = useState(0);
 
   const verify = useCallback(async () => {
     try {
@@ -71,6 +79,12 @@ export function DropInSuccessPage({ basePath }: DropInSuccessPageProps) {
         return true;
       }
 
+      if (status === 'awaiting_payment') {
+        setState('awaiting_payment');
+        setMessage('Awaiting payment confirmation. Complete checkout, then refresh this page.');
+        return true;
+      }
+
       if (status === 'processing_failed') {
         setState('processing_failed');
         setMessage('Payment succeeded, but processing failed. Please retry processing.');
@@ -86,6 +100,17 @@ export function DropInSuccessPage({ basePath }: DropInSuccessPageProps) {
   }, [queryString]);
 
   useEffect(() => {
+    if (!hasTrackingParams) {
+      setState('idle');
+      setMessage('No upload session selected. Start an upload to track live status.');
+      setAttempts(0);
+      return;
+    }
+
+    setState('processing');
+    setMessage('Verifying payment and processing your Drop-In upload...');
+    setAttempts(0);
+
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -114,18 +139,41 @@ export function DropInSuccessPage({ basePath }: DropInSuccessPageProps) {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [verify]);
+  }, [hasTrackingParams, verify]);
 
   const isDone = state !== 'processing';
-  const isError = state === 'failed_payment' || state === 'processing_failed' || state === 'timeout';
+  const isError =
+    state === 'failed_payment' || state === 'processing_failed' || state === 'timeout';
+  const title =
+    state === 'processing'
+      ? 'Processing Drop-In'
+      : state === 'idle'
+        ? 'No Upload In Progress'
+        : state === 'awaiting_payment'
+          ? 'Awaiting Payment Confirmation'
+          : isError
+            ? 'Drop-In Needs Attention'
+            : 'Drop-In Completed';
 
   return (
     <div className="min-h-screen p-6">
+      <div className="mx-auto mb-4 mt-4 max-w-md">
+        <Button asChild variant="ghost" className="w-fit px-0 text-muted-foreground hover:text-foreground">
+          <Link href={basePath}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Drop-In Hub
+          </Link>
+        </Button>
+      </div>
       <div className="mx-auto mt-20 max-w-md space-y-6 rounded-2xl border border-border bg-card p-6 text-center">
         {state === 'processing' ? (
           <Loader2 className="mx-auto h-14 w-14 animate-spin text-accent" />
         ) : isError ? (
           <AlertCircle className="mx-auto h-14 w-14 text-destructive" />
+        ) : state === 'awaiting_payment' ? (
+          <AlertCircle className="mx-auto h-14 w-14 text-warning" />
+        ) : state === 'idle' ? (
+          <AlertCircle className="mx-auto h-14 w-14 text-muted-foreground" />
         ) : (
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-success/10">
             <Check className="h-10 w-10 text-success" />
@@ -133,13 +181,7 @@ export function DropInSuccessPage({ basePath }: DropInSuccessPageProps) {
         )}
 
         <div>
-          <h1 className="text-2xl font-bold text-foreground">
-            {state === 'processing'
-              ? 'Processing Drop-In'
-              : isError
-                ? 'Drop-In Needs Attention'
-                : 'Drop-In Completed'}
-          </h1>
+          <h1 className="text-2xl font-bold text-foreground">{title}</h1>
           <p className="mt-2 text-sm text-muted-foreground">{message}</p>
           {!isDone && <p className="mt-1 text-xs text-muted-foreground">Attempt {attempts + 1}</p>}
         </div>

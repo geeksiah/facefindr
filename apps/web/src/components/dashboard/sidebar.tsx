@@ -55,6 +55,7 @@ interface DashboardSidebarProps {
 const mainNavigation: NavItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, exact: true },
   { name: 'Events', href: '/dashboard/events', icon: Calendar },
+  { name: 'Collaborations', href: '/dashboard/collaborations', icon: Users },
   { name: 'Upload', href: '/dashboard/upload', icon: Upload },
   { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
   { name: 'Drop-In', href: '/dashboard/drop-in/upload', icon: Sparkles },

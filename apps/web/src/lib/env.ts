@@ -22,6 +22,12 @@ interface EnvConfig {
   AWS_ACCESS_KEY_ID?: string;
   AWS_SECRET_ACCESS_KEY?: string;
   AWS_REGION?: string;
+
+  // External crawler providers (Drop-In Find Me external search)
+  SERPAPI_KEY?: string;
+  TAVILY_API_KEY?: string;
+  EXA_API_KEY?: string;
+  BING_SEARCH_API_KEY?: string;
   
   // App URL
   NEXT_PUBLIC_APP_URL?: string;
@@ -59,6 +65,10 @@ export function validateEnv(): EnvConfig {
     AWS_ACCESS_KEY_ID: getEnvVar('AWS_ACCESS_KEY_ID'),
     AWS_SECRET_ACCESS_KEY: getEnvVar('AWS_SECRET_ACCESS_KEY'),
     AWS_REGION: getEnvVar('AWS_REGION'),
+    SERPAPI_KEY: getEnvVar('SERPAPI_KEY'),
+    TAVILY_API_KEY: getEnvVar('TAVILY_API_KEY'),
+    EXA_API_KEY: getEnvVar('EXA_API_KEY'),
+    BING_SEARCH_API_KEY: getEnvVar('BING_SEARCH_API_KEY'),
     NEXT_PUBLIC_APP_URL: getEnvVar('NEXT_PUBLIC_APP_URL'),
   };
 
@@ -76,6 +86,10 @@ export function validateEnv(): EnvConfig {
     
     if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY) {
       warnings.push('AWS credentials not set - face recognition will fail');
+    }
+
+    if (!env.SERPAPI_KEY && !env.TAVILY_API_KEY && !env.EXA_API_KEY && !env.BING_SEARCH_API_KEY) {
+      warnings.push('No external crawler provider key found (SERPAPI/TAVILY/EXA/BING) - Drop-In external search will fail');
     }
     
     if (warnings.length > 0) {

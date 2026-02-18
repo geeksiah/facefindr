@@ -12,6 +12,7 @@ interface TipCreatorProps {
   photographerName: string;
   eventId?: string;
   mediaId?: string;
+  currency?: string;
   onSuccess?: () => void;
   onCancel?: () => void;
   className?: string;
@@ -24,6 +25,7 @@ export function TipCreator({
   photographerName,
   eventId,
   mediaId,
+  currency = 'USD',
   onSuccess,
   onCancel,
   className,
@@ -34,6 +36,12 @@ export function TipCreator({
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const formatAmount = (cents: number) =>
+    new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency,
+    }).format(cents / 100);
 
   const handlePresetAmount = (cents: number) => {
     setAmount(cents);
@@ -66,7 +74,7 @@ export function TipCreator({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           amount,
-          currency: 'USD',
+          currency,
           eventId,
           mediaId,
           message: message.trim() || null,
@@ -125,7 +133,7 @@ export function TipCreator({
               onClick={() => handlePresetAmount(cents)}
               className="flex-1"
             >
-              ${(cents / 100).toFixed(0)}
+              {formatAmount(cents)}
             </Button>
           );
         })}
@@ -134,7 +142,7 @@ export function TipCreator({
       {/* Custom Amount */}
       <div>
         <label className="block text-sm font-medium text-foreground mb-1">
-          Custom Amount (minimum $2.00)
+          Custom Amount (minimum {formatAmount(200)})
         </label>
         <Input
           type="number"
@@ -195,13 +203,13 @@ export function TipCreator({
         ) : (
           <>
             <Heart className="h-4 w-4" />
-            Tip ${((selectedAmount || 0) / 100).toFixed(2)}
+            Tip {formatAmount(selectedAmount || 0)}
           </>
         )}
       </Button>
 
       <p className="text-xs text-secondary text-center">
-        Platform fee: ${(((selectedAmount || 0) * 0.10) / 100).toFixed(2)} (10%)
+        Platform fee: {formatAmount(Math.round((selectedAmount || 0) * 0.10))} (10%)
       </p>
     </div>
   );

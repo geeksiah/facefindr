@@ -268,10 +268,13 @@ export default function AttendeeProfilePage() {
 
           {/* Stats */}
           <div className="flex items-center justify-center gap-6 mt-6 text-sm">
-            <div className="text-center">
+            <Link
+              href={`/u/${profile.public_profile_slug || profile.face_tag?.replace(/^@/, '') || profile.id}/followers`}
+              className="text-center hover:opacity-80 transition-opacity"
+            >
               <p className="font-bold text-foreground">{profile.followers_count || 0}</p>
               <p className="text-secondary">Followers</p>
-            </div>
+            </Link>
             <div className="text-center">
               <p className="font-bold text-foreground">{profile.following_count}</p>
               <p className="text-secondary">Following</p>

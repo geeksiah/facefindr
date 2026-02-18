@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/server';
 
 export async function GET(
   request: NextRequest,
@@ -16,7 +16,7 @@ export async function GET(
 ) {
   try {
     const { slug } = params;
-    const supabase = createClient();
+    const supabase = createServiceClient();
 
     // Get photographer by slug or ID
     const { data: photographer } = await supabase
@@ -34,6 +34,7 @@ export async function GET(
       .from('follows')
       .select('id', { count: 'exact', head: true })
       .eq('following_id', photographer.id)
+      .in('following_type', ['creator', 'photographer'])
       .eq('status', 'active');
 
     return NextResponse.json({

@@ -137,7 +137,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Check team member limit based on plan
     const { data: event } = await supabase
       .from('events')
-      .select('photographer_id')
+      .select('id, name, photographer_id')
       .eq('id', eventId)
       .single();
 
@@ -227,7 +227,44 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       throw error;
     }
 
-    // TODO: Send notification to invited photographer
+    // Send in-app notification to invited photographer.
+    try {
+      const inviterName = user.user_metadata?.display_name || user.email?.split('@')[0] || 'A creator';
+      const serviceClient = createServiceClient();
+
+      await serviceClient
+        .from('notifications')
+        .insert({
+          user_id: targetCreatorId,
+          template_code: 'event_collaboration_invite',
+          channel: 'in_app',
+          subject: `Invitation: ${event.name}`,
+          body: `${inviterName} invited you to collaborate on "${event.name}".`,
+          variables: {
+            eventId,
+            eventName: event.name,
+            role: collaborator.role,
+            inviterId: user.id,
+            inviterName,
+          },
+          status: 'sent',
+          sent_at: new Date().toISOString(),
+          metadata: {
+            type: 'event_collaboration_invite',
+            eventId,
+            collaboratorId: collaborator.id,
+            inviterId: user.id,
+            role: collaborator.role,
+            links: {
+              collaborations: '/dashboard/collaborations',
+              event: `/dashboard/events/${eventId}`,
+            },
+          },
+        })
+        .throwOnError();
+    } catch (notificationError) {
+      console.error('Failed to create collaboration notification:', notificationError);
+    }
 
     return NextResponse.json({
       success: true,

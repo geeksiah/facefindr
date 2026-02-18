@@ -107,7 +107,8 @@ export async function GET(request: NextRequest) {
           uploader:uploader_id (
             id,
             display_name,
-            face_tag
+            face_tag,
+            profile_photo_url
           )
         )
       `)

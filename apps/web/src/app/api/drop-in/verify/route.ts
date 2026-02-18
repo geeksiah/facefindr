@@ -53,6 +53,18 @@ export async function GET(request: NextRequest) {
       searchParams.get('orderId') ||
       searchParams.get('reference') ||
       null;
+    const photoId =
+      searchParams.get('photo_id') ||
+      searchParams.get('drop_in_photo_id') ||
+      null;
+    const latest = searchParams.get('latest') === '1';
+
+    if (!txRef && !photoId && !latest) {
+      return NextResponse.json(
+        { error: 'Missing status reference. Provide tx_ref, session_id, order_id, reference, or photo_id.' },
+        { status: 400 }
+      );
+    }
 
     let query = supabase
       .from('drop_in_photos')
@@ -65,6 +77,8 @@ export async function GET(request: NextRequest) {
 
     if (txRef) {
       query = query.eq('upload_payment_transaction_id', txRef);
+    } else if (photoId) {
+      query = query.eq('id', photoId);
     }
 
     const { data: rows, error } = await query;

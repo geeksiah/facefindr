@@ -1,5 +1,5 @@
 import { DropInFindMePage } from '@/components/drop-in/find-me-page';
 
 export default function GalleryDropInFindMePage() {
-  return <DropInFindMePage billingPath="/gallery/billing" />;
+  return <DropInFindMePage basePath="/gallery/drop-in" billingPath="/gallery/billing" />;
 }

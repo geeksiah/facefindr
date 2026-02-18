@@ -2,7 +2,7 @@
 
 import { Camera, Search, Sparkles, Upload } from 'lucide-react';
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 
@@ -15,6 +15,58 @@ interface DropInHubPageProps {
 
 export function DropInHubPage({ basePath, defaultTab = 'find' }: DropInHubPageProps) {
   const [tab, setTab] = useState<DropInTab>(defaultTab);
+  const [latestStatusHref, setLatestStatusHref] = useState<string | null>(null);
+  const [isCheckingLatestUpload, setIsCheckingLatestUpload] = useState(false);
+
+  useEffect(() => {
+    if (tab !== 'upload') return;
+
+    let isActive = true;
+
+    const loadLatestUploadStatus = async () => {
+      setIsCheckingLatestUpload(true);
+      try {
+        const response = await fetch('/api/drop-in/verify?latest=1', { cache: 'no-store' });
+        if (!response.ok) {
+          if (isActive) {
+            setLatestStatusHref(null);
+          }
+          return;
+        }
+
+        const data = await response.json().catch(() => null);
+        const txRef = data?.dropInPhoto?.transactionRef as string | undefined;
+        const photoId = data?.dropInPhoto?.id as string | undefined;
+
+        const params = new URLSearchParams();
+        if (txRef) {
+          params.set('tx_ref', txRef);
+        } else if (photoId) {
+          params.set('photo_id', photoId);
+        }
+
+        if (isActive) {
+          setLatestStatusHref(
+            params.toString().length > 0 ? `${basePath}/success?${params.toString()}` : null
+          );
+        }
+      } catch {
+        if (isActive) {
+          setLatestStatusHref(null);
+        }
+      } finally {
+        if (isActive) {
+          setIsCheckingLatestUpload(false);
+        }
+      }
+    };
+
+    void loadLatestUploadStatus();
+
+    return () => {
+      isActive = false;
+    };
+  }, [basePath, tab]);
 
   const tabCopy = useMemo(() => {
     if (tab === 'find') {
@@ -35,10 +87,10 @@ export function DropInHubPage({ basePath, defaultTab = 'find' }: DropInHubPagePr
         'Upload a photo of someone you met and let the platform find and notify the matched user.',
       primaryHref: `${basePath}/upload`,
       primaryLabel: 'Start Upload',
-      secondaryHref: `${basePath}/success`,
-      secondaryLabel: 'Check Upload Status',
+      secondaryHref: latestStatusHref,
+      secondaryLabel: isCheckingLatestUpload ? 'Checking Status...' : 'Check Upload Status',
     };
-  }, [basePath, tab]);
+  }, [basePath, isCheckingLatestUpload, latestStatusHref, tab]);
 
   return (
     <div className="space-y-6">
@@ -100,10 +152,27 @@ export function DropInHubPage({ basePath, defaultTab = 'find' }: DropInHubPagePr
               {tabCopy.primaryLabel}
             </Link>
           </Button>
-          <Button asChild variant="outline">
-            <Link href={tabCopy.secondaryHref}>{tabCopy.secondaryLabel}</Link>
-          </Button>
+          {tab === 'upload' ? (
+            tabCopy.secondaryHref ? (
+              <Button asChild variant="outline">
+                <Link href={tabCopy.secondaryHref}>{tabCopy.secondaryLabel}</Link>
+              </Button>
+            ) : (
+              <Button variant="outline" disabled>
+                {tabCopy.secondaryLabel}
+              </Button>
+            )
+          ) : (
+            <Button asChild variant="outline">
+              <Link href={tabCopy.secondaryHref ?? `${basePath}/discover`}>{tabCopy.secondaryLabel}</Link>
+            </Button>
+          )}
         </div>
+        {tab === 'upload' && !isCheckingLatestUpload && !latestStatusHref ? (
+          <p className="mt-3 text-xs text-muted-foreground">
+            No tracked upload yet. Start an upload first, then check status.
+          </p>
+        ) : null}
       </div>
     </div>
   );

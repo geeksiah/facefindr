@@ -2,12 +2,19 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { crawlExternalPlatforms, hasExternalCrawlerProviderConfigured } from '@/lib/drop-in/external-crawler';
 import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
-type SearchType = 'contacts' | 'external';
+type SearchType = 'internal' | 'contacts' | 'external';
+
+const SEARCH_CREDIT_COST: Record<SearchType, number> = {
+  internal: 3,
+  contacts: 3,
+  external: 5,
+};
 
 function isSearchType(value: unknown): value is SearchType {
-  return value === 'contacts' || value === 'external';
+  return value === 'internal' || value === 'contacts' || value === 'external';
 }
 
 export async function GET(request: NextRequest) {
@@ -154,54 +161,164 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to start search' }, { status: 500 });
     }
 
+    const failSearch = async (message: string) => {
+      await supabase
+        .from('drop_in_searches')
+        .update({
+          status: 'failed',
+          error_message: message,
+          completed_at: new Date().toISOString(),
+        })
+        .eq('id', search.id);
+    };
+
+    const completeSearch = async (count: number, creditsUsed: number) => {
+      await supabase
+        .from('drop_in_searches')
+        .update({
+          status: 'completed',
+          match_count: count,
+          credits_used: creditsUsed,
+          completed_at: new Date().toISOString(),
+        })
+        .eq('id', search.id);
+    };
+
     let creditsUsed = 0;
+    const requiredCredits = SEARCH_CREDIT_COST[searchType];
+
+    const { data: attendeeProfile } = await serviceClient
+      .from('attendees')
+      .select('display_name, face_tag, drop_in_credits')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (!attendeeProfile?.display_name) {
+      await failSearch('Attendee profile missing display name');
+      return NextResponse.json({ error: 'Attendee profile is incomplete' }, { status: 400 });
+    }
+
+    if (Number(attendeeProfile.drop_in_credits || 0) < requiredCredits) {
+      await failSearch(`Insufficient credits for ${searchType} search`);
+      return NextResponse.json(
+        { error: `Insufficient credits (${requiredCredits} required)` },
+        { status: 402 }
+      );
+    }
+
     if (searchType === 'external') {
+      if (!hasExternalCrawlerProviderConfigured()) {
+        await failSearch('External crawler providers are not configured');
+        return NextResponse.json(
+          { error: 'External crawler providers are not configured' },
+          { status: 503 }
+        );
+      }
+
+      let externalResults;
+      try {
+        externalResults = await crawlExternalPlatforms({
+          displayName: attendeeProfile.display_name,
+          faceTag: attendeeProfile.face_tag,
+          contactQuery,
+          limit: 30,
+        });
+      } catch (error: any) {
+        await failSearch(error?.message || 'External crawler failed');
+        return NextResponse.json(
+          { error: error?.message || 'External crawler failed' },
+          { status: 500 }
+        );
+      }
+
       const { data: creditsConsumed, error: creditsError } = await supabase.rpc('use_drop_in_credits', {
         p_attendee_id: user.id,
         p_action: 'external_search',
-        p_credits_needed: 1,
+        p_credits_needed: requiredCredits,
         p_metadata: {
           search_id: search.id,
+          results_count: externalResults.length,
         },
       });
 
       if (creditsError || !creditsConsumed) {
-        await supabase
-          .from('drop_in_searches')
-          .update({
-            status: 'failed',
-            error_message: 'Insufficient credits for external search',
-            completed_at: new Date().toISOString(),
-          })
-          .eq('id', search.id);
-
+        await failSearch('Insufficient credits for external search');
         return NextResponse.json({ error: 'Insufficient credits' }, { status: 402 });
       }
 
-      creditsUsed = 1;
+      creditsUsed = requiredCredits;
+
+      const searchResultsToInsert = externalResults.map((result) => ({
+        attendee_id: user.id,
+        search_id: search.id,
+        media_id: null,
+        source: result.source,
+        external_url: result.url,
+        confidence: result.confidence,
+        is_viewed: false,
+        is_purchased: false,
+      }));
+
+      if (searchResultsToInsert.length > 0) {
+        const { error: insertError } = await supabase.from('drop_in_search_results').insert(searchResultsToInsert);
+        if (insertError) {
+          await failSearch('Failed to store external search results');
+          return NextResponse.json({ error: 'Failed to store external search results' }, { status: 500 });
+        }
+      }
+
+      await completeSearch(searchResultsToInsert.length, creditsUsed);
+      return NextResponse.json({
+        success: true,
+        searchId: search.id,
+        resultsCount: searchResultsToInsert.length,
+        searchType,
+      });
     }
+
+    const { data: creditsConsumed, error: creditsError } = await supabase.rpc('use_drop_in_credits', {
+      p_attendee_id: user.id,
+      p_action: searchType === 'contacts' ? 'contacts_search' : 'internal_search',
+      p_credits_needed: requiredCredits,
+      p_metadata: {
+        search_id: search.id,
+      },
+    });
+
+    if (creditsError || !creditsConsumed) {
+      await failSearch(`Insufficient credits for ${searchType} search`);
+      return NextResponse.json(
+        { error: `Insufficient credits (${requiredCredits} required)` },
+        { status: 402 }
+      );
+    }
+    creditsUsed = requiredCredits;
 
     const { data: selfMatches } = await serviceClient
       .from('photo_drop_matches')
       .select('media_id')
       .eq('attendee_id', user.id);
-    const selfMediaIds = Array.from(new Set((selfMatches || []).map((row) => row.media_id).filter(Boolean)));
 
-    if (selfMediaIds.length === 0) {
-      await supabase
-        .from('drop_in_searches')
-        .update({
-          status: 'completed',
-          match_count: 0,
-          credits_used: creditsUsed,
-          completed_at: new Date().toISOString(),
-        })
-        .eq('id', search.id);
+    const { data: purchasedRows } = await supabase
+      .from('entitlements')
+      .select('media_id')
+      .eq('attendee_id', user.id)
+      .not('media_id', 'is', null);
+
+    const internalMediaIds = Array.from(
+      new Set([
+        ...(selfMatches || []).map((row) => row.media_id),
+        ...(purchasedRows || []).map((row) => row.media_id),
+      ].filter(Boolean))
+    );
+
+    if (internalMediaIds.length === 0) {
+      await completeSearch(0, creditsUsed);
 
       return NextResponse.json({ success: true, searchId: search.id, results: [] });
     }
 
-    let filteredMediaIds = selfMediaIds;
+    let filteredMediaIds = internalMediaIds;
 
     if (searchType === 'contacts') {
       const { data: contacts } = await supabase
@@ -233,7 +350,7 @@ export async function POST(request: NextRequest) {
           .from('photo_drop_matches')
           .select('media_id')
           .in('attendee_id', candidateContactIds)
-          .in('media_id', selfMediaIds);
+          .in('media_id', internalMediaIds);
 
         filteredMediaIds = Array.from(
           new Set((contactMatches || []).map((row) => row.media_id).filter(Boolean))
@@ -242,15 +359,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (filteredMediaIds.length === 0) {
-      await supabase
-        .from('drop_in_searches')
-        .update({
-          status: 'completed',
-          match_count: 0,
-          credits_used: creditsUsed,
-          completed_at: new Date().toISOString(),
-        })
-        .eq('id', search.id);
+      await completeSearch(0, creditsUsed);
 
       return NextResponse.json({ success: true, searchId: search.id, results: [] });
     }
@@ -278,7 +387,7 @@ export async function POST(request: NextRequest) {
       attendee_id: user.id,
       search_id: search.id,
       media_id: media.id,
-      source: searchType === 'external' ? 'external' : 'ferchr',
+      source: 'ferchr',
       confidence: 100,
       is_viewed: false,
       is_purchased: false,
@@ -288,15 +397,7 @@ export async function POST(request: NextRequest) {
       await supabase.from('drop_in_search_results').insert(searchResultsToInsert);
     }
 
-    await supabase
-      .from('drop_in_searches')
-      .update({
-        status: 'completed',
-        match_count: searchResultsToInsert.length,
-        credits_used: creditsUsed,
-        completed_at: new Date().toISOString(),
-      })
-      .eq('id', search.id);
+    await completeSearch(searchResultsToInsert.length, creditsUsed);
 
     return NextResponse.json({
       success: true,

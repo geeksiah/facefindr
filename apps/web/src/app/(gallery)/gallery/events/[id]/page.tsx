@@ -230,6 +230,20 @@ export default function EventDetailPage() {
                         className={event.coverImage ? 'text-white/80 hover:text-white' : ''}
                       />
                     </div>
+                    <div className="mt-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const suggestedPhoto = event.matchedPhotos.find((photo) => photo.isPurchased) || event.matchedPhotos[0] || null;
+                          setDownloadedPhoto(suggestedPhoto);
+                          setShowTipModal(true);
+                        }}
+                      >
+                        <Heart className="h-4 w-4 mr-2" />
+                        Tip Creator
+                      </Button>
+                    </div>
                   </>
                 )}
               </div>
@@ -441,7 +455,7 @@ export default function EventDetailPage() {
       )}
 
       {/* Tip Modal */}
-      {showTipModal && event && downloadedPhoto && (
+      {showTipModal && event && (
         <div 
           className="fixed z-[10000] flex items-center justify-center bg-black/50 backdrop-blur-sm"
           style={{
@@ -464,7 +478,8 @@ export default function EventDetailPage() {
               photographerId={event.photographerId || event.id}
               photographerName={event.photographerName}
               eventId={event.id}
-              mediaId={downloadedPhoto.id}
+              mediaId={downloadedPhoto?.id}
+              currency={event.pricing.currency}
               onSuccess={() => {
                 setShowTipModal(false);
                 setDownloadedPhoto(null);

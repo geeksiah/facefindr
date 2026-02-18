@@ -1,7 +1,8 @@
 'use client';
 
-import { Globe, Loader2, Search, Users, Zap } from 'lucide-react';
+import { ArrowLeft, Globe, Loader2, Search, ShieldCheck, Users, Zap } from 'lucide-react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -10,7 +11,7 @@ import { useToast } from '@/components/ui/toast';
 
 interface FindMeSearch {
   id: string;
-  searchType: 'contacts' | 'external';
+  searchType: 'internal' | 'contacts' | 'external';
   status: 'pending' | 'processing' | 'completed' | 'failed';
   matchCount: number;
   creditsUsed: number;
@@ -20,18 +21,24 @@ interface FindMeSearch {
 
 interface FindMeResult {
   id: string;
-  source: 'ferchr' | 'external';
+  source: string;
   confidence: number;
   thumbnailUrl: string | null;
+  externalUrl: string | null;
   eventName: string | null;
   photographerName: string | null;
 }
 
 interface DropInFindMePageProps {
+  basePath: string;
   billingPath: string;
 }
 
-export function DropInFindMePage({ billingPath }: DropInFindMePageProps) {
+const INTERNAL_SEARCH_CREDITS = 3;
+const CONTACTS_SEARCH_CREDITS = 3;
+const EXTERNAL_SEARCH_CREDITS = 5;
+
+export function DropInFindMePage({ basePath, billingPath }: DropInFindMePageProps) {
   const toast = useToast();
   const [credits, setCredits] = useState(0);
   const [contactQuery, setContactQuery] = useState('');
@@ -39,9 +46,10 @@ export function DropInFindMePage({ billingPath }: DropInFindMePageProps) {
   const [results, setResults] = useState<FindMeResult[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSearching, setIsSearching] = useState(false);
-  const [activeType, setActiveType] = useState<'contacts' | 'external' | null>(null);
-
-  const canRunExternal = useMemo(() => credits > 0, [credits]);
+  const [activeType, setActiveType] = useState<'internal' | 'contacts' | 'external' | null>(null);
+  const canRunInternal = useMemo(() => credits >= INTERNAL_SEARCH_CREDITS, [credits]);
+  const canRunContacts = useMemo(() => credits >= CONTACTS_SEARCH_CREDITS, [credits]);
+  const canRunExternal = useMemo(() => credits >= EXTERNAL_SEARCH_CREDITS, [credits]);
 
   const loadData = async () => {
     try {
@@ -67,9 +75,16 @@ export function DropInFindMePage({ billingPath }: DropInFindMePageProps) {
     void loadData();
   }, []);
 
-  const runSearch = async (searchType: 'contacts' | 'external') => {
-    if (searchType === 'external' && !canRunExternal) {
-      toast.error('No credits', 'Buy Drop-In credits before running external search');
+  const runSearch = async (searchType: 'internal' | 'contacts' | 'external') => {
+    const requiredCredits =
+      searchType === 'external'
+        ? EXTERNAL_SEARCH_CREDITS
+        : searchType === 'contacts'
+          ? CONTACTS_SEARCH_CREDITS
+          : INTERNAL_SEARCH_CREDITS;
+
+    if (credits < requiredCredits) {
+      toast.error('Insufficient credits', `${requiredCredits} credits required for this search type`);
       return;
     }
 
@@ -115,11 +130,18 @@ export function DropInFindMePage({ billingPath }: DropInFindMePageProps) {
 
   return (
     <div className="space-y-6">
+      <Button asChild variant="ghost" className="w-fit px-0 text-muted-foreground hover:text-foreground">
+        <Link href={basePath}>
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Back to Drop-In Hub
+        </Link>
+      </Button>
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Drop-In: Find Me</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Search for photos that include you, then filter by contact co-appearance.
+            Search across Ferchr internally, by contacts, or via external platform crawl.
           </p>
         </div>
         <div className="rounded-full bg-accent/10 px-4 py-2 text-sm font-medium text-accent">
@@ -127,7 +149,30 @@ export function DropInFindMePage({ billingPath }: DropInFindMePageProps) {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="rounded-2xl border border-border bg-card p-5">
+          <div className="mb-3 flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5 text-accent" />
+            <h2 className="font-semibold text-foreground">Internal Search</h2>
+          </div>
+          <p className="mb-3 text-sm text-muted-foreground">
+            Searches your Ferchr photos, including subscribed and matched event photos.
+          </p>
+          <Button
+            onClick={() => runSearch('internal')}
+            disabled={isSearching || !canRunInternal}
+            variant="outline"
+            className="w-full"
+          >
+            {isSearching && activeType === 'internal' ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Search className="mr-2 h-4 w-4" />
+            )}
+            Run Internal Search (3 credits)
+          </Button>
+        </div>
+
         <div className="rounded-2xl border border-border bg-card p-5">
           <div className="mb-3 flex items-center gap-2">
             <Users className="h-5 w-5 text-success" />
@@ -144,7 +189,7 @@ export function DropInFindMePage({ billingPath }: DropInFindMePageProps) {
           />
           <Button
             onClick={() => runSearch('contacts')}
-            disabled={isSearching}
+            disabled={isSearching || !canRunContacts}
             variant="outline"
             className="w-full"
           >
@@ -153,7 +198,7 @@ export function DropInFindMePage({ billingPath }: DropInFindMePageProps) {
             ) : (
               <Search className="mr-2 h-4 w-4" />
             )}
-            Search Contacts
+            Search Contacts (3 credits)
           </Button>
         </div>
 
@@ -163,7 +208,7 @@ export function DropInFindMePage({ billingPath }: DropInFindMePageProps) {
             <h2 className="font-semibold text-foreground">External Search</h2>
           </div>
           <p className="mb-3 text-sm text-muted-foreground">
-            Uses 1 credit per run to include external-contributor discovery scope.
+            Searches social media, websites, and blogs via external crawler integrations.
           </p>
           <Button onClick={() => runSearch('external')} disabled={isSearching || !canRunExternal} className="w-full">
             {isSearching && activeType === 'external' ? (
@@ -171,7 +216,7 @@ export function DropInFindMePage({ billingPath }: DropInFindMePageProps) {
             ) : (
               <Zap className="mr-2 h-4 w-4" />
             )}
-            Run External Search
+            Run External Search (5 credits)
           </Button>
           {!canRunExternal && (
             <p className="mt-2 text-xs text-muted-foreground">
@@ -191,7 +236,11 @@ export function DropInFindMePage({ billingPath }: DropInFindMePageProps) {
               <div key={search.id} className="flex items-center justify-between rounded-xl border border-border px-3 py-2">
                 <div>
                   <p className="text-sm font-medium text-foreground">
-                    {search.searchType === 'external' ? 'External' : 'Contacts'} search
+                    {search.searchType === 'external'
+                      ? 'External'
+                      : search.searchType === 'internal'
+                        ? 'Internal'
+                        : 'Contacts'} search
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {new Date(search.createdAt).toLocaleString()}
@@ -228,8 +277,18 @@ export function DropInFindMePage({ billingPath }: DropInFindMePageProps) {
                   <p className="truncate text-sm font-medium text-foreground">{result.eventName || 'Matched photo'}</p>
                   <p className="truncate text-xs text-muted-foreground">{result.photographerName || 'Unknown creator'}</p>
                   <p className="text-xs text-accent">
-                    {result.source} • {Math.round(result.confidence)}%
+                    {result.source} - {Math.round(result.confidence)}%
                   </p>
+                  {result.externalUrl && (
+                    <a
+                      href={result.externalUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="line-clamp-2 text-xs text-foreground underline"
+                    >
+                      View source page
+                    </a>
+                  )}
                 </div>
               </div>
             ))}
