@@ -1,7 +1,6 @@
 'use client';
 
-import { Bell, Plus, Send, Loader2, Trash2 } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { Bell, Plus, Send, Loader2, Pencil } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 import { formatDateTime } from '@/lib/utils';
@@ -39,12 +38,13 @@ interface RegionOption {
 }
 
 export default function AnnouncementsPage() {
-  const router = useRouter();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [regions, setRegions] = useState<RegionOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [sending, setSending] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   
   const [formData, setFormData] = useState({
     title: '',
@@ -78,19 +78,24 @@ export default function AnnouncementsPage() {
     }
   };
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
     setSending('create');
     
     try {
-      const response = await fetch('/api/admin/announcements', {
-        method: 'POST',
+      const isEditing = !!editingId;
+      const response = await fetch(
+        isEditing ? `/api/admin/announcements/${editingId}` : '/api/admin/announcements',
+        {
+        method: isEditing ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
       });
 
       if (response.ok) {
         setShowForm(false);
+        setEditingId(null);
         setFormData({
           title: '',
           content: '',
@@ -100,29 +105,72 @@ export default function AnnouncementsPage() {
           send_sms: false,
           country_code: '',
         });
-        fetchAnnouncements();
+        await fetchAnnouncements();
+      } else {
+        const payload = await response.json().catch(() => ({}));
+        setSubmitError(payload.error || 'Unable to save announcement draft');
       }
     } catch (error) {
       console.error('Create failed:', error);
+      setSubmitError('Network error. Please retry.');
     } finally {
       setSending(null);
     }
   };
 
   const handleSend = async (id: string) => {
+    setSubmitError(null);
     setSending(id);
     try {
       const response = await fetch(`/api/admin/announcements/${id}/send`, {
         method: 'POST',
       });
       if (response.ok) {
-        fetchAnnouncements();
+        await fetchAnnouncements();
+      } else {
+        const payload = await response.json().catch(() => ({}));
+        if (Array.isArray(payload.details) && payload.details.length > 0) {
+          setSubmitError(`${payload.error || 'Send failed'}: ${payload.details.join('; ')}`);
+        } else {
+          setSubmitError(payload.error || 'Send failed');
+        }
       }
     } catch (error) {
       console.error('Send failed:', error);
+      setSubmitError('Network error while sending announcement');
     } finally {
       setSending(null);
     }
+  };
+
+  const openCreateModal = () => {
+    setSubmitError(null);
+    setEditingId(null);
+    setFormData({
+      title: '',
+      content: '',
+      target: 'all',
+      send_email: false,
+      send_push: true,
+      send_sms: false,
+      country_code: '',
+    });
+    setShowForm(true);
+  };
+
+  const openEditModal = (announcement: Announcement) => {
+    setSubmitError(null);
+    setEditingId(announcement.id);
+    setFormData({
+      title: announcement.title,
+      content: announcement.content,
+      target: announcement.target,
+      send_email: announcement.send_email,
+      send_push: announcement.send_push,
+      send_sms: announcement.send_sms,
+      country_code: announcement.country_code || '',
+    });
+    setShowForm(true);
   };
 
   const statusColors: Record<string, string> = {
@@ -155,7 +203,7 @@ export default function AnnouncementsPage() {
           </p>
         </div>
         <button
-          onClick={() => setShowForm(true)}
+          onClick={openCreateModal}
           className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90 transition-colors"
         >
           <Plus className="h-4 w-4" />
@@ -170,6 +218,11 @@ export default function AnnouncementsPage() {
           Push notifications require FCM/APN configuration, and email notifications require an email provider to be set up in the Regions & Providers settings.
         </p>
       </div>
+      {submitError && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">
+          {submitError}
+        </div>
+      )}
 
       {/* Create Form Modal */}
       {showForm && (
@@ -189,8 +242,10 @@ export default function AnnouncementsPage() {
           }}
         >
           <div className="bg-card border border-border rounded-xl p-6 w-full max-w-lg mx-4 my-4">
-            <h2 className="text-xl font-bold text-foreground mb-4">Create Announcement</h2>
-            <form onSubmit={handleCreate} className="space-y-4">
+            <h2 className="text-xl font-bold text-foreground mb-4">
+              {editingId ? 'Edit Draft Announcement' : 'Create Announcement'}
+            </h2>
+            <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="text-sm font-medium text-foreground">Title</label>
                 <input
@@ -270,7 +325,11 @@ export default function AnnouncementsPage() {
               <div className="flex justify-end gap-3 pt-4">
                 <button
                   type="button"
-                  onClick={() => setShowForm(false)}
+                  onClick={() => {
+                    setShowForm(false);
+                    setEditingId(null);
+                    setSubmitError(null);
+                  }}
                   className="px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors"
                 >
                   Cancel
@@ -280,7 +339,13 @@ export default function AnnouncementsPage() {
                   disabled={sending === 'create'}
                   className="px-4 py-2 rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90 disabled:opacity-50"
                 >
-                  {sending === 'create' ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create Draft'}
+                  {sending === 'create' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : editingId ? (
+                    'Save Draft'
+                  ) : (
+                    'Create Draft'
+                  )}
                 </button>
               </div>
             </form>
@@ -335,18 +400,27 @@ export default function AnnouncementsPage() {
                   </div>
                 </div>
                 {announcement.status === 'draft' && (
-                  <button
-                    onClick={() => handleSend(announcement.id)}
-                    disabled={sending === announcement.id}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-green-500 text-white font-medium hover:bg-green-400 disabled:opacity-50"
-                  >
-                    {sending === announcement.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Send className="h-4 w-4" />
-                    )}
-                    Send Now
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => openEditModal(announcement)}
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border text-foreground hover:bg-muted transition-colors"
+                    >
+                      <Pencil className="h-4 w-4" />
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleSend(announcement.id)}
+                      disabled={sending === announcement.id}
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg bg-green-500 text-white font-medium hover:bg-green-400 disabled:opacity-50"
+                    >
+                      {sending === announcement.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Send className="h-4 w-4" />
+                      )}
+                      Send Now
+                    </button>
+                  </div>
                 )}
               </div>
             </div>

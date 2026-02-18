@@ -84,6 +84,7 @@ export async function POST(request: NextRequest) {
     const file = formData.get('photo') as File;
     const giftMessage = formData.get('giftMessage') as string | null;
     const includeGift = formData.get('includeGift') === 'true';
+    const returnPath = formData.get('returnPath') === 'dashboard' ? 'dashboard' : 'gallery';
     const locationLat = formData.get('locationLat') ? parseFloat(formData.get('locationLat') as string) : null;
     const locationLng = formData.get('locationLng') ? parseFloat(formData.get('locationLng') as string) : null;
     const locationName = formData.get('locationName') as string | null;
@@ -203,6 +204,9 @@ export async function POST(request: NextRequest) {
 
     // Create payment intent/checkout session
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const successPath =
+      returnPath === 'dashboard' ? '/dashboard/drop-in/success' : '/gallery/drop-in/success';
+    const cancelPath = returnPath === 'dashboard' ? '/dashboard/drop-in' : '/gallery/drop-in';
     const idempotencyKey = uuidv4();
     const selectedGateway = gatewaySelection.gateway;
 
@@ -244,8 +248,8 @@ export async function POST(request: NextRequest) {
             }] : []),
           ],
           mode: 'payment',
-          success_url: `${baseUrl}/dashboard/drop-in/success?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${baseUrl}/dashboard/drop-in/upload?canceled=true`,
+          success_url: `${baseUrl}${successPath}?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${baseUrl}${cancelPath}?canceled=true`,
           metadata: {
             type: 'drop_in_upload',
             attendee_id: attendee.id,
@@ -268,7 +272,7 @@ export async function POST(request: NextRequest) {
           txRef: idempotencyKey,
           amount: totalAmount,
           currency: dropInPricing.currencyCode,
-          redirectUrl: `${baseUrl}/dashboard/drop-in/success?tx_ref=${idempotencyKey}&provider=flutterwave`,
+          redirectUrl: `${baseUrl}${successPath}?tx_ref=${idempotencyKey}&provider=flutterwave`,
           customerEmail: user.email || '',
           eventId: null, // Drop-in not tied to event
           eventName: 'Drop-In Photo Upload',
@@ -309,8 +313,8 @@ export async function POST(request: NextRequest) {
           ],
           currency: dropInPricing.currencyCode,
           photographerPayPalEmail: null, // Platform payment
-          returnUrl: `${baseUrl}/dashboard/drop-in/success?order_id=${idempotencyKey}&provider=paypal`,
-          cancelUrl: `${baseUrl}/dashboard/drop-in/upload?canceled=true`,
+          returnUrl: `${baseUrl}${successPath}?order_id=${idempotencyKey}&provider=paypal`,
+          cancelUrl: `${baseUrl}${cancelPath}?canceled=true`,
           metadata: {
             type: 'drop_in_upload',
             attendee_id: attendee.id,
@@ -339,7 +343,7 @@ export async function POST(request: NextRequest) {
           email: user.email || '',
           amount: totalAmount,
           currency: dropInPricing.currencyCode,
-          callbackUrl: `${baseUrl}/dashboard/drop-in/success?reference=${idempotencyKey}&provider=paystack`,
+          callbackUrl: `${baseUrl}${successPath}?reference=${idempotencyKey}&provider=paystack`,
           metadata: {
             type: 'drop_in_upload',
             attendee_id: attendee.id,

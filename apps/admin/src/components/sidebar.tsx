@@ -94,9 +94,11 @@ interface SidebarProps {
     email: string;
     role: string;
   };
+  className?: string;
+  onNavigate?: () => void;
 }
 
-export function Sidebar({ admin }: SidebarProps) {
+export function Sidebar({ admin, className, onNavigate }: SidebarProps) {
   const pathname = usePathname();
   const safePathname = pathname ?? '';
   const router = useRouter();
@@ -104,6 +106,7 @@ export function Sidebar({ admin }: SidebarProps) {
 
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
+    onNavigate?.();
     router.push('/login');
     router.refresh();
   };
@@ -124,7 +127,7 @@ export function Sidebar({ admin }: SidebarProps) {
   const ThemeIcon = theme === 'light' ? Sun : theme === 'dark' ? Moon : Monitor;
 
   return (
-    <aside className="fixed left-0 top-0 z-40 h-screen w-64 bg-card border-r border-border flex flex-col">
+    <aside className={cn('h-screen w-64 bg-card border-r border-border flex flex-col', className)}>
       {/* Logo */}
       <div className="h-16 flex items-center gap-3 px-5 border-b border-border">
         <Logo variant="combo" size="sm" showText={true} />
@@ -152,6 +155,7 @@ export function Sidebar({ admin }: SidebarProps) {
                   <Link
                     key={item.href}
                     href={item.href}
+                    onClick={onNavigate}
                     className={cn(
                       'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
                       isActive

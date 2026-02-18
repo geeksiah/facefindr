@@ -3,11 +3,15 @@ import Link from 'next/link';
 import { supabaseAdmin } from '@/lib/supabase';
 import { formatDateTime } from '@/lib/utils';
 
+import { DetailsCell } from './details-cell';
+import { ExportCsvButton } from './export-csv-button';
 import { FilterSelect } from './filter-select';
 
 interface SearchParams {
   action?: string;
   admin?: string;
+  from?: string;
+  to?: string;
   page?: string;
 }
 
@@ -26,6 +30,14 @@ async function getAuditLogs(searchParams: SearchParams) {
 
   if (searchParams.admin) {
     query = query.eq('admin_id', searchParams.admin);
+  }
+
+  if (searchParams.from) {
+    query = query.gte('created_at', `${searchParams.from}T00:00:00.000Z`);
+  }
+
+  if (searchParams.to) {
+    query = query.lte('created_at', `${searchParams.to}T23:59:59.999Z`);
   }
 
   query = query
@@ -60,6 +72,15 @@ export default async function AuditLogsPage({
   ]);
 
   const totalPages = Math.ceil(total / limit);
+  const buildQuery = (nextPage: number) => {
+    const params = new URLSearchParams();
+    if (searchParams.action) params.set('action', searchParams.action);
+    if (searchParams.admin) params.set('admin', searchParams.admin);
+    if (searchParams.from) params.set('from', searchParams.from);
+    if (searchParams.to) params.set('to', searchParams.to);
+    params.set('page', String(nextPage));
+    return `?${params.toString()}`;
+  };
 
   const actionColors: Record<string, string> = {
     login: 'text-green-500',
@@ -81,7 +102,7 @@ export default async function AuditLogsPage({
       </div>
 
       {/* Filters */}
-      <div className="flex gap-4">
+      <div className="flex flex-wrap items-end gap-4">
         <FilterSelect
           name="action"
           defaultValue={searchParams.action}
@@ -103,6 +124,36 @@ export default async function AuditLogsPage({
           placeholder="All Admins"
           options={admins.map((admin) => ({ value: admin.id, label: admin.name || admin.email }))}
         />
+
+        <form method="GET" className="flex flex-wrap items-end gap-2">
+          {searchParams.action && <input type="hidden" name="action" value={searchParams.action} />}
+          {searchParams.admin && <input type="hidden" name="admin" value={searchParams.admin} />}
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">From</label>
+            <input
+              type="date"
+              name="from"
+              defaultValue={searchParams.from || ''}
+              className="rounded-lg border border-input bg-muted px-3 py-2 text-sm text-foreground"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">To</label>
+            <input
+              type="date"
+              name="to"
+              defaultValue={searchParams.to || ''}
+              className="rounded-lg border border-input bg-muted px-3 py-2 text-sm text-foreground"
+            />
+          </div>
+          <button
+            type="submit"
+            className="rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:bg-muted"
+          >
+            Apply Range
+          </button>
+        </form>
+        <ExportCsvButton logs={logs as any[]} />
       </div>
 
       {/* Logs Table */}
@@ -153,11 +204,7 @@ export default async function AuditLogsPage({
                     {log.ip_address || '-'}
                   </td>
                   <td className="px-6 py-4">
-                    {log.details && Object.keys(log.details).length > 0 && (
-                      <pre className="text-xs text-muted-foreground max-w-xs truncate">
-                        {JSON.stringify(log.details)}
-                      </pre>
-                    )}
+                    <DetailsCell details={log.details || null} />
                   </td>
                 </tr>
               ))}
@@ -174,13 +221,13 @@ export default async function AuditLogsPage({
           </p>
           <div className="flex gap-2">
             <Link
-              href={`?page=${page - 1}`}
+              href={buildQuery(page - 1)}
               className={`px-4 py-2 rounded-lg border ${page <= 1 ? 'opacity-50 pointer-events-none' : ''}`}
             >
               Previous
             </Link>
             <Link
-              href={`?page=${page + 1}`}
+              href={buildQuery(page + 1)}
               className={`px-4 py-2 rounded-lg border ${page >= totalPages ? 'opacity-50 pointer-events-none' : ''}`}
             >
               Next

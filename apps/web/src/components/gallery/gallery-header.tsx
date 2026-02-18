@@ -29,6 +29,7 @@ export function GallerySearch() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
+  const trimmedQuery = query.trim();
 
   // Close on outside click
   useEffect(() => {
@@ -50,7 +51,7 @@ export function GallerySearch() {
       abortControllerRef.current.abort();
     }
 
-    if (trimmedQuery.length < 1) {
+    if (trimmedQuery.length < 2) {
       setResults([]);
       setIsSearching(false);
       setShowResults(false);
@@ -139,10 +140,11 @@ export function GallerySearch() {
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
         <input
           type="search"
+          autoComplete="off"
           placeholder="Search events, photographers..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onFocus={() => setShowResults(query.trim().length > 0)}
+          onFocus={() => setShowResults(trimmedQuery.length >= 2)}
           className="h-10 w-full rounded-xl border border-border bg-background pl-10 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:border-transparent focus:outline-none focus:ring-2 focus:ring-accent"
         />
         {query && (
@@ -156,7 +158,7 @@ export function GallerySearch() {
       </div>
 
       {/* Results Dropdown */}
-      {showResults && query.trim().length > 0 && (
+      {showResults && trimmedQuery.length >= 2 && (
         <div className="absolute top-full left-0 right-0 mt-2 bg-card border border-border rounded-xl shadow-lg overflow-hidden z-50">
           {isSearching ? (
             <div className="p-4 text-center text-muted-foreground text-sm">

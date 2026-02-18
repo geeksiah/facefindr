@@ -143,6 +143,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Notification not found' }, { status: 404 });
     }
 
+    const { data: dropInPhoto } = await supabase
+      .from('drop_in_photos')
+      .select('id, uploader_id, gift_message, is_gifted')
+      .eq('id', notification.drop_in_photo_id)
+      .maybeSingle();
+
+    const uploaderId = dropInPhoto?.uploader_id || null;
+
     // Check premium access if required
     if (notification.requires_premium && !notification.is_gifted) {
       const { data: subscription } = await supabase
@@ -191,15 +199,86 @@ export async function POST(request: NextRequest) {
       updates.user_action_at = new Date().toISOString();
 
       // Block the uploader
+      if (uploaderId) {
+        await supabase
+          .from('contacts')
+          .upsert(
+            {
+              user_id: user.id,
+              contact_id: uploaderId,
+              contact_type: 'blocked',
+            },
+            { onConflict: 'user_id,contact_id' }
+          );
+      }
+    } else if (action === 'accept_connection') {
+      if (!uploaderId) {
+        return NextResponse.json({ error: 'Uploader not found' }, { status: 404 });
+      }
+
+      updates.user_action = 'accepted_connection';
+      updates.user_action_at = new Date().toISOString();
+      updates.status = 'viewed';
+      updates.viewed_at = notification.viewed_at || new Date().toISOString();
+
       await supabase
         .from('contacts')
-        .insert({
-          user_id: user.id,
-          contact_id: (notification.drop_in_photos as any)?.uploader_id,
-          contact_type: 'blocked',
-        })
-        .onConflict(['user_id', 'contact_id'])
-        .merge({ contact_type: 'blocked' });
+        .upsert(
+          [
+            {
+              user_id: user.id,
+              contact_id: uploaderId,
+              contact_type: 'mutual',
+            },
+            {
+              user_id: uploaderId,
+              contact_id: user.id,
+              contact_type: 'mutual',
+            },
+          ],
+          { onConflict: 'user_id,contact_id' }
+        );
+
+      await supabase.from('notifications').insert({
+        user_id: uploaderId,
+        channel: 'in_app',
+        template_code: 'drop_in_connection_accepted',
+        subject: 'Drop-In recipient accepted your connection',
+        body: 'A recipient accepted your Drop-In connection request.',
+        status: 'delivered',
+        sent_at: new Date().toISOString(),
+        delivered_at: new Date().toISOString(),
+        metadata: {
+          dropInNotificationId: notification.id,
+          dropInPhotoId: notification.drop_in_photo_id,
+          recipientAccepted: true,
+        },
+      });
+    } else if (action === 'decline_connection') {
+      if (!uploaderId) {
+        return NextResponse.json({ error: 'Uploader not found' }, { status: 404 });
+      }
+
+      updates.user_action = 'declined_connection';
+      updates.user_action_at = new Date().toISOString();
+      updates.status = 'dismissed';
+      updates.dismissed_at = new Date().toISOString();
+
+      await supabase.from('notifications').insert({
+        user_id: uploaderId,
+        channel: 'in_app',
+        template_code: 'drop_in_connection_declined',
+        subject: 'Drop-In recipient declined connection',
+        body: 'A recipient declined your Drop-In connection request.',
+        status: 'delivered',
+        sent_at: new Date().toISOString(),
+        delivered_at: new Date().toISOString(),
+        metadata: {
+          dropInNotificationId: notification.id,
+          dropInPhotoId: notification.drop_in_photo_id,
+          recipientAccepted: false,
+        },
+      });
     }
 
     const { error: updateError } = await supabase

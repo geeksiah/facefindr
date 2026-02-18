@@ -129,16 +129,22 @@ export async function GET(request: NextRequest) {
     // Premium users see all matches (no filtering needed)
 
     const matchIds = filteredMatches.map((match) => match.id);
-    let notificationByMatchId = new Map<string, string>();
+    let notificationByMatchId = new Map<string, { id: string; userAction: string | null }>();
     if (matchIds.length > 0) {
       const { data: notifications } = await supabase
         .from('drop_in_notifications')
-        .select('id, drop_in_match_id')
+        .select('id, drop_in_match_id, user_action')
         .eq('recipient_id', attendee.id)
         .in('drop_in_match_id', matchIds);
 
       notificationByMatchId = new Map(
-        (notifications || []).map((notification: any) => [notification.drop_in_match_id, notification.id])
+        (notifications || []).map((notification: any) => [
+          notification.drop_in_match_id,
+          {
+            id: notification.id,
+            userAction: notification.user_action || null,
+          },
+        ])
       );
     }
 
@@ -154,7 +160,8 @@ export async function GET(request: NextRequest) {
 
         return {
           matchId: match.id,
-          notificationId: notificationByMatchId.get(match.id) || null,
+          notificationId: notificationByMatchId.get(match.id)?.id || null,
+          connectionDecision: notificationByMatchId.get(match.id)?.userAction || null,
           photoId: photo.id,
           thumbnailUrl: urlData?.signedUrl || null,
           confidence: match.confidence,
@@ -181,4 +188,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-

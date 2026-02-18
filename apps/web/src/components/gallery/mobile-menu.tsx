@@ -64,6 +64,7 @@ export function MobileMenu({ profileInitial, profilePhotoUrl, faceTag, displayNa
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const trimmedQuery = query.trim();
   const abortRef = useRef<AbortController | null>(null);
   const requestRef = useRef(0);
   const searchContainerRef = useRef<HTMLDivElement>(null);
@@ -100,7 +101,7 @@ export function MobileMenu({ profileInitial, profilePhotoUrl, faceTag, displayNa
 
   const performSearch = useCallback(async (searchQuery: string) => {
     const trimmed = searchQuery.trim();
-    if (trimmed.length < 1) {
+    if (trimmed.length < 2) {
       if (abortRef.current) abortRef.current.abort();
       setResults([]);
       setIsSearching(false);
@@ -181,7 +182,7 @@ export function MobileMenu({ profileInitial, profilePhotoUrl, faceTag, displayNa
         )}
       </div>
 
-      {query.trim().length > 0 && (
+      {trimmedQuery.length >= 2 && (
         <div className="mt-2 bg-card border border-border rounded-xl overflow-hidden max-h-60 overflow-y-auto">
           {isSearching ? (
             <div className="p-4 text-center text-muted-foreground text-sm">Searching...</div>
