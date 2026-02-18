@@ -185,6 +185,18 @@ async function handleCaptureCompleted(
   supabase: ReturnType<typeof createServiceClient>,
   resource: PayPalWebhookPayload['resource']
 ) {
+  const tipMeta = extractTipMetadata(resource);
+  if (tipMeta.tipId) {
+    await supabase
+      .from('tips')
+      .update({
+        status: 'completed',
+        stripe_payment_intent_id: tipMeta.reference || resource.id,
+      })
+      .eq('id', tipMeta.tipId);
+    return;
+  }
+
   // Find the transaction by PayPal order ID
   const { data: transaction, error: findError } = await supabase
     .from('transactions')
@@ -283,6 +295,14 @@ async function handleCaptureFailed(
   eventType: string
 ) {
   const status = eventType === 'PAYMENT.CAPTURE.REFUNDED' ? 'refunded' : 'failed';
+  const tipMeta = extractTipMetadata(resource);
+  if (tipMeta.tipId) {
+    await supabase
+      .from('tips')
+      .update({ status })
+      .eq('id', tipMeta.tipId);
+    return;
+  }
 
   const { error } = await supabase
     .from('transactions')
@@ -400,5 +420,21 @@ function normalizeScope(value: unknown): SubscriptionScope | null {
   if (value === 'attendee_subscription') return 'attendee_subscription';
   if (value === 'vault_subscription') return 'vault_subscription';
   return null;
+}
+
+function extractTipMetadata(resource: PayPalWebhookPayload['resource']) {
+  const customId = resource.purchase_units?.[0]?.custom_id || resource.custom_id;
+  if (!customId) {
+    return { tipId: null as string | null, reference: null as string | null };
+  }
+
+  try {
+    const parsed = JSON.parse(customId) as Record<string, unknown>;
+    const tipId = readString(parsed.tip_id);
+    const reference = readString(parsed.tx_ref) || readString(parsed.order_id);
+    return { tipId, reference };
+  } catch {
+    return { tipId: null as string | null, reference: null as string | null };
+  }
 }
 

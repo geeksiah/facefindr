@@ -23,7 +23,6 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import ProfileLink from '@/components/social/profile-link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useState, useEffect , useRef } from 'react';
 
@@ -352,14 +351,13 @@ export default function CreatorProfilePage() {
 
             {/* Stats */}
             <div className="flex items-center justify-center sm:justify-start gap-6 mt-4 text-sm">
-              <ProfileLink
-                slug={profile.public_profile_slug || profile.id}
-                as="creator"
+              <Link
+                href={`/p/${profile.public_profile_slug || profile.face_tag?.replace(/^@/, '') || profile.id}/followers`}
                 className="text-center hover:opacity-80 transition-opacity cursor-pointer"
               >
                 <p className="font-bold text-foreground">{profile.follower_count || 0}</p>
                 <p className="text-secondary">Followers</p>
-              </ProfileLink>
+              </Link>
               <div className="text-center">
                 <p className="font-bold text-foreground">{profile.eventCount}</p>
                 <p className="text-secondary">Events</p>

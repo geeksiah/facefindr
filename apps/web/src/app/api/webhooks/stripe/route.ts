@@ -135,6 +135,14 @@ async function handleCheckoutComplete(
 ) {
   const { payment_intent, metadata } = session;
 
+  if (metadata?.tip_id) {
+    await updateTipStatus(supabase, metadata.tip_id, 'completed', {
+      stripe_payment_intent_id:
+        (typeof payment_intent === 'string' ? payment_intent : null) || session.id,
+    });
+    return;
+  }
+
   if (!payment_intent || !metadata?.event_id) {
     console.error('Missing payment_intent or event_id in checkout session');
     return;
@@ -162,6 +170,23 @@ async function handlePaymentSuccess(
   supabase: ReturnType<typeof createServiceClient>,
   paymentIntent: Stripe.PaymentIntent
 ) {
+  const tipId = paymentIntent.metadata?.tip_id;
+  if (tipId) {
+    await updateTipStatus(supabase, tipId, 'completed', {
+      stripe_payment_intent_id: paymentIntent.id,
+    });
+    return;
+  }
+
+  await supabase
+    .from('tips')
+    .update({
+      status: 'completed',
+      stripe_payment_intent_id: paymentIntent.id,
+    })
+    .eq('stripe_payment_intent_id', paymentIntent.id)
+    .eq('status', 'pending');
+
   const { error } = await supabase
     .from('transactions')
     .update({ status: 'succeeded' })
@@ -176,6 +201,20 @@ async function handlePaymentFailed(
   supabase: ReturnType<typeof createServiceClient>,
   paymentIntent: Stripe.PaymentIntent
 ) {
+  const tipId = paymentIntent.metadata?.tip_id;
+  if (tipId) {
+    await updateTipStatus(supabase, tipId, 'failed', {
+      stripe_payment_intent_id: paymentIntent.id,
+    });
+    return;
+  }
+
+  await supabase
+    .from('tips')
+    .update({ status: 'failed' })
+    .eq('stripe_payment_intent_id', paymentIntent.id)
+    .eq('status', 'pending');
+
   const { error } = await supabase
     .from('transactions')
     .update({ status: 'failed' })
@@ -210,6 +249,25 @@ async function handleRefund(
 
   if (transaction) {
     await supabase.from('entitlements').delete().eq('transaction_id', transaction.id);
+  }
+}
+
+async function updateTipStatus(
+  supabase: ReturnType<typeof createServiceClient>,
+  tipId: string,
+  status: 'completed' | 'failed' | 'refunded',
+  extra: Record<string, string | null> = {}
+) {
+  const { error } = await supabase
+    .from('tips')
+    .update({
+      status,
+      ...extra,
+    })
+    .eq('id', tipId);
+
+  if (error) {
+    console.error(`Failed to update tip ${tipId}:`, error);
   }
 }
 

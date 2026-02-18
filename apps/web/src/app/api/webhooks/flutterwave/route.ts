@@ -163,6 +163,18 @@ async function handleChargeCompleted(
       (verifiedTx.meta as Record<string, unknown> | undefined)?.subscription_id as string | number | undefined,
   });
 
+  const tipId = readString((data.meta || {}).tip_id);
+  if (tipId) {
+    await supabase
+      .from('tips')
+      .update({
+        status: 'completed',
+        stripe_payment_intent_id: data.tx_ref,
+      })
+      .eq('id', tipId);
+    return;
+  }
+
   // Find the pending transaction
   const { data: transaction, error: findError } = await supabase
     .from('transactions')
@@ -198,6 +210,16 @@ async function handleChargeFailed(
   supabase: ReturnType<typeof createServiceClient>,
   data: FlutterwaveWebhookPayload['data']
 ) {
+  const tipId = readString((data.meta || {}).tip_id);
+  if (tipId) {
+    await supabase
+      .from('tips')
+      .update({ status: 'failed' })
+      .eq('id', tipId);
+    await syncRecurringFromFlutterwaveData(supabase, 'charge.failed', data, 'past_due');
+    return;
+  }
+
   await supabase
     .from('transactions')
     .update({ status: 'failed' })

@@ -16,26 +16,63 @@ interface PurchaseDetails {
   isUnlockAll: boolean;
 }
 
+interface TipDetails {
+  tipId: string;
+  amount: number;
+  currency: string;
+  photographerName: string;
+}
+
 export default function CheckoutSuccessPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [details, setDetails] = useState<PurchaseDetails | null>(null);
+  const [tipDetails, setTipDetails] = useState<TipDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const verifyPurchase = async () => {
       try {
-        // Get provider and session info from URL
+        const tipId = searchParams?.get('tip_id');
         const provider = searchParams?.get('provider') || 'stripe';
         const sessionId = searchParams?.get('session_id');
         const txRef = searchParams?.get('tx_ref');
         const orderId = searchParams?.get('order_id');
+        const token = searchParams?.get('token');
         const reference = searchParams?.get('reference');
+
+        if (tipId) {
+          const params = new URLSearchParams({
+            tip_id: tipId,
+            provider,
+          });
+          if (sessionId) params.set('session_id', sessionId);
+          if (txRef) params.set('tx_ref', txRef);
+          if (orderId) params.set('order_id', orderId);
+          if (token) params.set('token', token);
+          if (reference) params.set('reference', reference);
+
+          const response = await fetch(`/api/tips/verify?${params.toString()}`);
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.error || 'Failed to verify tip payment');
+          }
+
+          setTipDetails({
+            tipId: data.tipId,
+            amount: data.amount,
+            currency: data.currency,
+            photographerName: data.photographerName,
+          });
+          setStatus('success');
+          return;
+        }
 
         let verifyUrl = '/api/checkout/verify?';
         if (sessionId) verifyUrl += `session_id=${sessionId}`;
         else if (txRef) verifyUrl += `tx_ref=${txRef}&provider=${provider}`;
+        else if (token) verifyUrl += `order_id=${token}&provider=${provider}`;
         else if (orderId) verifyUrl += `order_id=${orderId}&provider=${provider}`;
         else if (reference) verifyUrl += `reference=${reference}&provider=${provider}`;
 
@@ -95,9 +132,29 @@ export default function CheckoutSuccessPage() {
         </div>
 
         <h1 className="text-2xl font-bold text-foreground">Purchase Complete</h1>
-        <p className="text-secondary mt-2">Thank you for your purchase!</p>
+        <p className="text-secondary mt-2">
+          {tipDetails ? 'Your tip was sent successfully.' : 'Thank you for your purchase!'}
+        </p>
 
-        {details && (
+        {tipDetails && (
+          <div className="mt-6 pt-6 border-t border-border text-left">
+            <h2 className="font-semibold text-foreground mb-4">Tip Details</h2>
+            <div className="space-y-3 text-sm">
+              <div className="flex justify-between">
+                <span className="text-secondary">Creator</span>
+                <span className="text-foreground">{tipDetails.photographerName}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-secondary">Amount</span>
+                <span className="text-foreground font-semibold">
+                  {tipDetails.currency} {(tipDetails.amount / 100).toFixed(2)}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {details && !tipDetails && (
           <div className="mt-6 pt-6 border-t border-border text-left">
             <h2 className="font-semibold text-foreground mb-4">Order Details</h2>
             <div className="space-y-3 text-sm">
@@ -122,16 +179,18 @@ export default function CheckoutSuccessPage() {
         )}
 
         <div className="mt-8 space-y-3">
-          <Button variant="primary" className="w-full" asChild>
-            <Link href={details ? `/gallery/events/${details.eventId}` : '/gallery'}>
-              <Download className="h-4 w-4 mr-2" />
-              Download Photos
-            </Link>
-          </Button>
+          {!tipDetails && (
+            <Button variant="primary" className="w-full" asChild>
+              <Link href={details ? `/gallery/events/${details.eventId}` : '/gallery'}>
+                <Download className="h-4 w-4 mr-2" />
+                Download Photos
+              </Link>
+            </Button>
+          )}
           <Button variant="secondary" className="w-full" asChild>
             <Link href="/gallery">
               <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to My Photos
+              {tipDetails ? 'Back to Gallery' : 'Back to My Photos'}
             </Link>
           </Button>
         </div>

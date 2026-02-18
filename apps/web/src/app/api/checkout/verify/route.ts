@@ -14,6 +14,7 @@ export async function GET(request: Request) {
     const sessionId = searchParams.get('session_id');
     const txRef = searchParams.get('tx_ref');
     const orderId = searchParams.get('order_id');
+    const token = searchParams.get('token');
     const reference = searchParams.get('reference');
     const provider = searchParams.get('provider') || 'stripe';
 
@@ -56,8 +57,9 @@ export async function GET(request: Request) {
         .single();
 
       transaction = data;
-    } else if (provider === 'paypal' && orderId) {
-      const order = await getOrder(orderId);
+    } else if (provider === 'paypal' && (token || orderId)) {
+      const paypalOrderId = token || orderId;
+      const order = await getOrder(paypalOrderId!);
       
       if (order.status !== 'COMPLETED') {
         return NextResponse.json(
@@ -69,7 +71,7 @@ export async function GET(request: Request) {
       const { data } = await supabase
         .from('transactions')
         .select('*, events(name)')
-        .eq('paypal_order_id', orderId)
+        .eq('paypal_order_id', paypalOrderId!)
         .single();
 
       transaction = data;

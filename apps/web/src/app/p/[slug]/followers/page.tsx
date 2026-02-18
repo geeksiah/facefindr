@@ -25,13 +25,22 @@ import { Logo } from '@/components/ui/logo';
 interface FollowerItem {
   id: string;
   follower_id: string;
+  follower_type: 'attendee' | 'creator' | 'photographer';
   created_at: string;
-  attendees: {
+  attendees?: {
     id: string;
     display_name: string;
     face_tag: string;
     profile_photo_url: string | null;
-  };
+    public_profile_slug?: string | null;
+  } | null;
+  photographers?: {
+    id: string;
+    display_name: string;
+    face_tag: string;
+    profile_photo_url: string | null;
+    public_profile_slug?: string | null;
+  } | null;
 }
 
 interface CreatorInfo {
@@ -67,11 +76,11 @@ export default function CreatorFollowersPage() {
       setCreator(profileData.profile);
 
       // Load followers
-      const followersRes = await fetch(`/api/social/follow?type=followers&photographerId=${profileData.profile.id}`);
+      const followersRes = await fetch(`/api/profiles/creator/${slug}/followers?include=list`);
       if (followersRes.ok) {
         const followersData = await followersRes.json();
         setFollowers(followersData.followers || []);
-        setTotal(followersData.total || 0);
+        setTotal(followersData.count || followersData.total || 0);
       }
     } catch (err) {
       console.error('Error loading data:', err);
@@ -86,11 +95,13 @@ export default function CreatorFollowersPage() {
   }, [loadData]);
 
   const filteredFollowers = followers.filter((item) => {
+    const profile = item.attendees || item.photographers;
+    if (!profile) return false;
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
     return (
-      item.attendees.display_name.toLowerCase().includes(query) ||
-      item.attendees.face_tag?.toLowerCase().includes(query)
+      profile.display_name.toLowerCase().includes(query) ||
+      profile.face_tag?.toLowerCase().includes(query)
     );
   });
 
@@ -199,37 +210,44 @@ export default function CreatorFollowersPage() {
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="divide-y divide-border">
               {filteredFollowers.map((item) => {
-                const attendee = item.attendees;
+                const isCreatorFollower =
+                  item.follower_type === 'creator' || item.follower_type === 'photographer';
+                const follower = isCreatorFollower ? item.photographers : item.attendees;
+
+                if (!follower) return null;
+
+                const href = isCreatorFollower
+                  ? `/p/${follower.public_profile_slug || follower.face_tag?.replace('@', '') || follower.id}`
+                  : `/u/${follower.face_tag?.replace('@', '') || follower.id}`;
 
                 return (
-                  <ProfileLink
+                  <Link
                     key={item.id}
-                    slug={attendee.face_tag?.replace('@', '') || attendee.id}
-                    as="attendee"
+                    href={href}
                     className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
                   >
-                    {attendee.profile_photo_url ? (
+                    {follower.profile_photo_url ? (
                       <Image
-                        src={attendee.profile_photo_url}
-                        alt={attendee.display_name}
+                        src={follower.profile_photo_url}
+                        alt={follower.display_name}
                         width={48}
                         height={48}
                         className="h-12 w-12 rounded-full object-cover"
                       />
                     ) : (
                       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-lg font-semibold text-foreground">
-                        {attendee.display_name.charAt(0).toUpperCase()}
+                        {follower.display_name.charAt(0).toUpperCase()}
                       </div>
                     )}
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-foreground truncate">
-                        {attendee.display_name}
+                        {follower.display_name}
                       </p>
                       <p className="text-sm text-accent font-mono truncate">
-                        {attendee.face_tag}
+                        {follower.face_tag}
                       </p>
                     </div>
-                  </ProfileLink>
+                  </Link>
                 );
               })}
             </div>

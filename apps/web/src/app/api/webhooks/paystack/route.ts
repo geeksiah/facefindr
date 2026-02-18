@@ -138,6 +138,16 @@ async function handleChargeSuccess(
     await handleDropInPaymentSuccess(supabase, payload, metadata);
     return;
   }
+  if (metadata.tip_id) {
+    await supabase
+      .from('tips')
+      .update({
+        status: 'completed',
+        stripe_payment_intent_id: reference,
+      })
+      .eq('id', String(metadata.tip_id));
+    return;
+  }
   if (metadata.subscription_scope) {
     await syncRecurringFromPaystackPayload(supabase, payload.event, payload.data, metadata, 'active');
     return;
@@ -194,6 +204,13 @@ async function handleChargeFailure(
         })
         .eq('id', dropInPhotoId);
     }
+    return;
+  }
+  if (metadata.tip_id) {
+    await supabase
+      .from('tips')
+      .update({ status: 'failed' })
+      .eq('id', String(metadata.tip_id));
     return;
   }
   if (metadata.subscription_scope) {

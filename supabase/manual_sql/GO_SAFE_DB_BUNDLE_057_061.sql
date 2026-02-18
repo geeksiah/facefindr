@@ -326,6 +326,13 @@ CREATE POLICY "Provider plan mappings readable by authenticated users"
 -- ============================================================
 
 DO $$
+DECLARE
+  has_user_action boolean;
+  has_user_action_at boolean;
+  has_status boolean;
+  recipient_set text;
+  sender_status_set text;
+  sender_notified_set text;
 BEGIN
   IF to_regclass('public.drop_in_notifications') IS NOT NULL THEN
     ALTER TABLE public.drop_in_notifications
@@ -356,25 +363,68 @@ BEGIN
         )
       );
 
-    UPDATE public.drop_in_notifications
-    SET
-      recipient_decision = CASE
-        WHEN user_action = 'accepted_connection' THEN 'accepted_connection'
-        WHEN user_action = 'declined_connection' THEN 'declined_connection'
-        WHEN status = 'dismissed' THEN 'dismissed'
-        ELSE recipient_decision
-      END,
-      sender_status = CASE
-        WHEN user_action = 'accepted_connection' THEN 'recipient_accepted'
-        WHEN user_action = 'declined_connection' THEN 'recipient_declined'
-        WHEN status = 'viewed' THEN 'recipient_viewed'
-        ELSE sender_status
-      END,
-      sender_notified_at = CASE
-        WHEN user_action IN ('accepted_connection', 'declined_connection')
-          THEN COALESCE(sender_notified_at, user_action_at, NOW())
-        ELSE sender_notified_at
-      END;
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'drop_in_notifications'
+        AND column_name = 'user_action'
+    ) INTO has_user_action;
+
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'drop_in_notifications'
+        AND column_name = 'user_action_at'
+    ) INTO has_user_action_at;
+
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'drop_in_notifications'
+        AND column_name = 'status'
+    ) INTO has_status;
+
+    recipient_set := 'recipient_decision = CASE';
+    IF has_user_action THEN
+      recipient_set := recipient_set ||
+        ' WHEN user_action = ''accepted_connection'' THEN ''accepted_connection''' ||
+        ' WHEN user_action = ''declined_connection'' THEN ''declined_connection''';
+    END IF;
+    IF has_status THEN
+      recipient_set := recipient_set ||
+        ' WHEN status = ''dismissed'' THEN ''dismissed''';
+    END IF;
+    recipient_set := recipient_set || ' ELSE recipient_decision END';
+
+    sender_status_set := 'sender_status = CASE';
+    IF has_user_action THEN
+      sender_status_set := sender_status_set ||
+        ' WHEN user_action = ''accepted_connection'' THEN ''recipient_accepted''' ||
+        ' WHEN user_action = ''declined_connection'' THEN ''recipient_declined''';
+    END IF;
+    IF has_status THEN
+      sender_status_set := sender_status_set ||
+        ' WHEN status = ''viewed'' THEN ''recipient_viewed''';
+    END IF;
+    sender_status_set := sender_status_set || ' ELSE sender_status END';
+
+    IF has_user_action THEN
+      sender_notified_set := 'sender_notified_at = CASE' ||
+        ' WHEN user_action IN (''accepted_connection'', ''declined_connection'') THEN COALESCE(sender_notified_at';
+      IF has_user_action_at THEN
+        sender_notified_set := sender_notified_set || ', user_action_at';
+      END IF;
+      sender_notified_set := sender_notified_set || ', NOW()) ELSE sender_notified_at END';
+    ELSE
+      sender_notified_set := 'sender_notified_at = sender_notified_at';
+    END IF;
+
+    EXECUTE format(
+      'UPDATE public.drop_in_notifications SET %s, %s, %s',
+      recipient_set,
+      sender_status_set,
+      sender_notified_set
+    );
 
     CREATE INDEX IF NOT EXISTS idx_drop_in_notifications_sender_status
       ON public.drop_in_notifications(sender_status);

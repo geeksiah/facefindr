@@ -17,6 +17,9 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
+import { useRealtimeSubscription } from '@/hooks/use-realtime';
+import { createClient } from '@/lib/supabase/client';
 
 type ProfileType = 'creator' | 'attendee';
 type ShellType = 'dashboard' | 'gallery';
@@ -69,12 +72,15 @@ function formatDateLabel(value?: string) {
 
 export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewProps) {
   const router = useRouter();
+  const toast = useToast();
+  const supabase = createClient();
   const [profile, setProfile] = useState<CreatorProfile | AttendeeProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
   const [followLoading, setFollowLoading] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const apiPath = useMemo(
     () =>
@@ -90,6 +96,17 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
       profile.public_profile_slug || profile.face_tag?.replace(/^@/, '') || profile.id;
     return `${profileType === 'creator' ? '/c' : '/u'}/${slugOrTag}`;
   }, [profile, profileType]);
+
+  useEffect(() => {
+    async function loadCurrentUser() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      setCurrentUserId(user?.id || null);
+    }
+
+    void loadCurrentUser();
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -144,6 +161,61 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
     };
   }, [profile?.id, profileType]);
 
+  const { isConnected } = useRealtimeSubscription({
+    table: 'follows',
+    filter: `following_id=eq.${profile?.id || '__none__'}`,
+    onChange: () => {
+      if (profile?.id) {
+        void refreshFollowState(profile.id);
+      }
+    },
+  });
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!isConnected && profile?.id) {
+        void refreshFollowState(profile.id);
+      }
+    }, 12000);
+
+    return () => clearInterval(interval);
+  }, [isConnected, profile?.id, profileType]);
+
+  async function refreshFollowState(targetId: string) {
+    try {
+      const checkRes = await fetch(
+        `/api/social/follow?type=check&targetType=${profileType === 'creator' ? 'creator' : 'attendee'}&targetId=${encodeURIComponent(targetId)}`,
+        { cache: 'no-store' }
+      );
+      if (checkRes.ok) {
+        const checkData = await checkRes.json();
+        setIsFollowing(Boolean(checkData.isFollowing));
+      }
+
+      if (profileType === 'creator') {
+        const followersRes = await fetch(`/api/profiles/creator/${encodeURIComponent(targetId)}/followers`, {
+          cache: 'no-store',
+        });
+        if (followersRes.ok) {
+          const followersData = await followersRes.json();
+          const count = Number(followersData.count || 0);
+          setProfile((prev) => (prev ? { ...prev, follower_count: count } : prev));
+        }
+      } else {
+        const profileRes = await fetch(`/api/profiles/user/${encodeURIComponent(targetId)}`, {
+          cache: 'no-store',
+        });
+        if (profileRes.ok) {
+          const profileData = await profileRes.json();
+          const count = Number(profileData?.profile?.followers_count || 0);
+          setProfile((prev) => (prev ? { ...prev, followers_count: count } : prev));
+        }
+      }
+    } catch {
+      // ignore realtime refresh errors
+    }
+  }
+
   async function handleShare() {
     if (!profile || !publicPath || typeof window === 'undefined') return;
     const shareUrl = `${window.location.origin}${publicPath}`;
@@ -164,6 +236,18 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
 
   async function handleFollowToggle() {
     if (!profile?.id || followLoading) return;
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      router.push(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
+      return;
+    }
+    if (user.id === profile.id) {
+      toast.info('Own profile', 'You cannot follow yourself.');
+      return;
+    }
+
     const allowsFollows =
       profileType === 'creator'
         ? (profile as CreatorProfile).allow_follows !== false
@@ -180,7 +264,11 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
         const res = await fetch(`/api/social/follow?${searchParams.toString()}`, {
           method: 'DELETE',
         });
-        if (!res.ok) return;
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          toast.error('Unfollow failed', data?.error || 'Please try again.');
+          return;
+        }
         setIsFollowing(false);
         setProfile((prev) => {
           if (!prev) return prev;
@@ -205,7 +293,11 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        if (!res.ok) return;
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          toast.error('Follow failed', data?.error || 'Please try again.');
+          return;
+        }
         setIsFollowing(true);
         setProfile((prev) => {
           if (!prev) return prev;
@@ -250,6 +342,9 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
   const followerCount = isCreator
     ? creatorProfile.follower_count || 0
     : attendeeProfile.followers_count || 0;
+  const followersPath = isCreator
+    ? `/p/${creatorProfile.public_profile_slug || creatorProfile.face_tag?.replace(/^@/, '') || creatorProfile.id}/followers`
+    : `/u/${attendeeProfile.public_profile_slug || attendeeProfile.face_tag?.replace(/^@/, '') || attendeeProfile.id}/followers`;
 
   return (
     <div className="space-y-6">
@@ -289,8 +384,9 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
             )}
           </div>
 
-          {((isCreator && creatorProfile.allow_follows !== false) ||
-            (!isCreator && attendeeProfile.allow_follows !== false)) && (
+          {currentUserId !== profile.id &&
+            ((isCreator && creatorProfile.allow_follows !== false) ||
+              (!isCreator && attendeeProfile.allow_follows !== false)) && (
             <Button onClick={handleFollowToggle} disabled={followLoading}>
               {followLoading ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -305,10 +401,10 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
         </div>
 
         <div className="mt-6 grid gap-3 sm:grid-cols-3">
-          <div className="rounded-xl bg-muted/40 p-3 text-center">
+          <Link href={followersPath} className="rounded-xl bg-muted/40 p-3 text-center hover:bg-muted/70 transition-colors">
             <p className="text-lg font-semibold text-foreground">{followerCount}</p>
             <p className="text-xs text-secondary">Followers</p>
-          </div>
+          </Link>
           <div className="rounded-xl bg-muted/40 p-3 text-center">
             <p className="text-lg font-semibold text-foreground">
               {isCreator ? creatorProfile.eventCount || 0 : attendeeProfile.following_count || 0}

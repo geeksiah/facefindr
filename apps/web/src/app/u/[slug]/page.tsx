@@ -15,12 +15,15 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useState, useEffect, useRef } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Logo } from '@/components/ui/logo';
 import { QRCodeWithLogo, downloadQRCodeWithLogo } from '@/components/ui/qr-code-with-logo';
+import { useToast } from '@/components/ui/toast';
+import { useRealtimeSubscription } from '@/hooks/use-realtime';
+import { createClient } from '@/lib/supabase/client';
 
 interface AttendeeProfile {
   id: string;
@@ -36,6 +39,9 @@ interface AttendeeProfile {
 
 export default function AttendeeProfilePage() {
   const params = useParams();
+  const router = useRouter();
+  const supabase = createClient();
+  const toast = useToast();
   const slug = params?.slug as string;
 
   const [profile, setProfile] = useState<AttendeeProfile | null>(null);
@@ -47,10 +53,23 @@ export default function AttendeeProfilePage() {
   const [downloadingQr, setDownloadingQr] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
   const [followLoading, setFollowLoading] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const qrCodeValue = typeof window !== 'undefined' ? `${window.location.href}?app=1` : '';
   const qrCodeRef = useRef<HTMLDivElement>(null);
+
+  const { isConnected } = useRealtimeSubscription({
+    table: 'follows',
+    filter: `following_id=eq.${profile?.id || '__none__'}`,
+    onChange: () => {
+      if (profile?.id) {
+        void checkFollowStatus(profile.id);
+      }
+      void refreshFollowerCount();
+    },
+  });
+
   useEffect(() => {
-    loadProfile();
+    void loadProfile();
   }, [slug]);
 
   useEffect(() => {
@@ -58,6 +77,29 @@ export default function AttendeeProfilePage() {
       void checkFollowStatus(profile.id);
     }
   }, [profile?.id]);
+
+  useEffect(() => {
+    const loadCurrentUser = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      setCurrentUserId(user?.id || null);
+    };
+    void loadCurrentUser();
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!isConnected) {
+        if (profile?.id) {
+          void checkFollowStatus(profile.id);
+        }
+        void refreshFollowerCount();
+      }
+    }, 12000);
+
+    return () => clearInterval(interval);
+  }, [isConnected, profile?.id, slug]);
 
   async function loadProfile() {
     try {
@@ -73,6 +115,20 @@ export default function AttendeeProfilePage() {
       setError('Failed to load profile');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function refreshFollowerCount() {
+    try {
+      const res = await fetch(`/api/profiles/user/${slug}`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      const nextCount = data?.profile?.followers_count;
+      if (typeof nextCount === 'number') {
+        setProfile((prev) => (prev ? { ...prev, followers_count: nextCount } : prev));
+      }
+    } catch {
+      // ignore background refresh failures
     }
   }
 
@@ -96,31 +152,54 @@ export default function AttendeeProfilePage() {
 
     setFollowLoading(true);
     try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        router.push(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
+        return;
+      }
+
+      if (user.id === profile.id) {
+        toast.info('Own profile', 'You cannot follow yourself.');
+        return;
+      }
+
       if (isFollowing) {
         const res = await fetch(
           `/api/social/follow?targetType=attendee&targetId=${encodeURIComponent(profile.id)}`,
           { method: 'DELETE' }
         );
-        if (!res.ok) return;
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          toast.error('Unfollow failed', data?.error || 'Please try again.');
+          return;
+        }
         setIsFollowing(false);
         setProfile((prev) =>
           prev
             ? { ...prev, followers_count: Math.max(0, (prev.followers_count || 0) - 1) }
             : prev
         );
+        toast.success('Unfollowed', `You are no longer following ${profile.display_name}.`);
       } else {
         const res = await fetch('/api/social/follow', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ attendeeId: profile.id, targetType: 'attendee' }),
         });
-        if (!res.ok) return;
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          toast.error('Follow failed', data?.error || 'Please try again.');
+          return;
+        }
         setIsFollowing(true);
         setProfile((prev) =>
           prev
             ? { ...prev, followers_count: (prev.followers_count || 0) + 1 }
             : prev
         );
+        toast.success('Following', `You are now following ${profile.display_name}.`);
       }
     } finally {
       setFollowLoading(false);
@@ -281,7 +360,7 @@ export default function AttendeeProfilePage() {
             </div>
           </div>
 
-          {profile.allow_follows !== false && (
+          {profile.allow_follows !== false && currentUserId !== profile.id && (
             <div className="mt-6">
               <Button onClick={handleFollowToggle} disabled={followLoading}>
                 {followLoading ? (
