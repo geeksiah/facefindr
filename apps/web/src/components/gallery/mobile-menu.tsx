@@ -100,7 +100,12 @@ export function MobileMenu({ profileInitial, profilePhotoUrl, faceTag, displayNa
 
   const performSearch = useCallback(async (searchQuery: string) => {
     const trimmed = searchQuery.trim();
-    const includePublicSeed = trimmed.length < 1;
+    if (trimmed.length < 1) {
+      if (abortRef.current) abortRef.current.abort();
+      setResults([]);
+      setIsSearching(false);
+      return;
+    }
 
     const id = ++requestRef.current;
     if (abortRef.current) abortRef.current.abort();
@@ -110,9 +115,7 @@ export function MobileMenu({ profileInitial, profilePhotoUrl, faceTag, displayNa
     setIsSearching(true);
     try {
       const res = await fetch(
-        includePublicSeed
-          ? '/api/social/search?includePublicSeed=true&type=all&limit=8'
-          : `/api/social/search?q=${encodeURIComponent(trimmed.toLowerCase())}&type=all&limit=8`,
+        `/api/social/search?q=${encodeURIComponent(trimmed.toLowerCase())}&type=all&limit=8`,
         { signal: controller.signal, cache: 'no-store' }
       );
       if (!res.ok) throw new Error('Search failed');
@@ -178,49 +181,51 @@ export function MobileMenu({ profileInitial, profilePhotoUrl, faceTag, displayNa
         )}
       </div>
 
-      <div className="mt-2 bg-card border border-border rounded-xl overflow-hidden max-h-60 overflow-y-auto">
-        {isSearching ? (
-          <div className="p-4 text-center text-muted-foreground text-sm">Searching...</div>
-        ) : results.length === 0 ? (
-          <div className="p-4 text-center text-muted-foreground text-sm">No results found</div>
-        ) : (
-          results.map((result) => (
-            <button
-              key={`${result.type}-${result.id}`}
-              onClick={() => handleResultClick(result)}
-              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted text-left transition-colors"
-            >
-              {result.profile_photo_url ? (
-                <img
-                  src={result.profile_photo_url}
-                  alt={result.display_name || ''}
-                  className="w-8 h-8 rounded-full object-cover"
-                />
-              ) : (
-                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                  result.type === 'attendee'
-                    ? 'bg-emerald-500/10 text-emerald-500'
-                    : 'bg-purple-500/10 text-purple-500'
-                }`}>
-                  {result.type === 'attendee' ? (
-                    <User className="h-4 w-4" />
-                  ) : (
-                    <Camera className="h-4 w-4" />
-                  )}
+      {query.trim().length > 0 && (
+        <div className="mt-2 bg-card border border-border rounded-xl overflow-hidden max-h-60 overflow-y-auto">
+          {isSearching ? (
+            <div className="p-4 text-center text-muted-foreground text-sm">Searching...</div>
+          ) : results.length === 0 ? (
+            <div className="p-4 text-center text-muted-foreground text-sm">No results found</div>
+          ) : (
+            results.map((result) => (
+              <button
+                key={`${result.type}-${result.id}`}
+                onClick={() => handleResultClick(result)}
+                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted text-left transition-colors"
+              >
+                {result.profile_photo_url ? (
+                  <img
+                    src={result.profile_photo_url}
+                    alt={result.display_name || ''}
+                    className="w-8 h-8 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                    result.type === 'attendee'
+                      ? 'bg-emerald-500/10 text-emerald-500'
+                      : 'bg-purple-500/10 text-purple-500'
+                  }`}>
+                    {result.type === 'attendee' ? (
+                      <User className="h-4 w-4" />
+                    ) : (
+                      <Camera className="h-4 w-4" />
+                    )}
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">
+                    {result.name || result.display_name}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {result.face_tag || (result.type === 'attendee' ? 'Attendee' : 'Creator')}
+                  </p>
                 </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-foreground truncate">
-                  {result.name || result.display_name}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {result.face_tag || (result.type === 'attendee' ? 'Attendee' : 'Creator')}
-                </p>
-              </div>
-            </button>
-          ))
-        )}
-      </div>
+              </button>
+            ))
+          )}
+        </div>
+      )}
     </div>,
     document.body
   ) : null;

@@ -3,7 +3,15 @@ export const dynamic = 'force-dynamic';
 import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 
-import { verifyWebhook, captureOrder } from '@/lib/payments/paypal';
+import { verifyWebhook, captureOrder, getBillingSubscription } from '@/lib/payments/paypal';
+import {
+  parseMetadataRecord,
+  readNumber,
+  readString,
+  syncRecurringSubscriptionRecord,
+  type SubscriptionScope,
+} from '@/lib/payments/recurring-sync';
+import { mapProviderSubscriptionStatusToLocal } from '@/lib/payments/recurring-subscriptions';
 import {
   claimWebhookEvent,
   markWebhookFailed,
@@ -18,7 +26,13 @@ interface PayPalWebhookPayload {
   event_type: string;
   resource: {
     id: string;
-    status: string;
+    status?: string;
+    custom_id?: string;
+    plan_id?: string;
+    subscriber?: {
+      payer_id?: string;
+      email_address?: string;
+    };
     purchase_units?: Array<{
       reference_id: string;
       custom_id?: string;
@@ -54,7 +68,13 @@ export async function POST(request: Request) {
     const headersList = await headers();
     
     const webhookHeaders: Record<string, string> = {};
-    ['paypal-transmission-id', 'paypal-transmission-time', 'paypal-cert-url', 'paypal-transmission-sig'].forEach((key) => {
+    [
+      'paypal-transmission-id',
+      'paypal-transmission-time',
+      'paypal-cert-url',
+      'paypal-transmission-sig',
+      'paypal-auth-algo',
+    ].forEach((key) => {
       const value = headersList.get(key);
       if (value) webhookHeaders[key] = value;
     });
@@ -102,6 +122,21 @@ export async function POST(request: Request) {
         case 'PAYMENT.CAPTURE.DENIED':
         case 'PAYMENT.CAPTURE.REFUNDED': {
           await handleCaptureFailed(supabase, payload.resource, payload.event_type);
+          break;
+        }
+
+        case 'BILLING.SUBSCRIPTION.CREATED':
+        case 'BILLING.SUBSCRIPTION.ACTIVATED':
+        case 'BILLING.SUBSCRIPTION.UPDATED':
+        case 'BILLING.SUBSCRIPTION.SUSPENDED':
+        case 'BILLING.SUBSCRIPTION.CANCELLED':
+        case 'BILLING.SUBSCRIPTION.EXPIRED': {
+          await handleSubscriptionLifecycle(supabase, payload.resource, payload.event_type);
+          break;
+        }
+
+        case 'BILLING.SUBSCRIPTION.PAYMENT.FAILED': {
+          await handleSubscriptionPaymentFailure(supabase, payload.resource, payload.event_type);
           break;
         }
 
@@ -270,5 +305,100 @@ async function handleCaptureFailed(
       await supabase.from('entitlements').delete().eq('transaction_id', transaction.id);
     }
   }
+}
+
+async function handleSubscriptionLifecycle(
+  supabase: ReturnType<typeof createServiceClient>,
+  resource: PayPalWebhookPayload['resource'],
+  eventType: string
+) {
+  const subscriptionId = readString(resource.id);
+  if (!subscriptionId) return;
+
+  const latest = await getBillingSubscription(subscriptionId).catch(() => null);
+  const metadata = parseMetadataRecord(latest?.custom_id || resource.custom_id);
+  const scope = normalizeScope(metadata.subscription_scope);
+
+  if (!scope) {
+    return;
+  }
+
+  const mappedStatus =
+    mapProviderSubscriptionStatusToLocal(latest?.status || resource.status, scope) ||
+    (scope === 'vault_subscription' ? 'past_due' : 'past_due');
+
+  await syncRecurringSubscriptionRecord({
+    supabase,
+    provider: 'paypal',
+    scope,
+    status: mappedStatus,
+    eventType,
+    externalSubscriptionId: subscriptionId,
+    externalCustomerId:
+      readString(resource.subscriber?.payer_id) ||
+      readString(metadata.external_customer_id) ||
+      null,
+    externalPlanId: readString(latest?.plan_id) || readString(resource.plan_id) || null,
+    billingCycle: readString(metadata.billing_cycle) || 'monthly',
+    currency: readString(metadata.pricing_currency) || 'USD',
+    amountCents: readNumber(metadata.pricing_amount_cents),
+    cancelAtPeriodEnd: mappedStatus === 'canceled' || mappedStatus === 'cancelled',
+    canceledAt: mappedStatus === 'canceled' || mappedStatus === 'cancelled' ? new Date().toISOString() : null,
+    photographerId: readString(metadata.photographer_id),
+    attendeeId: readString(metadata.attendee_id),
+    userId: readString(metadata.user_id),
+    planCode: readString(metadata.plan_code) || 'free',
+    planId: readString(metadata.plan_id),
+    planSlug: readString(metadata.plan_slug),
+    metadata: {
+      ...metadata,
+      paypal_subscription_status: latest?.status || resource.status || null,
+    },
+  });
+}
+
+async function handleSubscriptionPaymentFailure(
+  supabase: ReturnType<typeof createServiceClient>,
+  resource: PayPalWebhookPayload['resource'],
+  eventType: string
+) {
+  const metadata = parseMetadataRecord(resource.custom_id);
+  const scope = normalizeScope(metadata.subscription_scope);
+  if (!scope) return;
+
+  const subscriptionId = readString(resource.id);
+  await syncRecurringSubscriptionRecord({
+    supabase,
+    provider: 'paypal',
+    scope,
+    status: 'past_due',
+    eventType,
+    externalSubscriptionId: subscriptionId,
+    externalCustomerId:
+      readString(resource.subscriber?.payer_id) ||
+      readString(metadata.external_customer_id) ||
+      null,
+    externalPlanId: readString(resource.plan_id) || readString(metadata.provider_plan_id),
+    billingCycle: readString(metadata.billing_cycle) || 'monthly',
+    currency: readString(metadata.pricing_currency) || 'USD',
+    amountCents: readNumber(metadata.pricing_amount_cents),
+    photographerId: readString(metadata.photographer_id),
+    attendeeId: readString(metadata.attendee_id),
+    userId: readString(metadata.user_id),
+    planCode: readString(metadata.plan_code) || 'free',
+    planId: readString(metadata.plan_id),
+    planSlug: readString(metadata.plan_slug),
+    metadata: {
+      ...metadata,
+      paypal_subscription_status: resource.status || null,
+    },
+  });
+}
+
+function normalizeScope(value: unknown): SubscriptionScope | null {
+  if (value === 'creator_subscription') return 'creator_subscription';
+  if (value === 'attendee_subscription') return 'attendee_subscription';
+  if (value === 'vault_subscription') return 'vault_subscription';
+  return null;
 }
 

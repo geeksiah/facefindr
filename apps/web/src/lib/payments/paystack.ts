@@ -21,6 +21,7 @@ export interface PaystackInitializeParams {
   callbackUrl: string;
   metadata?: Record<string, unknown>;
   subaccount?: string;
+  plan?: string;
 }
 
 export interface PaystackInitializeResponse {
@@ -120,6 +121,10 @@ export async function initializePaystackPayment(
     payload.subaccount = params.subaccount;
   }
 
+  if (params.plan) {
+    payload.plan = params.plan;
+  }
+
   const response = await paystackRequest<{
     status: boolean;
     message: string;
@@ -137,6 +142,42 @@ export async function initializePaystackPayment(
     authorizationUrl: response.data.authorization_url,
     accessCode: response.data.access_code,
     reference: response.data.reference,
+  };
+}
+
+export async function initializePaystackSubscription(
+  params: PaystackInitializeParams,
+  explicitSecretKey?: string
+): Promise<PaystackInitializeResponse> {
+  const payload = {
+    ...params,
+    plan: params.plan,
+  };
+  return initializePaystackPayment(payload, explicitSecretKey);
+}
+
+export async function getPaystackSubscriptionStatus(
+  subscriptionCodeOrId: string,
+  explicitSecretKey?: string
+): Promise<{ status: string; subscription_code?: string; id?: number }> {
+  const secretKey = getSecretKey(explicitSecretKey);
+
+  const response = await paystackRequest<{
+    status: boolean;
+    message: string;
+    data: {
+      id?: number;
+      subscription_code?: string;
+      status: string;
+    };
+  }>(`/subscription/${encodeURIComponent(subscriptionCodeOrId)}`, secretKey, {
+    method: 'GET',
+  });
+
+  return {
+    status: response.data.status,
+    subscription_code: response.data.subscription_code,
+    id: response.data.id,
   };
 }
 

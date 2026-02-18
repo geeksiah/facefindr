@@ -119,6 +119,28 @@ export interface PayPalOrder {
   }>;
 }
 
+export interface CreateBillingSubscriptionParams {
+  planId: string;
+  returnUrl: string;
+  cancelUrl: string;
+  customId?: string;
+  subscriber?: {
+    email?: string;
+    givenName?: string;
+    surname?: string;
+  };
+}
+
+export interface PayPalBillingSubscription {
+  id: string;
+  status: string;
+  links: Array<{
+    href: string;
+    rel: string;
+    method: string;
+  }>;
+}
+
 export async function createOrder(params: CreateOrderParams): Promise<PayPalOrder> {
   if (!ordersController) {
     throw new Error('PayPal is not configured');
@@ -194,6 +216,95 @@ export async function createOrder(params: CreateOrderParams): Promise<PayPalOrde
     id: order.id,
     status: order.status,
     links: order.links || [],
+  };
+}
+
+export async function createBillingSubscription(
+  params: CreateBillingSubscriptionParams
+): Promise<PayPalBillingSubscription> {
+  if (!PAYPAL_CLIENT_ID || !PAYPAL_CLIENT_SECRET) {
+    throw new Error('PayPal is not configured');
+  }
+
+  const accessToken = await getPayPalAccessToken();
+  const response = await fetch(`${getPayPalApiBaseUrl()}/v1/billing/subscriptions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=representation',
+    },
+    body: JSON.stringify({
+      plan_id: params.planId,
+      ...(params.customId ? { custom_id: params.customId } : {}),
+      ...(params.subscriber
+        ? {
+            subscriber: {
+              ...(params.subscriber.email ? { email_address: params.subscriber.email } : {}),
+              ...(params.subscriber.givenName || params.subscriber.surname
+                ? {
+                    name: {
+                      ...(params.subscriber.givenName ? { given_name: params.subscriber.givenName } : {}),
+                      ...(params.subscriber.surname ? { surname: params.subscriber.surname } : {}),
+                    },
+                  }
+                : {}),
+            },
+          }
+        : {}),
+      application_context: {
+        brand_name: 'Ferchr',
+        user_action: 'SUBSCRIBE_NOW',
+        return_url: params.returnUrl,
+        cancel_url: params.cancelUrl,
+      },
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.message || 'Failed to create PayPal billing subscription');
+  }
+
+  return {
+    id: data.id,
+    status: data.status,
+    links: data.links || [],
+  };
+}
+
+export async function getBillingSubscription(subscriptionId: string): Promise<{
+  id: string;
+  status: string;
+  plan_id?: string;
+  custom_id?: string;
+}> {
+  if (!PAYPAL_CLIENT_ID || !PAYPAL_CLIENT_SECRET) {
+    throw new Error('PayPal is not configured');
+  }
+
+  const accessToken = await getPayPalAccessToken();
+  const response = await fetch(
+    `${getPayPalApiBaseUrl()}/v1/billing/subscriptions/${encodeURIComponent(subscriptionId)}`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.message || 'Failed to fetch PayPal billing subscription');
+  }
+
+  return {
+    id: data.id,
+    status: data.status,
+    plan_id: data.plan_id,
+    custom_id: data.custom_id,
   };
 }
 

@@ -157,6 +157,62 @@ export async function initializePayment(
   return response.data;
 }
 
+export interface InitializeRecurringPaymentParams {
+  txRef: string;
+  amount: number; // cents
+  currency: string;
+  redirectUrl: string;
+  customerEmail: string;
+  customerName?: string;
+  paymentPlanId: string;
+  metadata?: Record<string, string>;
+}
+
+export async function initializeRecurringPayment(
+  params: InitializeRecurringPaymentParams
+): Promise<FlutterwavePaymentLink> {
+  const response = await flutterwaveRequest<{
+    status: string;
+    message: string;
+    data: FlutterwavePaymentLink;
+  }>('/payments', {
+    method: 'POST',
+    body: JSON.stringify({
+      tx_ref: params.txRef,
+      amount: params.amount / 100,
+      currency: params.currency,
+      redirect_url: params.redirectUrl,
+      customer: {
+        email: params.customerEmail,
+        name: params.customerName,
+      },
+      payment_plan: params.paymentPlanId,
+      customizations: {
+        title: 'Ferchr',
+        description: 'Recurring subscription',
+        logo: (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000') + '/assets/logos/icon.svg',
+      },
+      meta: params.metadata || {},
+    }),
+  });
+
+  return response.data;
+}
+
+export async function getRecurringSubscriptionStatus(
+  subscriptionId: string
+): Promise<{ id: string; status: string }> {
+  const response = await flutterwaveRequest<{
+    status: string;
+    message: string;
+    data: { id: string; status: string };
+  }>(`/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+    method: 'GET',
+  });
+
+  return response.data;
+}
+
 // ============================================
 // MOBILE MONEY CHARGE (Direct from customer)
 // ============================================

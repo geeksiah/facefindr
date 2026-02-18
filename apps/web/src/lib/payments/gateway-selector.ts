@@ -11,7 +11,13 @@
 import { createServiceClient } from '@/lib/supabase/server';
 
 export type PaymentGateway = 'stripe' | 'flutterwave' | 'paypal' | 'paystack';
-export type PaymentProductType = 'event_checkout' | 'tip' | 'drop_in' | 'subscription' | 'attendee_subscription';
+export type PaymentProductType =
+  | 'event_checkout'
+  | 'tip'
+  | 'drop_in'
+  | 'subscription'
+  | 'attendee_subscription'
+  | 'vault_subscription';
 export type RuntimeEnvironment = 'development' | 'staging' | 'production';
 
 export interface GatewaySelection {
@@ -24,8 +30,12 @@ export interface GatewaySelection {
 }
 
 function getProductSupportedGateways(productType: PaymentProductType): PaymentGateway[] {
-  if (productType === 'subscription' || productType === 'attendee_subscription') {
-    return ['stripe'];
+  if (
+    productType === 'subscription' ||
+    productType === 'attendee_subscription' ||
+    productType === 'vault_subscription'
+  ) {
+    return ['stripe', 'flutterwave', 'paypal', 'paystack'];
   }
   return ['stripe', 'flutterwave', 'paypal', 'paystack'];
 }

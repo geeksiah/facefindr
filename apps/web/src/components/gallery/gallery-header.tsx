@@ -43,14 +43,20 @@ export function GallerySearch() {
 
   const performSearch = useCallback(async (searchQuery: string) => {
     const trimmedQuery = searchQuery.trim();
-    const includePublicSeed = trimmedQuery.length < 1;
-
     const requestId = activeSearchRequestRef.current + 1;
     activeSearchRequestRef.current = requestId;
 
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
+
+    if (trimmedQuery.length < 1) {
+      setResults([]);
+      setIsSearching(false);
+      setShowResults(false);
+      return;
+    }
+
     const controller = new AbortController();
     abortControllerRef.current = controller;
     const timeoutId = setTimeout(() => controller.abort(), 8000);
@@ -63,9 +69,7 @@ export function GallerySearch() {
       const newResults: SearchResult[] = [];
 
       const response = await fetch(
-        includePublicSeed
-          ? '/api/social/search?includePublicSeed=true&type=all&limit=10'
-          : `/api/social/search?q=${encodeURIComponent(searchTerm)}&type=all&limit=10`,
+        `/api/social/search?q=${encodeURIComponent(searchTerm)}&type=all&limit=10`,
         { signal: controller.signal, cache: 'no-store' }
       );
 
@@ -138,7 +142,7 @@ export function GallerySearch() {
           placeholder="Search events, photographers..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onFocus={() => setShowResults(true)}
+          onFocus={() => setShowResults(query.trim().length > 0)}
           className="h-10 w-full rounded-xl border border-border bg-background pl-10 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:border-transparent focus:outline-none focus:ring-2 focus:ring-accent"
         />
         {query && (
@@ -152,7 +156,7 @@ export function GallerySearch() {
       </div>
 
       {/* Results Dropdown */}
-      {showResults && (
+      {showResults && query.trim().length > 0 && (
         <div className="absolute top-full left-0 right-0 mt-2 bg-card border border-border rounded-xl shadow-lg overflow-hidden z-50">
           {isSearching ? (
             <div className="p-4 text-center text-muted-foreground text-sm">

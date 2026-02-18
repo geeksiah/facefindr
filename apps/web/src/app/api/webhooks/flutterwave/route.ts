@@ -5,6 +5,14 @@ import { NextResponse } from 'next/server';
 
 import { verifyWebhookSignature, verifyTransaction } from '@/lib/payments/flutterwave';
 import {
+  parseMetadataRecord,
+  readNumber,
+  readString,
+  syncRecurringSubscriptionRecord,
+  type SubscriptionScope,
+} from '@/lib/payments/recurring-sync';
+import { mapProviderSubscriptionStatusToLocal } from '@/lib/payments/recurring-subscriptions';
+import {
   claimWebhookEvent,
   markWebhookFailed,
   markWebhookProcessed,
@@ -26,6 +34,10 @@ interface FlutterwaveWebhookPayload {
     merchant_fee: number;
     status: 'successful' | 'failed' | 'pending';
     payment_type: string;
+    subscription_id?: string | number;
+    plan?: string;
+    payment_plan?: string;
+    charged_at?: string;
     customer: {
       id: number;
       name: string;
@@ -91,8 +103,17 @@ export async function POST(request: Request) {
           break;
         }
 
+        case 'charge.failed': {
+          await handleChargeFailed(supabase, payload.data);
+          break;
+        }
+
         default:
-          console.log(`Unhandled Flutterwave event: ${payload.event}`);
+          if (payload.event.startsWith('subscription.')) {
+            await handleSubscriptionLifecycle(supabase, payload.event, payload.data);
+          } else {
+            console.log(`Unhandled Flutterwave event: ${payload.event}`);
+          }
       }
 
       if (claim.rowId) {
@@ -131,6 +152,17 @@ async function handleChargeCompleted(
     return;
   }
 
+  await syncRecurringFromFlutterwaveData(supabase, 'charge.completed', {
+    ...data,
+    status: verifiedTx.status,
+    currency: verifiedTx.currency || data.currency,
+    charged_amount: verifiedTx.charged_amount || data.charged_amount,
+    amount: verifiedTx.amount || data.amount,
+    meta: (verifiedTx.meta as Record<string, unknown>) || data.meta || {},
+    subscription_id:
+      (verifiedTx.meta as Record<string, unknown> | undefined)?.subscription_id as string | number | undefined,
+  });
+
   // Find the pending transaction
   const { data: transaction, error: findError } = await supabase
     .from('transactions')
@@ -162,6 +194,18 @@ async function handleChargeCompleted(
   await createEntitlements(supabase, transaction);
 }
 
+async function handleChargeFailed(
+  supabase: ReturnType<typeof createServiceClient>,
+  data: FlutterwaveWebhookPayload['data']
+) {
+  await supabase
+    .from('transactions')
+    .update({ status: 'failed' })
+    .eq('flutterwave_tx_ref', data.tx_ref);
+
+  await syncRecurringFromFlutterwaveData(supabase, 'charge.failed', data, 'past_due');
+}
+
 async function handleTransferCompleted(
   supabase: ReturnType<typeof createServiceClient>,
   data: FlutterwaveWebhookPayload['data']
@@ -179,6 +223,86 @@ async function handleTransferCompleted(
   if (error) {
     console.error('Failed to update payout status:', error);
   }
+}
+
+async function handleSubscriptionLifecycle(
+  supabase: ReturnType<typeof createServiceClient>,
+  eventType: string,
+  data: FlutterwaveWebhookPayload['data']
+) {
+  await syncRecurringFromFlutterwaveData(supabase, eventType, data);
+}
+
+async function syncRecurringFromFlutterwaveData(
+  supabase: ReturnType<typeof createServiceClient>,
+  eventType: string,
+  data: FlutterwaveWebhookPayload['data'],
+  statusOverride?: string
+) {
+  const metadata = parseMetadataRecord(data.meta);
+  const scope = normalizeScope(metadata.subscription_scope);
+  if (!scope) return;
+
+  const providerStatus = statusOverride || readString(data.status) || eventType;
+  const mappedStatus = mapProviderSubscriptionStatusToLocal(providerStatus, scope) || 'past_due';
+  const fallbackExternalId =
+    readString(metadata.subscription_id) ||
+    readString(metadata.provider_subscription_id) ||
+    readString(metadata.payment_plan) ||
+    readString(data.subscription_id) ||
+    readString(data.payment_plan) ||
+    readString(data.plan) ||
+    readString(data.tx_ref) ||
+    String(data.id);
+  const amountCentsFromCharge =
+    readNumber(data.charged_amount) !== null
+      ? Math.round(Number(data.charged_amount) * 100)
+      : readNumber(data.amount) !== null
+        ? Math.round(Number(data.amount) * 100)
+        : null;
+
+  await syncRecurringSubscriptionRecord({
+    supabase,
+    provider: 'flutterwave',
+    scope,
+    status: mappedStatus,
+    eventType,
+    externalSubscriptionId: fallbackExternalId,
+    externalCustomerId:
+      readString(metadata.external_customer_id) ||
+      (data.customer?.id ? String(data.customer.id) : null) ||
+      readString(data.customer?.email),
+    externalPlanId:
+      readString(metadata.provider_plan_id) ||
+      readString(metadata.payment_plan) ||
+      readString(data.payment_plan) ||
+      readString(data.plan),
+    billingCycle: readString(metadata.billing_cycle) || 'monthly',
+    currency: readString(data.currency) || readString(metadata.pricing_currency) || 'USD',
+    amountCents: readNumber(metadata.pricing_amount_cents) ?? amountCentsFromCharge,
+    currentPeriodStart: readString(metadata.current_period_start) || readString(data.charged_at),
+    currentPeriodEnd: readString(metadata.current_period_end),
+    cancelAtPeriodEnd: mappedStatus === 'canceled' || mappedStatus === 'cancelled',
+    canceledAt: mappedStatus === 'canceled' || mappedStatus === 'cancelled' ? new Date().toISOString() : null,
+    photographerId: readString(metadata.photographer_id),
+    attendeeId: readString(metadata.attendee_id),
+    userId: readString(metadata.user_id),
+    planCode: readString(metadata.plan_code) || 'free',
+    planId: readString(metadata.plan_id),
+    planSlug: readString(metadata.plan_slug),
+    metadata: {
+      ...metadata,
+      flutterwave_tx_ref: data.tx_ref,
+      flutterwave_event: eventType,
+    },
+  });
+}
+
+function normalizeScope(value: unknown): SubscriptionScope | null {
+  if (value === 'creator_subscription') return 'creator_subscription';
+  if (value === 'attendee_subscription') return 'attendee_subscription';
+  if (value === 'vault_subscription') return 'vault_subscription';
+  return null;
 }
 
 async function createEntitlements(

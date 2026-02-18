@@ -7,6 +7,14 @@ import {
   verifyPaystackWebhookSignatureAsync,
 } from '@/lib/payments/paystack';
 import {
+  parseMetadataRecord,
+  readNumber,
+  readString,
+  syncRecurringSubscriptionRecord,
+  type SubscriptionScope,
+} from '@/lib/payments/recurring-sync';
+import { mapProviderSubscriptionStatusToLocal } from '@/lib/payments/recurring-subscriptions';
+import {
   claimWebhookEvent,
   markWebhookFailed,
   markWebhookProcessed,
@@ -20,6 +28,21 @@ interface PaystackWebhookPayload {
     reference?: string;
     status?: string;
     fees?: number;
+    amount?: number;
+    currency?: string;
+    customer?: {
+      customer_code?: string;
+      email?: string;
+    };
+    plan?: {
+      plan_code?: string;
+      interval?: string;
+      amount?: number;
+      name?: string;
+    };
+    subscription_code?: string;
+    created_at?: string;
+    next_payment_date?: string;
     metadata?: Record<string, unknown>;
   };
 }
@@ -58,10 +81,25 @@ export async function POST(request: Request) {
     }
 
     try {
-      if (payload.event === 'charge.success') {
-        await handleChargeSuccess(supabase, payload);
-      } else if (payload.event === 'charge.failed') {
-        await handleChargeFailure(supabase, payload);
+      switch (payload.event) {
+        case 'charge.success': {
+          await handleChargeSuccess(supabase, payload);
+          break;
+        }
+        case 'charge.failed': {
+          await handleChargeFailure(supabase, payload);
+          break;
+        }
+        case 'subscription.create':
+        case 'subscription.disable':
+        case 'subscription.not_renew':
+        case 'invoice.payment_failed':
+        case 'invoice.update': {
+          await handleSubscriptionEvent(supabase, payload);
+          break;
+        }
+        default:
+          console.log(`Unhandled Paystack event: ${payload.event}`);
       }
 
       if (claim.rowId) {
@@ -98,6 +136,10 @@ async function handleChargeSuccess(
   const metadata = (payload.data?.metadata || {}) as Record<string, unknown>;
   if (metadata.type === 'drop_in_upload') {
     await handleDropInPaymentSuccess(supabase, payload, metadata);
+    return;
+  }
+  if (metadata.subscription_scope) {
+    await syncRecurringFromPaystackPayload(supabase, payload.event, payload.data, metadata, 'active');
     return;
   }
 
@@ -154,6 +196,10 @@ async function handleChargeFailure(
     }
     return;
   }
+  if (metadata.subscription_scope) {
+    await syncRecurringFromPaystackPayload(supabase, payload.event, payload.data, metadata, 'past_due');
+    return;
+  }
 
   const { error } = await (supabase
     .from('transactions') as any)
@@ -163,6 +209,83 @@ async function handleChargeFailure(
   if (error) {
     console.error('Failed to mark paystack transaction failed:', error);
   }
+}
+
+async function handleSubscriptionEvent(
+  supabase: ReturnType<typeof createServiceClient>,
+  payload: PaystackWebhookPayload
+) {
+  const metadata = parseMetadataRecord(payload.data?.metadata);
+  await syncRecurringFromPaystackPayload(supabase, payload.event, payload.data, metadata);
+}
+
+async function syncRecurringFromPaystackPayload(
+  supabase: ReturnType<typeof createServiceClient>,
+  eventType: string,
+  data: PaystackWebhookPayload['data'],
+  rawMetadata: Record<string, unknown>,
+  statusOverride?: string
+) {
+  const metadata = parseMetadataRecord(rawMetadata);
+  const scope = normalizeScope(metadata.subscription_scope);
+  if (!scope) return;
+
+  const providerStatus = statusOverride || readString(data.status) || eventType;
+  const mappedStatus = mapProviderSubscriptionStatusToLocal(providerStatus, scope) || 'past_due';
+  const derivedAmountCents =
+    readNumber(metadata.pricing_amount_cents) ??
+    (readNumber(data.amount) !== null ? Math.round(Number(data.amount)) : null);
+  const isCancelled = mappedStatus === 'canceled' || mappedStatus === 'cancelled';
+  const externalSubscriptionId =
+    readString(data.subscription_code) ||
+    readString(metadata.subscription_id) ||
+    readString(metadata.external_subscription_id) ||
+    readString(data.reference) ||
+    (data.id ? String(data.id) : null);
+
+  await syncRecurringSubscriptionRecord({
+    supabase,
+    provider: 'paystack',
+    scope,
+    status: mappedStatus,
+    eventType,
+    externalSubscriptionId,
+    externalCustomerId:
+      readString(data.customer?.customer_code) ||
+      readString(metadata.external_customer_id) ||
+      readString(data.customer?.email),
+    externalPlanId:
+      readString(data.plan?.plan_code) ||
+      readString(metadata.provider_plan_id) ||
+      readString(metadata.external_plan_id),
+    billingCycle:
+      readString(metadata.billing_cycle) ||
+      readString(data.plan?.interval) ||
+      'monthly',
+    currency: readString(data.currency) || readString(metadata.pricing_currency) || 'USD',
+    amountCents: derivedAmountCents,
+    currentPeriodStart: readString(data.created_at),
+    currentPeriodEnd: readString(data.next_payment_date) || readString(metadata.current_period_end),
+    cancelAtPeriodEnd: isCancelled,
+    canceledAt: isCancelled ? new Date().toISOString() : null,
+    photographerId: readString(metadata.photographer_id),
+    attendeeId: readString(metadata.attendee_id),
+    userId: readString(metadata.user_id),
+    planCode: readString(metadata.plan_code) || 'free',
+    planId: readString(metadata.plan_id),
+    planSlug: readString(metadata.plan_slug) || readString(data.plan?.name),
+    metadata: {
+      ...metadata,
+      paystack_reference: data.reference || null,
+    },
+  });
+}
+
+function normalizeScope(value: unknown): SubscriptionScope | null {
+  if (value === 'creator_subscription') return 'creator_subscription';
+  if (value === 'attendee_subscription') return 'attendee_subscription';
+  if (value === 'vault_subscription') return 'vault_subscription';
+  return null;
 }
 
 async function handleDropInPaymentSuccess(

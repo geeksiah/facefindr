@@ -87,6 +87,20 @@ export async function POST(request: Request) {
           break;
         }
 
+        case 'customer.subscription.created':
+        case 'customer.subscription.updated':
+        case 'customer.subscription.deleted': {
+          const subscription = event.data.object as Stripe.Subscription;
+          await handleSubscriptionLifecycle(supabase, subscription, event.type);
+          break;
+        }
+
+        case 'invoice.payment_failed': {
+          const invoice = event.data.object as Stripe.Invoice;
+          await handleSubscriptionInvoiceFailed(supabase, invoice);
+          break;
+        }
+
         default:
           console.log(`Unhandled Stripe event: ${event.type}`);
       }
@@ -262,5 +276,176 @@ async function createEntitlements(
 
     await supabase.from('entitlements').insert(entitlements);
   }
+}
+
+function mapStripeStatus(status?: string | null) {
+  const normalized = String(status || '').toLowerCase();
+  if (normalized === 'active') return 'active';
+  if (normalized === 'trialing') return 'trialing';
+  if (normalized === 'past_due' || normalized === 'unpaid' || normalized === 'incomplete') {
+    return 'past_due';
+  }
+  if (normalized.includes('cancel')) return 'canceled';
+  return 'past_due';
+}
+
+function toIsoFromUnix(timestamp: number | null | undefined) {
+  if (!timestamp || !Number.isFinite(timestamp)) return null;
+  return new Date(Number(timestamp) * 1000).toISOString();
+}
+
+async function handleSubscriptionLifecycle(
+  supabase: ReturnType<typeof createServiceClient>,
+  subscription: Stripe.Subscription,
+  eventType: string
+) {
+  const metadata = (subscription.metadata || {}) as Record<string, string>;
+  const scope = metadata.subscription_scope || metadata.type;
+  const status = mapStripeStatus(subscription.status);
+  const currentPeriodStart = toIsoFromUnix(subscription.current_period_start) || new Date().toISOString();
+  const currentPeriodEnd = toIsoFromUnix(subscription.current_period_end);
+  const canceledAt =
+    subscription.cancel_at || subscription.canceled_at
+      ? toIsoFromUnix(subscription.cancel_at || subscription.canceled_at || null)
+      : null;
+  const priceObj = subscription.items?.data?.[0]?.price;
+  const currency = String(priceObj?.currency || 'usd').toUpperCase();
+  const amountCents = Number(priceObj?.unit_amount || 0);
+
+  if (scope === 'attendee_subscription' || metadata.attendee_id) {
+    const attendeeId = metadata.attendee_id;
+    if (!attendeeId) return;
+
+    const planCode = metadata.plan_code || 'free';
+    const isPremium = planCode === 'premium' || planCode === 'premium_plus';
+    const isPremiumPlus = planCode === 'premium_plus';
+
+    await supabase
+      .from('attendee_subscriptions')
+      .upsert(
+        {
+          attendee_id: attendeeId,
+          plan_code: planCode,
+          status,
+          stripe_subscription_id: subscription.id,
+          stripe_customer_id: typeof subscription.customer === 'string' ? subscription.customer : null,
+          payment_provider: 'stripe',
+          external_subscription_id: subscription.id,
+          external_customer_id: typeof subscription.customer === 'string' ? subscription.customer : null,
+          external_plan_id: metadata.provider_plan_id || priceObj?.id || null,
+          billing_cycle: metadata.billing_cycle || 'monthly',
+          currency,
+          amount_cents: amountCents,
+          current_period_start: currentPeriodStart,
+          current_period_end: currentPeriodEnd,
+          cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
+          canceled_at: canceledAt,
+          can_discover_non_contacts: isPremium,
+          can_upload_drop_ins: isPremium,
+          can_receive_all_drop_ins: isPremium,
+          can_search_social_media: isPremiumPlus,
+          can_search_web: isPremiumPlus,
+          last_webhook_event_at: new Date().toISOString(),
+          metadata: {
+            stripe_event: eventType,
+          },
+        },
+        { onConflict: 'attendee_id' }
+      )
+      .throwOnError();
+    return;
+  }
+
+  if (scope === 'vault_subscription' || metadata.plan_slug) {
+    const userId = metadata.user_id;
+    if (!userId) return;
+
+    await supabase
+      .from('storage_subscriptions')
+      .upsert(
+        {
+          user_id: userId,
+          plan_id: metadata.plan_id || null,
+          status: status === 'canceled' ? 'cancelled' : status,
+          billing_cycle: metadata.billing_cycle || 'monthly',
+          price_paid: amountCents / 100,
+          currency,
+          payment_provider: 'stripe',
+          external_subscription_id: subscription.id,
+          external_customer_id: typeof subscription.customer === 'string' ? subscription.customer : null,
+          external_plan_id: metadata.provider_plan_id || priceObj?.id || null,
+          amount_cents: amountCents,
+          current_period_start: currentPeriodStart,
+          current_period_end: currentPeriodEnd,
+          cancelled_at: canceledAt,
+          last_webhook_event_at: new Date().toISOString(),
+          metadata: {
+            stripe_event: eventType,
+            plan_slug: metadata.plan_slug || null,
+          },
+        },
+        { onConflict: 'user_id' }
+      )
+      .throwOnError();
+
+    await supabase.rpc('sync_subscription_limits', { p_user_id: userId }).catch(() => {});
+    return;
+  }
+
+  const photographerId = metadata.photographer_id;
+  if (!photographerId) return;
+
+  await supabase
+    .from('subscriptions')
+    .upsert(
+      {
+        photographer_id: photographerId,
+        plan_code: metadata.plan_code || 'free',
+        plan_id: metadata.plan_id || null,
+        status,
+        stripe_subscription_id: subscription.id,
+        stripe_customer_id: typeof subscription.customer === 'string' ? subscription.customer : null,
+        payment_provider: 'stripe',
+        external_subscription_id: subscription.id,
+        external_customer_id: typeof subscription.customer === 'string' ? subscription.customer : null,
+        external_plan_id: metadata.provider_plan_id || priceObj?.id || null,
+        billing_cycle: metadata.billing_cycle || 'monthly',
+        currency,
+        amount_cents: amountCents,
+        current_period_start: currentPeriodStart,
+        current_period_end: currentPeriodEnd,
+        cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
+        canceled_at: canceledAt,
+        last_webhook_event_at: new Date().toISOString(),
+        metadata: {
+          stripe_event: eventType,
+        },
+      },
+      { onConflict: 'photographer_id' }
+    )
+    .throwOnError();
+}
+
+async function handleSubscriptionInvoiceFailed(
+  supabase: ReturnType<typeof createServiceClient>,
+  invoice: Stripe.Invoice
+) {
+  const subscriptionId = typeof invoice.subscription === 'string' ? invoice.subscription : null;
+  if (!subscriptionId) return;
+
+  await Promise.all([
+    supabase
+      .from('subscriptions')
+      .update({ status: 'past_due', last_webhook_event_at: new Date().toISOString() })
+      .eq('external_subscription_id', subscriptionId),
+    supabase
+      .from('attendee_subscriptions')
+      .update({ status: 'past_due', last_webhook_event_at: new Date().toISOString() })
+      .eq('external_subscription_id', subscriptionId),
+    supabase
+      .from('storage_subscriptions')
+      .update({ status: 'past_due', last_webhook_event_at: new Date().toISOString() })
+      .eq('external_subscription_id', subscriptionId),
+  ]);
 }
 

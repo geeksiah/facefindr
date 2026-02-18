@@ -57,14 +57,20 @@ export function DashboardHeader() {
 
   const performSearch = useCallback(async (query: string) => {
     const trimmedQuery = query.trim();
-    const includePublicSeed = trimmedQuery.length < 1;
-
     const requestId = activeSearchRequestRef.current + 1;
     activeSearchRequestRef.current = requestId;
 
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
+
+    if (trimmedQuery.length < 1) {
+      setSearchResults([]);
+      setIsSearching(false);
+      setShowResults(false);
+      return;
+    }
+
     const controller = new AbortController();
     abortControllerRef.current = controller;
     const timeoutId = setTimeout(() => controller.abort(), 8000);
@@ -77,9 +83,7 @@ export function DashboardHeader() {
       const results: SearchResult[] = [];
 
       const socialResponse = await fetch(
-        includePublicSeed
-          ? `/api/social/search?includePublicSeed=true&type=all&limit=8`
-          : `/api/social/search?q=${encodeURIComponent(searchTerm)}&type=all&limit=8`,
+        `/api/social/search?q=${encodeURIComponent(searchTerm)}&type=all&limit=8`,
         { signal: controller.signal, cache: 'no-store' }
       );
 
@@ -187,7 +191,7 @@ export function DashboardHeader() {
             placeholder="Search people by name or @FaceTag"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            onFocus={() => setShowResults(true)}
+            onFocus={() => setShowResults(searchQuery.trim().length > 0)}
             onKeyDown={handleKeyDown}
             className="h-10 w-72 rounded-xl border border-border bg-background pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground transition-all duration-200 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-accent"
           />
@@ -201,7 +205,7 @@ export function DashboardHeader() {
           )}
 
           {/* Search Results Dropdown */}
-          {showResults && (
+          {showResults && searchQuery.trim().length > 0 && (
             <div className="absolute top-full left-0 right-0 mt-2 bg-card border border-border rounded-xl shadow-lg overflow-hidden z-50">
               {isSearching ? (
                 <div className="p-4 text-center text-muted-foreground text-sm">
@@ -320,7 +324,7 @@ export function DashboardHeader() {
               placeholder="Search events, photographers..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              onFocus={() => setShowResults(true)}
+              onFocus={() => setShowResults(searchQuery.trim().length > 0)}
               className="h-11 w-full rounded-xl border border-border bg-background pl-10 pr-10 text-sm text-foreground placeholder:text-muted-foreground transition-all duration-200 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-accent"
               autoFocus
             />
@@ -335,7 +339,7 @@ export function DashboardHeader() {
           </div>
           
           {/* Mobile search results */}
-          {showResults && (
+          {showResults && searchQuery.trim().length > 0 && (
             <div className="mt-2 bg-card border border-border rounded-xl overflow-hidden">
               {isSearching ? (
                 <div className="p-4 text-center text-muted-foreground text-sm">
