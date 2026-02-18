@@ -150,11 +150,22 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'This creator does not accept followers' }, { status: 400 });
       }
     } else {
-      const { data: attendee } = await supabase
+      const attendeeWithAllow = await supabase
         .from('attendees')
-        .select('id, is_public_profile, display_name')
+        .select('id, is_public_profile, display_name, allow_follows')
         .eq('id', resolvedTargetId)
         .single();
+
+      const attendee =
+        attendeeWithAllow.error && isMissingColumnError(attendeeWithAllow.error, 'allow_follows')
+          ? (
+              await supabase
+                .from('attendees')
+                .select('id, is_public_profile, display_name')
+                .eq('id', resolvedTargetId)
+                .single()
+            ).data
+          : attendeeWithAllow.data;
 
       if (!attendee) {
         return NextResponse.json({ error: 'User not found' }, { status: 404 });
@@ -162,6 +173,10 @@ export async function POST(request: NextRequest) {
 
       if (!attendee.is_public_profile) {
         return NextResponse.json({ error: 'User profile is private' }, { status: 403 });
+      }
+
+      if ((attendee as any).allow_follows === false) {
+        return NextResponse.json({ error: 'This user does not accept followers' }, { status: 400 });
       }
     }
 

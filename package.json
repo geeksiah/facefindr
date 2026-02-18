@@ -8,6 +8,7 @@
     "packages/*"
   ],
   "scripts": {
+    "test:privacy-api": "node ./scripts/test-privacy-api-shape.mjs",
     "dev": "turbo run dev",
     "dev:web": "turbo run dev --filter=@facefind/web",
     "dev:admin": "turbo run dev --filter=@facefind/admin",

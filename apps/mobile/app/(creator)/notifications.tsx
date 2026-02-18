@@ -30,6 +30,7 @@ import {
 } from 'lucide-react-native';
 
 import { useAuthStore } from '@/stores/auth-store';
+import { openProfile } from '@/lib/open-profile';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 import { getApiBaseUrl } from '@/lib/api-base';
@@ -177,7 +178,7 @@ export default function NotificationsScreen() {
     } else if (notification.type === 'event' && notification.data?.eventId) {
       router.push(`/event/${notification.data.eventId}`);
     } else if (notification.type === 'follower' && notification.data?.userId) {
-      router.push(`/u/${notification.data.userId}`);
+      openProfile(router, notification.data.userId);
     }
   };
 

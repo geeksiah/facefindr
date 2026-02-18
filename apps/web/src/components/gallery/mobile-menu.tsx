@@ -275,7 +275,18 @@ export function MobileMenu({ profileInitial, profilePhotoUrl, faceTag, displayNa
       <div className="p-4 border-t border-border">
         <button
           onClick={async () => {
-            await fetch('/api/auth/logout', { method: 'POST' });
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 8000);
+            try {
+              await fetch('/api/auth/logout', { method: 'POST', signal: controller.signal });
+            } finally {
+              clearTimeout(timeout);
+              try {
+                const channel = new BroadcastChannel('auth');
+                channel.postMessage({ type: 'signed_out' });
+                channel.close();
+              } catch {}
+            }
             router.replace('/login');
             router.refresh();
           }}

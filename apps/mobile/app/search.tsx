@@ -36,6 +36,7 @@ import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import { getApiBaseUrl } from '@/lib/api-base';
+import { openProfile } from '@/lib/open-profile';
 
 interface SearchResult {
   id: string;
@@ -252,7 +253,7 @@ export default function SearchScreen() {
         styles.resultCard,
         pressed && styles.resultCardPressed,
       ]}
-      onPress={() => router.push(`/u/${item.public_profile_slug || item.id}`)}
+      onPress={() => openProfile(router, item)}
     >
       {item.profile_photo_url ? (
         <Image source={{ uri: item.profile_photo_url }} style={styles.avatar} />

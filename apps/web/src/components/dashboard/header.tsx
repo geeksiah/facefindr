@@ -7,6 +7,7 @@ import { useTheme } from 'next-themes';
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 import { NotificationBell } from '@/components/notifications';
+import { resolveProfileSlug } from '@facefind/shared';
 import { Button } from '@/components/ui/button';
 import { formatEventDateDisplay } from '@/lib/events/time';
 import { createClient } from '@/lib/supabase/client';
@@ -152,10 +153,10 @@ export function DashboardHeader() {
     if (result.type === 'event') {
       router.push(`/dashboard/events/${result.id}`);
     } else if (result.type === 'creator' || result.type === 'photographer') {
-      const creatorSlug = result.public_profile_slug || result.face_tag?.replace(/^@/, '') || result.id;
+      const creatorSlug = resolveProfileSlug(result);
       router.push(`/dashboard/people/creator/${creatorSlug}`);
     } else if (result.type === 'attendee') {
-      const attendeeSlug = result.public_profile_slug || result.face_tag?.replace(/^@/, '') || result.id;
+      const attendeeSlug = resolveProfileSlug(result);
       router.push(`/dashboard/people/attendee/${attendeeSlug}`);
     }
   };

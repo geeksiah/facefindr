@@ -31,6 +31,7 @@ import {
 
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 import { getApiBaseUrl } from '@/lib/api-base';
+import { openProfile } from '@/lib/open-profile';
 import { useAuthStore } from '@/stores/auth-store';
 
 const API_URL = getApiBaseUrl();
@@ -205,14 +206,8 @@ export default function FollowingScreen() {
             pressed && styles.itemPressed,
           ]}
           onPress={() => {
-            if (isAttendee) {
-              router.push(`/u/${profileData.public_profile_slug || profileData.id}`);
-            } else {
-              router.push({
-                pathname: '/p/[slug]',
-                params: { slug: profileData.public_profile_slug || profileData.id },
-              });
-            }
+            // Use openProfile to prefer shell route when available
+            openProfile(router, profileData);
           }}
         >
           {profileData.profile_photo_url ? (

@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import { 
   User, 
@@ -13,6 +13,7 @@ import {
   Eye,
   EyeOff,
   Globe,
+  Users,
   Instagram,
   Twitter,
   Facebook,
@@ -29,6 +30,8 @@ import { useToast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
+import { usePrivacySettings } from '@facefind/shared';
+import { buildProfileUrls } from '@facefind/shared';
 
 interface Profile {
   id: string;
@@ -126,6 +129,7 @@ export default function SettingsPage() {
     profileVisible: true,
     showInSearch: true,
     shareActivityWithCreators: false,
+    allowFollows: true,
   });
 
   // Handle URL params for tab switching
@@ -172,17 +176,15 @@ export default function SettingsPage() {
           setNotifications(data.settings);
         }
 
-        // Load privacy settings
-        const privRes = await fetch('/api/user/privacy-settings');
-        if (privRes.ok) {
-          const data = await privRes.json();
-          if (data.settings) {
-            setPrivacySettings({
-              profileVisible: data.settings.profileVisible ?? true,
-              showInSearch: data.settings.showInSearch ?? true,
-              shareActivityWithCreators: data.settings.shareActivityWithCreators ?? false,
-            });
-          }
+        // Load privacy settings via shared hook to avoid mismatches/flicker
+        const priv = await privacyHook.load();
+        if (priv) {
+          setPrivacySettings({
+            profileVisible: priv.profileVisible ?? true,
+            showInSearch: priv.showInSearch ?? true,
+            shareActivityWithCreators: priv.shareActivityWithCreators ?? false,
+            allowFollows: priv.allowFollows ?? true,
+          });
         }
       } catch (error) {
         console.error('Failed to load settings:', error);
@@ -199,12 +201,8 @@ export default function SettingsPage() {
     const prev = { ...privacySettings };
     setPrivacySettings((p) => ({ ...p, [key]: value }));
     try {
-      const res = await fetch('/api/user/privacy-settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [key]: value }),
-      });
-      if (!res.ok) {
+      const result = await privacyHook.updateSetting(key as any, value);
+      if (!result) {
         setPrivacySettings(prev);
         toast.error('Error', 'Failed to update privacy setting');
       }
@@ -213,6 +211,9 @@ export default function SettingsPage() {
       toast.error('Error', 'Failed to update privacy setting');
     }
   };
+
+  // Hook instance for privacy
+  const privacyHook = usePrivacySettings();
 
   // Save profile
   const handleSaveProfile = async () => {
@@ -483,14 +484,32 @@ export default function SettingsPage() {
               <div className="mt-4 pt-4 border-t border-border">
                 <p className="text-sm text-muted-foreground">
                   Public profile:{' '}
-                  <a 
-                    href={`/c/${profile.publicProfileSlug}`} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="text-accent hover:underline"
-                  >
-                    {new URL(process.env.NEXT_PUBLIC_APP_URL || window.location.origin).hostname}/c/{profile.publicProfileSlug}
-                  </a>
+                  {(() => {
+                    try {
+                      const publicUrl = buildProfileUrls(profile.publicProfileSlug).publicCreator;
+                      return (
+                        <a
+                          href={publicUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-accent hover:underline"
+                        >
+                          {new URL(publicUrl).hostname}/c/{profile.publicProfileSlug}
+                        </a>
+                      );
+                    } catch (e) {
+                      return (
+                        <a
+                          href={`/c/${profile.publicProfileSlug}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-accent hover:underline"
+                        >
+                          {new URL(process.env.NEXT_PUBLIC_APP_URL || window.location.origin).hostname}/c/{profile.publicProfileSlug}
+                        </a>
+                      );
+                    }
+                  })()}
                 </p>
               </div>
             )}
@@ -885,6 +904,16 @@ export default function SettingsPage() {
                   onCheckedChange={(checked) => updatePrivacySetting('shareActivityWithCreators', checked)}
                 />
               </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-foreground">Allow Follows</p>
+                  <p className="text-sm text-secondary">Let others follow your creator profile</p>
+                </div>
+                <Switch
+                  checked={privacySettings.allowFollows}
+                  onCheckedChange={(checked) => updatePrivacySetting('allowFollows', checked)}
+                />
+              </div>
             </div>
           </div>
 
@@ -923,4 +952,3 @@ export default function SettingsPage() {
     </div>
   );
 }
-

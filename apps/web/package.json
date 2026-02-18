@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "lint:fix": "next lint --fix",
-    "type-check": "tsc --noEmit"
+    "type-check": "node -e \"require('fs').rmSync('.next/types', { recursive: true, force: true });\" && tsc --noEmit"
   },
   "dependencies": {
     "@aws-sdk/client-rekognition": "^3.967.0",

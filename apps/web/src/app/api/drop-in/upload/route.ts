@@ -244,8 +244,8 @@ export async function POST(request: NextRequest) {
             }] : []),
           ],
           mode: 'payment',
-          success_url: `${baseUrl}/drop-in/success?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${baseUrl}/drop-in/upload?canceled=true`,
+          success_url: `${baseUrl}/dashboard/drop-in/success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${baseUrl}/dashboard/drop-in/upload?canceled=true`,
           metadata: {
             type: 'drop_in_upload',
             attendee_id: attendee.id,
@@ -268,7 +268,7 @@ export async function POST(request: NextRequest) {
           txRef: idempotencyKey,
           amount: totalAmount,
           currency: dropInPricing.currencyCode,
-          redirectUrl: `${baseUrl}/drop-in/success?tx_ref=${idempotencyKey}&provider=flutterwave`,
+          redirectUrl: `${baseUrl}/dashboard/drop-in/success?tx_ref=${idempotencyKey}&provider=flutterwave`,
           customerEmail: user.email || '',
           eventId: null, // Drop-in not tied to event
           eventName: 'Drop-In Photo Upload',
@@ -309,8 +309,8 @@ export async function POST(request: NextRequest) {
           ],
           currency: dropInPricing.currencyCode,
           photographerPayPalEmail: null, // Platform payment
-          returnUrl: `${baseUrl}/drop-in/success?order_id=${idempotencyKey}&provider=paypal`,
-          cancelUrl: `${baseUrl}/drop-in/upload?canceled=true`,
+          returnUrl: `${baseUrl}/dashboard/drop-in/success?order_id=${idempotencyKey}&provider=paypal`,
+          cancelUrl: `${baseUrl}/dashboard/drop-in/upload?canceled=true`,
           metadata: {
             type: 'drop_in_upload',
             attendee_id: attendee.id,
@@ -339,7 +339,7 @@ export async function POST(request: NextRequest) {
           email: user.email || '',
           amount: totalAmount,
           currency: dropInPricing.currencyCode,
-          callbackUrl: `${baseUrl}/drop-in/success?reference=${idempotencyKey}&provider=paystack`,
+          callbackUrl: `${baseUrl}/dashboard/drop-in/success?reference=${idempotencyKey}&provider=paystack`,
           metadata: {
             type: 'drop_in_upload',
             attendee_id: attendee.id,

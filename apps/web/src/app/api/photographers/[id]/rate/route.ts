@@ -42,11 +42,21 @@ export async function POST(
     }
 
     // Check if user is an attendee
-    const { data: attendee } = await supabase
+    const attendeeById = await supabase
       .from('attendees')
       .select('id')
       .eq('id', user.id)
-      .single();
+      .maybeSingle();
+
+    const attendee =
+      attendeeById.data ||
+      (
+        await supabase
+          .from('attendees')
+          .select('id')
+          .eq('user_id', user.id)
+          .maybeSingle()
+      ).data;
 
     if (!attendee) {
       return NextResponse.json(
@@ -68,7 +78,7 @@ export async function POST(
       const purchaseResult = await supabase
         .from('entitlements')
         .select('id', { count: 'exact', head: true })
-        .eq('attendee_id', user.id)
+        .eq('attendee_id', attendee.id)
         .in('event_id', eventIds);
       purchaseCount = purchaseResult.count || 0;
     }
@@ -80,7 +90,7 @@ export async function POST(
       .from('photographer_ratings')
       .upsert({
         photographer_id: photographerId,
-        attendee_id: user.id,
+        attendee_id: attendee.id,
         event_id: body.eventId || null,
         rating,
         review_text: body.reviewText || null,

@@ -29,11 +29,12 @@ export async function GET(
 
     const fullSelect = `
       id, display_name, face_tag, bio, profile_photo_url,
-      website_url, instagram_url, twitter_url, facebook_url,
+      website, instagram, twitter, facebook,
       is_public_profile, allow_follows, follower_count,
       public_profile_slug, created_at
     `;
-    const minimalSelect = 'id, display_name, face_tag, bio, profile_photo_url, created_at';
+    const minimalSelect =
+      'id, display_name, face_tag, bio, profile_photo_url, website, instagram, twitter, facebook, is_public_profile, allow_follows, follower_count, created_at';
 
     const queryProfile = async (selectClause: string) => {
       let q = supabase.from('photographers').select(selectClause);
@@ -125,6 +126,10 @@ export async function GET(
     return NextResponse.json({
       profile: {
         ...profile,
+        website_url: (profile as any).website_url ?? (profile as any).website ?? null,
+        instagram_url: (profile as any).instagram_url ?? (profile as any).instagram ?? null,
+        twitter_url: (profile as any).twitter_url ?? (profile as any).twitter ?? null,
+        facebook_url: (profile as any).facebook_url ?? (profile as any).facebook ?? null,
         events: eventsWithCovers,
         eventCount: eventCount || 0,
       },
