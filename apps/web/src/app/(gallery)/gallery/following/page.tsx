@@ -229,7 +229,7 @@ export default function FollowingPage() {
               >
                 {/* Creator Info */}
                 <Link
-                  href={`/c/${photographer.public_profile_slug || photographer.id}`}
+                  href={`/gallery/people/creator/${photographer.public_profile_slug || photographer.id}`}
                   className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
                 >
                   {photographer.profile_photo_url ? (

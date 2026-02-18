@@ -43,11 +43,7 @@ export function GallerySearch() {
 
   const performSearch = useCallback(async (searchQuery: string) => {
     const trimmedQuery = searchQuery.trim();
-    if (trimmedQuery.length < 1) {
-      setResults([]);
-      setShowResults(false);
-      return;
-    }
+    const includePublicSeed = trimmedQuery.length < 1;
 
     const requestId = activeSearchRequestRef.current + 1;
     activeSearchRequestRef.current = requestId;
@@ -67,7 +63,9 @@ export function GallerySearch() {
       const newResults: SearchResult[] = [];
 
       const response = await fetch(
-        `/api/social/search?q=${encodeURIComponent(searchTerm)}&type=all&limit=10`,
+        includePublicSeed
+          ? '/api/social/search?includePublicSeed=true&type=all&limit=10'
+          : `/api/social/search?q=${encodeURIComponent(searchTerm)}&type=all&limit=10`,
         { signal: controller.signal, cache: 'no-store' }
       );
 
@@ -124,10 +122,10 @@ export function GallerySearch() {
       router.push(`/gallery/events/${result.id}`);
     } else if (result.type === 'attendee') {
       const attendeeSlug = result.public_profile_slug || result.face_tag?.replace(/^@/, '') || result.id;
-      router.push(`/u/${attendeeSlug}`);
+      router.push(`/gallery/people/attendee/${attendeeSlug}`);
     } else {
       const creatorSlug = result.public_profile_slug || result.face_tag?.replace(/^@/, '') || result.id;
-      router.push(`/c/${creatorSlug}`);
+      router.push(`/gallery/people/creator/${creatorSlug}`);
     }
   };
 
@@ -140,7 +138,7 @@ export function GallerySearch() {
           placeholder="Search events, photographers..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onFocus={() => query.trim().length >= 1 && setShowResults(true)}
+          onFocus={() => setShowResults(true)}
           className="h-10 w-full rounded-xl border border-border bg-background pl-10 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:border-transparent focus:outline-none focus:ring-2 focus:ring-accent"
         />
         {query && (

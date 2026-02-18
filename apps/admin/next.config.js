@@ -65,7 +65,7 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: https://*.supabase.co https://*.supabase.in",
               "font-src 'self'",
-              "connect-src 'self' https://*.supabase.co https://*.supabase.in",
+              "connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co wss://*.supabase.in",
               "frame-ancestors 'none'",
             ].join('; '),
           },

@@ -16,10 +16,9 @@ import {
   UserPlus,
 } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 
-import { logout } from '@/app/(auth)/actions';
 import { Logo } from '@/components/ui/logo';
 import { useConfirm } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
@@ -108,8 +107,10 @@ function PlanBadge({ plan }: { plan: string }) {
 
 export function DashboardSidebar({ user }: DashboardSidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const safePathname = pathname ?? '';
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const { confirm, ConfirmDialog } = useConfirm();
 
   const handleLogout = async () => {
@@ -122,7 +123,17 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
     });
     
     if (confirmed) {
-      await logout();
+      setIsLoggingOut(true);
+      try {
+        const response = await fetch('/api/auth/logout', { method: 'POST' });
+        const data = await response.json().catch(() => ({}));
+        router.replace(data?.redirectTo || '/login');
+        router.refresh();
+      } catch (error) {
+        console.error('Logout error:', error);
+      } finally {
+        setIsLoggingOut(false);
+      }
     }
   };
 
@@ -235,10 +246,11 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
       <div className="border-t border-border p-3">
         <button
           onClick={handleLogout}
+          disabled={isLoggingOut}
           className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-secondary transition-all duration-200 hover:bg-destructive/10 hover:text-destructive"
         >
           <LogOut className="h-5 w-5" />
-          Sign out
+          {isLoggingOut ? 'Signing out...' : 'Sign out'}
         </button>
       </div>
     </div>

@@ -184,9 +184,22 @@ export default function CreatorProfilePage() {
 
     switch (platform) {
       case 'copy':
-        await navigator.clipboard.writeText(url);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        try {
+          if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(url);
+          } else {
+            const input = document.createElement('textarea');
+            input.value = url;
+            document.body.appendChild(input);
+            input.select();
+            document.execCommand('copy');
+            input.remove();
+          }
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        } catch (error) {
+          console.error('Copy profile link failed:', error);
+        }
         break;
       case 'twitter':
         window.open(`https://twitter.com/intent/tweet?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`);

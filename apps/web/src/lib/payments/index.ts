@@ -4,17 +4,19 @@
  * Supports:
  * - Stripe Connect (Global, Card payments)
  * - Flutterwave (Africa, Mobile Money, Cards)
+ * - Paystack (Africa and global card/bank rails)
  * - PayPal (Global, PayPal balance & Cards)
  */
 
 export * as stripePayments from './stripe';
 export * as flutterwavePayments from './flutterwave';
+export * as paystackPayments from './paystack';
 export * as paypalPayments from './paypal';
 export * from './payout-minimums';
 export * from './payout-service';
 export * from './payment-methods';
 
-export type PaymentProvider = 'stripe' | 'flutterwave' | 'paypal';
+export type PaymentProvider = 'stripe' | 'flutterwave' | 'paypal' | 'paystack';
 
 export interface PaymentProviderConfig {
   provider: PaymentProvider;
@@ -68,6 +70,17 @@ export function getAvailableProviders(): PaymentProviderConfig[] {
     });
   }
 
+  // Paystack
+  if (process.env.PAYSTACK_SECRET_KEY) {
+    providers.push({
+      provider: 'paystack',
+      isConfigured: true,
+      supportedCountries: ['GH', 'NG', 'KE', 'ZA', 'UG', 'US', 'GB'],
+      supportedMethods: ['card', 'bank_transfer'],
+      fees: { percentage: 1.5, fixed: 100, currency: 'NGN' },
+    });
+  }
+
   return providers;
 }
 
@@ -78,6 +91,9 @@ export function getProviderForCountry(countryCode: string): PaymentProvider | nu
   // Africa → Flutterwave
   const africanCountries = ['GH', 'NG', 'KE', 'UG', 'RW', 'ZA', 'TZ', 'CI', 'SN', 'CM'];
   if (africanCountries.includes(countryCode)) {
+    const paystack = providers.find((p) => p.provider === 'paystack');
+    if (paystack) return 'paystack';
+
     const flutterwave = providers.find((p) => p.provider === 'flutterwave');
     if (flutterwave) return 'flutterwave';
   }

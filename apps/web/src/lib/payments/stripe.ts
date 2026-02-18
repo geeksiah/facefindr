@@ -3,8 +3,10 @@ import Stripe from 'stripe';
 // Initialize Stripe with secret key
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 
-if (!stripeSecretKey) {
-  console.warn('STRIPE_SECRET_KEY is not set. Stripe payments will not work.');
+if (!stripeSecretKey && process.env.NODE_ENV !== 'production') {
+  if (!process.env.FLUTTERWAVE_SECRET_KEY && !process.env.PAYPAL_CLIENT_SECRET && !process.env.PAYSTACK_SECRET_KEY) {
+    console.warn('No payment provider secret is configured. Payment checkout will not work.');
+  }
 }
 
 export const stripe = stripeSecretKey

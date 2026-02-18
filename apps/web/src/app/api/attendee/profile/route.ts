@@ -54,6 +54,20 @@ export async function GET() {
 
     const uniqueEvents = new Set(consents?.map(c => c.event_id) || []);
 
+    const [{ count: followersCount }, { count: followingCount }] = await Promise.all([
+      supabase
+        .from('follows')
+        .select('id', { count: 'exact', head: true })
+        .eq('following_id', user.id)
+        .eq('following_type', 'attendee')
+        .eq('status', 'active'),
+      supabase
+        .from('follows')
+        .select('id', { count: 'exact', head: true })
+        .eq('follower_id', user.id)
+        .eq('status', 'active'),
+    ]);
+
     return NextResponse.json({
       id: attendee.id,
       displayName: attendee.display_name,
@@ -65,6 +79,8 @@ export async function GET() {
       createdAt: attendee.created_at,
       totalPhotos: totalPhotos || 0,
       totalEvents: uniqueEvents.size,
+      followersCount: followersCount || 0,
+      followingCount: followingCount || attendee.following_count || 0,
     });
 
   } catch (error) {
@@ -125,6 +141,20 @@ export async function PATCH(request: NextRequest) {
       .select('id')
       .eq('attendee_id', user.id);
 
+    const [{ count: followersCount }, { count: followingCount }] = await Promise.all([
+      supabase
+        .from('follows')
+        .select('id', { count: 'exact', head: true })
+        .eq('following_id', user.id)
+        .eq('following_type', 'attendee')
+        .eq('status', 'active'),
+      supabase
+        .from('follows')
+        .select('id', { count: 'exact', head: true })
+        .eq('follower_id', user.id)
+        .eq('status', 'active'),
+    ]);
+
     return NextResponse.json({
       id: attendee?.id,
       displayName: attendee?.display_name,
@@ -136,6 +166,8 @@ export async function PATCH(request: NextRequest) {
       createdAt: attendee?.created_at,
       totalPhotos: 0,
       totalEvents: 0,
+      followersCount: followersCount || 0,
+      followingCount: followingCount || attendee?.following_count || 0,
     });
 
   } catch (error) {

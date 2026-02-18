@@ -31,11 +31,13 @@ export default function CheckoutSuccessPage() {
         const sessionId = searchParams?.get('session_id');
         const txRef = searchParams?.get('tx_ref');
         const orderId = searchParams?.get('order_id');
+        const reference = searchParams?.get('reference');
 
         let verifyUrl = '/api/checkout/verify?';
         if (sessionId) verifyUrl += `session_id=${sessionId}`;
         else if (txRef) verifyUrl += `tx_ref=${txRef}&provider=${provider}`;
         else if (orderId) verifyUrl += `order_id=${orderId}&provider=${provider}`;
+        else if (reference) verifyUrl += `reference=${reference}&provider=${provider}`;
 
         const response = await fetch(verifyUrl);
         const data = await response.json();

@@ -2,7 +2,7 @@
 Date: 2026-02-17
 Auditor: Codex
 Branch: `main`
-Commit audited: `807605a6`
+Commit audited: `04ddfbc1`
 
 ## Verdict
 - Decision: `NO-GO` for final real-user launch sign-off from this environment.
@@ -64,3 +64,61 @@ Commit audited: `807605a6`
    - Web attendee flow (`/s/...` -> `/e/...`, QR download + scan, mobile web layout),
    - Admin pricing/settings paths,
    - Mobile release build cold boot + scan + event link open.
+
+## Progressive Gate Pass #2 (Remaining Modules)
+Run date: `2026-02-17`  
+Audited commit: `04ddfbc1`
+
+### Automated Gate Evidence
+- `pnpm run ci:verify` -> `PASS`
+  - web build pass
+  - admin build pass
+  - mobile type-check pass
+- `pnpm test` -> `PASS` with `0` tests executed (no runnable test tasks configured)
+- `pnpm type-check` -> `PASS` across all workspace packages
+- `pnpm lint` -> `PASS` with warnings (no lint errors)
+
+### Progressive Module Matrix
+| Outcome Area | Status | Evidence |
+|---|---|---|
+| Creator account + identity + event CRUD | `PARTIAL` | Core routes compile and build, but runtime smoke still missing |
+| Creator subscriptions + plan activation | `BLOCKED` | Checkout route creates Stripe subscription session, but Stripe webhook handler does not process subscription lifecycle writes to `subscriptions` |
+| Creator watermark protection for paid previews | `BLOCKED` | Watermark service is explicitly placeholder and returns original URL |
+| Creator collaborator invites/permission workflow | `PARTIAL` | Permissions exist, but invite notification dispatch is still TODO |
+| Creator connections/facetag add flow | `PARTIAL` | Route resolves creator identity, but has fail-open path when table is missing (`success` returned) |
+| Attendee privacy/search/follow basics | `PARTIAL` | API wiring exists, but no runtime proof in this pass; user-reported regressions still need live confirmation |
+| Attendee face search + event-linked retrieval | `RISK` | Face search supports event-bound mode, but no-event mode searches all active face-enabled events (privacy/consistency risk for strict linkage requirement) |
+| Attendee vault upgrade + billing | `BLOCKED` | Vault subscribe sets Stripe metadata `type=storage_subscription`, but reviewed webhook handler has no storage-subscription activation branch |
+| Drop-In capture/process/notify pipeline | `PARTIAL` | Upload + process + notify routes exist; production async depends on webhook + process secret wiring |
+| Drop-In sender lifecycle state integrity | `RISK` | Current model exposes payment/processing/notification states but not full required sender lifecycle (`sent/searching/found/awaiting response/accepted/rejected/failed`) |
+| Notifications/realtime | `PARTIAL` | Main notifications API and SSE route exist; legacy attendee notifications route still returns empty placeholder |
+| System assurance (security/stability/payment consistency) | `NO-GO` | Build passes, but critical runtime contract gaps and env warnings remain |
+
+### Hard Blockers Found in Code
+1. Watermark enforcement is not production-grade.
+   - `apps/web/src/lib/watermark/watermark-service.ts:164`
+   - `apps/web/src/lib/watermark/watermark-service.ts:186`
+   - `apps/web/src/lib/watermark/watermark-service.ts:197`
+2. Stripe webhook does not handle creator subscription activation writes.
+   - `apps/web/src/app/api/subscriptions/checkout/route.ts:135`
+   - `apps/web/src/app/api/webhooks/stripe/route.ts:59`
+3. Vault paid subscription activation path is incomplete in reviewed webhook.
+   - `apps/web/src/app/api/vault/subscribe/route.ts:115`
+   - `apps/web/src/app/api/webhooks/stripe/route.ts:118`
+4. Collaborator invite notification not implemented.
+   - `apps/web/src/app/api/events/[id]/collaborators/route.ts:230`
+5. Creator connections API has fail-open behavior when table is missing.
+   - `apps/web/src/app/api/photographers/connections/route.ts:135`
+6. Face search can run cross-event when `eventId` omitted (strict attendee-event linkage not guaranteed).
+   - `apps/web/src/app/api/faces/search/route.ts:137`
+7. Legacy attendee notifications endpoint is still placeholder.
+   - `apps/web/src/app/api/attendee/notifications/route.ts:20`
+
+### Environment/Runtime Risks Still Open
+1. `STRIPE_SECRET_KEY is not set. Stripe payments will not work.` warning still appears in gate output.
+2. Admin build still logs revalidation URL parsing errors with undefined env values.
+3. MB1 emulator smoke for this audited commit is not yet recorded.
+
+### Progressive Pass #2 Verdict
+- Decision: `NO-GO`
+- Reason: compile/build gates pass, but core production assurances requested (payment lifecycle correctness, watermark enforcement, strict identity/event linkage, and complete drop-in state integrity) are not yet satisfied with current runtime evidence and codepath coverage.

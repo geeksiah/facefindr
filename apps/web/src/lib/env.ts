@@ -70,8 +70,8 @@ export function validateEnv(): EnvConfig {
       warnings.push('SUPABASE_SERVICE_ROLE_KEY not set - admin operations will fail');
     }
     
-    if (!env.STRIPE_SECRET_KEY) {
-      warnings.push('STRIPE_SECRET_KEY not set - payments will fail');
+    if (!env.STRIPE_SECRET_KEY && !process.env.FLUTTERWAVE_SECRET_KEY && !process.env.PAYPAL_CLIENT_ID && !process.env.PAYSTACK_SECRET_KEY) {
+      warnings.push('No payment provider secret key found (Stripe/Flutterwave/PayPal/Paystack) - payments will fail');
     }
     
     if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY) {

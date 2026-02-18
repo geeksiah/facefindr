@@ -11,6 +11,7 @@ import {
   createAccountLink,
   isStripeConfigured,
 } from '@/lib/payments/stripe';
+import { resolvePaystackSecretKey } from '@/lib/payments/paystack';
 import { createClient } from '@/lib/supabase/server';
 
 export async function POST(request: Request) {
@@ -32,6 +33,8 @@ export async function POST(request: Request) {
       // Flutterwave specific
       accountBank,
       accountNumber,
+      // Paystack specific
+      paystackSubaccountCode,
     } = body;
 
     // Get photographer profile
@@ -151,6 +154,23 @@ export async function POST(request: Request) {
       }
 
       walletData.paypal_merchant_id = paypalEmail;
+      walletData.status = 'active';
+      walletData.payouts_enabled = true;
+      walletData.charges_enabled = true;
+      walletData.details_submitted = true;
+    }
+
+    // Handle Paystack
+    if (provider === 'paystack') {
+      const paystackSecretKey = await resolvePaystackSecretKey(country);
+      if (!paystackSecretKey) {
+        return NextResponse.json(
+          { error: 'Paystack is not configured' },
+          { status: 500 }
+        );
+      }
+
+      walletData.paystack_subaccount_code = paystackSubaccountCode || null;
       walletData.status = 'active';
       walletData.payouts_enabled = true;
       walletData.charges_enabled = true;

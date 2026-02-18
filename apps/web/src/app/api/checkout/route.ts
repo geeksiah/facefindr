@@ -18,6 +18,10 @@ import {
   isPayPalConfigured,
 } from '@/lib/payments/paypal';
 import {
+  initializePaystackPayment,
+  resolvePaystackSecretKey,
+} from '@/lib/payments/paystack';
+import {
   createCheckoutSession,
   isStripeConfigured,
 } from '@/lib/payments/stripe';
@@ -547,6 +551,36 @@ export async function POST(request: NextRequest) {
 
       checkoutUrl = approvalUrl;
       sessionId = order.id;
+    } else if (finalProvider === 'paystack') {
+      const paystackSecretKey = await resolvePaystackSecretKey(event.country_code || undefined);
+      if (!paystackSecretKey) {
+        return respond(
+          { error: 'Paystack is not configured' },
+          500,
+          'failed'
+        );
+      }
+
+      const payment = await initializePaystackPayment({
+        reference: txRef,
+        email: email || '',
+        amount: feeCalculation.grossAmount,
+        currency: transactionCurrency,
+        callbackUrl: `${baseUrl}/gallery/checkout/success?reference=${txRef}&provider=paystack`,
+        metadata: {
+          wallet_id: wallet.id,
+          media_ids: mediaIds?.join(',') || 'all',
+          unlock_all: String(unlockAll || false),
+          attendee_id: user?.id || '',
+          event_id: eventId,
+          event_currency: eventCurrency,
+          exchange_rate: feeCalculation.exchangeRate,
+        },
+        subaccount: (wallet as any).paystack_subaccount_code || undefined,
+      }, paystackSecretKey);
+
+      checkoutUrl = payment.authorizationUrl;
+      sessionId = payment.reference;
     } else {
       return respond(
         { error: 'Invalid payment provider' },
@@ -578,39 +612,43 @@ export async function POST(request: NextRequest) {
     }
 
     // Create pending transaction record with proper fee calculation and idempotency
+    const transactionPayload: Record<string, unknown> = {
+      event_id: eventId,
+      wallet_id: wallet.id,
+      attendee_id: user?.id || null,
+      attendee_email: email,
+      payment_provider: finalProvider,
+      stripe_payment_intent_id: finalProvider === 'stripe' ? null : null, // Will be filled by webhook
+      stripe_checkout_session_id: finalProvider === 'stripe' ? sessionId : null,
+      flutterwave_tx_ref: finalProvider === 'flutterwave' ? txRef : null,
+      paypal_order_id: finalProvider === 'paypal' ? sessionId : null,
+      paystack_reference: finalProvider === 'paystack' ? txRef : null,
+      paystack_access_code: finalProvider === 'paystack' ? sessionId : null,
+      gross_amount: feeCalculation.grossAmount,
+      original_amount: feeCalculation.originalAmount,
+      platform_fee: feeCalculation.platformFee,
+      transaction_fee: feeCalculation.transactionFee,
+      stripe_fee: feeCalculation.providerFee,
+      provider_fee: feeCalculation.providerFee,
+      net_amount: feeCalculation.netAmount,
+      currency: transactionCurrency,
+      event_currency: eventCurrency,
+      exchange_rate: feeCalculation.exchangeRate,
+      status: 'pending',
+      metadata: {
+        items,
+        media_ids: mediaIds || [],
+        unlock_all: unlockAll || false,
+        fee_breakdown: feeCalculation.breakdown,
+        photographer_plan: subscription.plan_code,
+        idempotency_key: idempotencyKey,
+        created_at: new Date().toISOString(),
+      },
+    };
+
     const { data: transaction, error: transactionError } = await supabase
       .from('transactions')
-      .insert({
-        event_id: eventId,
-        wallet_id: wallet.id,
-        attendee_id: user?.id || null,
-        attendee_email: email,
-        payment_provider: finalProvider,
-        stripe_payment_intent_id: finalProvider === 'stripe' ? null : null, // Will be filled by webhook
-        stripe_checkout_session_id: finalProvider === 'stripe' ? sessionId : null,
-        flutterwave_tx_ref: finalProvider === 'flutterwave' ? txRef : null,
-        paypal_order_id: finalProvider === 'paypal' ? sessionId : null,
-        gross_amount: feeCalculation.grossAmount,
-        original_amount: feeCalculation.originalAmount,
-        platform_fee: feeCalculation.platformFee,
-        transaction_fee: feeCalculation.transactionFee, // Region-based transaction fee
-        stripe_fee: feeCalculation.providerFee, // Provider fee (Stripe/Flutterwave/PayPal)
-        provider_fee: feeCalculation.providerFee,
-        net_amount: feeCalculation.netAmount,
-        currency: transactionCurrency,
-        event_currency: eventCurrency,
-        exchange_rate: feeCalculation.exchangeRate,
-        status: 'pending',
-        metadata: {
-          items,
-          media_ids: mediaIds || [],
-          unlock_all: unlockAll || false,
-          fee_breakdown: feeCalculation.breakdown,
-          photographer_plan: subscription.plan_code,
-          idempotency_key: idempotencyKey, // Store idempotency key in metadata
-          created_at: new Date().toISOString(),
-        },
-      })
+      .insert(transactionPayload as any)
       .select()
       .single();
 

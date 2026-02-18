@@ -11,22 +11,29 @@ import { NextResponse } from 'next/server';
 import { getAppUrl } from '@/lib/env';
 import { createClient } from '@/lib/supabase/server';
 
+async function performLogout() {
+  const supabase = await createClient();
+  await supabase.auth.signOut();
+}
+
 export async function GET() {
   const appUrl = getAppUrl();
   try {
-    const supabase = await createClient();
-    await supabase.auth.signOut();
-    
-    // Redirect to home page
-    return NextResponse.redirect(new URL('/', appUrl));
+    await performLogout();
+    return NextResponse.redirect(new URL('/login', appUrl));
   } catch (error) {
     console.error('Logout error:', error);
-    // Still redirect even on error
-    return NextResponse.redirect(new URL('/', appUrl));
+    return NextResponse.redirect(new URL('/login', appUrl));
   }
 }
 
 export async function POST() {
-  return GET();
+  try {
+    await performLogout();
+    return NextResponse.json({ success: true, redirectTo: '/login' });
+  } catch (error) {
+    console.error('Logout error:', error);
+    return NextResponse.json({ success: false, redirectTo: '/login' }, { status: 500 });
+  }
 }
 

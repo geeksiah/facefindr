@@ -35,7 +35,7 @@ export interface CalculateFeesParams {
   transactionCurrency: string;
   photographerId: string;
   eventId: string;
-  provider?: string; // 'stripe', 'flutterwave', 'paypal'
+  provider?: string; // 'stripe', 'flutterwave', 'paypal', 'paystack'
 }
 
 /**
@@ -214,6 +214,15 @@ function calculateProviderFee(
       fee: Math.round(amount * 0.0349) + 30, // ~3.49% + $0.30
       rate: 0.0349,
       fixed: 30,
+    };
+  }
+
+  if (provider === 'paystack') {
+    // Paystack baseline estimate (actual varies by region/payment method)
+    return {
+      fee: Math.round(amount * 0.015) + 100, // ~1.5% + fixed
+      rate: 0.015,
+      fixed: 100,
     };
   }
 
