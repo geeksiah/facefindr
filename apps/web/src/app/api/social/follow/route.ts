@@ -58,11 +58,15 @@ async function resolveProfileIdByUser(
 async function getAttendeeByIdentifier(supabase: any, identifier: string) {
   const withUserId = await supabase
     .from('attendees')
-    .select('id, is_public_profile, public_profile_slug, user_id')
+    .select('id, is_public_profile, public_profile_slug, user_id, allow_follows')
     .or(`id.eq.${identifier},public_profile_slug.eq.${identifier}`)
     .single();
 
-  if (!withUserId.error || !isMissingColumnError(withUserId.error, 'user_id')) {
+  if (
+    !withUserId.error ||
+    (!isMissingColumnError(withUserId.error, 'user_id') &&
+      !isMissingColumnError(withUserId.error, 'allow_follows'))
+  ) {
     return withUserId;
   }
 
@@ -73,7 +77,13 @@ async function getAttendeeByIdentifier(supabase: any, identifier: string) {
     .single();
 
   return {
-    data: fallback.data ? { ...fallback.data, user_id: fallback.data.id } : fallback.data,
+    data: fallback.data
+      ? {
+          ...fallback.data,
+          user_id: fallback.data.id,
+          allow_follows: true,
+        }
+      : fallback.data,
     error: fallback.error,
   };
 }
@@ -81,11 +91,15 @@ async function getAttendeeByIdentifier(supabase: any, identifier: string) {
 async function getCreatorByIdentifier(supabase: any, identifier: string) {
   const withUserId = await supabase
     .from('photographers')
-    .select('id, is_public_profile, public_profile_slug, user_id')
+    .select('id, is_public_profile, public_profile_slug, user_id, allow_follows')
     .or(`id.eq.${identifier},public_profile_slug.eq.${identifier}`)
     .single();
 
-  if (!withUserId.error || !isMissingColumnError(withUserId.error, 'user_id')) {
+  if (
+    !withUserId.error ||
+    (!isMissingColumnError(withUserId.error, 'user_id') &&
+      !isMissingColumnError(withUserId.error, 'allow_follows'))
+  ) {
     return withUserId;
   }
 
@@ -96,7 +110,13 @@ async function getCreatorByIdentifier(supabase: any, identifier: string) {
     .single();
 
   return {
-    data: fallback.data ? { ...fallback.data, user_id: fallback.data.id } : fallback.data,
+    data: fallback.data
+      ? {
+          ...fallback.data,
+          user_id: fallback.data.id,
+          allow_follows: true,
+        }
+      : fallback.data,
     error: fallback.error,
   };
 }
@@ -177,7 +197,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Creator profile is private' }, { status: 403 });
       }
 
-      if (!photographer.allow_follows) {
+      if (photographer.allow_follows === false) {
         return NextResponse.json({ error: 'This creator does not accept followers' }, { status: 400 });
       }
     } else {
