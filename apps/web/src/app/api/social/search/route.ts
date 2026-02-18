@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createServiceClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 function isSchemaCompatibilityError(error: any): boolean {
   return error?.code === '42703' || error?.code === '42P01';
@@ -42,24 +42,29 @@ function dedupeById<T extends { id: string }>(items: T[]): T[] {
 export async function GET(request: NextRequest) {
   try {
     const serviceClient = createServiceClient();
+    const authClient = await createClient();
+    const {
+      data: { user },
+    } = await authClient.auth.getUser();
     const { searchParams } = new URL(request.url);
     
     const query = searchParams.get('q');
     const type = searchParams.get('type') || 'all'; // 'all', 'photographers', 'users'
+    const includePublicSeed = searchParams.get('includePublicSeed') === 'true';
     const rawLimit = parseInt(searchParams.get('limit') || '20');
     const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 50) : 20;
 
-    if (!query || query.trim().length < 1) {
+    if ((!query || query.trim().length < 1) && !includePublicSeed) {
       return NextResponse.json({ error: 'Search query is required' }, { status: 400 });
     }
 
     // Clean search term
-    const searchTerm = query.replace('@', '').trim().toLowerCase();
+    const searchTerm = (query || '').replace('@', '').trim().toLowerCase();
     const safeSearchTerm = searchTerm.replace(/[,%()]/g, ' ').trim();
-    if (!searchTerm) {
+    if (!searchTerm && !includePublicSeed) {
       return NextResponse.json({ error: 'Search query is required' }, { status: 400 });
     }
-    if (!safeSearchTerm) {
+    if (!safeSearchTerm && !includePublicSeed) {
       return NextResponse.json({ photographers: [], users: [] });
     }
 
@@ -85,7 +90,11 @@ export async function GET(request: NextRequest) {
           follower_count, public_profile_slug, is_public_profile, allow_follows
         `)
         .eq('is_public_profile', true)
-        .or(`face_tag.ilike.%${safeSearchTerm}%,display_name.ilike.%${safeSearchTerm}%`)
+        .or(
+          includePublicSeed && !safeSearchTerm
+            ? 'face_tag.not.is.null'
+            : `face_tag.ilike.%${safeSearchTerm}%,display_name.ilike.%${safeSearchTerm}%`
+        )
         .order('follower_count', { ascending: false })
         .limit(Math.min(limit * 3, 100));
 
@@ -116,6 +125,7 @@ export async function GET(request: NextRequest) {
       }
 
       const creatorCandidates = dedupeById([...(exactPhotographers || []), ...(photographers || [])]);
+      const exactPhotographerIds = new Set((exactPhotographers || []).map((p: any) => p.id));
       const creatorIds = creatorCandidates.map((p: any) => p.id);
 
       const { data: creatorPrivacy } = creatorIds.length
@@ -132,7 +142,8 @@ export async function GET(request: NextRequest) {
       );
 
       results.photographers = creatorCandidates
-        .filter((p: any) => !hiddenCreatorIds.has(p.id))
+        .filter((p: any) => !user?.id || p.id !== user.id)
+        .filter((p: any) => exactPhotographerIds.has(p.id) || !hiddenCreatorIds.has(p.id))
         .sort((a: any, b: any) => {
           const scoreDiff = scoreSearchMatch(a.face_tag, a.display_name, searchTerm) - scoreSearchMatch(b.face_tag, b.display_name, searchTerm);
           if (scoreDiff !== 0) return scoreDiff;
@@ -161,10 +172,14 @@ export async function GET(request: NextRequest) {
         .from('attendees')
         .select(`
           id, display_name, face_tag, profile_photo_url, 
-          public_profile_slug, is_public_profile, following_count
+          public_profile_slug, is_public_profile, following_count, follower_count, allow_follows
         `)
         .eq('is_public_profile', true)
-        .or(`face_tag.ilike.%${safeSearchTerm}%,display_name.ilike.%${safeSearchTerm}%`)
+        .or(
+          includePublicSeed && !safeSearchTerm
+            ? 'face_tag.not.is.null'
+            : `face_tag.ilike.%${safeSearchTerm}%,display_name.ilike.%${safeSearchTerm}%`
+        )
         .limit(Math.min(limit * 3, 100));
 
       let exactUsers = exactUsersQuery.data || [];
@@ -194,6 +209,7 @@ export async function GET(request: NextRequest) {
       }
 
       const attendeeCandidates = dedupeById([...(exactUsers || []), ...(users || [])]);
+      const exactAttendeeIds = new Set((exactUsers || []).map((u: any) => u.id));
       const attendeeIds = attendeeCandidates.map((u: any) => u.id);
 
       const { data: attendeePrivacy } = attendeeIds.length
@@ -210,11 +226,12 @@ export async function GET(request: NextRequest) {
       );
 
       results.users = attendeeCandidates
-        .filter((u: any) => !hiddenAttendeeIds.has(u.id))
+        .filter((u: any) => !user?.id || u.id !== user.id)
+        .filter((u: any) => exactAttendeeIds.has(u.id) || !hiddenAttendeeIds.has(u.id))
         .sort((a: any, b: any) => {
           const scoreDiff = scoreSearchMatch(a.face_tag, a.display_name, searchTerm) - scoreSearchMatch(b.face_tag, b.display_name, searchTerm);
           if (scoreDiff !== 0) return scoreDiff;
-          return (b.following_count || 0) - (a.following_count || 0);
+          return ((b.follower_count || 0) + (b.following_count || 0)) - ((a.follower_count || 0) + (a.following_count || 0));
         })
         .slice(0, limit)
         .map((u: any) => ({

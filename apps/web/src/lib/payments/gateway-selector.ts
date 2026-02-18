@@ -10,7 +10,7 @@
 
 import { createServiceClient } from '@/lib/supabase/server';
 
-export type PaymentGateway = 'stripe' | 'flutterwave' | 'paypal';
+export type PaymentGateway = 'stripe' | 'flutterwave' | 'paypal' | 'paystack';
 export type PaymentProductType = 'event_checkout' | 'tip' | 'drop_in' | 'subscription' | 'attendee_subscription';
 export type RuntimeEnvironment = 'development' | 'staging' | 'production';
 
@@ -21,6 +21,13 @@ export interface GatewaySelection {
   countryCode: string;
   productType: PaymentProductType;
   environment: RuntimeEnvironment;
+}
+
+function getProductSupportedGateways(productType: PaymentProductType): PaymentGateway[] {
+  if (productType === 'subscription' || productType === 'attendee_subscription') {
+    return ['stripe'];
+  }
+  return ['stripe', 'flutterwave', 'paypal', 'paystack'];
 }
 
 export class GatewaySelectionError extends Error {
@@ -102,7 +109,7 @@ export async function getAvailableGateways(photographerId: string): Promise<Paym
   return wallets
     .map(w => String(w.provider || '').toLowerCase())
     .filter((provider): provider is PaymentGateway =>
-      provider === 'stripe' || provider === 'flutterwave' || provider === 'paypal'
+      provider === 'stripe' || provider === 'flutterwave' || provider === 'paypal' || provider === 'paystack'
     );
 }
 
@@ -144,7 +151,7 @@ export async function selectPaymentGateway(options: {
     }
   }
 
-  const configuredGateways = await filterConfiguredGateways(availableGateways);
+  const configuredGateways = await filterConfiguredGateways(availableGateways, userCountry);
   if (!configuredGateways.length) {
     throw new GatewaySelectionError(
       `No configured provider credentials found for region ${userCountry}`,
@@ -152,12 +159,21 @@ export async function selectPaymentGateway(options: {
     );
   }
 
+  const productSupportedGateways = getProductSupportedGateways(productType);
+  const productGateways = configuredGateways.filter((gateway) => productSupportedGateways.includes(gateway));
+  if (!productGateways.length) {
+    throw new GatewaySelectionError(
+      `No supported payment gateways available for ${productType} in ${userCountry}`,
+      'unsupported_gateway_for_product'
+    );
+  }
+
   const preferredGateway = await getUserPreferredGateway(userId);
-  if (preferredGateway && configuredGateways.includes(preferredGateway)) {
+  if (preferredGateway && productGateways.includes(preferredGateway)) {
     return {
       gateway: preferredGateway,
       reason: 'User preference',
-      availableGateways: configuredGateways,
+      availableGateways: productGateways,
       countryCode: userCountry.toUpperCase(),
       productType,
       environment,
@@ -165,9 +181,9 @@ export async function selectPaymentGateway(options: {
   }
 
   return {
-    gateway: configuredGateways[0],
+    gateway: productGateways[0],
     reason: `Region configuration (${userCountry})`,
-    availableGateways: configuredGateways,
+    availableGateways: productGateways,
     countryCode: userCountry.toUpperCase(),
     productType,
     environment,
@@ -177,12 +193,31 @@ export async function selectPaymentGateway(options: {
 /**
  * Check if a gateway is configured
  */
-async function isGatewayConfigured(gateway: PaymentGateway): Promise<boolean> {
+async function isGatewayConfigured(gateway: PaymentGateway, countryCode?: string): Promise<boolean> {
+  if (countryCode && gateway === 'paystack') {
+    const supabase = createServiceClient();
+    const { data } = await (supabase
+      .from('payment_provider_credentials') as any)
+      .select('is_active, credentials')
+      .eq('region_code', countryCode.toUpperCase())
+      .eq('provider', gateway)
+      .maybeSingle();
+
+    if (data?.is_active && data.credentials && typeof data.credentials === 'object') {
+      const creds = data.credentials as Record<string, unknown>;
+      if (Object.keys(creds).length > 0) {
+        return true;
+      }
+    }
+  }
+
   switch (gateway) {
     case 'stripe':
       return !!process.env.STRIPE_SECRET_KEY;
     case 'flutterwave':
       return !!process.env.FLUTTERWAVE_SECRET_KEY;
+    case 'paystack':
+      return !!process.env.PAYSTACK_SECRET_KEY;
     case 'paypal':
       return !!process.env.PAYPAL_CLIENT_ID && !!process.env.PAYPAL_CLIENT_SECRET;
     default:
@@ -209,14 +244,14 @@ async function getConfiguredGateways(countryCode: string): Promise<PaymentGatewa
     new Set(
       data.payment_providers
         .map((provider: unknown) => String(provider || '').toLowerCase())
-        .filter((provider) => provider === 'stripe' || provider === 'flutterwave' || provider === 'paypal')
+        .filter((provider) => provider === 'stripe' || provider === 'flutterwave' || provider === 'paypal' || provider === 'paystack')
     )
   ) as PaymentGateway[];
 }
 
-async function filterConfiguredGateways(gateways: PaymentGateway[]): Promise<PaymentGateway[]> {
+async function filterConfiguredGateways(gateways: PaymentGateway[], countryCode?: string): Promise<PaymentGateway[]> {
   const configured = await Promise.all(
-    gateways.map(async (gateway) => ((await isGatewayConfigured(gateway)) ? gateway : null))
+    gateways.map(async (gateway) => ((await isGatewayConfigured(gateway, countryCode)) ? gateway : null))
   );
 
   return configured.filter((gateway): gateway is PaymentGateway => !!gateway);

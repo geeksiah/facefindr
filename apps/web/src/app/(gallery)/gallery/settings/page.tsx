@@ -15,7 +15,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 
-import { logout } from '@/app/(auth)/actions';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 
@@ -38,11 +37,12 @@ export default function SettingsPage() {
         const res = await fetch('/api/user/privacy-settings');
         if (res.ok) {
           const data = await res.json();
-          if (data.settings) {
+          const payload = data.settings || data;
+          if (payload) {
             setPrivacySettings({
-              allowTagging: data.settings.allowPhotoTagging ?? true,
-              publicProfile: data.settings.profileVisible ?? false,
-              showInSearch: data.settings.showInSearch ?? true,
+              allowTagging: payload.allowPhotoTagging ?? payload.allowTagging ?? true,
+              publicProfile: payload.profileVisible ?? payload.publicProfile ?? false,
+              showInSearch: payload.showInSearch ?? true,
             });
           }
         }
@@ -56,8 +56,14 @@ export default function SettingsPage() {
   }, []);
 
   const handleLogout = async () => {
-    await logout();
-    router.push('/');
+    try {
+      const res = await fetch('/api/auth/logout', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      router.replace(data?.redirectTo || '/login');
+      router.refresh();
+    } catch (error) {
+      console.error('Logout failed:', error);
+    }
   };
 
   const handleDeleteFaceData = async () => {
@@ -84,8 +90,10 @@ export default function SettingsPage() {
         method: 'DELETE',
       });
       if (response.ok) {
-        await logout();
-        router.push('/');
+        const logoutResponse = await fetch('/api/auth/logout', { method: 'POST' });
+        const logoutData = await logoutResponse.json().catch(() => ({}));
+        router.replace(logoutData?.redirectTo || '/login');
+        router.refresh();
       }
     } catch (error) {
       console.error('Failed to delete account:', error);
@@ -165,6 +173,7 @@ export default function SettingsPage() {
             </div>
             <Switch
               checked={privacySettings.allowTagging}
+              disabled={isLoadingSettings}
               onCheckedChange={(checked) => updatePrivacySetting('allowTagging', checked)}
             />
           </div>
@@ -180,6 +189,7 @@ export default function SettingsPage() {
             </div>
             <Switch
               checked={privacySettings.publicProfile}
+              disabled={isLoadingSettings}
               onCheckedChange={(checked) => updatePrivacySetting('publicProfile', checked)}
             />
           </div>
@@ -195,6 +205,7 @@ export default function SettingsPage() {
             </div>
             <Switch
               checked={privacySettings.showInSearch}
+              disabled={isLoadingSettings}
               onCheckedChange={(checked) => updatePrivacySetting('showInSearch', checked)}
             />
           </div>
@@ -378,4 +389,3 @@ export default function SettingsPage() {
     </div>
   );
 }
-

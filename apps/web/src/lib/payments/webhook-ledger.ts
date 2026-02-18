@@ -1,4 +1,4 @@
-export type WebhookProvider = 'stripe' | 'flutterwave' | 'paypal' | 'drop_in';
+export type WebhookProvider = 'stripe' | 'flutterwave' | 'paypal' | 'paystack' | 'drop_in';
 
 type ProcessingStatus = 'processing' | 'processed' | 'failed';
 

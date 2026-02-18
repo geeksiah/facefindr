@@ -36,9 +36,9 @@ export function LogoutButton({
     if (confirmed) {
       setIsLoading(true);
       try {
-        // Use the API route for logout
-        await fetch('/api/auth/logout', { method: 'GET' });
-        router.push('/');
+        const response = await fetch('/api/auth/logout', { method: 'POST' });
+        const data = await response.json().catch(() => ({}));
+        router.replace(data?.redirectTo || '/login');
         router.refresh();
       } catch (error) {
         console.error('Logout error:', error);

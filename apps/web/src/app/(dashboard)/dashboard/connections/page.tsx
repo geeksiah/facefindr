@@ -244,7 +244,7 @@ export default function ConnectionsPage() {
                   className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
                 >
                   <Link
-                    href={`/u/${attendee.face_tag?.replace('@', '') || attendee.id}`}
+                    href={`/dashboard/people/attendee/${attendee.face_tag?.replace('@', '') || attendee.id}`}
                     className="flex items-center gap-4 flex-1 min-w-0"
                   >
                     {attendee.profile_photo_url ? (

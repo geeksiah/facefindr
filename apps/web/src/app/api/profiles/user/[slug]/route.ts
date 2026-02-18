@@ -70,7 +70,42 @@ export async function GET(
       return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ profile });
+    const [{ count: followersCount }, { count: followingCount }, privacyResult] = await Promise.all([
+      supabase
+        .from('follows')
+        .select('id', { count: 'exact', head: true })
+        .eq('following_id', profile.id)
+        .eq('following_type', 'attendee')
+        .eq('status', 'active'),
+      supabase
+        .from('follows')
+        .select('id', { count: 'exact', head: true })
+        .eq('follower_id', profile.id)
+        .eq('status', 'active'),
+      supabase
+        .from('user_privacy_settings')
+        .select('profile_visible, show_in_search')
+        .eq('user_id', profile.id)
+        .maybeSingle(),
+    ]);
+
+    const privacySettings = privacyResult?.error ? null : privacyResult?.data;
+    const isPublicProfile = Boolean(
+      privacySettings?.profile_visible ?? profile.is_public_profile ?? false
+    );
+
+    return NextResponse.json({
+      profile: {
+        ...profile,
+        is_public_profile: isPublicProfile,
+        allow_follows: isPublicProfile,
+        followers_count: followersCount || 0,
+        following_count:
+          typeof profile.following_count === 'number'
+            ? profile.following_count
+            : (followingCount || 0),
+      },
+    });
 
   } catch (error) {
     console.error('Get user profile error:', error);

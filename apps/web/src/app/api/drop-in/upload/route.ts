@@ -13,6 +13,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { isFlutterwaveConfigured, initializePayment } from '@/lib/payments/flutterwave';
 import { GatewaySelectionError, selectPaymentGateway } from '@/lib/payments/gateway-selector';
 import { isPayPalConfigured, createOrder, getApprovalUrl } from '@/lib/payments/paypal';
+import { initializePaystackPayment, resolvePaystackSecretKey } from '@/lib/payments/paystack';
 import { stripe } from '@/lib/payments/stripe';
 import { resolveDropInPricingConfig } from '@/lib/drop-in/pricing';
 import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
@@ -326,6 +327,29 @@ export async function POST(request: NextRequest) {
 
         checkoutUrl = approvalUrl;
         sessionId = order.id;
+      } else if (selectedGateway === 'paystack') {
+        const paystackSecretKey = await resolvePaystackSecretKey(gatewaySelection.countryCode);
+        if (!paystackSecretKey) {
+          throw new Error('Paystack is not configured');
+        }
+
+        const totalAmount = dropInPricing.uploadFeeCents + (includeGift ? dropInPricing.giftFeeCents : 0);
+        const payment = await initializePaystackPayment({
+          reference: idempotencyKey,
+          email: user.email || '',
+          amount: totalAmount,
+          currency: dropInPricing.currencyCode,
+          callbackUrl: `${baseUrl}/drop-in/success?reference=${idempotencyKey}&provider=paystack`,
+          metadata: {
+            type: 'drop_in_upload',
+            attendee_id: attendee.id,
+            include_gift: includeGift,
+            drop_in_photo_id: dropInPhoto.id,
+          },
+        }, paystackSecretKey);
+
+        checkoutUrl = payment.authorizationUrl;
+        sessionId = payment.reference;
       } else {
         throw new Error(`Unsupported payment gateway: ${selectedGateway}`);
       }
@@ -372,4 +396,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

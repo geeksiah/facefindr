@@ -23,6 +23,10 @@ import {
   isPayPalConfigured,
 } from '@/lib/payments/paypal';
 import {
+  initializePaystackPayment,
+  resolvePaystackSecretKey,
+} from '@/lib/payments/paystack';
+import {
   createCheckoutSession,
   isStripeConfigured,
 } from '@/lib/payments/stripe';
@@ -360,6 +364,35 @@ export async function POST(
 
       checkoutUrl = approvalUrl;
       sessionId = order.id;
+    } else if (selectedProvider === 'paystack') {
+      const paystackSecretKey = await resolvePaystackSecretKey(eventCountryCode || photographer.country_code || undefined);
+      if (!paystackSecretKey) {
+        return NextResponse.json(
+          { error: 'Paystack is not configured' },
+          { status: 500 }
+        );
+      }
+
+      const payment = await initializePaystackPayment({
+        reference: txRef,
+        email: user.email || '',
+        amount,
+        currency: transactionCurrency,
+        callbackUrl: `${baseUrl}/gallery/checkout/success?tip_id=${tip.id}&reference=${txRef}&provider=paystack`,
+        metadata: {
+          wallet_id: wallet.id,
+          tip_id: tip.id,
+          photographer_id: photographerId,
+          from_user_id: user.id,
+          event_id: eventId || '',
+          media_id: mediaId || '',
+          is_anonymous: isAnonymous,
+        },
+        subaccount: (wallet as any).paystack_subaccount_code || undefined,
+      }, paystackSecretKey);
+
+      checkoutUrl = payment.authorizationUrl;
+      sessionId = payment.reference;
     } else {
       return NextResponse.json(
         { error: 'Invalid payment provider' },

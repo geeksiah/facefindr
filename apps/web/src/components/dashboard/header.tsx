@@ -56,11 +56,7 @@ export function DashboardHeader() {
 
   const performSearch = useCallback(async (query: string) => {
     const trimmedQuery = query.trim();
-    if (trimmedQuery.length < 1) {
-      setSearchResults([]);
-      setShowResults(false);
-      return;
-    }
+    const includePublicSeed = trimmedQuery.length < 1;
 
     const requestId = activeSearchRequestRef.current + 1;
     activeSearchRequestRef.current = requestId;
@@ -80,7 +76,9 @@ export function DashboardHeader() {
       const results: SearchResult[] = [];
 
       const socialResponse = await fetch(
-        `/api/social/search?q=${encodeURIComponent(searchTerm)}&type=all&limit=8`,
+        includePublicSeed
+          ? `/api/social/search?includePublicSeed=true&type=all&limit=8`
+          : `/api/social/search?q=${encodeURIComponent(searchTerm)}&type=all&limit=8`,
         { signal: controller.signal, cache: 'no-store' }
       );
 
@@ -155,10 +153,10 @@ export function DashboardHeader() {
       router.push(`/dashboard/events/${result.id}`);
     } else if (result.type === 'creator' || result.type === 'photographer') {
       const creatorSlug = result.public_profile_slug || result.face_tag?.replace(/^@/, '') || result.id;
-      router.push(`/c/${creatorSlug}`);
+      router.push(`/dashboard/people/creator/${creatorSlug}`);
     } else if (result.type === 'attendee') {
       const attendeeSlug = result.public_profile_slug || result.face_tag?.replace(/^@/, '') || result.id;
-      router.push(`/u/${attendeeSlug}`);
+      router.push(`/dashboard/people/attendee/${attendeeSlug}`);
     }
   };
 
@@ -188,7 +186,7 @@ export function DashboardHeader() {
             placeholder="Search people by name or @FaceTag"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            onFocus={() => searchQuery.trim().length >= 1 && setShowResults(true)}
+            onFocus={() => setShowResults(true)}
             onKeyDown={handleKeyDown}
             className="h-10 w-72 rounded-xl border border-border bg-background pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground transition-all duration-200 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-accent"
           />
@@ -315,12 +313,13 @@ export function DashboardHeader() {
             <input
               type="search"
               name="dashboard-search-mobile"
-              autoComplete="off"
-              autoCorrect="off"
-              spellCheck="false"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck="false"
               placeholder="Search events, photographers..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setShowResults(true)}
               className="h-11 w-full rounded-xl border border-border bg-background pl-10 pr-10 text-sm text-foreground placeholder:text-muted-foreground transition-all duration-200 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-accent"
               autoFocus
             />
@@ -335,7 +334,7 @@ export function DashboardHeader() {
           </div>
           
           {/* Mobile search results */}
-          {showResults && searchQuery.trim().length >= 1 && (
+          {showResults && (
             <div className="mt-2 bg-card border border-border rounded-xl overflow-hidden">
               {isSearching ? (
                 <div className="p-4 text-center text-muted-foreground text-sm">

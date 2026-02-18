@@ -9,6 +9,9 @@ import {
   X,
   Download,
   Loader2,
+  UserPlus,
+  UserCheck,
+  ExternalLink,
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -24,7 +27,10 @@ interface AttendeeProfile {
   display_name: string;
   face_tag: string;
   profile_photo_url?: string;
+  followers_count?: number;
   following_count: number;
+  allow_follows?: boolean;
+  is_public_profile?: boolean;
   public_profile_slug?: string;
 }
 
@@ -36,13 +42,22 @@ export default function AttendeeProfilePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showQRCode, setShowQRCode] = useState(false);
+  const [showShareMenu, setShowShareMenu] = useState(false);
   const [copied, setCopied] = useState(false);
   const [downloadingQr, setDownloadingQr] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [followLoading, setFollowLoading] = useState(false);
   const qrCodeValue = typeof window !== 'undefined' ? `${window.location.href}?app=1` : '';
   const qrCodeRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     loadProfile();
   }, [slug]);
+
+  useEffect(() => {
+    if (profile?.id) {
+      void checkFollowStatus(profile.id);
+    }
+  }, [profile?.id]);
 
   async function loadProfile() {
     try {
@@ -61,10 +76,91 @@ export default function AttendeeProfilePage() {
     }
   }
 
+  async function checkFollowStatus(targetId: string) {
+    try {
+      const res = await fetch(
+        `/api/social/follow?type=check&targetType=attendee&targetId=${encodeURIComponent(targetId)}`
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      setIsFollowing(Boolean(data.isFollowing));
+    } catch {
+      // Ignore for anonymous sessions
+    }
+  }
+
+  async function handleFollowToggle() {
+    if (!profile?.id || followLoading || profile.allow_follows === false) {
+      return;
+    }
+
+    setFollowLoading(true);
+    try {
+      if (isFollowing) {
+        const res = await fetch(
+          `/api/social/follow?targetType=attendee&targetId=${encodeURIComponent(profile.id)}`,
+          { method: 'DELETE' }
+        );
+        if (!res.ok) return;
+        setIsFollowing(false);
+        setProfile((prev) =>
+          prev
+            ? { ...prev, followers_count: Math.max(0, (prev.followers_count || 0) - 1) }
+            : prev
+        );
+      } else {
+        const res = await fetch('/api/social/follow', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attendeeId: profile.id, targetType: 'attendee' }),
+        });
+        if (!res.ok) return;
+        setIsFollowing(true);
+        setProfile((prev) =>
+          prev
+            ? { ...prev, followers_count: (prev.followers_count || 0) + 1 }
+            : prev
+        );
+      }
+    } finally {
+      setFollowLoading(false);
+    }
+  }
+
   async function handleCopyLink() {
-    await navigator.clipboard.writeText(window.location.href);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(window.location.href);
+      } else {
+        const input = document.createElement('textarea');
+        input.value = window.location.href;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        input.remove();
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      console.error('Copy profile link failed:', error);
+    }
+  }
+
+  async function handleShare() {
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: profile?.display_name || 'Ferchr Profile',
+          url: window.location.href,
+        });
+      } else {
+        await handleCopyLink();
+      }
+    } catch (error) {
+      console.error('Share failed:', error);
+    } finally {
+      setShowShareMenu(false);
+    }
   }
 
   if (loading) {
@@ -105,12 +201,42 @@ export default function AttendeeProfilePage() {
             >
               <QrCode className="h-5 w-5 text-foreground" />
             </button>
-            <button
-              onClick={handleCopyLink}
-              className="p-2 rounded-xl hover:bg-muted transition-colors"
-            >
-              {copied ? <Check className="h-5 w-5 text-success" /> : <Share2 className="h-5 w-5 text-foreground" />}
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => setShowShareMenu((prev) => !prev)}
+                className="p-2 rounded-xl hover:bg-muted transition-colors"
+              >
+                {copied ? <Check className="h-5 w-5 text-success" /> : <Share2 className="h-5 w-5 text-foreground" />}
+              </button>
+              {showShareMenu && (
+                <>
+                  <button
+                    onClick={() => setShowShareMenu(false)}
+                    className="fixed inset-0 z-40"
+                    aria-label="Close share menu"
+                  />
+                  <div className="absolute right-0 top-full z-50 mt-2 w-44 rounded-xl border border-border bg-card p-2 shadow-lg">
+                    <button
+                      onClick={() => {
+                        void handleCopyLink();
+                        setShowShareMenu(false);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-foreground hover:bg-muted"
+                    >
+                      <Copy className="h-4 w-4" />
+                      Copy Link
+                    </button>
+                    <button
+                      onClick={() => void handleShare()}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-foreground hover:bg-muted"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      Share
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </header>
@@ -143,10 +269,29 @@ export default function AttendeeProfilePage() {
           {/* Stats */}
           <div className="flex items-center justify-center gap-6 mt-6 text-sm">
             <div className="text-center">
+              <p className="font-bold text-foreground">{profile.followers_count || 0}</p>
+              <p className="text-secondary">Followers</p>
+            </div>
+            <div className="text-center">
               <p className="font-bold text-foreground">{profile.following_count}</p>
               <p className="text-secondary">Following</p>
             </div>
           </div>
+
+          {profile.allow_follows !== false && (
+            <div className="mt-6">
+              <Button onClick={handleFollowToggle} disabled={followLoading}>
+                {followLoading ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : isFollowing ? (
+                  <UserCheck className="h-4 w-4 mr-2" />
+                ) : (
+                  <UserPlus className="h-4 w-4 mr-2" />
+                )}
+                {isFollowing ? 'Following' : 'Follow'}
+              </Button>
+            </div>
+          )}
 
           {/* Add Connection CTA (for photographers viewing) */}
           <div className="mt-8 p-6 bg-muted rounded-2xl max-w-md mx-auto">

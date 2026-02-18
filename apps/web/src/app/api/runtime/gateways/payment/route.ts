@@ -8,6 +8,7 @@ const SUPPORTED_PAYMENT_GATEWAYS = new Set([
   'stripe',
   'flutterwave',
   'paypal',
+  'paystack',
 ]);
 
 function normalizeGatewayList(input: unknown): string[] {

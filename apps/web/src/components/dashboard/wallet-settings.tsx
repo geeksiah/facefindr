@@ -23,7 +23,7 @@ import { PayoutPreferences } from './payout-preferences';
 
 interface WalletData {
   id: string;
-  provider: 'stripe' | 'flutterwave' | 'paypal';
+  provider: 'stripe' | 'flutterwave' | 'paypal' | 'paystack' | 'momo';
   status: 'pending' | 'active' | 'restricted';
   charges_enabled: boolean;
   payouts_enabled: boolean;
@@ -67,6 +67,12 @@ const PROVIDER_INFO = {
     icon: Wallet,
     color: 'bg-blue-500',
   },
+  paystack: {
+    name: 'Paystack',
+    description: 'Cards, bank, and transfer payments',
+    icon: Globe,
+    color: 'bg-emerald-500',
+  },
   momo: {
     name: 'Mobile Money',
     description: 'Receive payouts to your mobile wallet (no business registration)',
@@ -81,13 +87,14 @@ export function WalletSettings() {
   const [loading, setLoading] = useState(true);
   const [onboarding, setOnboarding] = useState<string | null>(null);
   const [showAddWallet, setShowAddWallet] = useState(false);
-  const [newWalletProvider, setNewWalletProvider] = useState<'stripe' | 'flutterwave' | 'paypal' | 'momo' | null>(null);
+  const [newWalletProvider, setNewWalletProvider] = useState<'stripe' | 'flutterwave' | 'paypal' | 'paystack' | 'momo' | null>(null);
   const [formData, setFormData] = useState({
     country: 'GH',
     businessName: '',
     accountBank: '',
     accountNumber: '',
     paypalEmail: '',
+    paystackSubaccountCode: '',
     momoNetwork: 'MTN',
     momoNumber: '',
   });
@@ -118,7 +125,7 @@ export function WalletSettings() {
     }
   };
 
-  const handleOnboard = async (provider: 'stripe' | 'flutterwave' | 'paypal' | 'momo') => {
+  const handleOnboard = async (provider: 'stripe' | 'flutterwave' | 'paypal' | 'paystack' | 'momo') => {
     setOnboarding(provider);
 
     try {
@@ -132,6 +139,7 @@ export function WalletSettings() {
           accountBank: formData.accountBank,
           accountNumber: formData.accountNumber,
           paypalEmail: formData.paypalEmail,
+          paystackSubaccountCode: formData.paystackSubaccountCode,
           momoNetwork: formData.momoNetwork,
           momoNumber: formData.momoNumber,
         }),
@@ -534,6 +542,23 @@ export function WalletSettings() {
                       placeholder="your@email.com"
                       required
                     />
+                  </div>
+                )}
+
+                {/* Paystack specific fields */}
+                {newWalletProvider === 'paystack' && (
+                  <div>
+                    <label className="text-sm font-medium text-foreground mb-1 block">
+                      Subaccount Code (Optional)
+                    </label>
+                    <Input
+                      value={formData.paystackSubaccountCode}
+                      onChange={(e) => setFormData({ ...formData, paystackSubaccountCode: e.target.value })}
+                      placeholder="ACCT_xxxxxxxx"
+                    />
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Add your Paystack subaccount code if you want split settlement.
+                    </p>
                   </div>
                 )}
 

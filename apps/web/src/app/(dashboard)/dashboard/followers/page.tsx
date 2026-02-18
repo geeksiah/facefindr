@@ -280,7 +280,7 @@ export default function FollowersPage() {
               return (
                 <Link
                   key={item.id}
-                  href={`/u/${attendee.face_tag?.replace('@', '') || attendee.id}`}
+                  href={`/dashboard/people/attendee/${attendee.face_tag?.replace('@', '') || attendee.id}`}
                   className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
                 >
                   {attendee.profile_photo_url ? (

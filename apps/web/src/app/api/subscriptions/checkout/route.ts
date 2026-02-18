@@ -19,12 +19,6 @@ import { createClient } from '@/lib/supabase/server';
 export async function POST(request: NextRequest) {
   try {
     const appUrl = getAppUrl();
-    if (!stripe) {
-      return NextResponse.json(
-        { error: 'Stripe not configured' },
-        { status: 500 }
-      );
-    }
 
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -72,33 +66,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get or create Stripe customer
-    const { data: photographer } = await supabase
-      .from('photographers')
-      .select('stripe_customer_id, email')
-      .eq('id', user.id)
-      .single();
-
-    let customerId = photographer?.stripe_customer_id;
-
-    if (!customerId) {
-      // Create new Stripe customer
-      const customer = await stripe.customers.create({
-        email: user.email,
-        metadata: {
-          photographer_id: user.id,
-        },
-      });
-
-      customerId = customer.id;
-
-      // Save customer ID
-      await supabase
-        .from('photographers')
-        .update({ stripe_customer_id: customerId })
-        .eq('id', user.id);
-    }
-
     // Select payment gateway based on user preference
     let gatewaySelection;
     try {
@@ -130,6 +97,31 @@ export async function POST(request: NextRequest) {
           { error: 'Stripe not configured' },
           { status: 500 }
         );
+      }
+
+      // Get or create Stripe customer
+      const { data: photographer } = await supabase
+        .from('photographers')
+        .select('stripe_customer_id, email')
+        .eq('id', user.id)
+        .single();
+
+      let customerId = photographer?.stripe_customer_id;
+
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          email: user.email,
+          metadata: {
+            photographer_id: user.id,
+          },
+        });
+
+        customerId = customer.id;
+
+        await supabase
+          .from('photographers')
+          .update({ stripe_customer_id: customerId })
+          .eq('id', user.id);
       }
 
       const session = await stripe.checkout.sessions.create({
