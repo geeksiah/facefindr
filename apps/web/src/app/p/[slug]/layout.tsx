@@ -1,6 +1,7 @@
 import { Metadata } from 'next';
 
 import { createClient } from '@/lib/supabase/server';
+import { buildProfileUrls } from '@facefind/shared';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
@@ -44,7 +45,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     openGraph: {
       title: `${displayName} - Creator on Ferchr`,
       description,
-      url: `${APP_URL}/c/${slug}`,
+      url: buildProfileUrls(slug).publicCreator,
       siteName: 'Ferchr',
       images: [
         {

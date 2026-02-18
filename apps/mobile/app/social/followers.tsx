@@ -28,6 +28,7 @@ import {
 
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 import { getApiBaseUrl } from '@/lib/api-base';
+import { openProfile } from '@/lib/open-profile';
 import { useAuthStore } from '@/stores/auth-store';
 
 const API_URL = getApiBaseUrl();
@@ -125,9 +126,8 @@ export default function FollowersScreen() {
           pressed && styles.itemPressed,
         ]}
         onPress={() =>
-          item.follower_type === 'creator' || item.follower_type === 'photographer'
-            ? router.push(`/p/${item.photographers?.public_profile_slug || follower.id}`)
-            : router.push(`/u/${follower.id}`)
+          // Prefer shell when possible; openProfile will choose shell vs public
+          openProfile(router, item.follower_type === 'creator' || item.follower_type === 'photographer' ? (item.photographers || follower) : follower)
         }
       >
         {follower.profile_photo_url ? (

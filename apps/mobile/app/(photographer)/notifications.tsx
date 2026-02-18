@@ -15,6 +15,7 @@ import {
   StatusBar,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { openProfile } from '@/lib/open-profile';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
@@ -177,7 +178,7 @@ export default function NotificationsScreen() {
     } else if (notification.type === 'event' && notification.data?.eventId) {
       router.push(`/event/${notification.data.eventId}`);
     } else if (notification.type === 'follower' && notification.data?.userId) {
-      router.push(`/u/${notification.data.userId}`);
+      openProfile(router, notification.data.userId);
     }
   };
 

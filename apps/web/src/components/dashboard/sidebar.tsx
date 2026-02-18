@@ -21,6 +21,7 @@ import { useState } from 'react';
 
 import { Logo } from '@/components/ui/logo';
 import { useConfirm } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
 
 // ============================================
@@ -112,6 +113,7 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const { confirm, ConfirmDialog } = useConfirm();
+  const toast = useToast();
 
   const handleLogout = async () => {
     const confirmed = await confirm({
@@ -124,14 +126,26 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
     
     if (confirmed) {
       setIsLoggingOut(true);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      let redirectTo = '/login';
       try {
-        const response = await fetch('/api/auth/logout', { method: 'POST' });
+        const response = await fetch('/api/auth/logout', { method: 'POST', signal: controller.signal });
         const data = await response.json().catch(() => ({}));
-        router.replace(data?.redirectTo || '/login');
-        router.refresh();
+        redirectTo = data?.redirectTo || '/login';
+        toast.success('Signed out', 'You have been signed out.');
       } catch (error) {
         console.error('Logout error:', error);
+        toast.info('Signed out', 'Session ended. Redirecting to login.');
       } finally {
+        clearTimeout(timeout);
+        try {
+          const channel = new BroadcastChannel('auth');
+          channel.postMessage({ type: 'signed_out' });
+          channel.close();
+        } catch {}
+        router.replace(redirectTo);
+        router.refresh();
         setIsLoggingOut(false);
       }
     }

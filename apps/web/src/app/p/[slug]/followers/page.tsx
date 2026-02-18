@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
+import ProfileLink from '@/components/social/profile-link';
 import { useParams, useRouter } from 'next/navigation';
 import { useState, useEffect, useCallback } from 'react';
 
@@ -141,8 +142,9 @@ export default function CreatorFollowersPage() {
 
       <main className="max-w-4xl mx-auto px-4 sm:px-6 py-6">
         {/* Creator Info */}
-        <Link
-          href={`/c/${photographer.public_profile_slug || photographer.id}`}
+        <ProfileLink
+          slug={photographer.public_profile_slug || photographer.id}
+          as="creator"
           className="flex items-center gap-4 p-4 rounded-xl border border-border bg-card mb-6 hover:bg-muted/50 transition-colors"
         >
           {photographer.profile_photo_url ? (
@@ -162,7 +164,7 @@ export default function CreatorFollowersPage() {
             <p className="font-semibold text-foreground">{photographer.display_name}</p>
             <p className="text-sm text-accent font-mono">{photographer.face_tag}</p>
           </div>
-        </Link>
+        </ProfileLink>
 
         {/* Search */}
         {followers.length > 5 && (
@@ -200,9 +202,10 @@ export default function CreatorFollowersPage() {
                 const attendee = item.attendees;
 
                 return (
-                  <Link
+                  <ProfileLink
                     key={item.id}
-                    href={`/u/${attendee.face_tag?.replace('@', '') || attendee.id}`}
+                    slug={attendee.face_tag?.replace('@', '') || attendee.id}
+                    as="attendee"
                     className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
                   >
                     {attendee.profile_photo_url ? (
@@ -226,7 +229,7 @@ export default function CreatorFollowersPage() {
                         {attendee.face_tag}
                       </p>
                     </div>
-                  </Link>
+                  </ProfileLink>
                 );
               })}
             </div>

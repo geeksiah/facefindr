@@ -18,10 +18,11 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, Eye, Lock, Trash2, Download, Check, AlertCircle } from 'lucide-react-native';
+import { ArrowLeft, Eye, Lock, Trash2, Download, Check, AlertCircle, Users } from 'lucide-react-native';
 
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
+import { usePrivacySettings } from '@facefind/shared';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 import { getApiBaseUrl } from '@/lib/api-base';
 
@@ -34,6 +35,7 @@ interface PrivacySettings {
   allowFaceRecognition: boolean;
   shareActivityWithCreators: boolean;
   emailMarketing: boolean;
+  allowFollows: boolean;
 }
 
 export default function PrivacySettingsScreen() {
@@ -53,38 +55,24 @@ export default function PrivacySettingsScreen() {
     allowFaceRecognition: true,
     shareActivityWithCreators: false,
     emailMarketing: false,
+    allowFollows: true,
   });
+  const privacyHook = usePrivacySettings(API_URL);
 
-  // Load settings on mount
+  // Load settings on mount (use shared hook so mapping and base URL are handled)
   useEffect(() => {
-    loadSettings();
-  }, []);
-
-  const loadSettings = async () => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session?.access_token) {
+    const doLoad = async () => {
+      try {
+        const data = await privacyHook.load();
+        if (data) setSettings(data as PrivacySettings);
+      } catch (err) {
+        console.error('Error loading privacy settings via hook:', err);
+      } finally {
         setIsLoading(false);
-        return;
       }
-
-      const response = await fetch(`${API_URL}/api/user/privacy-settings`, {
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setSettings(data.settings);
-      }
-    } catch (error) {
-      console.error('Error loading privacy settings:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    };
+    doLoad();
+  }, []);
 
   const updateSetting = async (key: keyof PrivacySettings, value: boolean) => {
     // Optimistic update
@@ -92,24 +80,9 @@ export default function PrivacySettingsScreen() {
     setSaveStatus('saving');
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session?.access_token) {
-        throw new Error('Not authenticated');
-      }
-
-      const response = await fetch(`${API_URL}/api/user/privacy-settings`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ [key]: value }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to save');
-      }
+      // Use shared hook to update (baseUrl already provided)
+      const result = await privacyHook.updateSetting(key as any, value);
+      if (!result) throw new Error('Failed to save');
 
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2000);
@@ -223,6 +196,12 @@ export default function PrivacySettingsScreen() {
       icon: Eye,
       title: 'Face Recognition',
       description: 'Allow AI to match your face in event photos',
+    },
+    {
+      key: 'allowFollows' as const,
+      icon: Users,
+      title: 'Allow Follows',
+      description: 'Let other users follow your profile',
     },
   ];
 

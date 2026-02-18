@@ -10,6 +10,7 @@ import {
   Lock,
   Eye,
   UserX,
+  Users,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -17,34 +18,45 @@ import { useState, useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import { useToast } from '@/components/ui/toast';
+import { usePrivacySettings } from '@facefind/shared';
+
+type PrivacySettingsState = {
+  allowTagging: boolean;
+  publicProfile: boolean;
+  showInSearch: boolean;
+  allowFollows: boolean;
+};
 
 export default function SettingsPage() {
   const router = useRouter();
+  const toast = useToast();
   const [showDeleteAccount, setShowDeleteAccount] = useState(false);
   const [showDeleteFace, setShowDeleteFace] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
-  const [privacySettings, setPrivacySettings] = useState({
-    allowTagging: true,
-    publicProfile: false,
-    showInSearch: true,
-  });
+  const [privacySettings, setPrivacySettings] = useState<PrivacySettingsState | null>(null);
+  const privacyHook = usePrivacySettings();
 
   // Load saved privacy settings on mount
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const res = await fetch('/api/user/privacy-settings');
-        if (res.ok) {
-          const data = await res.json();
-          const payload = data.settings || data;
-          if (payload) {
-            setPrivacySettings({
-              allowTagging: payload.allowPhotoTagging ?? payload.allowTagging ?? true,
-              publicProfile: payload.profileVisible ?? payload.publicProfile ?? false,
-              showInSearch: payload.showInSearch ?? true,
-            });
-          }
+        const data = await privacyHook.load();
+        if (data) {
+          setPrivacySettings({
+            allowTagging: data.allowPhotoTagging ?? true,
+            publicProfile: data.profileVisible ?? true,
+            showInSearch: data.showInSearch ?? true,
+            allowFollows: data.allowFollows ?? true,
+          });
+        } else {
+          setPrivacySettings({
+            allowTagging: true,
+            publicProfile: true,
+            showInSearch: true,
+            allowFollows: true,
+          });
         }
       } catch (err) {
         console.error('Failed to load privacy settings:', err);
@@ -56,13 +68,30 @@ export default function SettingsPage() {
   }, []);
 
   const handleLogout = async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
     try {
-      const res = await fetch('/api/auth/logout', { method: 'POST' });
+      const res = await fetch('/api/auth/logout', { method: 'POST', signal: controller.signal });
       const data = await res.json().catch(() => ({}));
+      try {
+        const channel = new BroadcastChannel('auth');
+        channel.postMessage({ type: 'signed_out' });
+        channel.close();
+      } catch {}
+      toast.success('Signed out', 'You have been signed out.');
       router.replace(data?.redirectTo || '/login');
-      router.refresh();
     } catch (error) {
       console.error('Logout failed:', error);
+      try {
+        const channel = new BroadcastChannel('auth');
+        channel.postMessage({ type: 'signed_out' });
+        channel.close();
+      } catch {}
+      toast.info('Signed out', 'Session ended. Redirecting to login.');
+      router.replace('/login');
+    } finally {
+      clearTimeout(timeout);
+      router.refresh();
     }
   };
 
@@ -122,26 +151,27 @@ export default function SettingsPage() {
   };
 
   // Map local field names to API field names
-  const fieldMap: Record<string, string> = {
-    allowTagging: 'allowPhotoTagging',
-    publicProfile: 'profileVisible',
-    showInSearch: 'showInSearch',
-  };
+  const updatePrivacySetting = async (key: keyof PrivacySettingsState, value: boolean) => {
+    if (!privacySettings) return;
 
-  const updatePrivacySetting = async (key: keyof typeof privacySettings, value: boolean) => {
     const prev = { ...privacySettings };
-    setPrivacySettings((p) => ({ ...p, [key]: value }));
+    setPrivacySettings((p) => (p ? { ...p, [key]: value } : p));
     try {
-      const apiField = fieldMap[key] || key;
-      const res = await fetch('/api/user/privacy-settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [apiField]: value }),
-      });
-      if (!res.ok) {
-        // Revert on failure
+      // Map local key to hook key
+      const map: Record<
+        keyof PrivacySettingsState,
+        'allowPhotoTagging' | 'profileVisible' | 'showInSearch' | 'allowFollows'
+      > = {
+        allowTagging: 'allowPhotoTagging',
+        publicProfile: 'profileVisible',
+        showInSearch: 'showInSearch',
+        allowFollows: 'allowFollows',
+      };
+      const hookKey = map[key];
+      const result = await privacyHook.updateSetting(hookKey, value);
+      if (!result) {
         setPrivacySettings(prev);
-        console.error('Failed to update privacy setting:', await res.text());
+        console.error('Failed to update privacy setting');
       }
     } catch (error) {
       setPrivacySettings(prev);
@@ -160,56 +190,74 @@ export default function SettingsPage() {
       {/* Privacy Settings */}
       <div>
         <h2 className="text-sm font-medium text-secondary mb-3 px-1">Privacy</h2>
-        <div className="rounded-2xl border border-border bg-card divide-y divide-border">
-          <div className="flex items-center justify-between p-4">
-            <div className="flex items-center gap-3">
-              <Eye className="h-5 w-5 text-secondary" />
-              <div>
-                <p className="font-medium text-foreground">Allow Photo Tagging</p>
-                <p className="text-sm text-secondary">
-                  Creators can match your face in their photos
-                </p>
-              </div>
-            </div>
-            <Switch
-              checked={privacySettings.allowTagging}
-              disabled={isLoadingSettings}
-              onCheckedChange={(checked) => updatePrivacySetting('allowTagging', checked)}
-            />
+        {isLoadingSettings || !privacySettings ? (
+          <div className="rounded-2xl border border-border bg-card p-4">
+            <p className="text-sm text-secondary">Loading privacy settings...</p>
           </div>
-          <div className="flex items-center justify-between p-4">
-            <div className="flex items-center gap-3">
-              <UserX className="h-5 w-5 text-secondary" />
-              <div>
-                <p className="font-medium text-foreground">Public Profile</p>
-                <p className="text-sm text-secondary">
-                  Others can see your profile and FaceTag
-                </p>
+        ) : (
+          <div className="rounded-2xl border border-border bg-card divide-y divide-border">
+            <div className="flex items-center justify-between p-4">
+              <div className="flex items-center gap-3">
+                <Eye className="h-5 w-5 text-secondary" />
+                <div>
+                  <p className="font-medium text-foreground">Allow Photo Tagging</p>
+                  <p className="text-sm text-secondary">
+                    Creators can match your face in their photos
+                  </p>
+                </div>
               </div>
+              <Switch
+                checked={privacySettings.allowTagging}
+                onCheckedChange={(checked) => updatePrivacySetting('allowTagging', checked)}
+              />
             </div>
-            <Switch
-              checked={privacySettings.publicProfile}
-              disabled={isLoadingSettings}
-              onCheckedChange={(checked) => updatePrivacySetting('publicProfile', checked)}
-            />
-          </div>
-          <div className="flex items-center justify-between p-4">
-            <div className="flex items-center gap-3">
-              <Lock className="h-5 w-5 text-secondary" />
-              <div>
-                <p className="font-medium text-foreground">Appear in Search</p>
-                <p className="text-sm text-secondary">
-                  Creators can find you by FaceTag
-                </p>
+            <div className="flex items-center justify-between p-4">
+              <div className="flex items-center gap-3">
+                <UserX className="h-5 w-5 text-secondary" />
+                <div>
+                  <p className="font-medium text-foreground">Public Profile</p>
+                  <p className="text-sm text-secondary">
+                    Others can see your profile and FaceTag
+                  </p>
+                </div>
               </div>
+              <Switch
+                checked={privacySettings.publicProfile}
+                onCheckedChange={(checked) => updatePrivacySetting('publicProfile', checked)}
+              />
             </div>
-            <Switch
-              checked={privacySettings.showInSearch}
-              disabled={isLoadingSettings}
-              onCheckedChange={(checked) => updatePrivacySetting('showInSearch', checked)}
-            />
+            <div className="flex items-center justify-between p-4">
+              <div className="flex items-center gap-3">
+                <Lock className="h-5 w-5 text-secondary" />
+                <div>
+                  <p className="font-medium text-foreground">Appear in Search</p>
+                  <p className="text-sm text-secondary">
+                    Creators can find you by FaceTag
+                  </p>
+                </div>
+              </div>
+              <Switch
+                checked={privacySettings.showInSearch}
+                onCheckedChange={(checked) => updatePrivacySetting('showInSearch', checked)}
+              />
+            </div>
+            <div className="flex items-center justify-between p-4">
+              <div className="flex items-center gap-3">
+                <Users className="h-5 w-5 text-secondary" />
+                <div>
+                  <p className="font-medium text-foreground">Allow Follows</p>
+                  <p className="text-sm text-secondary">
+                    Let others follow your profile
+                  </p>
+                </div>
+              </div>
+              <Switch
+                checked={privacySettings.allowFollows}
+                onCheckedChange={(checked) => updatePrivacySetting('allowFollows', checked)}
+              />
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Security */}
@@ -295,21 +343,7 @@ export default function SettingsPage() {
 
       {/* Delete Face Data Modal */}
       {showDeleteFace && (
-        <div 
-          className="fixed z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            width: '100dvw',
-            height: '100dvh',
-            margin: 0,
-            padding: 0,
-          }}
-        >
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl bg-card p-6 space-y-4 mx-4 my-4">
             <div className="flex items-center gap-3 text-warning">
               <AlertTriangle className="h-6 w-6" />
@@ -342,21 +376,7 @@ export default function SettingsPage() {
 
       {/* Delete Account Modal */}
       {showDeleteAccount && (
-        <div 
-          className="fixed z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            width: '100dvw',
-            height: '100dvh',
-            margin: 0,
-            padding: 0,
-          }}
-        >
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl bg-card p-6 space-y-4">
             <div className="flex items-center gap-3 text-destructive">
               <AlertTriangle className="h-6 w-6" />

@@ -26,7 +26,7 @@ export async function GET(
 
     const fullSelect = `
       id, display_name, face_tag, profile_photo_url,
-      is_public_profile, following_count, public_profile_slug
+      is_public_profile, allow_follows, following_count, public_profile_slug
     `;
     const minimalSelect = 'id, display_name, face_tag, profile_photo_url';
 
@@ -84,7 +84,7 @@ export async function GET(
         .eq('status', 'active'),
       supabase
         .from('user_privacy_settings')
-        .select('profile_visible, show_in_search')
+        .select('profile_visible, show_in_search, allow_follows')
         .eq('user_id', profile.id)
         .maybeSingle(),
     ]);
@@ -98,7 +98,10 @@ export async function GET(
       profile: {
         ...profile,
         is_public_profile: isPublicProfile,
-        allow_follows: isPublicProfile,
+        allow_follows:
+          privacySettings?.allow_follows ??
+          (profile as any)?.allow_follows ??
+          isPublicProfile,
         followers_count: followersCount || 0,
         following_count:
           typeof profile.following_count === 'number'

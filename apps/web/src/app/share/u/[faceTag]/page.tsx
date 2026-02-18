@@ -1,6 +1,8 @@
 import { QrCode, ArrowRight, User } from 'lucide-react';
 import { Metadata } from 'next';
 import Link from 'next/link';
+import ProfileLink from '@/components/social/profile-link';
+import { buildProfileUrls } from '@facefind/shared';
 import { redirect } from 'next/navigation';
 
 import { Button } from '@/components/ui/button';
@@ -35,7 +37,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     openGraph: {
       title: `${displayName} on Ferchr`,
       description: `Connect with ${displayName} on Ferchr. FaceTag: ${faceTag}`,
-      url: `${APP_URL}/u/${params.faceTag}`,
+      url: buildProfileUrls(params.faceTag).publicUser,
       siteName: 'Ferchr',
       images: [
         {
@@ -75,8 +77,8 @@ export default async function ShareProfilePage({ params }: Props) {
     .single();
 
   if (!attendee) {
-    // Redirect to main user profile page
-    redirect(`/u/${params.faceTag}`);
+    // Redirect to main user profile page (public)
+    redirect(buildProfileUrls(params.faceTag).publicUser);
   }
 
   return (
@@ -124,10 +126,10 @@ export default async function ShareProfilePage({ params }: Props) {
             {/* Actions */}
             <div className="space-y-3">
               <Button asChild size="lg" className="w-full">
-                <Link href={`/u/${params.faceTag}`}>
+                <ProfileLink slug={params.faceTag} as="attendee" className="flex items-center justify-center">
                   View Full Profile
                   <ArrowRight className="w-4 h-4 ml-2" />
-                </Link>
+                </ProfileLink>
               </Button>
 
               <Button asChild variant="outline" size="lg" className="w-full">

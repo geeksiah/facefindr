@@ -9,7 +9,9 @@
       "@/components/*": ["./src/components/*"],
       "@/lib/*": ["./src/lib/*"],
       "@/stores/*": ["./src/stores/*"],
-      "@/hooks/*": ["./src/hooks/*"]
+      "@/hooks/*": ["./src/hooks/*"],
+      "@facefind/shared": ["../../packages/shared/src/index.ts"],
+      "@facefind/shared/*": ["../../packages/shared/src/*"]
     }
   },
   "include": [

@@ -90,13 +90,14 @@ export async function POST(request: NextRequest) {
       attendeeQuery = attendeeQuery.eq('id', attendeeId);
     } else {
       // Normalize FaceTag
-      const normalizedTag = attendeeFaceTag.startsWith('@')
-        ? attendeeFaceTag
-        : `@${attendeeFaceTag}`;
+      const trimmedTag = String(attendeeFaceTag || '').trim();
+      const normalizedTag = trimmedTag.startsWith('@')
+        ? trimmedTag
+        : `@${trimmedTag}`;
       attendeeQuery = attendeeQuery.ilike('face_tag', normalizedTag);
     }
 
-    const { data: attendee, error: attendeeError } = await attendeeQuery.single();
+    const { data: attendee, error: attendeeError } = await attendeeQuery.maybeSingle();
 
     if (attendeeError || !attendee) {
       return NextResponse.json({ error: 'Attendee not found' }, { status: 404 });
@@ -130,13 +131,11 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (insertError) {
-      // If table doesn't exist, create it inline (for development)
       if (insertError.code === '42P01') {
-        // Table doesn't exist - return success anyway for now
-        return NextResponse.json({
-          success: true,
-          message: 'Connection feature not fully configured',
-        });
+        return NextResponse.json(
+          { error: 'Connections feature is not configured', failClosed: true },
+          { status: 503 }
+        );
       }
       throw insertError;
     }
@@ -190,9 +189,11 @@ export async function GET(request: NextRequest) {
     const { data: connections, error } = await query;
 
     if (error) {
-      // If table doesn't exist, return empty array
       if (error.code === '42P01') {
-        return NextResponse.json({ connections: [] });
+        return NextResponse.json(
+          { error: 'Connections feature is not configured', failClosed: true },
+          { status: 503 }
+        );
       }
       throw error;
     }
@@ -255,4 +256,3 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to delete connection' }, { status: 500 });
   }
 }
-

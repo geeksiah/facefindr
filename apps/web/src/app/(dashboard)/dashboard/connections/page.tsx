@@ -38,6 +38,13 @@ interface Connection {
   };
 }
 
+interface AttendeeSuggestion {
+  id: string;
+  display_name: string;
+  face_tag: string;
+  profile_photo_url: string | null;
+}
+
 export default function ConnectionsPage() {
   const router = useRouter();
   const toast = useToast();
@@ -46,7 +53,17 @@ export default function ConnectionsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [newFaceTag, setNewFaceTag] = useState('');
+  const [selectedAttendeeId, setSelectedAttendeeId] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
+  const [suggestions, setSuggestions] = useState<AttendeeSuggestion[]>([]);
+  const [isSearchingSuggestions, setIsSearchingSuggestions] = useState(false);
+
+  const closeAddModal = () => {
+    setShowAddModal(false);
+    setNewFaceTag('');
+    setSelectedAttendeeId(null);
+    setSuggestions([]);
+  };
 
   const loadConnections = useCallback(async () => {
     try {
@@ -72,6 +89,48 @@ export default function ConnectionsPage() {
     onChange: () => loadConnections(),
   });
 
+  useEffect(() => {
+    if (!showAddModal) {
+      setSuggestions([]);
+      setSelectedAttendeeId(null);
+      return;
+    }
+
+    const query = newFaceTag.trim().replace(/^@/, '');
+    if (query.length < 2) {
+      setSuggestions([]);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      setIsSearchingSuggestions(true);
+      try {
+        const response = await fetch(
+          `/api/social/search?q=${encodeURIComponent(query)}&type=users&limit=6`,
+          { cache: 'no-store', signal: controller.signal }
+        );
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          setSuggestions([]);
+          return;
+        }
+        setSuggestions(data.users || []);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === 'AbortError')) {
+          setSuggestions([]);
+        }
+      } finally {
+        setIsSearchingSuggestions(false);
+      }
+    }, 250);
+
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [newFaceTag, showAddModal]);
+
   const handleAddConnection = async () => {
     if (!newFaceTag.trim()) return;
 
@@ -80,7 +139,11 @@ export default function ConnectionsPage() {
       const response = await fetch('/api/creators/connections', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ attendeeFaceTag: newFaceTag.trim() }),
+        body: JSON.stringify(
+          selectedAttendeeId
+            ? { attendeeId: selectedAttendeeId, attendeeFaceTag: newFaceTag.trim() }
+            : { attendeeFaceTag: newFaceTag.trim() }
+        ),
       });
 
       const data = await response.json();
@@ -93,7 +156,7 @@ export default function ConnectionsPage() {
           loadConnections();
         }
         setShowAddModal(false);
-        setNewFaceTag('');
+        closeAddModal();
       } else {
         toast.error('Error', data.error || 'Failed to add connection');
       }
@@ -288,7 +351,7 @@ export default function ConnectionsPage() {
       {showAddModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-          onClick={() => setShowAddModal(false)}
+          onClick={closeAddModal}
         >
           <div
             className="w-full max-w-md rounded-2xl bg-card border border-border p-6 mx-4"
@@ -297,7 +360,7 @@ export default function ConnectionsPage() {
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-lg font-semibold text-foreground">Add Connection</h3>
               <button
-                onClick={() => setShowAddModal(false)}
+                onClick={closeAddModal}
                 className="p-1 rounded-lg hover:bg-muted transition-colors"
               >
                 <X className="h-5 w-5 text-secondary" />
@@ -313,11 +376,53 @@ export default function ConnectionsPage() {
                   <AtSign className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-secondary" />
                   <Input
                     value={newFaceTag}
-                    onChange={(e) => setNewFaceTag(e.target.value)}
+                    onChange={(e) => {
+                      setNewFaceTag(e.target.value);
+                      setSelectedAttendeeId(null);
+                    }}
                     placeholder="username1234"
                     className="pl-11"
                   />
                 </div>
+                {isSearchingSuggestions && (
+                  <p className="mt-2 text-xs text-secondary">Searching attendees...</p>
+                )}
+                {!isSearchingSuggestions && suggestions.length > 0 && (
+                  <div className="mt-2 max-h-56 overflow-y-auto rounded-xl border border-border bg-background">
+                    {suggestions.map((suggestion) => (
+                      <button
+                        key={suggestion.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedAttendeeId(suggestion.id);
+                          setNewFaceTag(suggestion.face_tag || suggestion.display_name);
+                          setSuggestions([]);
+                        }}
+                        className="flex w-full items-center gap-3 border-b border-border px-3 py-2 text-left transition-colors hover:bg-muted/50 last:border-b-0"
+                      >
+                        {suggestion.profile_photo_url ? (
+                          <Image
+                            src={suggestion.profile_photo_url}
+                            alt={suggestion.display_name}
+                            width={32}
+                            height={32}
+                            className="h-8 w-8 rounded-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground">
+                            {suggestion.display_name?.charAt(0)?.toUpperCase() || '?'}
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-foreground">
+                            {suggestion.display_name}
+                          </p>
+                          <p className="truncate text-xs text-secondary">{suggestion.face_tag}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <p className="text-xs text-secondary mt-2">
                   Enter the attendee&apos;s FaceTag (e.g., @amara1234)
                 </p>
@@ -327,7 +432,7 @@ export default function ConnectionsPage() {
                 <Button
                   variant="ghost"
                   className="flex-1"
-                  onClick={() => setShowAddModal(false)}
+                  onClick={closeAddModal}
                 >
                   Cancel
                 </Button>

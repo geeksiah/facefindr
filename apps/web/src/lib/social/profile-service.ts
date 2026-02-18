@@ -32,7 +32,7 @@ export async function getCreatorProfile(
       .from('photographers')
       .select(`
         id, display_name, face_tag, bio, profile_photo_url,
-        website_url, instagram_url, twitter_url, facebook_url,
+        website, instagram, twitter, facebook,
         is_public_profile, allow_follows, follower_count,
         public_profile_slug, created_at
       `)
@@ -74,6 +74,10 @@ export async function getCreatorProfile(
       success: true,
       profile: {
         ...data,
+        website_url: (data as any).website_url ?? (data as any).website ?? null,
+        instagram_url: (data as any).instagram_url ?? (data as any).instagram ?? null,
+        twitter_url: (data as any).twitter_url ?? (data as any).twitter ?? null,
+        facebook_url: (data as any).facebook_url ?? (data as any).facebook ?? null,
         events: events || [],
         eventCount: eventCount || 0,
       },

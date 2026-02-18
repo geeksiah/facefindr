@@ -16,6 +16,7 @@ interface Profile {
   username: string | null;
   faceTag: string | null;
   profilePhotoUrl: string | null;
+  profileVisible?: boolean;
   userType: 'creator' | 'attendee';
 }
 
@@ -69,6 +70,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           .eq('id', session.user.id)
           .single();
 
+        // Also fetch privacy settings so UI can reflect persisted visibility immediately
+        let profileVisible: boolean | undefined = undefined;
+        try {
+          const { data: privacy } = await supabase
+            .from('user_privacy_settings')
+            .select('profile_visible')
+            .eq('user_id', session.user.id)
+            .maybeSingle();
+          if (privacy) profileVisible = privacy.profile_visible;
+        } catch (err) {
+          // ignore - privacy will fall back to profile fields
+        }
+
         set({
           session,
           user: session.user,
@@ -79,6 +93,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             username: profile.username,
             faceTag: profile.face_tag,
             profilePhotoUrl: profile.profile_photo_url,
+            profileVisible: profileVisible ?? profile.is_public_profile,
             userType,
           } : null,
         });
@@ -99,6 +114,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             .eq('id', session.user.id)
             .single();
 
+          // Load privacy settings as well
+          let profileVisible: boolean | undefined = undefined;
+          try {
+            const { data: privacy } = await supabase
+              .from('user_privacy_settings')
+              .select('profile_visible')
+              .eq('user_id', session.user.id)
+              .maybeSingle();
+            if (privacy) profileVisible = privacy.profile_visible;
+          } catch (err) {}
+
           set({
             session,
             user: session.user,
@@ -109,6 +135,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
               username: profile.username,
               faceTag: profile.face_tag,
               profilePhotoUrl: profile.profile_photo_url,
+              profileVisible: profileVisible ?? profile.is_public_profile,
               userType,
             } : null,
           });
@@ -195,6 +222,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         .single();
 
       if (profile) {
+        // Also fetch privacy
+        let profileVisible: boolean | undefined = undefined;
+        try {
+          const { data: privacy } = await supabase
+            .from('user_privacy_settings')
+            .select('profile_visible')
+            .eq('user_id', session.user.id)
+            .maybeSingle();
+          if (privacy) profileVisible = privacy.profile_visible;
+        } catch (err) {}
+
         set({
           profile: {
             id: profile.id,
@@ -203,6 +241,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             username: profile.username,
             faceTag: profile.face_tag,
             profilePhotoUrl: profile.profile_photo_url,
+            profileVisible: profileVisible ?? profile.is_public_profile,
             userType,
           },
         });
