@@ -31,7 +31,7 @@ export async function GET(
       id, display_name, face_tag, bio, profile_photo_url,
       website, instagram, twitter, facebook,
       is_public_profile, allow_follows, follower_count,
-      public_profile_slug, created_at
+      public_profile_slug, created_at, user_id
     `;
     const minimalSelect =
       'id, display_name, face_tag, bio, profile_photo_url, website, instagram, twitter, facebook, is_public_profile, allow_follows, follower_count, created_at';
@@ -126,6 +126,7 @@ export async function GET(
     return NextResponse.json({
       profile: {
         ...profile,
+        follow_target_id: (profile as any).user_id || profile.id,
         website_url: (profile as any).website_url ?? (profile as any).website ?? null,
         instagram_url: (profile as any).instagram_url ?? (profile as any).instagram ?? null,
         twitter_url: (profile as any).twitter_url ?? (profile as any).twitter ?? null,

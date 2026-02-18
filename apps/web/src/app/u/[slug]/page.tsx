@@ -29,6 +29,7 @@ interface AttendeeProfile {
   id: string;
   display_name: string;
   face_tag: string;
+  follow_target_id?: string;
   profile_photo_url?: string;
   followers_count?: number;
   following_count: number;
@@ -59,10 +60,10 @@ export default function AttendeeProfilePage() {
 
   const { isConnected } = useRealtimeSubscription({
     table: 'follows',
-    filter: `following_id=eq.${profile?.id || '__none__'}`,
+    filter: `following_id=eq.${profile?.follow_target_id || profile?.id || '__none__'}`,
     onChange: () => {
-      if (profile?.id) {
-        void checkFollowStatus(profile.id);
+      if (profile?.follow_target_id || profile?.id) {
+        void checkFollowStatus(profile?.follow_target_id || profile!.id);
       }
       void refreshFollowerCount();
     },
@@ -73,10 +74,10 @@ export default function AttendeeProfilePage() {
   }, [slug]);
 
   useEffect(() => {
-    if (profile?.id) {
-      void checkFollowStatus(profile.id);
+    if (profile?.follow_target_id || profile?.id) {
+      void checkFollowStatus(profile?.follow_target_id || profile!.id);
     }
-  }, [profile?.id]);
+  }, [profile?.id, profile?.follow_target_id]);
 
   useEffect(() => {
     const loadCurrentUser = async () => {
@@ -91,15 +92,15 @@ export default function AttendeeProfilePage() {
   useEffect(() => {
     const interval = setInterval(() => {
       if (!isConnected) {
-        if (profile?.id) {
-          void checkFollowStatus(profile.id);
+        if (profile?.follow_target_id || profile?.id) {
+          void checkFollowStatus(profile?.follow_target_id || profile!.id);
         }
         void refreshFollowerCount();
       }
     }, 12000);
 
     return () => clearInterval(interval);
-  }, [isConnected, profile?.id, slug]);
+  }, [isConnected, profile?.id, profile?.follow_target_id, slug]);
 
   async function loadProfile() {
     try {
@@ -149,6 +150,7 @@ export default function AttendeeProfilePage() {
     if (!profile?.id || followLoading || profile.allow_follows === false) {
       return;
     }
+    const followTargetId = profile.follow_target_id || profile.id;
 
     setFollowLoading(true);
     try {
@@ -160,14 +162,14 @@ export default function AttendeeProfilePage() {
         return;
       }
 
-      if (user.id === profile.id) {
+      if (user.id === followTargetId || user.id === profile.id) {
         toast.info('Own profile', 'You cannot follow yourself.');
         return;
       }
 
       if (isFollowing) {
         const res = await fetch(
-          `/api/social/follow?targetType=attendee&targetId=${encodeURIComponent(profile.id)}`,
+          `/api/social/follow?targetType=attendee&targetId=${encodeURIComponent(followTargetId)}`,
           { method: 'DELETE' }
         );
         if (!res.ok) {
@@ -186,7 +188,7 @@ export default function AttendeeProfilePage() {
         const res = await fetch('/api/social/follow', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ attendeeId: profile.id, targetType: 'attendee' }),
+          body: JSON.stringify({ targetId: followTargetId, targetType: 'attendee' }),
         });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
@@ -360,7 +362,8 @@ export default function AttendeeProfilePage() {
             </div>
           </div>
 
-          {profile.allow_follows !== false && currentUserId !== profile.id && (
+          {profile.allow_follows !== false &&
+            currentUserId !== (profile.follow_target_id || profile.id) && (
             <div className="mt-6">
               <Button onClick={handleFollowToggle} disabled={followLoading}>
                 {followLoading ? (

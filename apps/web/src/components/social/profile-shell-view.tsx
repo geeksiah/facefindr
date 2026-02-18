@@ -26,6 +26,7 @@ type ShellType = 'dashboard' | 'gallery';
 
 interface CreatorProfile {
   id: string;
+  follow_target_id?: string;
   display_name: string;
   face_tag?: string;
   bio?: string;
@@ -44,6 +45,7 @@ interface CreatorProfile {
 
 interface AttendeeProfile {
   id: string;
+  follow_target_id?: string;
   display_name: string;
   face_tag?: string;
   profile_photo_url?: string;
@@ -96,6 +98,7 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
       profile.public_profile_slug || profile.face_tag?.replace(/^@/, '') || profile.id;
     return `${profileType === 'creator' ? '/c' : '/u'}/${slugOrTag}`;
   }, [profile, profileType]);
+  const targetFollowId = useMemo(() => profile?.follow_target_id || profile?.id || '', [profile]);
 
   useEffect(() => {
     async function loadCurrentUser() {
@@ -137,8 +140,8 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
   }, [apiPath]);
 
   useEffect(() => {
-    if (!profile?.id) return;
-    const targetId = profile.id;
+    if (!targetFollowId) return;
+    const targetId = targetFollowId;
     let active = true;
 
     async function checkFollowStatus() {
@@ -159,27 +162,27 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
     return () => {
       active = false;
     };
-  }, [profile?.id, profileType]);
+  }, [targetFollowId, profileType]);
 
   const { isConnected } = useRealtimeSubscription({
     table: 'follows',
-    filter: `following_id=eq.${profile?.id || '__none__'}`,
+    filter: `following_id=eq.${targetFollowId || '__none__'}`,
     onChange: () => {
-      if (profile?.id) {
-        void refreshFollowState(profile.id);
+      if (targetFollowId) {
+        void refreshFollowState(targetFollowId);
       }
     },
   });
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (!isConnected && profile?.id) {
-        void refreshFollowState(profile.id);
+      if (!isConnected && targetFollowId) {
+        void refreshFollowState(targetFollowId);
       }
     }, 12000);
 
     return () => clearInterval(interval);
-  }, [isConnected, profile?.id, profileType]);
+  }, [isConnected, targetFollowId, profileType]);
 
   async function refreshFollowState(targetId: string) {
     try {
@@ -235,7 +238,7 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
   }
 
   async function handleFollowToggle() {
-    if (!profile?.id || followLoading) return;
+    if (!targetFollowId || followLoading) return;
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -243,7 +246,7 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
       router.push(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
       return;
     }
-    if (user.id === profile.id) {
+    if (user.id === targetFollowId || user.id === profile?.id) {
       toast.info('Own profile', 'You cannot follow yourself.');
       return;
     }
@@ -259,7 +262,7 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
       if (isFollowing) {
         const searchParams = new URLSearchParams({
           targetType: profileType === 'creator' ? 'creator' : 'attendee',
-          targetId: profile.id,
+          targetId: targetFollowId,
         });
         const res = await fetch(`/api/social/follow?${searchParams.toString()}`, {
           method: 'DELETE',
@@ -286,8 +289,8 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
       } else {
         const payload =
           profileType === 'creator'
-            ? { photographerId: profile.id, targetType: 'creator' }
-            : { attendeeId: profile.id, targetType: 'attendee' };
+            ? { targetId: targetFollowId, targetType: 'creator' }
+            : { targetId: targetFollowId, targetType: 'attendee' };
         const res = await fetch('/api/social/follow', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -384,7 +387,7 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
             )}
           </div>
 
-          {currentUserId !== profile.id &&
+          {currentUserId !== targetFollowId &&
             ((isCreator && creatorProfile.allow_follows !== false) ||
               (!isCreator && attendeeProfile.allow_follows !== false)) && (
             <Button onClick={handleFollowToggle} disabled={followLoading}>

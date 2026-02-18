@@ -55,6 +55,7 @@ export async function GET(
     if (error || !profile) {
       return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
     }
+    const followTargetId = (profile as any).user_id || profile.id;
 
     const privacyResult = await supabase
       .from('user_privacy_settings')
@@ -81,7 +82,7 @@ export async function GET(
             id, display_name, face_tag, profile_photo_url, public_profile_slug
           )
         `)
-        .eq('following_id', profile.id)
+        .eq('following_id', followTargetId)
         .eq('following_type', 'attendee')
         .eq('follower_type', 'attendee')
         .eq('status', 'active')
@@ -97,7 +98,7 @@ export async function GET(
             id, display_name, face_tag, profile_photo_url, public_profile_slug
           )
         `)
-        .eq('following_id', profile.id)
+        .eq('following_id', followTargetId)
         .eq('following_type', 'attendee')
         .in('follower_type', ['creator', 'photographer'])
         .eq('status', 'active')

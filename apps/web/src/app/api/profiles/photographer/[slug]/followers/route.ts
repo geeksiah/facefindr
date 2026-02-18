@@ -22,7 +22,7 @@ export async function GET(
     // Get photographer by slug or ID
     const { data: photographer } = await supabase
       .from('photographers')
-      .select('id, follower_count, public_profile_slug, is_public_profile')
+      .select('id, user_id, follower_count, public_profile_slug, is_public_profile')
       .or(`id.eq.${slug},public_profile_slug.eq.${slug}`)
       .single();
 
@@ -30,11 +30,13 @@ export async function GET(
       return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
     }
 
+    const followTargetId = (photographer as any).user_id || photographer.id;
+
     // Get actual follower count from follows table (more accurate than cached count)
     const { count } = await supabase
       .from('follows')
       .select('id', { count: 'exact', head: true })
-      .eq('following_id', photographer.id)
+      .eq('following_id', followTargetId)
       .in('following_type', ['creator', 'photographer'])
       .eq('status', 'active');
 
@@ -62,7 +64,7 @@ export async function GET(
           id, display_name, face_tag, profile_photo_url, public_profile_slug
         )
       `)
-      .eq('following_id', photographer.id)
+      .eq('following_id', followTargetId)
       .in('following_type', ['creator', 'photographer'])
       .eq('status', 'active')
       .order('created_at', { ascending: false });

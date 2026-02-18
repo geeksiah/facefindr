@@ -74,13 +74,13 @@ export async function GET(
       supabase
         .from('follows')
         .select('id', { count: 'exact', head: true })
-        .eq('following_id', profile.id)
+        .eq('following_id', (profile as any).user_id || profile.id)
         .eq('following_type', 'attendee')
         .eq('status', 'active'),
       supabase
         .from('follows')
         .select('id', { count: 'exact', head: true })
-        .eq('follower_id', profile.id)
+        .eq('follower_id', (profile as any).user_id || profile.id)
         .eq('status', 'active'),
       supabase
         .from('user_privacy_settings')
@@ -102,6 +102,7 @@ export async function GET(
           privacySettings?.allow_follows ??
           (profile as any)?.allow_follows ??
           isPublicProfile,
+        follow_target_id: (profile as any).user_id || profile.id,
         followers_count: followersCount || 0,
         following_count:
           typeof profile.following_count === 'number'
