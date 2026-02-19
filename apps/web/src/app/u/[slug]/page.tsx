@@ -59,16 +59,16 @@ export default function AttendeeProfilePage() {
   const followTargetId = profile?.follow_target_id || profile?.id;
   const qrCodeValue = typeof window !== 'undefined' ? `${window.location.href}?app=1` : '';
   const qrCodeRef = useRef<HTMLDivElement>(null);
+  const followSyncSeqRef = useRef(0);
 
   const { isConnected } = useRealtimeSubscription({
     table: 'follows',
     filter: `following_id=eq.${followTargetId || '__none__'}`,
     onChange: () => {
       if (followLoading) return;
-      if (profile?.follow_target_id || profile?.id) {
-        void checkFollowStatus(profile?.follow_target_id || profile!.id);
+      if (followTargetId) {
+        void refreshFollowState(followTargetId);
       }
-      void refreshFollowerCount();
     },
   });
 
@@ -77,10 +77,10 @@ export default function AttendeeProfilePage() {
   }, [slug]);
 
   useEffect(() => {
-    if (profile?.follow_target_id || profile?.id) {
-      void checkFollowStatus(profile?.follow_target_id || profile!.id);
+    if (followTargetId) {
+      void refreshFollowState(followTargetId);
     }
-  }, [profile?.id, profile?.follow_target_id]);
+  }, [followTargetId, slug]);
 
   useEffect(() => {
     const loadCurrentUser = async () => {
@@ -95,15 +95,14 @@ export default function AttendeeProfilePage() {
   useEffect(() => {
     const interval = setInterval(() => {
       if (!isConnected && !followLoading) {
-        if (profile?.follow_target_id || profile?.id) {
-          void checkFollowStatus(profile?.follow_target_id || profile!.id);
+        if (followTargetId) {
+          void refreshFollowState(followTargetId);
         }
-        void refreshFollowerCount();
       }
     }, 12000);
 
     return () => clearInterval(interval);
-  }, [isConnected, profile?.id, profile?.follow_target_id, slug, followLoading]);
+  }, [isConnected, followTargetId, slug, followLoading]);
 
   useEffect(() => {
     const redirectToShellIfAuthenticated = async () => {
@@ -143,30 +142,36 @@ export default function AttendeeProfilePage() {
     }
   }
 
-  async function refreshFollowerCount() {
+  async function refreshFollowState(targetId: string) {
+    const seq = ++followSyncSeqRef.current;
+
     try {
-      const res = await fetch(`/api/profiles/user/${slug}`, { cache: 'no-store' });
-      if (!res.ok) return;
-      const data = await res.json();
-      const nextCount = data?.profile?.followers_count;
-      if (typeof nextCount === 'number') {
-        setProfile((prev) => (prev ? { ...prev, followers_count: nextCount } : prev));
+      const [statusRes, profileRes] = await Promise.all([
+        fetch(
+          `/api/social/follow?type=check&targetType=attendee&targetId=${encodeURIComponent(targetId)}`,
+          { cache: 'no-store' }
+        ),
+        fetch(`/api/profiles/user/${slug}`, { cache: 'no-store' }),
+      ]);
+
+      if (seq !== followSyncSeqRef.current) return;
+
+      if (statusRes.ok) {
+        const data = await statusRes.json();
+        if (seq === followSyncSeqRef.current) {
+          setIsFollowing(Boolean(data.isFollowing));
+        }
+      }
+
+      if (profileRes.ok) {
+        const data = await profileRes.json();
+        const nextCount = Number(data?.profile?.followers_count || 0);
+        if (seq === followSyncSeqRef.current) {
+          setProfile((prev) => (prev ? { ...prev, followers_count: nextCount } : prev));
+        }
       }
     } catch {
       // ignore background refresh failures
-    }
-  }
-
-  async function checkFollowStatus(targetId: string) {
-    try {
-      const res = await fetch(
-        `/api/social/follow?type=check&targetType=attendee&targetId=${encodeURIComponent(targetId)}`
-      );
-      if (!res.ok) return;
-      const data = await res.json();
-      setIsFollowing(Boolean(data.isFollowing));
-    } catch {
-      // Ignore for anonymous sessions
     }
   }
 
@@ -247,7 +252,7 @@ export default function AttendeeProfilePage() {
       }
     } finally {
       if (followTargetId) {
-        await checkFollowStatus(followTargetId);
+        await refreshFollowState(followTargetId);
       }
       setFollowLoading(false);
     }

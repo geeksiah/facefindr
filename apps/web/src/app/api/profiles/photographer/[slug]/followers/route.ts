@@ -14,6 +14,10 @@ function isMissingColumnError(error: any, columnName: string) {
   return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
 }
 
+function uniqueStringValues(values: Array<string | null | undefined>) {
+  return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))];
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { slug: string } }
@@ -49,15 +53,20 @@ export async function GET(
     }
 
     const ownerUserId = (photographer as any).user_id || photographer.id;
-    const followTargetId = ownerUserId;
+    const followTargetIds = uniqueStringValues([ownerUserId, photographer.id]);
 
     // Get actual follower count from follows table (more accurate than cached count)
-    const { count } = await supabase
+    let countQuery = supabase
       .from('follows')
       .select('id', { count: 'exact', head: true })
-      .eq('following_id', followTargetId)
       .in('following_type', ['creator', 'photographer'])
       .eq('status', 'active');
+    if (followTargetIds.length === 1) {
+      countQuery = countQuery.eq('following_id', followTargetIds[0]);
+    } else {
+      countQuery = countQuery.in('following_id', followTargetIds);
+    }
+    const { count } = await countQuery;
 
     if (!includeList) {
       return NextResponse.json({
@@ -74,7 +83,7 @@ export async function GET(
       return NextResponse.json({ error: 'Followers list is private' }, { status: 403 });
     }
 
-    const { data: followers } = await supabase
+    let followersQuery = supabase
       .from('follows')
       .select(`
         id,
@@ -88,10 +97,15 @@ export async function GET(
           id, display_name, face_tag, profile_photo_url, public_profile_slug
         )
       `)
-      .eq('following_id', followTargetId)
       .in('following_type', ['creator', 'photographer'])
       .eq('status', 'active')
       .order('created_at', { ascending: false });
+    if (followTargetIds.length === 1) {
+      followersQuery = followersQuery.eq('following_id', followTargetIds[0]);
+    } else {
+      followersQuery = followersQuery.in('following_id', followTargetIds);
+    }
+    const { data: followers } = await followersQuery;
 
     return NextResponse.json({
       count: count || photographer.follower_count || 0,

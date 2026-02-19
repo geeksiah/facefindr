@@ -66,57 +66,46 @@ export async function GET(
       });
     }
     const photographerId = photographer.id;
-
-    // Get rating stats from materialized view or calculate
-    const { data: stats, error } = await supabase
-      .from('photographer_rating_stats')
-      .select('average_rating, total_ratings')
+    const { data: ratings, error: ratingsError } = await supabase
+      .from('photographer_ratings')
+      .select('rating')
       .eq('photographer_id', photographerId)
-      .single();
+      .eq('is_public', true);
 
-    if (error) {
-      // If materialized view doesn't exist or has no data, calculate from ratings table
-      const { data: ratings } = await supabase
-        .from('photographer_ratings')
-        .select('rating')
-        .eq('photographer_id', photographerId)
-        .eq('is_public', true);
+    if (ratingsError) {
+      throw ratingsError;
+    }
 
-      if (!ratings || ratings.length === 0) {
-        return NextResponse.json({
-          average_rating: 0,
-          raw_average_rating: 0,
-          total_ratings: 0,
-          rating_breakdown: {},
-        });
-      }
-
-      const totalRatings = ratings.length;
-      const rawAverageRating = ratings.reduce((sum, r) => sum + r.rating, 0) / totalRatings;
-      const adjustedAverage = getAdjustedAverage(rawAverageRating, totalRatings);
-
-      // Calculate breakdown
-      const breakdown = ratings.reduce((acc, r) => {
-        acc[r.rating] = (acc[r.rating] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>);
-
+    if (!ratings || ratings.length === 0) {
       return NextResponse.json({
-        average_rating: Math.round(adjustedAverage * 100) / 100,
-        raw_average_rating: Math.round(rawAverageRating * 100) / 100,
-        total_ratings: totalRatings,
-        rating_breakdown: breakdown,
+        average_rating: 0,
+        raw_average_rating: 0,
+        total_ratings: 0,
+        rating_breakdown: {
+          1: 0,
+          2: 0,
+          3: 0,
+          4: 0,
+          5: 0,
+        },
       });
     }
 
-    const rawAverageRating = Number(stats.average_rating || 0);
-    const totalRatings = Number(stats.total_ratings || 0);
+    const totalRatings = ratings.length;
+    const rawAverageRating = ratings.reduce((sum, row) => sum + Number(row.rating || 0), 0) / totalRatings;
     const adjustedAverage = getAdjustedAverage(rawAverageRating, totalRatings);
+    const breakdown: Record<string, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+
+    for (const row of ratings) {
+      const value = String(Math.max(1, Math.min(5, Number(row.rating || 0))));
+      breakdown[value] = (breakdown[value] || 0) + 1;
+    }
 
     return NextResponse.json({
       average_rating: Math.round(adjustedAverage * 100) / 100,
-      raw_average_rating: rawAverageRating,
+      raw_average_rating: Math.round(rawAverageRating * 100) / 100,
       total_ratings: totalRatings,
+      rating_breakdown: breakdown,
     });
 
   } catch (error: any) {

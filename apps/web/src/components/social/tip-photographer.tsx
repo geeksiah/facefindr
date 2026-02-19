@@ -1,7 +1,7 @@
 'use client';
 
 import { Heart, Loader2, X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,11 +36,55 @@ export function TipCreator({
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resolvedCurrency, setResolvedCurrency] = useState(
+    typeof currency === 'string' && currency.trim()
+      ? currency.trim().toUpperCase()
+      : 'USD'
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    const explicitCurrency =
+      typeof currency === 'string' && currency.trim()
+        ? currency.trim().toUpperCase()
+        : null;
+
+    if (explicitCurrency) {
+      setResolvedCurrency(explicitCurrency);
+      return () => {
+        active = false;
+      };
+    }
+
+    const loadEffectiveCurrency = async () => {
+      try {
+        const response = await fetch('/api/currency', { cache: 'no-store' });
+        if (!response.ok) return;
+        const data = await response.json();
+        const effectiveCurrency =
+          typeof data?.effectiveCurrency === 'string' && data.effectiveCurrency.trim()
+            ? data.effectiveCurrency.trim().toUpperCase()
+            : null;
+        if (active && effectiveCurrency) {
+          setResolvedCurrency(effectiveCurrency);
+        }
+      } catch {
+        // keep default currency fallback
+      }
+    };
+
+    void loadEffectiveCurrency();
+
+    return () => {
+      active = false;
+    };
+  }, [currency]);
 
   const formatAmount = (cents: number) =>
-    new Intl.NumberFormat('en-US', {
+    new Intl.NumberFormat(undefined, {
       style: 'currency',
-      currency: (currency || 'USD').toUpperCase(),
+      currency: resolvedCurrency,
     }).format(cents / 100);
 
   const handlePresetAmount = (cents: number) => {
@@ -74,7 +118,7 @@ export function TipCreator({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           amount,
-          currency: currency || undefined,
+          currency: resolvedCurrency || undefined,
           eventId,
           mediaId,
           message: message.trim() || null,

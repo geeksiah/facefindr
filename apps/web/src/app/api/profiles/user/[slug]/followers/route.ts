@@ -24,6 +24,10 @@ function isMissingColumnError(error: any, columnName: string) {
   return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
 }
 
+function uniqueStringValues(values: Array<string | null | undefined>) {
+  return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))];
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { slug: string } }
@@ -84,7 +88,7 @@ export async function GET(
       return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
     }
     const ownerUserId = (profile as any).user_id || profile.id;
-    const followTargetId = ownerUserId;
+    const followTargetIds = uniqueStringValues([ownerUserId, profile.id]);
 
     const authClient = await createClient();
     const {
@@ -96,34 +100,60 @@ export async function GET(
     }
 
     const [attendeeFollowersRes, creatorFollowersRes] = await Promise.all([
-      supabase
-        .from('follows')
-        .select(`
-          id,
-          follower_id,
-          follower_type,
-          created_at,
-          attendees!follows_follower_id_fkey (
-            id, display_name, face_tag, profile_photo_url, public_profile_slug
-          )
-        `)
-        .eq('following_id', followTargetId)
+      (followTargetIds.length === 1
+        ? supabase
+            .from('follows')
+            .select(`
+              id,
+              follower_id,
+              follower_type,
+              created_at,
+              attendees!follows_follower_id_fkey (
+                id, display_name, face_tag, profile_photo_url, public_profile_slug
+              )
+            `)
+            .eq('following_id', followTargetIds[0])
+        : supabase
+            .from('follows')
+            .select(`
+              id,
+              follower_id,
+              follower_type,
+              created_at,
+              attendees!follows_follower_id_fkey (
+                id, display_name, face_tag, profile_photo_url, public_profile_slug
+              )
+            `)
+            .in('following_id', followTargetIds))
         .eq('following_type', 'attendee')
         .eq('follower_type', 'attendee')
         .eq('status', 'active')
         .order('created_at', { ascending: false }),
-      supabase
-        .from('follows')
-        .select(`
-          id,
-          follower_id,
-          follower_type,
-          created_at,
-          photographers!follows_follower_id_fkey (
-            id, display_name, face_tag, profile_photo_url, public_profile_slug
-          )
-        `)
-        .eq('following_id', followTargetId)
+      (followTargetIds.length === 1
+        ? supabase
+            .from('follows')
+            .select(`
+              id,
+              follower_id,
+              follower_type,
+              created_at,
+              photographers!follows_follower_id_fkey (
+                id, display_name, face_tag, profile_photo_url, public_profile_slug
+              )
+            `)
+            .eq('following_id', followTargetIds[0])
+        : supabase
+            .from('follows')
+            .select(`
+              id,
+              follower_id,
+              follower_type,
+              created_at,
+              photographers!follows_follower_id_fkey (
+                id, display_name, face_tag, profile_photo_url, public_profile_slug
+              )
+            `)
+            .in('following_id', followTargetIds))
         .eq('following_type', 'attendee')
         .in('follower_type', ['creator', 'photographer'])
         .eq('status', 'active')

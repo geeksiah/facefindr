@@ -51,6 +51,7 @@ export default function RegisterPage() {
       displayName: '',
       username: '',
       userType: undefined,
+      countryCode: '',
       acceptTerms: false,
     },
   });
@@ -243,6 +244,33 @@ export default function RegisterPage() {
                 autoComplete="email"
               />
             </div>
+          </div>
+
+          {/* Country */}
+          <div>
+            <label htmlFor="countryCode" className="block text-sm font-medium text-foreground mb-2">
+              Country
+            </label>
+            <select
+              {...register('countryCode')}
+              id="countryCode"
+              className="w-full rounded-lg border border-input bg-muted px-3 py-2 text-foreground"
+              defaultValue=""
+            >
+              <option value="">Auto-detect</option>
+              <option value="GH">Ghana</option>
+              <option value="NG">Nigeria</option>
+              <option value="KE">Kenya</option>
+              <option value="UG">Uganda</option>
+              <option value="ZA">South Africa</option>
+              <option value="US">United States</option>
+              <option value="GB">United Kingdom</option>
+              <option value="CA">Canada</option>
+              <option value="AU">Australia</option>
+            </select>
+            {errors.countryCode && (
+              <p className="mt-1.5 text-xs text-destructive">{errors.countryCode.message}</p>
+            )}
           </div>
 
           {/* Password */}

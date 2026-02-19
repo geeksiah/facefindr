@@ -62,6 +62,61 @@ async function resolveAttendeeByUser(supabase: any, userId: string) {
   };
 }
 
+async function getRatingEligibility(
+  supabase: any,
+  attendeeId: string,
+  attendeeUserId: string,
+  photographerId: string,
+  photographerUserId: string,
+  eventId?: string | null
+) {
+  const [connectionsResult, followsResult, eventsResult] = await Promise.all([
+    supabase
+      .from('connections')
+      .select('id', { count: 'exact', head: true })
+      .eq('photographer_id', photographerId)
+      .eq('attendee_id', attendeeId)
+      .eq('status', 'active'),
+    supabase
+      .from('follows')
+      .select('id', { count: 'exact', head: true })
+      .eq('follower_id', attendeeUserId)
+      .eq('following_id', photographerUserId)
+      .eq('status', 'active'),
+    supabase
+      .from('events')
+      .select('id')
+      .eq('photographer_id', photographerId),
+  ]);
+
+  const creatorEventIds = (eventsResult.data || []).map((event: any) => event.id);
+  const entitlementQuery = supabase
+    .from('entitlements')
+    .select('id', { count: 'exact', head: true })
+    .eq('attendee_id', attendeeId);
+
+  let entitlementCount = 0;
+  if (eventId) {
+    const { count } = await entitlementQuery.eq('event_id', eventId);
+    entitlementCount = count || 0;
+  } else if (creatorEventIds.length > 0) {
+    const { count } = await entitlementQuery.in('event_id', creatorEventIds);
+    entitlementCount = count || 0;
+  }
+
+  const hasConnection = (connectionsResult.count || 0) > 0;
+  const hasFollow = (followsResult.count || 0) > 0;
+  const hasEntitlement = entitlementCount > 0;
+
+  return {
+    hasConnection,
+    hasFollow,
+    hasEntitlement,
+    eligible: hasConnection || hasEntitlement || hasFollow,
+    creatorEventIds,
+  };
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -115,24 +170,47 @@ export async function POST(
       );
     }
 
-    const { data: photographerEvents } = await serviceClient
-      .from('events')
-      .select('id')
-      .eq('photographer_id', photographerId);
-    const eventIds = (photographerEvents || []).map((event: any) => event.id);
+    const attendeeUserId = (attendee as any).user_id || user.id;
+    const eventId =
+      typeof body.eventId === 'string' && body.eventId.trim().length > 0
+        ? body.eventId.trim()
+        : null;
 
-    // Check if attendee has purchased/downloaded photos from this photographer (for verified rating)
-    let purchaseCount = 0;
-    if (eventIds.length > 0) {
-      const purchaseResult = await serviceClient
-        .from('entitlements')
-        .select('id', { count: 'exact', head: true })
-        .eq('attendee_id', attendee.id)
-        .in('event_id', eventIds);
-      purchaseCount = purchaseResult.count || 0;
+    if (eventId) {
+      const { data: event } = await serviceClient
+        .from('events')
+        .select('id')
+        .eq('id', eventId)
+        .eq('photographer_id', photographerId)
+        .maybeSingle();
+      if (!event) {
+        return NextResponse.json(
+          { error: 'Event does not belong to this creator' },
+          { status: 400 }
+        );
+      }
     }
 
-    const isVerified = (purchaseCount || 0) > 0;
+    const eligibility = await getRatingEligibility(
+      serviceClient,
+      attendee.id,
+      attendeeUserId,
+      photographerId,
+      photographerUserId,
+      eventId
+    );
+
+    if (!eligibility.eligible) {
+      return NextResponse.json(
+        {
+          error:
+            'You can only rate creators you have followed, connected with, or purchased from.',
+        },
+        { status: 403 }
+      );
+    }
+
+    const isVerified = eligibility.hasConnection || eligibility.hasEntitlement;
 
     // Upsert rating (one rating per attendee per photographer)
     const { data: ratingData, error: ratingError } = await serviceClient
@@ -140,7 +218,7 @@ export async function POST(
       .upsert({
         photographer_id: photographerId,
         attendee_id: attendee.id,
-        event_id: body.eventId || null,
+        event_id: eventId,
         rating,
         review_text: body.reviewText || null,
         is_verified: isVerified,

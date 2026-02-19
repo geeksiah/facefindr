@@ -11,12 +11,11 @@ import {
   Phone,
   Shield,
   Check,
-  DollarSign,
   TrendingUp,
   Wallet,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter, useParams } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { useState, useEffect } from 'react';
 
 function getCurrencySymbol(currencyCode: string): string {
@@ -84,6 +83,38 @@ interface SmsPreset {
   config_schema: any;
 }
 
+type PaymentProvider =
+  | 'stripe'
+  | 'flutterwave'
+  | 'paystack'
+  | 'mtn_momo'
+  | 'vodafone_cash'
+  | 'airteltigo_money'
+  | 'mpesa'
+  | 'paypal';
+
+interface ProviderCredentialField {
+  key: string;
+  label: string;
+  sensitive?: boolean;
+}
+
+interface PaymentProviderOption {
+  value: PaymentProvider;
+  label: string;
+  methods: string[];
+  credentialFields: ProviderCredentialField[];
+}
+
+interface PaymentProviderCredentialForm {
+  is_active: boolean;
+  is_test_mode: boolean;
+  credentials: Record<string, string>;
+  supported_methods: string[];
+  min_amount: number;
+  max_amount: number;
+}
+
 const WHATSAPP_PROVIDER_OPTIONS = [
   { value: 'twilio', label: 'Twilio WhatsApp' },
   { value: 'meta_cloud_api', label: 'Meta WhatsApp Cloud API' },
@@ -98,16 +129,169 @@ const PUSH_PROVIDER_OPTIONS = [
   { value: 'onesignal', label: 'OneSignal' },
 ];
 
+const PAYMENT_PROVIDER_OPTIONS: PaymentProviderOption[] = [
+  {
+    value: 'stripe',
+    label: 'Stripe',
+    methods: ['card', 'apple_pay', 'google_pay'],
+    credentialFields: [
+      { key: 'publishable_key', label: 'Publishable key' },
+      { key: 'secret_key', label: 'Secret key', sensitive: true },
+      { key: 'webhook_secret', label: 'Webhook secret', sensitive: true },
+    ],
+  },
+  {
+    value: 'flutterwave',
+    label: 'Flutterwave',
+    methods: ['card', 'bank_transfer', 'mobile_money'],
+    credentialFields: [
+      { key: 'public_key', label: 'Public key' },
+      { key: 'secret_key', label: 'Secret key', sensitive: true },
+      { key: 'encryption_key', label: 'Encryption key', sensitive: true },
+    ],
+  },
+  {
+    value: 'paystack',
+    label: 'Paystack',
+    methods: ['card', 'bank_transfer', 'ussd'],
+    credentialFields: [
+      { key: 'public_key', label: 'Public key' },
+      { key: 'secret_key', label: 'Secret key', sensitive: true },
+      { key: 'webhook_secret', label: 'Webhook secret', sensitive: true },
+    ],
+  },
+  {
+    value: 'paypal',
+    label: 'PayPal',
+    methods: ['paypal_wallet', 'card'],
+    credentialFields: [
+      { key: 'client_id', label: 'Client ID' },
+      { key: 'client_secret', label: 'Client secret', sensitive: true },
+      { key: 'webhook_id', label: 'Webhook ID' },
+    ],
+  },
+  {
+    value: 'mtn_momo',
+    label: 'MTN MoMo',
+    methods: ['mobile_money'],
+    credentialFields: [
+      { key: 'api_user', label: 'API user' },
+      { key: 'api_key', label: 'API key', sensitive: true },
+      { key: 'subscription_key', label: 'Subscription key', sensitive: true },
+      { key: 'environment', label: 'Environment' },
+    ],
+  },
+  {
+    value: 'vodafone_cash',
+    label: 'Vodafone Cash',
+    methods: ['mobile_money'],
+    credentialFields: [
+      { key: 'merchant_id', label: 'Merchant ID' },
+      { key: 'api_key', label: 'API key', sensitive: true },
+      { key: 'environment', label: 'Environment' },
+    ],
+  },
+  {
+    value: 'airteltigo_money',
+    label: 'AirtelTigo Money',
+    methods: ['mobile_money'],
+    credentialFields: [
+      { key: 'client_id', label: 'Client ID' },
+      { key: 'client_secret', label: 'Client secret', sensitive: true },
+      { key: 'environment', label: 'Environment' },
+    ],
+  },
+  {
+    value: 'mpesa',
+    label: 'M-Pesa',
+    methods: ['mobile_money'],
+    credentialFields: [
+      { key: 'consumer_key', label: 'Consumer key' },
+      { key: 'consumer_secret', label: 'Consumer secret', sensitive: true },
+      { key: 'shortcode', label: 'Shortcode' },
+      { key: 'passkey', label: 'Passkey', sensitive: true },
+      { key: 'environment', label: 'Environment' },
+    ],
+  },
+];
+
+function getProviderConfig(provider: PaymentProvider) {
+  return PAYMENT_PROVIDER_OPTIONS.find((entry) => entry.value === provider);
+}
+
+function getDefaultCredentialState(provider: PaymentProvider): PaymentProviderCredentialForm {
+  const option = getProviderConfig(provider);
+  return {
+    is_active: true,
+    is_test_mode: true,
+    credentials: {},
+    supported_methods: option?.methods || ['card'],
+    min_amount: 100,
+    max_amount: 100000000,
+  };
+}
+
+function toProviderMap(
+  rows: Array<{
+    provider: PaymentProvider;
+    is_active?: boolean;
+    is_test_mode?: boolean;
+    credentials?: Record<string, string>;
+    supported_methods?: string[];
+    min_amount?: number;
+    max_amount?: number;
+  }>,
+  selectedProviders: PaymentProvider[]
+) {
+  const map: Record<string, PaymentProviderCredentialForm> = {};
+
+  for (const provider of selectedProviders) {
+    map[provider] = getDefaultCredentialState(provider);
+  }
+
+  for (const row of rows || []) {
+    const provider = row.provider;
+    map[provider] = {
+      ...getDefaultCredentialState(provider),
+      is_active: row.is_active ?? true,
+      is_test_mode: row.is_test_mode ?? true,
+      credentials: row.credentials || {},
+      supported_methods:
+        Array.isArray(row.supported_methods) && row.supported_methods.length > 0
+          ? row.supported_methods
+          : getDefaultCredentialState(provider).supported_methods,
+      min_amount: Number.isFinite(row.min_amount) ? Number(row.min_amount) : 100,
+      max_amount: Number.isFinite(row.max_amount) ? Number(row.max_amount) : 100000000,
+    };
+  }
+
+  return map;
+}
+
 export default function RegionConfigPage() {
-  const router = useRouter();
   const params = useParams();
   const code = params?.code as string;
 
   const [config, setConfig] = useState<RegionConfig | null>(null);
   const [smsPresets, setSmsPresets] = useState<SmsPreset[]>([]);
+  const [providerCredentials, setProviderCredentials] = useState<Record<string, PaymentProviderCredentialForm>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  function updateProviderCredential(
+    provider: PaymentProvider,
+    patch: Partial<PaymentProviderCredentialForm>
+  ) {
+    setProviderCredentials((prev) => ({
+      ...prev,
+      [provider]: {
+        ...(prev[provider] || getDefaultCredentialState(provider)),
+        ...patch,
+      },
+    }));
+  }
 
   useEffect(() => {
     const fetchData = async () => {
@@ -118,7 +302,15 @@ export default function RegionConfigPage() {
 
       if (configRes.ok) {
         const data = await configRes.json();
-        setConfig(data.region);
+        const regionConfig = data.region as RegionConfig;
+        const selectedProviders = (regionConfig.payment_providers || []).filter((provider: string) =>
+          PAYMENT_PROVIDER_OPTIONS.some((entry) => entry.value === provider)
+        ) as PaymentProvider[];
+
+        setConfig(regionConfig);
+        setProviderCredentials(
+          toProviderMap((data.paymentProviderCredentials || []) as any[], selectedProviders)
+        );
       }
 
       if (presetsRes.ok) {
@@ -132,23 +324,48 @@ export default function RegionConfigPage() {
     fetchData();
   }, [code]);
 
+  useEffect(() => {
+    if (!config) return;
+    const selectedProviders = (config.payment_providers || []).filter((provider: string) =>
+      PAYMENT_PROVIDER_OPTIONS.some((entry) => entry.value === provider)
+    ) as PaymentProvider[];
+
+    setProviderCredentials((prev) => {
+      const next = { ...prev };
+      for (const provider of selectedProviders) {
+        if (!next[provider]) {
+          next[provider] = getDefaultCredentialState(provider);
+        }
+      }
+      return next;
+    });
+  }, [config?.payment_providers]);
+
   const handleSave = async () => {
     if (!config) return;
     setIsSaving(true);
+    setSaveError(null);
 
     try {
       const response = await fetch(`/api/admin/regions/${code}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
+        body: JSON.stringify({
+          region: config,
+          paymentProviderCredentials: providerCredentials,
+        }),
       });
 
       if (response.ok) {
         setSaved(true);
         setTimeout(() => setSaved(false), 3000);
+      } else {
+        const payload = await response.json().catch(() => ({}));
+        setSaveError(payload?.error || 'Failed to save region configuration');
       }
     } catch (error) {
       console.error('Save failed:', error);
+      setSaveError('Failed to save region configuration');
     } finally {
       setIsSaving(false);
     }
@@ -183,6 +400,38 @@ export default function RegionConfigPage() {
   }
 
   const currentSmsPreset = smsPresets.find(p => p.provider === config.sms_provider);
+  const selectedPaymentProviders = (config.payment_providers || []).filter((provider: string) =>
+    PAYMENT_PROVIDER_OPTIONS.some((entry) => entry.value === provider)
+  ) as PaymentProvider[];
+
+  function handlePaymentProviderToggle(provider: PaymentProvider, checked: boolean) {
+    setConfig((prev) => {
+      if (!prev) return prev;
+      const previousProviders = (prev.payment_providers || []).filter((value) =>
+        PAYMENT_PROVIDER_OPTIONS.some((entry) => entry.value === value)
+      ) as PaymentProvider[];
+      const nextProviders = checked
+        ? Array.from(new Set([...previousProviders, provider]))
+        : previousProviders.filter((value) => value !== provider);
+
+      const nextPayoutProviders = checked
+        ? Array.from(new Set([...(prev.payout_providers || []), provider]))
+        : (prev.payout_providers || []).filter((value) => value !== provider);
+
+      return {
+        ...prev,
+        payment_providers: nextProviders,
+        payout_providers: nextPayoutProviders,
+      };
+    });
+
+    if (checked && !providerCredentials[provider]) {
+      setProviderCredentials((prev) => ({
+        ...prev,
+        [provider]: getDefaultCredentialState(provider),
+      }));
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -218,6 +467,12 @@ export default function RegionConfigPage() {
           </button>
         </div>
       </div>
+
+      {saveError && (
+        <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+          {saveError}
+        </div>
+      )}
 
       {/* Status Toggle */}
       <div className="rounded-xl border border-border bg-card p-6">
@@ -675,29 +930,181 @@ export default function RegionConfigPage() {
 
       {/* Payment Providers */}
       <div className="rounded-xl border border-border bg-card p-6">
-        <h2 className="font-semibold text-foreground mb-4 flex items-center gap-2">
-          <CreditCard className="h-5 w-5" /> Payment Providers
-        </h2>
-
-        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-          {['stripe', 'flutterwave', 'paystack', 'mtn_momo', 'vodafone_cash', 'airteltigo_money', 'mpesa', 'paypal'].map(provider => (
-            <label key={provider} className="flex items-center gap-2 p-3 rounded-lg bg-muted/50 cursor-pointer hover:bg-muted transition-colors">
-              <input
-                type="checkbox"
-                checked={config.payment_providers.includes(provider)}
-                onChange={(e) => {
-                  if (e.target.checked) {
-                    setConfig({ ...config, payment_providers: [...config.payment_providers, provider] });
-                  } else {
-                    setConfig({ ...config, payment_providers: config.payment_providers.filter(p => p !== provider) });
-                  }
-                }}
-                className="rounded"
-              />
-              <span className="text-sm text-foreground capitalize">{provider.replace(/_/g, ' ')}</span>
-            </label>
-          ))}
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="font-semibold text-foreground flex items-center gap-2">
+              <CreditCard className="h-5 w-5" /> Payment Providers
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Configure region payment gateways with credentials, mode, methods, and limits.
+            </p>
+          </div>
+          <div className="rounded-lg bg-muted px-3 py-2 text-sm text-foreground">
+            {selectedPaymentProviders.length} enabled
+          </div>
         </div>
+
+        <div className="space-y-4">
+          {PAYMENT_PROVIDER_OPTIONS.map((providerOption) => {
+            const provider = providerOption.value;
+            const selected = selectedPaymentProviders.includes(provider);
+            const credentialState =
+              providerCredentials[provider] || getDefaultCredentialState(provider);
+            const payoutEnabled = (config.payout_providers || []).includes(provider);
+
+            return (
+              <div key={provider} className="rounded-lg border border-border bg-muted/20">
+                <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                  <label className="flex cursor-pointer items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={(e) => handlePaymentProviderToggle(provider, e.target.checked)}
+                      className="rounded"
+                    />
+                    <div>
+                      <p className="font-medium text-foreground">{providerOption.label}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Methods: {providerOption.methods.join(', ')}
+                      </p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={payoutEnabled}
+                      disabled={!selected}
+                      onChange={(e) => {
+                        const next = e.target.checked
+                          ? Array.from(new Set([...(config.payout_providers || []), provider]))
+                          : (config.payout_providers || []).filter((value) => value !== provider);
+                        setConfig({ ...config, payout_providers: next });
+                      }}
+                      className="rounded"
+                    />
+                    Enable for payouts
+                  </label>
+                </div>
+
+                {selected && (
+                  <div className="space-y-4 border-t border-border px-4 py-4">
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={credentialState.is_active}
+                          onChange={(e) =>
+                            updateProviderCredential(provider, { is_active: e.target.checked })
+                          }
+                          className="rounded"
+                        />
+                        <span className="text-foreground">Provider active</span>
+                      </label>
+
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={credentialState.is_test_mode}
+                          onChange={(e) =>
+                            updateProviderCredential(provider, { is_test_mode: e.target.checked })
+                          }
+                          className="rounded"
+                        />
+                        <span className="text-foreground">Test mode</span>
+                      </label>
+
+                      <div>
+                        <label className="text-xs font-medium text-muted-foreground">Min amount</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={credentialState.min_amount}
+                          onChange={(e) =>
+                            updateProviderCredential(provider, {
+                              min_amount: Number.parseInt(e.target.value || '0', 10) || 0,
+                            })
+                          }
+                          className="mt-1 w-full rounded-lg border border-input bg-muted px-3 py-2 text-sm text-foreground"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-medium text-muted-foreground">Max amount</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={credentialState.max_amount}
+                          onChange={(e) =>
+                            updateProviderCredential(provider, {
+                              max_amount: Number.parseInt(e.target.value || '0', 10) || 0,
+                            })
+                          }
+                          className="mt-1 w-full rounded-lg border border-input bg-muted px-3 py-2 text-sm text-foreground"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="mb-2 text-xs font-medium text-muted-foreground">Supported methods</p>
+                      <div className="flex flex-wrap gap-3">
+                        {providerOption.methods.map((method) => {
+                          const checked = credentialState.supported_methods.includes(method);
+                          return (
+                            <label key={method} className="flex items-center gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => {
+                                  const nextMethods = e.target.checked
+                                    ? Array.from(new Set([...credentialState.supported_methods, method]))
+                                    : credentialState.supported_methods.filter((value) => value !== method);
+                                  updateProviderCredential(provider, {
+                                    supported_methods: nextMethods.length > 0 ? nextMethods : [method],
+                                  });
+                                }}
+                                className="rounded"
+                              />
+                              <span className="text-foreground">{method}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      {providerOption.credentialFields.map((field) => (
+                        <div key={`${provider}-${field.key}`}>
+                          <label className="text-xs font-medium text-muted-foreground">{field.label}</label>
+                          <input
+                            type={field.sensitive ? 'password' : 'text'}
+                            value={credentialState.credentials[field.key] || ''}
+                            onChange={(e) =>
+                              updateProviderCredential(provider, {
+                                credentials: {
+                                  ...credentialState.credentials,
+                                  [field.key]: e.target.value,
+                                },
+                              })
+                            }
+                            className="mt-1 w-full rounded-lg border border-input bg-muted px-3 py-2 text-sm text-foreground"
+                            placeholder={field.label}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <p className="mt-3 text-xs text-muted-foreground">
+          Provider credentials are stored per region and used by runtime payment gateway selection.
+        </p>
       </div>
 
       {/* Feature Flags */}

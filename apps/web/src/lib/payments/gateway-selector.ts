@@ -76,28 +76,45 @@ export async function getUserPreferredGateway(userId: string): Promise<PaymentGa
  */
 export async function getUserCountry(userId: string): Promise<string | null> {
   const supabase = createServiceClient();
-  
-  // Try to get from attendee profile
-  const { data: attendee } = await supabase
-    .from('attendees')
-    .select('country_code')
-    .eq('id', userId)
-    .single();
+  const normalize = (value: unknown) => {
+    if (typeof value !== 'string') return null;
+    const code = value.trim().toUpperCase();
+    return /^[A-Z]{2}$/.test(code) ? code : null;
+  };
 
-  if (attendee?.country_code) {
-    return attendee.country_code;
-  }
+  const resolveCountryFromTable = async (table: 'attendees' | 'photographers') => {
+    const byId = await supabase
+      .from(table)
+      .select('country_code')
+      .eq('id', userId)
+      .maybeSingle();
 
-  // Try photographer profile
-  const { data: photographer } = await supabase
-    .from('photographers')
-    .select('country_code')
-    .eq('id', userId)
-    .single();
+    const fromId = normalize(byId.data?.country_code);
+    if (fromId) return fromId;
 
-  if (photographer?.country_code) {
-    return photographer.country_code;
-  }
+    const byUserId = await supabase
+      .from(table)
+      .select('country_code')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    const fromUserId = normalize(byUserId.data?.country_code);
+    if (fromUserId) return fromUserId;
+
+    return null;
+  };
+
+  const attendeeCountry = await resolveCountryFromTable('attendees');
+  if (attendeeCountry) return attendeeCountry;
+
+  const creatorCountry = await resolveCountryFromTable('photographers');
+  if (creatorCountry) return creatorCountry;
+
+  const { data: user } = await supabase.auth.admin.getUserById(userId);
+  const metadataCountry =
+    normalize((user?.user?.user_metadata as any)?.country_code) ||
+    normalize((user?.user?.app_metadata as any)?.country_code);
+  if (metadataCountry) return metadataCountry;
 
   return null;
 }

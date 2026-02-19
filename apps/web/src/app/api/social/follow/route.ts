@@ -33,6 +33,21 @@ function isMissingColumnError(error: any, columnName: string) {
   return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
 }
 
+function uniqueStringValues(values: Array<string | null | undefined>) {
+  return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))];
+}
+
+function getFollowingTypeFilters(followingType: 'creator' | 'attendee') {
+  return followingType === 'creator' ? ['creator', 'photographer'] : ['attendee'];
+}
+
+function applyFollowingIdFilter(query: any, followingIds: string[]) {
+  if (followingIds.length === 1) {
+    return query.eq('following_id', followingIds[0]);
+  }
+  return query.in('following_id', followingIds);
+}
+
 async function resolveProfileIdByUser(
   supabase: any,
   table: 'attendees' | 'photographers',
@@ -173,16 +188,24 @@ async function resolveFollowingUserId(
 
 async function getActiveFollowerCount(
   supabase: any,
-  followingId: string,
+  followingIds: string[],
   followingType: string
 ) {
-  const typeFilter = followingType === 'creator' ? ['creator', 'photographer'] : ['attendee'];
-  const { count } = await supabase
+  if (!followingIds.length) return 0;
+  const typeFilter = getFollowingTypeFilters(followingType as 'creator' | 'attendee');
+  let query = supabase
     .from('follows')
     .select('id', { count: 'exact', head: true })
-    .eq('following_id', followingId)
     .in('following_type', typeFilter)
     .eq('status', 'active');
+
+  if (followingIds.length === 1) {
+    query = query.eq('following_id', followingIds[0]);
+  } else {
+    query = query.in('following_id', followingIds);
+  }
+
+  const { count } = await query;
   return count || 0;
 }
 
@@ -231,6 +254,11 @@ export async function POST(request: NextRequest) {
 
     resolvedTargetType = target.data.resolvedType;
     const followingUserId = target.data.userId;
+    const followingIdCandidates = uniqueStringValues([
+      target.data.profileId,
+      target.data.userId,
+      resolvedTargetId,
+    ]);
 
     if (!target.data.isPublicProfile) {
       return NextResponse.json(
@@ -259,11 +287,18 @@ export async function POST(request: NextRequest) {
     const normalizedFollowerType =
       normalizeUserType(user.user_metadata?.user_type) === 'creator' ? 'creator' : 'attendee';
 
-    if (followingUserId === user.id) {
+    if (!followingUserId) {
+      return NextResponse.json(
+        { error: resolvedTargetType === 'creator' ? 'Creator not found' : 'User not found' },
+        { status: 404 }
+      );
+    }
+
+    if (followingIdCandidates.includes(user.id)) {
       return NextResponse.json({ error: 'You cannot follow yourself' }, { status: 400 });
     }
 
-    // Create or reactivate follow.
+    // Create or reactivate canonical follow row.
     const insertResult = await supabase
       .from('follows')
       .insert({
@@ -295,9 +330,19 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Cleanup legacy rows that used non-canonical IDs.
+    const legacyFollowingIds = followingIdCandidates.filter((id) => id !== followingUserId);
+    if (legacyFollowingIds.length > 0) {
+      await supabase
+        .from('follows')
+        .delete()
+        .eq('follower_id', user.id)
+        .in('following_id', legacyFollowingIds);
+    }
+
     const activeFollowers = await getActiveFollowerCount(
       lookupClient,
-      followingUserId,
+      followingIdCandidates,
       resolvedTargetType
     );
 
@@ -368,12 +413,22 @@ export async function DELETE(request: NextRequest) {
     const resolvedTarget = await resolveFollowingUserId(lookupClient, targetType as 'creator' | 'attendee', targetId);
     const followingUserId = resolvedTarget.data?.userId || targetId;
     const resolvedFollowingType = resolvedTarget.data?.resolvedType || targetType;
+    const followingIdCandidates = uniqueStringValues([
+      resolvedTarget.data?.profileId,
+      resolvedTarget.data?.userId,
+      targetId,
+    ]);
 
-    const { error } = await supabase
+    let deleteQuery = supabase
       .from('follows')
       .delete()
-      .eq('follower_id', user.id)
-      .eq('following_id', followingUserId);
+      .eq('follower_id', user.id);
+    if (followingIdCandidates.length === 1) {
+      deleteQuery = deleteQuery.eq('following_id', followingIdCandidates[0]);
+    } else {
+      deleteQuery = deleteQuery.in('following_id', followingIdCandidates);
+    }
+    const { error } = await deleteQuery;
 
     if (error) {
       throw error;
@@ -399,7 +454,7 @@ export async function DELETE(request: NextRequest) {
 
     const activeFollowers = await getActiveFollowerCount(
       lookupClient,
-      followingUserId,
+      followingIdCandidates,
       resolvedFollowingType
     );
 
@@ -451,15 +506,28 @@ export async function GET(request: NextRequest) {
       );
       const followingUserId = resolvedTarget.data?.userId || targetId;
       const resolvedFollowingType = resolvedTarget.data?.resolvedType || targetType;
+      const followingIdCandidates = uniqueStringValues([
+        resolvedTarget.data?.profileId,
+        resolvedTarget.data?.userId,
+        targetId,
+      ]);
+      const followingTypeFilters = getFollowingTypeFilters(resolvedFollowingType);
 
       // Check if following a specific user
-      const { data } = await supabase
+      let checkQuery = supabase
         .from('follows')
         .select('id')
         .eq('follower_id', user.id)
-        .eq('following_id', followingUserId)
-        .eq('status', 'active')
-        .single();
+        .in('following_type', followingTypeFilters)
+        .eq('status', 'active');
+
+      if (followingIdCandidates.length === 1) {
+        checkQuery = checkQuery.eq('following_id', followingIdCandidates[0]);
+      } else {
+        checkQuery = checkQuery.in('following_id', followingIdCandidates);
+      }
+
+      const { data } = await checkQuery.limit(1).maybeSingle();
 
       return NextResponse.json({ isFollowing: !!data });
     }
@@ -513,7 +581,7 @@ export async function GET(request: NextRequest) {
     if (type === 'followers') {
       if (targetType === 'attendee') {
         let targetAttendeeId = targetId || attendeeId;
-        let targetAttendeeFollowId = targetAttendeeId;
+        let targetAttendeeFollowIds: string[] = [];
 
         if (!targetAttendeeId) {
           const { data: attendee } = await resolveProfileIdByUser(supabase, 'attendees', user.id);
@@ -522,7 +590,7 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: 'Not an attendee' }, { status: 403 });
           }
           targetAttendeeId = attendee.id;
-          targetAttendeeFollowId = user.id;
+          targetAttendeeFollowIds = uniqueStringValues([user.id, attendee.id]);
         } else {
           const { data: attendee } = await getAttendeeByIdentifier(lookupClient, targetAttendeeId);
 
@@ -537,11 +605,19 @@ export async function GET(request: NextRequest) {
           }
 
           targetAttendeeId = attendee.id;
-          targetAttendeeFollowId = (attendee as any).user_id || attendee.id;
+          targetAttendeeFollowIds = uniqueStringValues([
+            (attendee as any).user_id || attendee.id,
+            attendee.id,
+          ]);
+        }
+
+        if (!targetAttendeeFollowIds.length) {
+          targetAttendeeFollowIds = uniqueStringValues([targetAttendeeId]);
         }
 
         const [attendeeFollowersRes, creatorFollowersRes] = await Promise.all([
-          supabase
+          applyFollowingIdFilter(
+            supabase
             .from('follows')
             .select(`
               id,
@@ -554,12 +630,15 @@ export async function GET(request: NextRequest) {
                 id, display_name, face_tag, profile_photo_url, email
               )
             `)
-            .eq('following_id', targetAttendeeFollowId)
+            ,
+            targetAttendeeFollowIds
+          )
             .eq('following_type', 'attendee')
             .eq('follower_type', 'attendee')
             .eq('status', 'active')
             .order('created_at', { ascending: false }),
-          supabase
+          applyFollowingIdFilter(
+            supabase
             .from('follows')
             .select(`
               id,
@@ -572,7 +651,9 @@ export async function GET(request: NextRequest) {
                 id, display_name, face_tag, profile_photo_url, email, public_profile_slug
               )
             `)
-            .eq('following_id', targetAttendeeFollowId)
+            ,
+            targetAttendeeFollowIds
+          )
             .eq('following_type', 'attendee')
             .in('follower_type', ['creator', 'photographer'])
             .eq('status', 'active')
@@ -608,7 +689,7 @@ export async function GET(request: NextRequest) {
 
       // Get followers for a creator (either by ID or current user)
       let targetCreatorId = photographerId;
-      let targetCreatorFollowId = photographerId;
+      let targetCreatorFollowIds: string[] = [];
 
       // If no photographerId provided, get current user's followers (for creators)
       if (!targetCreatorId) {
@@ -618,7 +699,7 @@ export async function GET(request: NextRequest) {
           return NextResponse.json({ error: 'Not a creator' }, { status: 403 });
         }
         targetCreatorId = photographer.id;
-        targetCreatorFollowId = user.id;
+        targetCreatorFollowIds = uniqueStringValues([user.id, photographer.id]);
       } else {
         // Check if photographer exists and profile is public
         const { data: photographer } = await getCreatorByIdentifier(lookupClient, targetCreatorId);
@@ -637,10 +718,17 @@ export async function GET(request: NextRequest) {
         }
 
         targetCreatorId = photographer.id;
-        targetCreatorFollowId = (photographer as any).user_id || photographer.id;
+        targetCreatorFollowIds = uniqueStringValues([
+          (photographer as any).user_id || photographer.id,
+          photographer.id,
+        ]);
       }
 
-      const { data, count } = await supabase
+      if (!targetCreatorFollowIds.length) {
+        targetCreatorFollowIds = uniqueStringValues([targetCreatorId]);
+      }
+
+      let followersQuery = supabase
         .from('follows')
         .select(`
           id,
@@ -655,10 +743,11 @@ export async function GET(request: NextRequest) {
           photographers!follows_follower_id_fkey (
             id, display_name, face_tag, profile_photo_url, email, public_profile_slug
           )
-        `, { count: 'exact' })
-        .eq('following_id', targetCreatorFollowId)
+        `, { count: 'exact' });
+      followersQuery = applyFollowingIdFilter(followersQuery, targetCreatorFollowIds)
         .eq('status', 'active')
         .order('created_at', { ascending: false });
+      const { data, count } = await followersQuery;
 
       // Calculate stats for creator's own followers
       const now = new Date();

@@ -33,6 +33,7 @@ import { Button } from '@/components/ui/button';
 import { Logo } from '@/components/ui/logo';
 import { QRCodeWithLogo, downloadQRCodeWithLogo } from '@/components/ui/qr-code-with-logo';
 import { useToast } from '@/components/ui/toast';
+import { useRealtimeSubscription } from '@/hooks/use-realtime';
 import { formatEventDateDisplay } from '@/lib/events/time';
 import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
@@ -86,6 +87,17 @@ export default function CreatorProfilePage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const qrCodeRef = useRef<HTMLDivElement>(null);
   const followTargetId = profile?.follow_target_id || profile?.id;
+  const followSyncSeqRef = useRef(0);
+
+  const { isConnected } = useRealtimeSubscription({
+    table: 'follows',
+    filter: `following_id=eq.${followTargetId || '__none__'}`,
+    onChange: () => {
+      if (!followLoading && followTargetId) {
+        void refreshFollowState(followTargetId);
+      }
+    },
+  });
 
   useEffect(() => {
     loadProfile();
@@ -97,10 +109,20 @@ export default function CreatorProfilePage() {
   }, [slug]);
 
   useEffect(() => {
-    if (profile?.id) {
-      checkFollowStatus();
+    if (followTargetId) {
+      void refreshFollowState(followTargetId);
     }
-  }, [profile?.id, profile?.follow_target_id]);
+  }, [followTargetId, slug]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!isConnected && !followLoading && followTargetId) {
+        void refreshFollowState(followTargetId);
+      }
+    }, 12000);
+
+    return () => clearInterval(interval);
+  }, [isConnected, followLoading, followTargetId, slug]);
 
   useEffect(() => {
     const loadCurrentUser = async () => {
@@ -156,18 +178,43 @@ export default function CreatorProfilePage() {
     }
   }
 
-  async function checkFollowStatus() {
-    const targetId = profile?.follow_target_id || profile?.id;
-    if (!targetId) return;
-    
+  async function refreshFollowState(targetId: string) {
+    const seq = ++followSyncSeqRef.current;
+
     try {
-      const res = await fetch(
-        `/api/social/follow?type=check&targetType=creator&targetId=${encodeURIComponent(targetId)}`
-      );
-      const data = await res.json();
-      setIsFollowing(data.isFollowing);
+      const [statusRes, profileRes] = await Promise.all([
+        fetch(
+          `/api/social/follow?type=check&targetType=creator&targetId=${encodeURIComponent(targetId)}`,
+          { cache: 'no-store' }
+        ),
+        fetch(`/api/profiles/creator/${slug}`, { cache: 'no-store' }),
+      ]);
+
+      if (seq !== followSyncSeqRef.current) return;
+
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        if (seq === followSyncSeqRef.current) {
+          setIsFollowing(Boolean(statusData.isFollowing));
+        }
+      }
+
+      if (profileRes.ok) {
+        const profileData = await profileRes.json();
+        const nextCount = Number(profileData?.profile?.follower_count || 0);
+        if (seq === followSyncSeqRef.current) {
+          setProfile((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  follower_count: nextCount,
+                }
+              : prev
+          );
+        }
+      }
     } catch {
-      // Ignore - user might not be logged in
+      // Ignore background sync errors.
     }
   }
 
@@ -224,7 +271,7 @@ export default function CreatorProfilePage() {
               typeof payload?.followersCount === 'number'
                 ? payload.followersCount
                 : Math.max(0, profile.follower_count || 0);
-            setProfile({ ...profile, follower_count: nextCount });
+            setProfile((prev) => (prev ? { ...prev, follower_count: nextCount } : prev));
           }
           toast.success('Unfollowed', `You unfollowed ${profile?.display_name || 'this creator'}.`);
         } else {
@@ -245,7 +292,7 @@ export default function CreatorProfilePage() {
               typeof payload?.followersCount === 'number'
                 ? payload.followersCount
                 : (profile.follower_count || 0) + 1;
-            setProfile({ ...profile, follower_count: nextCount });
+            setProfile((prev) => (prev ? { ...prev, follower_count: nextCount } : prev));
           }
           toast.success('Following', `You are now following ${profile?.display_name || 'this creator'}.`);
         } else {
@@ -257,7 +304,9 @@ export default function CreatorProfilePage() {
       console.error('Follow error:', error);
       toast.error('Follow failed', 'Please try again.');
     } finally {
-      await checkFollowStatus();
+      if (targetId) {
+        await refreshFollowState(targetId);
+      }
       setFollowLoading(false);
     }
   }

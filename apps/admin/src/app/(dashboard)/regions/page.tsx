@@ -1,4 +1,4 @@
-import { 
+﻿import { 
   Globe, 
   Plus, 
   Check, 
@@ -215,17 +215,18 @@ function FeatureBadge({ enabled, label }: { enabled: boolean; label: string }) {
 
 function getCountryFlag(code: string): string {
   const flags: Record<string, string> = {
-    GH: '🇬🇭',
-    NG: '🇳🇬',
-    KE: '🇰🇪',
-    ZA: '🇿🇦',
-    UG: '🇺🇬',
-    TZ: '🇹🇿',
-    RW: '🇷🇼',
-    US: '🇺🇸',
-    GB: '🇬🇧',
-    CA: '🇨🇦',
-    AU: '🇦🇺',
+    GH: '\uD83C\uDDEC\uD83C\uDDED',
+    NG: '\uD83C\uDDF3\uD83C\uDDEC',
+    KE: '\uD83C\uDDF0\uD83C\uDDEA',
+    ZA: '\uD83C\uDDFF\uD83C\uDDE6',
+    UG: '\uD83C\uDDFA\uD83C\uDDEC',
+    TZ: '\uD83C\uDDF9\uD83C\uDDFF',
+    RW: '\uD83C\uDDF7\uD83C\uDDFC',
+    US: '\uD83C\uDDFA\uD83C\uDDF8',
+    GB: '\uD83C\uDDEC\uD83C\uDDE7',
+    CA: '\uD83C\uDDE8\uD83C\uDDE6',
+    AU: '\uD83C\uDDE6\uD83C\uDDFA',
   };
-  return flags[code] || '🌍';
+  return flags[code] || '\uD83C\uDF0D';
 }
+

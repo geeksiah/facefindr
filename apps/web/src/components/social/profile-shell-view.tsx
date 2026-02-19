@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { RatingsDisplay } from '@/components/photographer/ratings-display';
 import { TipCreator } from '@/components/social/tip-photographer';
@@ -86,6 +86,7 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
   const [followLoading, setFollowLoading] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [showTipModal, setShowTipModal] = useState(false);
+  const followSyncSeqRef = useRef(0);
 
   const apiPath = useMemo(
     () =>
@@ -189,6 +190,7 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
   }, [isConnected, targetFollowId, profileType, followLoading]);
 
   async function refreshFollowState(targetId: string) {
+    const seq = ++followSyncSeqRef.current;
     try {
       const checkRes = await fetch(
         `/api/social/follow?type=check&targetType=${profileType === 'creator' ? 'creator' : 'attendee'}&targetId=${encodeURIComponent(targetId)}`,
@@ -196,7 +198,9 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
       );
       if (checkRes.ok) {
         const checkData = await checkRes.json();
-        setIsFollowing(Boolean(checkData.isFollowing));
+        if (seq === followSyncSeqRef.current) {
+          setIsFollowing(Boolean(checkData.isFollowing));
+        }
       }
 
       if (profileType === 'creator') {
@@ -206,7 +210,9 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
         if (followersRes.ok) {
           const followersData = await followersRes.json();
           const count = Number(followersData.count || 0);
-          setProfile((prev) => (prev ? { ...prev, follower_count: count } : prev));
+          if (seq === followSyncSeqRef.current) {
+            setProfile((prev) => (prev ? { ...prev, follower_count: count } : prev));
+          }
         }
       } else {
         const profileRes = await fetch(`/api/profiles/user/${encodeURIComponent(targetId)}`, {
@@ -215,7 +221,9 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
         if (profileRes.ok) {
           const profileData = await profileRes.json();
           const count = Number(profileData?.profile?.followers_count || 0);
-          setProfile((prev) => (prev ? { ...prev, followers_count: count } : prev));
+          if (seq === followSyncSeqRef.current) {
+            setProfile((prev) => (prev ? { ...prev, followers_count: count } : prev));
+          }
         }
       }
     } catch {

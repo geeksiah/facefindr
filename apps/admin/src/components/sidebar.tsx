@@ -75,7 +75,6 @@ const navigation: NavGroup[] = [
   {
     label: 'Configuration',
     items: [
-      { label: 'Regions & Providers', href: '/regions', icon: Globe },
       { label: 'Platform Settings', href: '/settings', icon: Settings },
     ],
   },

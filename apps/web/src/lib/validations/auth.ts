@@ -31,6 +31,13 @@ export const registerSchema = z
     userType: z.enum(['creator', 'photographer', 'attendee'], {
       required_error: 'Please select an account type',
     }),
+    countryCode: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .regex(/^[A-Z]{2}$/, 'Country must be a valid 2-letter code')
+      .optional()
+      .or(z.literal('')),
     acceptTerms: z.boolean().refine((val) => val === true, {
       message: 'You must accept the terms and conditions',
     }),

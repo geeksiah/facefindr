@@ -10,6 +10,10 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { createServiceClient } from '@/lib/supabase/server';
 
+function uniqueStringValues(values: Array<string | null | undefined>) {
+  return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))];
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { slug: string } }
@@ -60,28 +64,45 @@ export async function GET(
         const tag = slug.startsWith('@') ? slug : `@${slug}`;
         const { data: tagProfile } = await supabase
           .from('attendees')
-          .select(minimalSelect)
+          .select(fullSelect)
           .eq('face_tag', tag)
           .maybeSingle();
         if (tagProfile) {
-          return NextResponse.json({ profile: tagProfile });
+          profile = tagProfile;
+          error = null;
         }
       }
-      return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+      if (!profile) {
+        return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+      }
+    }
+
+    const followTargetIds = uniqueStringValues([(profile as any).user_id || profile.id, profile.id]);
+
+    let followersQuery = supabase
+      .from('follows')
+      .select('id', { count: 'exact', head: true })
+      .eq('following_type', 'attendee')
+      .eq('status', 'active');
+    if (followTargetIds.length === 1) {
+      followersQuery = followersQuery.eq('following_id', followTargetIds[0]);
+    } else {
+      followersQuery = followersQuery.in('following_id', followTargetIds);
+    }
+
+    let followingQuery = supabase
+      .from('follows')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'active');
+    if (followTargetIds.length === 1) {
+      followingQuery = followingQuery.eq('follower_id', followTargetIds[0]);
+    } else {
+      followingQuery = followingQuery.in('follower_id', followTargetIds);
     }
 
     const [{ count: followersCount }, { count: followingCount }, privacyResult] = await Promise.all([
-      supabase
-        .from('follows')
-        .select('id', { count: 'exact', head: true })
-        .eq('following_id', (profile as any).user_id || profile.id)
-        .eq('following_type', 'attendee')
-        .eq('status', 'active'),
-      supabase
-        .from('follows')
-        .select('id', { count: 'exact', head: true })
-        .eq('follower_id', (profile as any).user_id || profile.id)
-        .eq('status', 'active'),
+      followersQuery,
+      followingQuery,
       supabase
         .from('user_privacy_settings')
         .select('profile_visible, show_in_search, allow_follows')

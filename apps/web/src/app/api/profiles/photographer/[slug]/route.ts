@@ -14,6 +14,10 @@ function isMissingColumnError(error: any): boolean {
   return error?.code === '42703' || error?.code === '42P01';
 }
 
+function uniqueStringValues(values: Array<string | null | undefined>) {
+  return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))];
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { slug: string } }
@@ -37,10 +41,11 @@ export async function GET(
       'id, display_name, face_tag, bio, profile_photo_url, website, instagram, twitter, facebook, is_public_profile, allow_follows, follower_count, created_at';
 
     const queryProfile = async (selectClause: string) => {
+      const supportsUserId = selectClause.includes('user_id');
       let q = supabase.from('photographers').select(selectClause);
 
       if (isUuid) {
-        q = q.eq('id', slug);
+        q = supportsUserId ? q.or(`id.eq.${slug},user_id.eq.${slug}`) : q.eq('id', slug);
       } else if (isFaceTag) {
         const tag = slug.startsWith('@') ? slug : `@${slug}`;
         q = q.eq('face_tag', tag);
@@ -113,13 +118,18 @@ export async function GET(
       .eq('status', 'active');
     eventCount = count;
 
-    const followTargetId = (profile as any).user_id || profile.id;
-    const { count: followersCount } = await supabase
+    const followTargetIds = uniqueStringValues([(profile as any).user_id || profile.id, profile.id]);
+    let followersCountQuery = supabase
       .from('follows')
       .select('id', { count: 'exact', head: true })
-      .eq('following_id', followTargetId)
       .in('following_type', ['creator', 'photographer'])
       .eq('status', 'active');
+    if (followTargetIds.length === 1) {
+      followersCountQuery = followersCountQuery.eq('following_id', followTargetIds[0]);
+    } else {
+      followersCountQuery = followersCountQuery.in('following_id', followTargetIds);
+    }
+    const { count: followersCount } = await followersCountQuery;
 
     // Generate signed cover image URLs for events
     const eventsWithCovers = (events || []).map((event: any) => {
