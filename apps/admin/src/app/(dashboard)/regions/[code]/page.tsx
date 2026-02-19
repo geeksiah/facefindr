@@ -12,6 +12,14 @@ const PAYMENT_PROVIDERS = [
   { value: 'paystack', label: 'Paystack' },
 ] as const;
 
+const SMS_PROVIDERS = [
+  { value: '', label: 'None' },
+  { value: 'twilio', label: 'Twilio' },
+  { value: 'africas_talking', label: "Africa's Talking" },
+  { value: 'termii', label: 'Termii' },
+  { value: 'hubtel', label: 'Hubtel' },
+];
+
 type PaymentProvider = (typeof PAYMENT_PROVIDERS)[number]['value'];
 
 interface RegionConfig {
@@ -20,6 +28,22 @@ interface RegionConfig {
   is_active: boolean;
   default_currency: string;
   payment_providers: PaymentProvider[];
+  sms_provider?: string | null;
+  sms_enabled?: boolean;
+  platform_commission_percent?: number;
+  transaction_fee_percent?: number;
+  transaction_fee_fixed?: number;
+  payout_fee_percent?: number;
+  payout_fee_fixed?: number;
+  payout_minimum_threshold?: number;
+  phone_verification_enabled?: boolean;
+  phone_verification_required?: boolean;
+  email_verification_enabled?: boolean;
+  email_verification_required?: boolean;
+  print_orders_enabled?: boolean;
+  social_features_enabled?: boolean;
+  public_events_enabled?: boolean;
+  instant_payout_enabled?: boolean;
 }
 
 interface ProviderCredentialForm {
@@ -161,7 +185,23 @@ export default function RegionConfigPage() {
           region_name: config.region_name,
           is_active: config.is_active,
           default_currency: normalizeCurrency(config.default_currency),
+          sms_provider: config.sms_provider ?? null,
+          sms_enabled: Boolean(config.sms_enabled),
           payment_providers: selectedProviders.length > 0 ? selectedProviders : ['stripe'],
+          platform_commission_percent: Number(config.platform_commission_percent || 0),
+          transaction_fee_percent: Number(config.transaction_fee_percent || 0),
+          transaction_fee_fixed: Number(config.transaction_fee_fixed || 0),
+          payout_fee_percent: Number(config.payout_fee_percent || 0),
+          payout_fee_fixed: Number(config.payout_fee_fixed || 0),
+          payout_minimum_threshold: Number(config.payout_minimum_threshold || 0),
+          phone_verification_enabled: Boolean(config.phone_verification_enabled),
+          phone_verification_required: Boolean(config.phone_verification_required),
+          email_verification_enabled: Boolean(config.email_verification_enabled),
+          email_verification_required: Boolean(config.email_verification_required),
+          print_orders_enabled: Boolean(config.print_orders_enabled),
+          social_features_enabled: Boolean(config.social_features_enabled),
+          public_events_enabled: Boolean(config.public_events_enabled),
+          instant_payout_enabled: Boolean(config.instant_payout_enabled),
         },
         paymentProviderCredentials: credentialsPayload,
       };
@@ -275,6 +315,23 @@ export default function RegionConfigPage() {
             />
           </label>
 
+          <label className="space-y-1 text-sm">
+            <span className="text-muted-foreground">SMS Provider</span>
+            <select
+              value={config.sms_provider || ''}
+              onChange={(event) =>
+                setConfig((prev) => (prev ? { ...prev, sms_provider: event.target.value || null } : prev))
+              }
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-foreground"
+            >
+              {SMS_PROVIDERS.map((provider) => (
+                <option key={provider.value || 'none'} value={provider.value}>
+                  {provider.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <label className="flex items-center justify-between rounded-lg border border-input bg-background px-3 py-2 text-sm">
             <span className="text-muted-foreground">Region Active</span>
             <input
@@ -284,6 +341,18 @@ export default function RegionConfigPage() {
                 setConfig((prev) => (prev ? { ...prev, is_active: event.target.checked } : prev))
               }
             />
+          </label>
+        </div>
+        <div className="mt-4">
+          <label className="inline-flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={Boolean(config.sms_enabled)}
+              onChange={(event) =>
+                setConfig((prev) => (prev ? { ...prev, sms_enabled: event.target.checked } : prev))
+              }
+            />
+            <span className="text-muted-foreground">SMS Enabled</span>
           </label>
         </div>
       </div>
@@ -307,6 +376,153 @@ export default function RegionConfigPage() {
               </label>
             );
           })}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-6">
+        <h2 className="mb-4 text-lg font-semibold text-foreground">Platform Fees</h2>
+        <div className="grid gap-4 md:grid-cols-3">
+          <label className="space-y-1 text-sm">
+            <span className="text-muted-foreground">Platform Commission (%)</span>
+            <input
+              type="number"
+              step="0.1"
+              value={Number(config.platform_commission_percent || 0)}
+              onChange={(event) =>
+                setConfig((prev) =>
+                  prev ? { ...prev, platform_commission_percent: Number(event.target.value || 0) } : prev
+                )
+              }
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-foreground"
+            />
+          </label>
+          <label className="space-y-1 text-sm">
+            <span className="text-muted-foreground">Transaction Fee (%)</span>
+            <input
+              type="number"
+              step="0.1"
+              value={Number(config.transaction_fee_percent || 0)}
+              onChange={(event) =>
+                setConfig((prev) =>
+                  prev ? { ...prev, transaction_fee_percent: Number(event.target.value || 0) } : prev
+                )
+              }
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-foreground"
+            />
+          </label>
+          <label className="space-y-1 text-sm">
+            <span className="text-muted-foreground">Transaction Fee Fixed (minor unit)</span>
+            <input
+              type="number"
+              value={Number(config.transaction_fee_fixed || 0)}
+              onChange={(event) =>
+                setConfig((prev) =>
+                  prev ? { ...prev, transaction_fee_fixed: Number(event.target.value || 0) } : prev
+                )
+              }
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-foreground"
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-6">
+        <h2 className="mb-4 text-lg font-semibold text-foreground">Verification Settings</h2>
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="inline-flex items-center justify-between rounded-lg border border-input bg-background px-3 py-2 text-sm">
+            <span className="text-muted-foreground">Phone Verification Enabled</span>
+            <input
+              type="checkbox"
+              checked={Boolean(config.phone_verification_enabled)}
+              onChange={(event) =>
+                setConfig((prev) =>
+                  prev ? { ...prev, phone_verification_enabled: event.target.checked } : prev
+                )
+              }
+            />
+          </label>
+          <label className="inline-flex items-center justify-between rounded-lg border border-input bg-background px-3 py-2 text-sm">
+            <span className="text-muted-foreground">Phone Verification Required</span>
+            <input
+              type="checkbox"
+              checked={Boolean(config.phone_verification_required)}
+              onChange={(event) =>
+                setConfig((prev) =>
+                  prev ? { ...prev, phone_verification_required: event.target.checked } : prev
+                )
+              }
+            />
+          </label>
+          <label className="inline-flex items-center justify-between rounded-lg border border-input bg-background px-3 py-2 text-sm">
+            <span className="text-muted-foreground">Email Verification Enabled</span>
+            <input
+              type="checkbox"
+              checked={Boolean(config.email_verification_enabled)}
+              onChange={(event) =>
+                setConfig((prev) =>
+                  prev ? { ...prev, email_verification_enabled: event.target.checked } : prev
+                )
+              }
+            />
+          </label>
+          <label className="inline-flex items-center justify-between rounded-lg border border-input bg-background px-3 py-2 text-sm">
+            <span className="text-muted-foreground">Email Verification Required</span>
+            <input
+              type="checkbox"
+              checked={Boolean(config.email_verification_required)}
+              onChange={(event) =>
+                setConfig((prev) =>
+                  prev ? { ...prev, email_verification_required: event.target.checked } : prev
+                )
+              }
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-6">
+        <h2 className="mb-4 text-lg font-semibold text-foreground">Feature Flags</h2>
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="inline-flex items-center justify-between rounded-lg border border-input bg-background px-3 py-2 text-sm">
+            <span className="text-muted-foreground">Print Orders</span>
+            <input
+              type="checkbox"
+              checked={Boolean(config.print_orders_enabled)}
+              onChange={(event) =>
+                setConfig((prev) => (prev ? { ...prev, print_orders_enabled: event.target.checked } : prev))
+              }
+            />
+          </label>
+          <label className="inline-flex items-center justify-between rounded-lg border border-input bg-background px-3 py-2 text-sm">
+            <span className="text-muted-foreground">Social Features</span>
+            <input
+              type="checkbox"
+              checked={Boolean(config.social_features_enabled)}
+              onChange={(event) =>
+                setConfig((prev) => (prev ? { ...prev, social_features_enabled: event.target.checked } : prev))
+              }
+            />
+          </label>
+          <label className="inline-flex items-center justify-between rounded-lg border border-input bg-background px-3 py-2 text-sm">
+            <span className="text-muted-foreground">Public Events</span>
+            <input
+              type="checkbox"
+              checked={Boolean(config.public_events_enabled)}
+              onChange={(event) =>
+                setConfig((prev) => (prev ? { ...prev, public_events_enabled: event.target.checked } : prev))
+              }
+            />
+          </label>
+          <label className="inline-flex items-center justify-between rounded-lg border border-input bg-background px-3 py-2 text-sm">
+            <span className="text-muted-foreground">Instant Payout</span>
+            <input
+              type="checkbox"
+              checked={Boolean(config.instant_payout_enabled)}
+              onChange={(event) =>
+                setConfig((prev) => (prev ? { ...prev, instant_payout_enabled: event.target.checked } : prev))
+              }
+            />
+          </label>
         </div>
       </div>
 

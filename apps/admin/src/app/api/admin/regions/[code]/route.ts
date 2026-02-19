@@ -34,6 +34,16 @@ function normalizeCurrency(value: unknown, fallback = 'USD') {
   return code.length === 3 ? code : fallback;
 }
 
+function normalizeNumber(value: unknown, fallback = 0) {
+  const parsed =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string'
+      ? Number.parseFloat(value)
+      : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 function isMissingTableError(error: any, tableName: string) {
   if (!error) return false;
   const message = String(error.message || '').toLowerCase();
@@ -60,6 +70,60 @@ function sanitizeRegionUpdate(payload: Record<string, any>) {
   }
   if (payload.payment_providers !== undefined) {
     update.payment_providers = normalizeProviderList(payload.payment_providers, ['stripe']);
+  }
+  if (payload.sms_provider !== undefined) {
+    update.sms_provider = payload.sms_provider ? String(payload.sms_provider).toLowerCase() : null;
+  }
+  if (typeof payload.sms_enabled === 'boolean') {
+    update.sms_enabled = payload.sms_enabled;
+  }
+
+  if (payload.platform_commission_percent !== undefined) {
+    update.platform_commission_percent = normalizeNumber(payload.platform_commission_percent, 0);
+  }
+  if (payload.transaction_fee_percent !== undefined) {
+    update.transaction_fee_percent = normalizeNumber(payload.transaction_fee_percent, 0);
+  }
+  if (payload.transaction_fee_fixed !== undefined) {
+    update.transaction_fee_fixed = Math.round(normalizeNumber(payload.transaction_fee_fixed, 0));
+  }
+  if (payload.payout_fee_percent !== undefined) {
+    update.payout_fee_percent = normalizeNumber(payload.payout_fee_percent, 0);
+  }
+  if (payload.payout_fee_fixed !== undefined) {
+    update.payout_fee_fixed = Math.round(normalizeNumber(payload.payout_fee_fixed, 0));
+  }
+  if (payload.payout_minimum_threshold !== undefined) {
+    update.payout_minimum_threshold = Math.max(
+      0,
+      Math.round(normalizeNumber(payload.payout_minimum_threshold, 0))
+    );
+  }
+
+  if (typeof payload.phone_verification_enabled === 'boolean') {
+    update.phone_verification_enabled = payload.phone_verification_enabled;
+  }
+  if (typeof payload.phone_verification_required === 'boolean') {
+    update.phone_verification_required = payload.phone_verification_required;
+  }
+  if (typeof payload.email_verification_enabled === 'boolean') {
+    update.email_verification_enabled = payload.email_verification_enabled;
+  }
+  if (typeof payload.email_verification_required === 'boolean') {
+    update.email_verification_required = payload.email_verification_required;
+  }
+
+  if (typeof payload.print_orders_enabled === 'boolean') {
+    update.print_orders_enabled = payload.print_orders_enabled;
+  }
+  if (typeof payload.social_features_enabled === 'boolean') {
+    update.social_features_enabled = payload.social_features_enabled;
+  }
+  if (typeof payload.public_events_enabled === 'boolean') {
+    update.public_events_enabled = payload.public_events_enabled;
+  }
+  if (typeof payload.instant_payout_enabled === 'boolean') {
+    update.instant_payout_enabled = payload.instant_payout_enabled;
   }
 
   return update;
@@ -239,7 +303,7 @@ export async function PUT(
 
     const { data: currentRegion, error: currentRegionError } = await supabaseAdmin
       .from('region_config')
-      .select('region_code, payment_providers')
+      .select('*')
       .eq('region_code', regionCode)
       .single();
 
@@ -248,36 +312,53 @@ export async function PUT(
     }
 
     const regionUpdate = sanitizeRegionUpdate(payloadRegion);
+    const availableColumns = new Set(Object.keys(currentRegion || {}));
+    const currentProviders = normalizeProviderList((currentRegion as any).payment_providers, ['stripe']);
     const effectivePaymentProviders =
-      regionUpdate.payment_providers ??
-      normalizeProviderList(currentRegion.payment_providers, ['stripe']);
+      normalizeProviderList(regionUpdate.payment_providers, currentProviders).length > 0
+        ? normalizeProviderList(regionUpdate.payment_providers, currentProviders)
+        : ['stripe'];
 
-    regionUpdate.payment_providers =
-      effectivePaymentProviders.length > 0 ? effectivePaymentProviders : ['stripe'];
-    regionUpdate.payout_providers = [...regionUpdate.payment_providers];
-    regionUpdate.default_currency = normalizeCurrency(regionUpdate.default_currency, 'USD');
-    regionUpdate.updated_at = new Date().toISOString();
+    const filteredRegionUpdate = Object.fromEntries(
+      Object.entries(regionUpdate).filter(([key]) => availableColumns.has(key))
+    ) as Record<string, any>;
+
+    if (availableColumns.has('payment_providers')) {
+      filteredRegionUpdate.payment_providers = effectivePaymentProviders;
+    }
+    if (availableColumns.has('payout_providers')) {
+      filteredRegionUpdate.payout_providers = [...effectivePaymentProviders];
+    }
+    if (availableColumns.has('default_currency')) {
+      filteredRegionUpdate.default_currency = normalizeCurrency(
+        filteredRegionUpdate.default_currency ?? (currentRegion as any).default_currency,
+        'USD'
+      );
+    }
+    if (availableColumns.has('updated_at')) {
+      filteredRegionUpdate.updated_at = new Date().toISOString();
+    }
 
     const { error: updateError } = await supabaseAdmin
       .from('region_config')
-      .update(regionUpdate)
+      .update(filteredRegionUpdate)
       .eq('region_code', regionCode);
 
     if (updateError) {
       throw updateError;
     }
 
-    for (const provider of regionUpdate.payment_providers as PaymentProvider[]) {
+    for (const provider of effectivePaymentProviders as PaymentProvider[]) {
       const sanitized = sanitizeCredentialPayload(payloadCredentials[provider]);
       await upsertProviderCredential(regionCode, provider, sanitized);
     }
 
-    await deactivateRemovedProviders(regionCode, regionUpdate.payment_providers as PaymentProvider[]);
+    await deactivateRemovedProviders(regionCode, effectivePaymentProviders as PaymentProvider[]);
 
     await logAction('settings_update', 'region_config', undefined, {
       region_code: regionCode,
-      changes: Object.keys(regionUpdate),
-      payment_providers: regionUpdate.payment_providers,
+      changes: Object.keys(filteredRegionUpdate),
+      payment_providers: effectivePaymentProviders,
     });
     await bumpRuntimeConfigVersion('regions', session.adminId);
 
