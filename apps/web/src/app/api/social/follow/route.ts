@@ -171,6 +171,21 @@ async function resolveFollowingUserId(
   return primary;
 }
 
+async function getActiveFollowerCount(
+  supabase: any,
+  followingId: string,
+  followingType: string
+) {
+  const typeFilter = followingType === 'creator' ? ['creator', 'photographer'] : ['attendee'];
+  const { count } = await supabase
+    .from('follows')
+    .select('id', { count: 'exact', head: true })
+    .eq('following_id', followingId)
+    .in('following_type', typeFilter)
+    .eq('status', 'active');
+  return count || 0;
+}
+
 // POST - Follow a creator
 export async function POST(request: NextRequest) {
   try {
@@ -248,22 +263,43 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'You cannot follow yourself' }, { status: 400 });
     }
 
-    // Create follow
-    const { error } = await supabase
+    // Create or reactivate follow.
+    const insertResult = await supabase
       .from('follows')
       .insert({
         follower_id: user.id,
         follower_type: normalizedFollowerType,
         following_id: followingUserId,
         following_type: resolvedTargetType,
+        status: 'active',
       });
 
-    if (error) {
-      if (error.code === '23505') {
-        return NextResponse.json({ success: true, alreadyFollowing: true });
+    if (insertResult.error) {
+      if (insertResult.error.code === '23505') {
+        const { error: reactivateError } = await supabase
+          .from('follows')
+          .update({
+            status: 'active',
+            following_type: resolvedTargetType,
+            follower_type: normalizedFollowerType,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('follower_id', user.id)
+          .eq('following_id', followingUserId);
+
+        if (reactivateError) {
+          throw reactivateError;
+        }
+      } else {
+        throw insertResult.error;
       }
-      throw error;
     }
+
+    const activeFollowers = await getActiveFollowerCount(
+      lookupClient,
+      followingUserId,
+      resolvedTargetType
+    );
 
     if (serviceClient) {
       await serviceClient.from('audit_logs').insert({
@@ -288,6 +324,7 @@ export async function POST(request: NextRequest) {
       followingType: resolvedTargetType,
       followingId: resolvedTargetId,
       followingUserId,
+      followersCount: activeFollowers,
     });
 
   } catch (error) {
@@ -336,8 +373,7 @@ export async function DELETE(request: NextRequest) {
       .from('follows')
       .delete()
       .eq('follower_id', user.id)
-      .eq('following_id', followingUserId)
-      .eq('following_type', resolvedFollowingType);
+      .eq('following_id', followingUserId);
 
     if (error) {
       throw error;
@@ -361,7 +397,19 @@ export async function DELETE(request: NextRequest) {
       }).catch(() => {});
     }
 
-    return NextResponse.json({ success: true, followingType: resolvedFollowingType, followingId: targetId, followingUserId });
+    const activeFollowers = await getActiveFollowerCount(
+      lookupClient,
+      followingUserId,
+      resolvedFollowingType
+    );
+
+    return NextResponse.json({
+      success: true,
+      followingType: resolvedFollowingType,
+      followingId: targetId,
+      followingUserId,
+      followersCount: activeFollowers,
+    });
 
   } catch (error) {
     console.error('Unfollow error:', error);
@@ -410,7 +458,7 @@ export async function GET(request: NextRequest) {
         .select('id')
         .eq('follower_id', user.id)
         .eq('following_id', followingUserId)
-        .eq('following_type', resolvedFollowingType)
+        .eq('status', 'active')
         .single();
 
       return NextResponse.json({ isFollowing: !!data });
@@ -484,8 +532,8 @@ export async function GET(request: NextRequest) {
 
           const ownerUserId = (attendee as any).user_id || attendee.id;
           const isOwnProfile = user && ownerUserId === user.id;
-          if (!isOwnProfile && !attendee.is_public_profile) {
-            return NextResponse.json({ error: 'Profile is private' }, { status: 403 });
+          if (!isOwnProfile) {
+            return NextResponse.json({ error: 'Followers list is private' }, { status: 403 });
           }
 
           targetAttendeeId = attendee.id;
@@ -584,8 +632,8 @@ export async function GET(request: NextRequest) {
         // 2. Creator profile is public
         const ownerUserId = (photographer as any).user_id || photographer.id;
         const isOwnProfile = user && ownerUserId === user.id;
-        if (!isOwnProfile && !photographer.is_public_profile) {
-          return NextResponse.json({ error: 'Profile is private' }, { status: 403 });
+        if (!isOwnProfile) {
+          return NextResponse.json({ error: 'Followers list is private' }, { status: 403 });
         }
 
         targetCreatorId = photographer.id;

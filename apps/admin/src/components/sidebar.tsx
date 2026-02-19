@@ -60,6 +60,7 @@ const navigation: NavGroup[] = [
     label: 'Financial',
     items: [
       { label: 'Pricing & Plans', href: '/pricing', icon: DollarSign },
+      { label: 'Payment Providers', href: '/regions', icon: Globe },
       { label: 'Payouts', href: '/payouts', icon: CreditCard },
       { label: 'Transactions', href: '/transactions', icon: Receipt },
     ],

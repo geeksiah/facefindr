@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createServiceClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 function isMissingColumnError(error: any, columnName: string) {
   return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
@@ -48,7 +48,8 @@ export async function GET(
       return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
     }
 
-    const followTargetId = (photographer as any).user_id || photographer.id;
+    const ownerUserId = (photographer as any).user_id || photographer.id;
+    const followTargetId = ownerUserId;
 
     // Get actual follower count from follows table (more accurate than cached count)
     const { count } = await supabase
@@ -64,8 +65,13 @@ export async function GET(
       });
     }
 
-    if (!photographer.is_public_profile) {
-      return NextResponse.json({ error: 'Profile is private' }, { status: 403 });
+    const authClient = await createClient();
+    const {
+      data: { user },
+    } = await authClient.auth.getUser();
+
+    if (!user || user.id !== ownerUserId) {
+      return NextResponse.json({ error: 'Followers list is private' }, { status: 403 });
     }
 
     const { data: followers } = await supabase

@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useState, useEffect, useRef } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -44,6 +44,7 @@ export default function AttendeeProfilePage() {
   const supabase = createClient();
   const toast = useToast();
   const slug = params?.slug as string;
+  const searchParams = useSearchParams();
 
   const [profile, setProfile] = useState<AttendeeProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -55,13 +56,15 @@ export default function AttendeeProfilePage() {
   const [isFollowing, setIsFollowing] = useState(false);
   const [followLoading, setFollowLoading] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const followTargetId = profile?.follow_target_id || profile?.id;
   const qrCodeValue = typeof window !== 'undefined' ? `${window.location.href}?app=1` : '';
   const qrCodeRef = useRef<HTMLDivElement>(null);
 
   const { isConnected } = useRealtimeSubscription({
     table: 'follows',
-    filter: `following_id=eq.${profile?.follow_target_id || profile?.id || '__none__'}`,
+    filter: `following_id=eq.${followTargetId || '__none__'}`,
     onChange: () => {
+      if (followLoading) return;
       if (profile?.follow_target_id || profile?.id) {
         void checkFollowStatus(profile?.follow_target_id || profile!.id);
       }
@@ -91,7 +94,7 @@ export default function AttendeeProfilePage() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (!isConnected) {
+      if (!isConnected && !followLoading) {
         if (profile?.follow_target_id || profile?.id) {
           void checkFollowStatus(profile?.follow_target_id || profile!.id);
         }
@@ -100,7 +103,28 @@ export default function AttendeeProfilePage() {
     }, 12000);
 
     return () => clearInterval(interval);
-  }, [isConnected, profile?.id, profile?.follow_target_id, slug]);
+  }, [isConnected, profile?.id, profile?.follow_target_id, slug, followLoading]);
+
+  useEffect(() => {
+    const redirectToShellIfAuthenticated = async () => {
+      if (!profile) return;
+      if (searchParams?.get('public') === '1') return;
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+      const userType = user.user_metadata?.user_type;
+      const slugOrTag =
+        profile.public_profile_slug || profile.face_tag?.replace(/^@/, '') || profile.id;
+      const shellPath =
+        userType === 'attendee'
+          ? `/gallery/people/attendee/${slugOrTag}`
+          : `/dashboard/people/attendee/${slugOrTag}`;
+      router.replace(shellPath);
+    };
+
+    void redirectToShellIfAuthenticated();
+  }, [profile, searchParams, router]);
 
   async function loadProfile() {
     try {
@@ -181,10 +205,17 @@ export default function AttendeeProfilePage() {
           toast.error('Unfollow failed', data?.error || 'Please try again.');
           return;
         }
+        const data = await res.json().catch(() => ({}));
         setIsFollowing(false);
         setProfile((prev) =>
           prev
-            ? { ...prev, followers_count: Math.max(0, (prev.followers_count || 0) - 1) }
+            ? {
+                ...prev,
+                followers_count:
+                  typeof data?.followersCount === 'number'
+                    ? data.followersCount
+                    : Math.max(0, prev.followers_count || 0),
+              }
             : prev
         );
         toast.success('Unfollowed', `You are no longer following ${profile.display_name}.`);
@@ -199,15 +230,25 @@ export default function AttendeeProfilePage() {
           toast.error('Follow failed', data?.error || 'Please try again.');
           return;
         }
+        const data = await res.json().catch(() => ({}));
         setIsFollowing(true);
         setProfile((prev) =>
           prev
-            ? { ...prev, followers_count: (prev.followers_count || 0) + 1 }
+            ? {
+                ...prev,
+                followers_count:
+                  typeof data?.followersCount === 'number'
+                    ? data.followersCount
+                    : (prev.followers_count || 0) + 1,
+              }
             : prev
         );
         toast.success('Following', `You are now following ${profile.display_name}.`);
       }
     } finally {
+      if (followTargetId) {
+        await checkFollowStatus(followTargetId);
+      }
       setFollowLoading(false);
     }
   }
@@ -353,13 +394,20 @@ export default function AttendeeProfilePage() {
 
           {/* Stats */}
           <div className="flex items-center justify-center gap-6 mt-6 text-sm">
-            <Link
-              href={`/u/${profile.public_profile_slug || profile.face_tag?.replace(/^@/, '') || profile.id}/followers`}
-              className="text-center hover:opacity-80 transition-opacity"
-            >
-              <p className="font-bold text-foreground">{profile.followers_count || 0}</p>
-              <p className="text-secondary">Followers</p>
-            </Link>
+            {currentUserId && followTargetId && currentUserId === followTargetId ? (
+              <Link
+                href={`/u/${profile.public_profile_slug || profile.face_tag?.replace(/^@/, '') || profile.id}/followers`}
+                className="text-center hover:opacity-80 transition-opacity"
+              >
+                <p className="font-bold text-foreground">{profile.followers_count || 0}</p>
+                <p className="text-secondary">Followers</p>
+              </Link>
+            ) : (
+              <div className="text-center">
+                <p className="font-bold text-foreground">{profile.followers_count || 0}</p>
+                <p className="text-secondary">Followers</p>
+              </div>
+            )}
             <div className="text-center">
               <p className="font-bold text-foreground">{profile.following_count}</p>
               <p className="text-secondary">Following</p>

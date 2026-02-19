@@ -14,6 +14,7 @@ import {
   setUserCurrencyPreference,
   getEffectiveCurrency,
   getCurrencyForCountry,
+  getPlatformBaseCurrency,
   getCountryFromRequest,
   setDetectedLocation,
 } from '@/lib/currency';
@@ -33,11 +34,11 @@ export async function GET(request: NextRequest) {
     const detectedCountry = getCountryFromRequest(request.headers);
     const detectedCurrency = detectedCountry 
       ? await getCurrencyForCountry(detectedCountry)
-      : 'USD';
+      : await getPlatformBaseCurrency();
     
     // If logged in, update detected location and get preference
     let preference: Awaited<ReturnType<typeof getUserCurrencyPreference>> | null = null;
-    let effectiveCurrency = detectedCurrency;
+    let effectiveCurrency = await getEffectiveCurrency(undefined, detectedCountry || undefined);
     
     if (user) {
       if (detectedCountry) {
@@ -77,8 +78,10 @@ export async function POST(request: NextRequest) {
     
     const body = await request.json();
     const { currency } = body;
+    const normalizedCurrency =
+      typeof currency === 'string' ? currency.trim().toUpperCase() : '';
     
-    if (!currency) {
+    if (!normalizedCurrency) {
       return NextResponse.json(
         { error: 'Currency code is required' },
         { status: 400 }
@@ -87,14 +90,14 @@ export async function POST(request: NextRequest) {
     
     // Validate currency
     const currencies = await getSupportedCurrencies();
-    if (!currencies.has(currency)) {
+    if (!currencies.has(normalizedCurrency)) {
       return NextResponse.json(
         { error: 'Unsupported currency' },
         { status: 400 }
       );
     }
     
-    const result = await setUserCurrencyPreference(user.id, currency);
+    const result = await setUserCurrencyPreference(user.id, normalizedCurrency);
     
     if (!result.success) {
       return NextResponse.json(
@@ -105,7 +108,7 @@ export async function POST(request: NextRequest) {
     
     return NextResponse.json({
       success: true,
-      effectiveCurrency: currency,
+      effectiveCurrency: normalizedCurrency,
     });
     
   } catch (error) {

@@ -171,6 +171,7 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
     table: 'follows',
     filter: `following_id=eq.${targetFollowId || '__none__'}`,
     onChange: () => {
+      if (followLoading) return;
       if (targetFollowId) {
         void refreshFollowState(targetFollowId);
       }
@@ -179,13 +180,13 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (!isConnected && targetFollowId) {
+      if (!isConnected && targetFollowId && !followLoading) {
         void refreshFollowState(targetFollowId);
       }
     }, 12000);
 
     return () => clearInterval(interval);
-  }, [isConnected, targetFollowId, profileType]);
+  }, [isConnected, targetFollowId, profileType, followLoading]);
 
   async function refreshFollowState(targetId: string) {
     try {
@@ -275,18 +276,25 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
           toast.error('Unfollow failed', data?.error || 'Please try again.');
           return;
         }
+        const data = await res.json().catch(() => ({}));
         setIsFollowing(false);
         setProfile((prev) => {
           if (!prev) return prev;
+          const nextCount =
+            typeof data?.followersCount === 'number'
+              ? data.followersCount
+              : profileType === 'creator'
+              ? Math.max(0, ((prev as CreatorProfile).follower_count || 0) - 1)
+              : Math.max(0, ((prev as AttendeeProfile).followers_count || 0) - 1);
           if (profileType === 'creator') {
             return {
               ...prev,
-              follower_count: Math.max(0, ((prev as CreatorProfile).follower_count || 0) - 1),
+              follower_count: nextCount,
             };
           }
           return {
             ...prev,
-            followers_count: Math.max(0, ((prev as AttendeeProfile).followers_count || 0) - 1),
+            followers_count: nextCount,
           };
         });
       } else {
@@ -304,21 +312,29 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
           toast.error('Follow failed', data?.error || 'Please try again.');
           return;
         }
+        const data = await res.json().catch(() => ({}));
         setIsFollowing(true);
         setProfile((prev) => {
           if (!prev) return prev;
+          const nextCount =
+            typeof data?.followersCount === 'number'
+              ? data.followersCount
+              : profileType === 'creator'
+              ? ((prev as CreatorProfile).follower_count || 0) + 1
+              : ((prev as AttendeeProfile).followers_count || 0) + 1;
           if (profileType === 'creator') {
             return {
               ...prev,
-              follower_count: ((prev as CreatorProfile).follower_count || 0) + 1,
+              follower_count: nextCount,
             };
           }
           return {
             ...prev,
-            followers_count: ((prev as AttendeeProfile).followers_count || 0) + 1,
+            followers_count: nextCount,
           };
         });
       }
+      await refreshFollowState(targetFollowId);
     } finally {
       setFollowLoading(false);
     }
@@ -351,6 +367,8 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
   const followersPath = isCreator
     ? `/p/${creatorProfile.public_profile_slug || creatorProfile.face_tag?.replace(/^@/, '') || creatorProfile.id}/followers`
     : `/u/${attendeeProfile.public_profile_slug || attendeeProfile.face_tag?.replace(/^@/, '') || attendeeProfile.id}/followers`;
+  const canViewFollowersList =
+    Boolean(currentUserId) && currentUserId === (profile?.follow_target_id || profile?.id);
 
   return (
     <div className="space-y-6">
@@ -407,10 +425,17 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
         </div>
 
         <div className="mt-6 grid gap-3 sm:grid-cols-3">
-          <Link href={followersPath} className="rounded-xl bg-muted/40 p-3 text-center hover:bg-muted/70 transition-colors">
-            <p className="text-lg font-semibold text-foreground">{followerCount}</p>
-            <p className="text-xs text-secondary">Followers</p>
-          </Link>
+          {canViewFollowersList ? (
+            <Link href={followersPath} className="rounded-xl bg-muted/40 p-3 text-center hover:bg-muted/70 transition-colors">
+              <p className="text-lg font-semibold text-foreground">{followerCount}</p>
+              <p className="text-xs text-secondary">Followers</p>
+            </Link>
+          ) : (
+            <div className="rounded-xl bg-muted/40 p-3 text-center">
+              <p className="text-lg font-semibold text-foreground">{followerCount}</p>
+              <p className="text-xs text-secondary">Followers</p>
+            </div>
+          )}
           <div className="rounded-xl bg-muted/40 p-3 text-center">
             <p className="text-lg font-semibold text-foreground">
               {isCreator ? creatorProfile.eventCount || 0 : attendeeProfile.following_count || 0}

@@ -19,18 +19,24 @@ import Link from 'next/link';
 import { useRouter, useParams } from 'next/navigation';
 import { useState, useEffect } from 'react';
 
-const CURRENCY_SYMBOLS: Record<string, string> = {
-  USD: '$',
-  EUR: 'EUR ',
-  GBP: 'GBP ',
-  NGN: 'NGN ',
-  GHS: 'GHS ',
-  KES: 'KES ',
-  ZAR: 'ZAR ',
-};
-
 function getCurrencySymbol(currencyCode: string): string {
-  return CURRENCY_SYMBOLS[currencyCode?.toUpperCase()] ?? `${currencyCode?.toUpperCase() || 'USD'} `;
+  const code = (currencyCode || 'USD').toUpperCase();
+  try {
+    const parts = new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: code,
+      currencyDisplay: 'narrowSymbol',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).formatToParts(0);
+    const symbol = parts.find((part) => part.type === 'currency')?.value;
+    if (symbol) {
+      return symbol;
+    }
+  } catch {
+    // Fall back to currency code below.
+  }
+  return `${code} `;
 }
 
 interface RegionConfig {

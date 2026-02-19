@@ -4,6 +4,7 @@ import { Star } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
 import { useRealtimeSubscription } from '@/hooks/use-realtime';
 import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
@@ -30,6 +31,7 @@ export function RatingsDisplay({
   className,
 }: RatingsDisplayProps) {
   const supabase = createClient();
+  const toast = useToast();
   const [stats, setStats] = useState<RatingStats | null>(null);
   const [userRating, setUserRating] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -43,7 +45,7 @@ export function RatingsDisplay({
   }, [photographerId]);
 
   // Subscribe to real-time rating updates
-  useRealtimeSubscription({
+  const { isConnected } = useRealtimeSubscription({
     table: 'photographer_ratings',
     filter: `photographer_id=eq.${photographerId}`,
     onChange: () => {
@@ -52,9 +54,20 @@ export function RatingsDisplay({
     },
   });
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!isConnected) {
+        void loadRatingStats();
+        void loadUserRating();
+      }
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, [isConnected, photographerId]);
+
   const loadRatingStats = async () => {
     try {
-      const response = await fetch(`/api/creators/${photographerId}/ratings/stats`);
+      const response = await fetch(`/api/creators/${photographerId}/ratings/stats`, { cache: 'no-store' });
       if (response.ok) {
         const data = await response.json();
         setStats(data);
@@ -71,7 +84,7 @@ export function RatingsDisplay({
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const response = await fetch(`/api/creators/${photographerId}/ratings/my`);
+      const response = await fetch(`/api/creators/${photographerId}/ratings/my`, { cache: 'no-store' });
       if (response.ok) {
         const data = await response.json();
         setUserRating(data.rating || null);
@@ -84,7 +97,7 @@ export function RatingsDisplay({
   const handleRate = async (rating: number) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      // Redirect to login or show auth prompt
+      toast.info('Sign in required', 'Please sign in to rate this creator.');
       return;
     }
 
@@ -105,12 +118,14 @@ export function RatingsDisplay({
         setUserRating(data.rating.rating);
         await loadRatingStats();
         setShowRatingModal(false);
+        toast.success('Rating saved', 'Thanks for your feedback.');
       } else {
         const error = await response.json();
-        console.error('Failed to rate:', error);
+        toast.error('Rating failed', error?.error || 'Please try again.');
       }
     } catch (error) {
       console.error('Rate error:', error);
+      toast.error('Rating failed', 'Please try again.');
     } finally {
       setRatingLoading(false);
     }
@@ -198,6 +213,10 @@ export function RatingsDisplay({
         <span className="text-sm text-secondary">
           {stats.average_rating.toFixed(1)} ({stats.total_ratings})
         </span>
+      )}
+
+      {stats.total_ratings > 0 && stats.total_ratings < 5 && variant === 'full' && (
+        <span className="text-xs text-muted-foreground">early ratings</span>
       )}
 
       {/* Rate Button */}

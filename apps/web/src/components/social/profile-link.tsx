@@ -18,11 +18,23 @@ export function ProfileLink({ slug, as = 'attendee', className, children, title 
   const router = useRouter();
   const urls = buildProfileUrls(slug);
 
-  // Consider ourselves "in-app" (prefer shell) when already inside dashboard or inside a shell path.
-  const inApp = !!pathname && (pathname.startsWith('/dashboard') || pathname.startsWith('/p') || pathname.startsWith('/u'));
+  const kind = as === 'attendee' ? 'attendee' : 'creator';
+  // Consider ourselves "in-app" (prefer shell) when already inside dashboard/gallery or inside a shell path.
+  const inApp =
+    !!pathname &&
+    (pathname.startsWith('/dashboard') ||
+      pathname.startsWith('/gallery') ||
+      pathname.startsWith('/p') ||
+      pathname.startsWith('/u'));
 
   const targetPublic = as === 'creator' ? urls.publicCreator : urls.publicUser;
-  const targetShell = urls.shell;
+  const targetShell = pathname?.startsWith('/dashboard')
+    ? `/dashboard/people/${kind}/${slug}`
+    : pathname?.startsWith('/gallery')
+    ? `/gallery/people/${kind}/${slug}`
+    : kind === 'creator'
+    ? urls.shellCreator
+    : urls.shellAttendee;
 
   if (inApp) {
     return (

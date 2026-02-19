@@ -50,6 +50,7 @@ export function FollowButton({
     table: 'follows',
     filter: `following_id=eq.${photographerId}`,
     onChange: () => {
+      if (isToggling) return;
       checkFollowStatus();
       if (showCount) {
         loadFollowerCount();
@@ -59,7 +60,7 @@ export function FollowButton({
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (!isConnected) {
+      if (!isConnected && !isToggling) {
         void checkFollowStatus();
         if (showCount) {
           void loadFollowerCount();
@@ -68,7 +69,7 @@ export function FollowButton({
     }, 12000);
 
     return () => clearInterval(interval);
-  }, [isConnected, photographerId, showCount]);
+  }, [isConnected, photographerId, showCount, isToggling]);
 
   const checkFollowStatus = async () => {
     try {
@@ -125,9 +126,14 @@ export function FollowButton({
         );
 
         if (response.ok) {
+          const payload = await response.json().catch(() => ({}));
           setIsFollowing(false);
-          if (showCount && followerCount !== null) {
-            setFollowerCount(Math.max(0, followerCount - 1));
+          if (showCount) {
+            if (typeof payload?.followersCount === 'number') {
+              setFollowerCount(payload.followersCount);
+            } else if (followerCount !== null) {
+              setFollowerCount(Math.max(0, followerCount - 1));
+            }
           }
           onFollowChange?.(false);
           toast.success('Unfollowed', photographerName ? `You unfollowed ${photographerName}.` : 'Unfollowed successfully.');
@@ -144,9 +150,14 @@ export function FollowButton({
         });
 
         if (response.ok) {
+          const payload = await response.json().catch(() => ({}));
           setIsFollowing(true);
-          if (showCount && followerCount !== null) {
-            setFollowerCount(followerCount + 1);
+          if (showCount) {
+            if (typeof payload?.followersCount === 'number') {
+              setFollowerCount(payload.followersCount);
+            } else if (followerCount !== null) {
+              setFollowerCount(followerCount + 1);
+            }
           }
           onFollowChange?.(true);
           toast.success('Following', photographerName ? `You are now following ${photographerName}.` : 'Followed successfully.');
@@ -158,6 +169,10 @@ export function FollowButton({
     } catch (error) {
       console.error('Failed to toggle follow:', error);
     } finally {
+      void checkFollowStatus();
+      if (showCount) {
+        void loadFollowerCount();
+      }
       setIsToggling(false);
     }
   };

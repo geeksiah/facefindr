@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createServiceClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 type FollowerProfile = {
   id: string;
@@ -20,6 +20,10 @@ function isFaceTag(value: string) {
   return value.includes('+') || /^@?[a-z0-9_.]+[+.]?\d{3,5}$/i.test(value);
 }
 
+function isMissingColumnError(error: any, columnName: string) {
+  return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { slug: string } }
@@ -29,45 +33,66 @@ export async function GET(
     const { slug } = params;
     const queryType = request.nextUrl.searchParams.get('type');
 
-    let profileQuery = supabase
-      .from('attendees')
-      .select('id, display_name, face_tag, profile_photo_url, is_public_profile, public_profile_slug');
+    const fullSelect =
+      'id, user_id, display_name, face_tag, profile_photo_url, is_public_profile, public_profile_slug';
+    const fallbackSelect =
+      'id, display_name, face_tag, profile_photo_url, is_public_profile, public_profile_slug';
 
-    if (isUuid(slug)) {
-      profileQuery = profileQuery.eq('id', slug);
-    } else if (isFaceTag(slug)) {
-      profileQuery = profileQuery.eq('face_tag', slug.startsWith('@') ? slug : `@${slug}`);
-    } else {
-      profileQuery = profileQuery.eq('public_profile_slug', slug);
+    const queryProfile = async (includeUserId: boolean) => {
+      let q = supabase
+        .from('attendees')
+        .select(includeUserId ? fullSelect : fallbackSelect);
+
+      if (isUuid(slug)) {
+        q = includeUserId ? q.or(`id.eq.${slug},user_id.eq.${slug}`) : q.eq('id', slug);
+      } else if (isFaceTag(slug)) {
+        q = q.eq('face_tag', slug.startsWith('@') ? slug : `@${slug}`);
+      } else {
+        q = q.eq('public_profile_slug', slug);
+      }
+
+      return q.maybeSingle();
+    };
+
+    let { data: profile, error } = await queryProfile(true);
+
+    if (error && isMissingColumnError(error, 'user_id')) {
+      const fallback = await queryProfile(false);
+      profile = fallback.data ? { ...fallback.data, user_id: fallback.data.id } : fallback.data;
+      error = fallback.error;
     }
 
-    let { data: profile, error } = await profileQuery.maybeSingle();
-
     if (!profile && !error && !isUuid(slug) && !isFaceTag(slug)) {
-      const { data: byFaceTag } = await supabase
+      const { data: byFaceTag, error: byFaceTagError } = await supabase
         .from('attendees')
-        .select('id, display_name, face_tag, profile_photo_url, is_public_profile, public_profile_slug')
+        .select(fullSelect)
         .eq('face_tag', slug.startsWith('@') ? slug : `@${slug}`)
         .maybeSingle();
-      profile = byFaceTag;
+      if (byFaceTagError && isMissingColumnError(byFaceTagError, 'user_id')) {
+        const fallback = await supabase
+          .from('attendees')
+          .select(fallbackSelect)
+          .eq('face_tag', slug.startsWith('@') ? slug : `@${slug}`)
+          .maybeSingle();
+        profile = fallback.data ? { ...fallback.data, user_id: fallback.data.id } : fallback.data;
+      } else {
+        profile = byFaceTag;
+      }
     }
 
     if (error || !profile) {
       return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
     }
-    const followTargetId = (profile as any).user_id || profile.id;
+    const ownerUserId = (profile as any).user_id || profile.id;
+    const followTargetId = ownerUserId;
 
-    const privacyResult = await supabase
-      .from('user_privacy_settings')
-      .select('profile_visible')
-      .eq('user_id', profile.id)
-      .maybeSingle();
-    const isPublic = Boolean(
-      privacyResult.data?.profile_visible ?? profile.is_public_profile ?? false
-    );
+    const authClient = await createClient();
+    const {
+      data: { user },
+    } = await authClient.auth.getUser();
 
-    if (!isPublic) {
-      return NextResponse.json({ error: 'Profile is private' }, { status: 403 });
+    if (!user || user.id !== ownerUserId) {
+      return NextResponse.json({ error: 'Followers list is private' }, { status: 403 });
     }
 
     const [attendeeFollowersRes, creatorFollowersRes] = await Promise.all([

@@ -12,7 +12,7 @@ interface TipCreatorProps {
   photographerName: string;
   eventId?: string;
   mediaId?: string;
-  currency?: string;
+  currency?: string | null;
   onSuccess?: () => void;
   onCancel?: () => void;
   className?: string;
@@ -25,7 +25,7 @@ export function TipCreator({
   photographerName,
   eventId,
   mediaId,
-  currency = 'USD',
+  currency,
   onSuccess,
   onCancel,
   className,
@@ -40,7 +40,7 @@ export function TipCreator({
   const formatAmount = (cents: number) =>
     new Intl.NumberFormat('en-US', {
       style: 'currency',
-      currency,
+      currency: (currency || 'USD').toUpperCase(),
     }).format(cents / 100);
 
   const handlePresetAmount = (cents: number) => {
@@ -60,7 +60,7 @@ export function TipCreator({
 
   const handleTip = async () => {
     if (!amount || amount < 200) {
-      setError('Minimum tip amount is $2.00');
+      setError(`Minimum tip amount is ${formatAmount(200)}`);
       return;
     }
 
@@ -74,7 +74,7 @@ export function TipCreator({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           amount,
-          currency,
+          currency: currency || undefined,
           eventId,
           mediaId,
           message: message.trim() || null,

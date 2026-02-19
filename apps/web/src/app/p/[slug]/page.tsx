@@ -40,6 +40,7 @@ import { cn } from '@/lib/utils';
 
 interface CreatorProfile {
   id: string;
+  follow_target_id?: string;
   display_name: string;
   face_tag: string;
   bio?: string;
@@ -82,7 +83,9 @@ export default function CreatorProfilePage() {
   const [showTipModal, setShowTipModal] = useState(false);
   const [copied, setCopied] = useState(false);
   const [downloadingQr, setDownloadingQr] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const qrCodeRef = useRef<HTMLDivElement>(null);
+  const followTargetId = profile?.follow_target_id || profile?.id;
 
   useEffect(() => {
     loadProfile();
@@ -97,7 +100,38 @@ export default function CreatorProfilePage() {
     if (profile?.id) {
       checkFollowStatus();
     }
-  }, [profile?.id]);
+  }, [profile?.id, profile?.follow_target_id]);
+
+  useEffect(() => {
+    const loadCurrentUser = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      setCurrentUserId(user?.id || null);
+    };
+    void loadCurrentUser();
+  }, []);
+
+  useEffect(() => {
+    const redirectToShellIfAuthenticated = async () => {
+      if (!profile) return;
+      if (searchParams?.get('public') === '1') return;
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+      const userType = user.user_metadata?.user_type;
+      const slugOrTag =
+        profile.public_profile_slug || profile.face_tag?.replace(/^@/, '') || profile.id;
+      const shellPath =
+        userType === 'attendee'
+          ? `/gallery/people/creator/${slugOrTag}`
+          : `/dashboard/people/creator/${slugOrTag}`;
+      router.replace(shellPath);
+    };
+
+    void redirectToShellIfAuthenticated();
+  }, [profile, searchParams, router]);
 
   async function loadProfile() {
     try {
@@ -123,10 +157,13 @@ export default function CreatorProfilePage() {
   }
 
   async function checkFollowStatus() {
-    if (!profile?.id) return;
+    const targetId = profile?.follow_target_id || profile?.id;
+    if (!targetId) return;
     
     try {
-      const res = await fetch(`/api/social/follow?type=check&photographerId=${profile.id}`);
+      const res = await fetch(
+        `/api/social/follow?type=check&targetType=creator&targetId=${encodeURIComponent(targetId)}`
+      );
       const data = await res.json();
       setIsFollowing(data.isFollowing);
     } catch {
@@ -161,7 +198,13 @@ export default function CreatorProfilePage() {
       return;
     }
 
-    if (user.id === profile?.id) {
+    const targetId = profile?.follow_target_id || profile?.id;
+    if (!targetId) {
+      toast.error('Follow failed', 'Creator not found.');
+      return;
+    }
+
+    if (user.id === targetId || user.id === profile?.id) {
       toast.info('Own profile', 'You cannot follow yourself.');
       return;
     }
@@ -170,14 +213,18 @@ export default function CreatorProfilePage() {
     try {
       if (isFollowing) {
         const response = await fetch(
-          `/api/social/follow?targetType=creator&targetId=${encodeURIComponent(profile?.id || '')}`,
+          `/api/social/follow?targetType=creator&targetId=${encodeURIComponent(targetId)}`,
           { method: 'DELETE' }
         );
         if (response.ok) {
+          const payload = await response.json().catch(() => ({}));
           setIsFollowing(false);
-          // Refresh follower count
           if (profile) {
-            setProfile({ ...profile, follower_count: Math.max(0, (profile.follower_count || 0) - 1) });
+            const nextCount =
+              typeof payload?.followersCount === 'number'
+                ? payload.followersCount
+                : Math.max(0, profile.follower_count || 0);
+            setProfile({ ...profile, follower_count: nextCount });
           }
           toast.success('Unfollowed', `You unfollowed ${profile?.display_name || 'this creator'}.`);
         } else {
@@ -188,13 +235,17 @@ export default function CreatorProfilePage() {
         const response = await fetch('/api/social/follow', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ targetType: 'creator', targetId: profile?.id }),
+          body: JSON.stringify({ targetType: 'creator', targetId }),
         });
         if (response.ok) {
+          const payload = await response.json().catch(() => ({}));
           setIsFollowing(true);
-          // Refresh follower count
           if (profile) {
-            setProfile({ ...profile, follower_count: (profile.follower_count || 0) + 1 });
+            const nextCount =
+              typeof payload?.followersCount === 'number'
+                ? payload.followersCount
+                : (profile.follower_count || 0) + 1;
+            setProfile({ ...profile, follower_count: nextCount });
           }
           toast.success('Following', `You are now following ${profile?.display_name || 'this creator'}.`);
         } else {
@@ -206,6 +257,7 @@ export default function CreatorProfilePage() {
       console.error('Follow error:', error);
       toast.error('Follow failed', 'Please try again.');
     } finally {
+      await checkFollowStatus();
       setFollowLoading(false);
     }
   }
@@ -383,13 +435,20 @@ export default function CreatorProfilePage() {
 
             {/* Stats */}
             <div className="flex items-center justify-center sm:justify-start gap-6 mt-4 text-sm">
-              <Link
-                href={`/p/${profile.public_profile_slug || profile.face_tag?.replace(/^@/, '') || profile.id}/followers`}
-                className="text-center hover:opacity-80 transition-opacity cursor-pointer"
-              >
-                <p className="font-bold text-foreground">{profile.follower_count || 0}</p>
-                <p className="text-secondary">Followers</p>
-              </Link>
+              {currentUserId && followTargetId && currentUserId === followTargetId ? (
+                <Link
+                  href={`/p/${profile.public_profile_slug || profile.face_tag?.replace(/^@/, '') || profile.id}/followers`}
+                  className="text-center hover:opacity-80 transition-opacity cursor-pointer"
+                >
+                  <p className="font-bold text-foreground">{profile.follower_count || 0}</p>
+                  <p className="text-secondary">Followers</p>
+                </Link>
+              ) : (
+                <div className="text-center">
+                  <p className="font-bold text-foreground">{profile.follower_count || 0}</p>
+                  <p className="text-secondary">Followers</p>
+                </div>
+              )}
               <div className="text-center">
                 <p className="font-bold text-foreground">{profile.eventCount}</p>
                 <p className="text-secondary">Events</p>

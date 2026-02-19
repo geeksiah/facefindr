@@ -40,6 +40,8 @@ export interface ExchangeRate {
 let currencyCache: Map<string, Currency> | null = null;
 let currencyCacheTime = 0;
 const CACHE_TTL = 60 * 60 * 1000; // 1 hour
+let baseCurrencyCache: string | null = null;
+let baseCurrencyCacheTime = 0;
 
 // Default currencies (fallback when database is empty)
 const DEFAULT_CURRENCIES: Currency[] = [
@@ -124,7 +126,57 @@ export async function getCurrencyForCountry(countryCode: string): Promise<string
     }
   }
   
-  return 'USD'; // Default
+  return getPlatformBaseCurrency();
+}
+
+function normalizeCurrencyCode(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim().toUpperCase();
+  }
+  if (value && typeof value === 'object') {
+    const nested = (value as any).code || (value as any).currency;
+    if (typeof nested === 'string' && nested.trim()) {
+      return nested.trim().toUpperCase();
+    }
+  }
+  return null;
+}
+
+export async function getPlatformBaseCurrency(): Promise<string> {
+  const now = Date.now();
+  if (baseCurrencyCache && now - baseCurrencyCacheTime < CACHE_TTL) {
+    return baseCurrencyCache;
+  }
+
+  let fallbackCurrency = 'USD';
+
+  try {
+    const supported = await getSupportedCurrencies();
+    const firstSupported = supported.values().next().value as Currency | undefined;
+    if (firstSupported?.code) {
+      fallbackCurrency = firstSupported.code.toUpperCase();
+    }
+  } catch {
+    // Use USD fallback.
+  }
+
+  try {
+    const supabase = createServiceClient();
+    const { data: setting } = await supabase
+      .from('platform_settings')
+      .select('value')
+      .eq('setting_key', 'platform_base_currency')
+      .maybeSingle();
+
+    const configured = normalizeCurrencyCode(setting?.value);
+    baseCurrencyCache = configured || fallbackCurrency;
+    baseCurrencyCacheTime = now;
+    return baseCurrencyCache;
+  } catch {
+    baseCurrencyCache = fallbackCurrency;
+    baseCurrencyCacheTime = now;
+    return fallbackCurrency;
+  }
 }
 
 // ============================================
@@ -218,7 +270,7 @@ export async function getEffectiveCurrency(
     return getCurrencyForCountry(detectedCountry);
   }
   
-  return 'USD';
+  return getPlatformBaseCurrency();
 }
 
 // ============================================

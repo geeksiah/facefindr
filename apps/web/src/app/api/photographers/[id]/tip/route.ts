@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 
-import { getEffectiveCurrency } from '@/lib/currency/currency-service';
+import { getEffectiveCurrency, getPlatformBaseCurrency } from '@/lib/currency/currency-service';
 import { calculateFees } from '@/lib/payments/fee-calculator';
 import {
   initializePayment,
@@ -32,6 +32,34 @@ import {
 } from '@/lib/payments/stripe';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
+function isMissingColumnError(error: any, columnName: string) {
+  return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
+}
+
+async function resolvePhotographerByIdentifier(supabase: any, identifier: string) {
+  const withUserId = await supabase
+    .from('photographers')
+    .select('id, user_id, display_name, country_code')
+    .or(`id.eq.${identifier},user_id.eq.${identifier}`)
+    .limit(1)
+    .maybeSingle();
+
+  if (!withUserId.error || !isMissingColumnError(withUserId.error, 'user_id')) {
+    return withUserId;
+  }
+
+  const fallback = await supabase
+    .from('photographers')
+    .select('id, display_name, country_code')
+    .eq('id', identifier)
+    .maybeSingle();
+
+  return {
+    data: fallback.data ? { ...fallback.data, user_id: fallback.data.id } : fallback.data,
+    error: fallback.error,
+  };
+}
+
 
 // POST - Create tip payment
 export async function POST(
@@ -39,20 +67,13 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { id: photographerId } = params;
-    const supabase = createClient();
+    const { id: photographerIdentifier } = params;
+    const supabase = await createClient();
     const serviceClient = createServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    if (photographerId === user.id) {
-      return NextResponse.json(
-        { error: 'You cannot tip your own profile' },
-        { status: 400 }
-      );
     }
 
     const body = await request.json();
@@ -65,6 +86,10 @@ export async function POST(
       message, 
       isAnonymous = false 
     } = body;
+    const normalizedProvidedCurrency =
+      typeof providedCurrency === 'string' && providedCurrency.trim()
+        ? providedCurrency.trim().toUpperCase()
+        : undefined;
 
     // Validate amount (minimum $2.00 = 200 cents)
     if (!amount || amount < 200) {
@@ -74,23 +99,30 @@ export async function POST(
       );
     }
 
-    // Get photographer's info
-    const { data: photographer } = await supabase
-      .from('photographers')
-      .select('id, display_name, country_code')
-      .eq('id', photographerId)
-      .single();
+    const { data: photographer } = await resolvePhotographerByIdentifier(
+      serviceClient,
+      photographerIdentifier
+    );
 
     if (!photographer) {
       return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
     }
+    const photographerId = photographer.id;
+    const photographerUserId = (photographer as any).user_id || photographer.id;
+
+    if (photographerUserId === user.id) {
+      return NextResponse.json(
+        { error: 'You cannot tip your own profile' },
+        { status: 400 }
+      );
+    }
 
     // Get event info if provided (for currency and country detection)
-    let eventCurrency = 'USD';
+    let eventCurrency = await getPlatformBaseCurrency();
     let eventCountryCode: string | undefined;
     
     if (eventId) {
-      const { data: event } = await supabase
+      const { data: event } = await serviceClient
         .from('events')
         .select('currency_code, country_code')
         .eq('id', eventId)
@@ -103,8 +135,8 @@ export async function POST(
     }
 
     // Determine transaction currency (use provided, user preference, or event currency)
-    const transactionCurrency = providedCurrency || 
-      await getEffectiveCurrency(user.id, eventCountryCode) || 
+    const transactionCurrency = normalizedProvidedCurrency || 
+      await getEffectiveCurrency(user.id, eventCountryCode || photographer.country_code || undefined) || 
       eventCurrency;
 
     // Select payment gateway based on user preference, country, and availability
@@ -137,7 +169,7 @@ export async function POST(
       : gatewaySelection.gateway;
 
     // Get photographer's wallet for selected provider
-    const { data: wallet, error: walletError } = await supabase
+    const { data: wallet, error: walletError } = await serviceClient
       .from('wallets')
       .select('*')
       .eq('photographer_id', photographerId)
@@ -150,7 +182,7 @@ export async function POST(
       for (const availableGateway of gatewaySelection.availableGateways) {
         if (availableGateway === selectedProvider) continue;
         
-        const { data: altWallet } = await supabase
+        const { data: altWallet } = await serviceClient
           .from('wallets')
           .select('*')
           .eq('photographer_id', photographerId)
@@ -177,7 +209,7 @@ export async function POST(
     }
 
     // Create tip record
-    const { data: tip, error: tipError } = await supabase
+    const { data: tip, error: tipError } = await serviceClient
       .from('tips')
       .insert({
         from_user_id: user.id,
@@ -407,7 +439,7 @@ export async function POST(
       ? 'stripe_payment_intent_id' // Reuse field for Flutterwave tx_ref
       : 'stripe_payment_intent_id'; // Reuse field for PayPal order ID
     
-    await supabase
+    await serviceClient
       .from('tips')
       .update({ 
         [paymentField]: sessionId,
@@ -443,20 +475,32 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { id: photographerId } = params;
-    const supabase = createClient();
+    const { id: photographerIdentifier } = params;
+    const supabase = await createClient();
+    const serviceClient = createServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Only photographer can view their own tips
-    if (user.id !== photographerId) {
+    const { data: photographer } = await resolvePhotographerByIdentifier(
+      serviceClient,
+      photographerIdentifier
+    );
+
+    if (!photographer) {
+      return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
+    }
+    const photographerId = photographer.id;
+    const photographerUserId = (photographer as any).user_id || photographer.id;
+
+    // Only photographer owner can view their own tips
+    if (user.id !== photographerUserId) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const { data: tips, error } = await supabase
+    const { data: tips, error } = await serviceClient
       .from('tips')
       .select(`
         id,

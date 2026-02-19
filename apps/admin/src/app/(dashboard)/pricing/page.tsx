@@ -19,6 +19,7 @@ import {
   HardDrive,
   Users,
 } from 'lucide-react';
+import Link from 'next/link';
 import { useState, useEffect } from 'react';
 
 import { useToast, useConfirm } from '@/components/ui/toast';
@@ -1148,6 +1149,8 @@ export default function PricingPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
   const [activeTab, setActiveTab] = useState<'plans' | 'features' | 'currencies' | 'storage'>('plans');
+  const [platformBaseCurrency, setPlatformBaseCurrency] = useState('USD');
+  const [savingBaseCurrency, setSavingBaseCurrency] = useState(false);
   
   // Available features for plan creation
   const [availablePlanFeatures, setAvailablePlanFeatures] = useState<any[]>([]);
@@ -1177,6 +1180,7 @@ export default function PricingPage() {
     loadPlans();
     loadCurrencies();
     loadAvailableFeatures();
+    loadPlatformBaseCurrency();
   }, []);
   
   // Load features when plan type changes
@@ -1221,6 +1225,56 @@ export default function PricingPage() {
       }
     } catch (err) {
       console.error('Failed to load currencies:', err);
+    }
+  }
+
+  async function loadPlatformBaseCurrency() {
+    try {
+      const res = await fetch('/api/admin/settings');
+      if (!res.ok) return;
+      const data = await res.json();
+      const row = (data.settings || []).find(
+        (setting: any) => setting.setting_key === 'platform_base_currency'
+      );
+      const raw = row?.value;
+      const normalized =
+        typeof raw === 'string'
+          ? raw
+          : typeof raw?.code === 'string'
+          ? raw.code
+          : '';
+      if (normalized) {
+        setPlatformBaseCurrency(normalized.replace(/"/g, '').toUpperCase());
+      }
+    } catch (err) {
+      console.error('Failed to load base currency:', err);
+    }
+  }
+
+  async function savePlatformBaseCurrency() {
+    if (!platformBaseCurrency) return;
+    setSavingBaseCurrency(true);
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          settings: {
+            platform_base_currency: platformBaseCurrency.toUpperCase(),
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload?.error || 'Failed to save base currency');
+      }
+
+      toast.success('Base currency updated', `Fallback currency is now ${platformBaseCurrency.toUpperCase()}.`);
+    } catch (err: any) {
+      toast.error('Save failed', err?.message || 'Could not save base currency');
+    } finally {
+      setSavingBaseCurrency(false);
     }
   }
 
@@ -1462,6 +1516,52 @@ export default function PricingPage() {
           <Plus className="h-4 w-4" />
           Create Plan
         </button>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="font-medium text-foreground">Payment Providers & Region Currency Rules</p>
+            <p className="text-sm text-muted-foreground">
+              Provider availability is configured per region. Plan prices and currency options here are consumed by those regional provider rules.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2 rounded-lg border border-border px-2 py-1.5">
+              <span className="text-xs text-muted-foreground">Base fallback currency</span>
+              <select
+                value={platformBaseCurrency}
+                onChange={(e) => setPlatformBaseCurrency(e.target.value.toUpperCase())}
+                className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground"
+              >
+                {currencies.map((currency) => (
+                  <option key={currency.code} value={currency.code}>
+                    {currency.code}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={savePlatformBaseCurrency}
+                disabled={savingBaseCurrency}
+                className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+              >
+                {savingBaseCurrency ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+            <Link
+              href="/regions"
+              className="rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:bg-muted"
+            >
+              Open Regions
+            </Link>
+            <Link
+              href="/settings"
+              className="rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:bg-muted"
+            >
+              Platform Defaults
+            </Link>
+          </div>
+        </div>
       </div>
 
       {/* Tabs */}

@@ -17,6 +17,8 @@ export function buildProfileUrls(slug: string) {
     publicUser: `/u/${normalized}`,
     publicCreator: `/c/${normalized}`,
     shell: `/p/${normalized}`,
+    shellCreator: `/p/${normalized}`,
+    shellAttendee: `/u/${normalized}`,
   };
 }
 

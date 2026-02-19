@@ -80,6 +80,15 @@ export function SettingsForm({ settings }: SettingsFormProps) {
       .replace(/\b\w/g, (l) => l.toUpperCase());
   };
 
+  const isToggleSetting = (key: string) =>
+    key.includes('enabled') || key.includes('mode');
+
+  const isTextSetting = (key: string, value: string) => {
+    if (key === 'platform_base_currency') return true;
+    if (key.includes('supported_currencies')) return true;
+    return value.trim() !== '' && Number.isNaN(Number(value));
+  };
+
   const formatValue = (key: string, value: string) => {
     // Percentages should be whole numbers (e.g., 20 for 20%)
     if (key.includes('fee') || key.includes('commission') || key.includes('percent')) {
@@ -123,14 +132,14 @@ export function SettingsForm({ settings }: SettingsFormProps) {
                   <label className="text-sm font-medium text-foreground">
                     {formatLabel(setting.key)}
                   </label>
-                  {setting.key.includes('enabled') || setting.key.includes('mode') ? null : (
+                  {isToggleSetting(setting.key) ? null : (
                     <span className="text-xs text-muted-foreground">
                       Display: {formatValue(setting.key, values[setting.key])}
                     </span>
                   )}
                 </div>
                 
-                {setting.key.includes('enabled') || setting.key.includes('mode') ? (
+                {isToggleSetting(setting.key) ? (
                   <select
                     value={values[setting.key]}
                     onChange={(e) => setValues({ ...values, [setting.key]: e.target.value })}
@@ -139,6 +148,21 @@ export function SettingsForm({ settings }: SettingsFormProps) {
                     <option value="true">Enabled</option>
                     <option value="false">Disabled</option>
                   </select>
+                ) : isTextSetting(setting.key, values[setting.key]) ? (
+                  <input
+                    type="text"
+                    value={values[setting.key]}
+                    onChange={(e) =>
+                      setValues({
+                        ...values,
+                        [setting.key]:
+                          setting.key === 'platform_base_currency'
+                            ? e.target.value.toUpperCase()
+                            : e.target.value,
+                      })
+                    }
+                    className="px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
+                  />
                 ) : (
                   <input
                     type="number"

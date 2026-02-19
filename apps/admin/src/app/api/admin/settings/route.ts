@@ -4,6 +4,33 @@ import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
 import { bumpRuntimeConfigVersion } from '@/lib/runtime-config-version';
 import { supabaseAdmin } from '@/lib/supabase';
 
+export async function GET() {
+  try {
+    const session = await getAdminSession();
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('platform_settings')
+      .select('setting_key, value, description, category')
+      .order('category', { ascending: true })
+      .order('setting_key', { ascending: true });
+
+    if (error) {
+      throw error;
+    }
+
+    return NextResponse.json({ settings: data || [] });
+  } catch (error) {
+    console.error('Settings GET error:', error);
+    return NextResponse.json(
+      { error: 'An error occurred' },
+      { status: 500 }
+    );
+  }
+}
+
 export async function PUT(request: NextRequest) {
   try {
     const session = await getAdminSession();

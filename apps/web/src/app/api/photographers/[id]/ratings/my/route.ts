@@ -8,39 +8,87 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
+
+function isMissingColumnError(error: any, columnName: string) {
+  return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
+}
+
+async function resolvePhotographerByIdentifier(supabase: any, identifier: string) {
+  const withUserId = await supabase
+    .from('photographers')
+    .select('id')
+    .or(`id.eq.${identifier},user_id.eq.${identifier}`)
+    .limit(1)
+    .maybeSingle();
+
+  if (!withUserId.error || !isMissingColumnError(withUserId.error, 'user_id')) {
+    return withUserId;
+  }
+
+  return supabase
+    .from('photographers')
+    .select('id')
+    .eq('id', identifier)
+    .maybeSingle();
+}
+
+async function resolveAttendeeByUser(supabase: any, userId: string) {
+  const byUserId = await supabase
+    .from('attendees')
+    .select('id')
+    .eq('user_id', userId)
+    .limit(1)
+    .maybeSingle();
+
+  if (!byUserId.error || !isMissingColumnError(byUserId.error, 'user_id')) {
+    return byUserId;
+  }
+
+  return supabase
+    .from('attendees')
+    .select('id')
+    .eq('id', userId)
+    .maybeSingle();
+}
 
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
+    const serviceClient = createServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
       return NextResponse.json({ rating: null });
     }
 
-    const { id: photographerId } = params;
+    const { id: photographerIdentifier } = params;
+
+    const { data: photographer } = await resolvePhotographerByIdentifier(
+      serviceClient,
+      photographerIdentifier
+    );
+
+    if (!photographer) {
+      return NextResponse.json({ rating: null });
+    }
 
     // Check if user is an attendee
-    const { data: attendee } = await supabase
-      .from('attendees')
-      .select('id')
-      .eq('id', user.id)
-      .single();
+    const { data: attendee } = await resolveAttendeeByUser(serviceClient, user.id);
 
     if (!attendee) {
       return NextResponse.json({ rating: null });
     }
 
     // Get user's rating
-    const { data: rating, error } = await supabase
+    const { data: rating, error } = await serviceClient
       .from('photographer_ratings')
       .select('rating, review_text, created_at')
-      .eq('photographer_id', photographerId)
-      .eq('attendee_id', user.id)
+      .eq('photographer_id', photographer.id)
+      .eq('attendee_id', attendee.id)
       .single();
 
     if (error && error.code !== 'PGRST116') {
