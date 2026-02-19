@@ -58,38 +58,11 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const { data: credentialRows } = await supabase
-      .from('payment_provider_credentials')
-      .select('provider, is_active')
-      .eq('region_code', country);
-
-    const activeCredentialProviders = new Set(
-      (credentialRows || [])
-        .filter((row) => row.is_active !== false)
-        .map((row) => String(row.provider || '').toLowerCase())
-        .filter((provider) => SUPPORTED_PAYMENT_GATEWAYS.has(provider))
-    );
-
-    const filteredGateways =
-      activeCredentialProviders.size > 0
-        ? gateways.filter((gateway) => activeCredentialProviders.has(gateway))
-        : gateways;
-
-    if (filteredGateways.length === 0) {
-      return NextResponse.json(
-        {
-          error: `No active payment provider credentials configured for ${country}`,
-          failClosed: true,
-        },
-        { status: 503 }
-      );
-    }
-
     return NextResponse.json({
       countryCode: country,
-      gateways: filteredGateways,
+      gateways,
       configuredGateways: gateways,
-      credentialedGateways: activeCredentialProviders.size > 0 ? filteredGateways : [],
+      credentialedGateways: gateways,
       version: String(data.updated_at ? Date.parse(data.updated_at) : Date.now()),
       updatedAt: data.updated_at || new Date().toISOString(),
     });
