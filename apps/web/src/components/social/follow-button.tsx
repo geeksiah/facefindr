@@ -1,9 +1,11 @@
 'use client';
 
 import { UserPlus, UserCheck, Loader2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
 import { useRealtimeSubscription } from '@/hooks/use-realtime';
 import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
@@ -27,6 +29,8 @@ export function FollowButton({
   onFollowChange,
   className,
 }: FollowButtonProps) {
+  const router = useRouter();
+  const toast = useToast();
   const buttonSize = size === 'md' ? 'default' : size;
   const supabase = createClient();
   const [isFollowing, setIsFollowing] = useState(false);
@@ -75,7 +79,9 @@ export function FollowButton({
         return;
       }
 
-      const response = await fetch(`/api/social/follow?type=check&photographerId=${photographerId}`);
+      const response = await fetch(
+        `/api/social/follow?type=check&targetType=creator&targetId=${encodeURIComponent(photographerId)}`
+      );
       if (response.ok) {
         const data = await response.json();
         setIsFollowing(data.isFollowing);
@@ -103,7 +109,7 @@ export function FollowButton({
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       // Redirect to login or show auth prompt
-      window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname);
+      router.push(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
       return;
     }
 
@@ -111,9 +117,12 @@ export function FollowButton({
     try {
       if (isFollowing) {
         // Unfollow
-        const response = await fetch(`/api/social/follow?photographerId=${photographerId}`, {
+        const response = await fetch(
+          `/api/social/follow?targetType=creator&targetId=${encodeURIComponent(photographerId)}`,
+          {
           method: 'DELETE',
-        });
+          }
+        );
 
         if (response.ok) {
           setIsFollowing(false);
@@ -121,13 +130,17 @@ export function FollowButton({
             setFollowerCount(Math.max(0, followerCount - 1));
           }
           onFollowChange?.(false);
+          toast.success('Unfollowed', photographerName ? `You unfollowed ${photographerName}.` : 'Unfollowed successfully.');
+        } else {
+          const data = await response.json().catch(() => ({}));
+          toast.error('Unfollow failed', data?.error || 'Please try again.');
         }
       } else {
         // Follow
         const response = await fetch('/api/social/follow', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ photographerId }),
+          body: JSON.stringify({ targetType: 'creator', targetId: photographerId }),
         });
 
         if (response.ok) {
@@ -136,6 +149,10 @@ export function FollowButton({
             setFollowerCount(followerCount + 1);
           }
           onFollowChange?.(true);
+          toast.success('Following', photographerName ? `You are now following ${photographerName}.` : 'Followed successfully.');
+        } else {
+          const data = await response.json().catch(() => ({}));
+          toast.error('Follow failed', data?.error || 'Please try again.');
         }
       }
     } catch (error) {

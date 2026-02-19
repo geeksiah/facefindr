@@ -23,7 +23,7 @@ export async function GET(
     const { data: photographer } = await supabase
       .from('photographers')
       .select('id, user_id, follower_count, public_profile_slug, is_public_profile')
-      .or(`id.eq.${slug},public_profile_slug.eq.${slug}`)
+      .or(`id.eq.${slug},public_profile_slug.eq.${slug},user_id.eq.${slug}`)
       .single();
 
     if (!photographer) {

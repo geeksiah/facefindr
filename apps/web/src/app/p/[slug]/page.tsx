@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useState, useEffect , useRef } from 'react';
 
 
@@ -31,7 +31,9 @@ import { RatingsDisplay } from '@/components/photographer/ratings-display';
 import { Button } from '@/components/ui/button';
 import { Logo } from '@/components/ui/logo';
 import { QRCodeWithLogo, downloadQRCodeWithLogo } from '@/components/ui/qr-code-with-logo';
+import { useToast } from '@/components/ui/toast';
 import { formatEventDateDisplay } from '@/lib/events/time';
+import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
 
 
@@ -62,6 +64,9 @@ interface CreatorProfile {
 
 export default function CreatorProfilePage() {
   const params = useParams();
+  const router = useRouter();
+  const supabase = createClient();
+  const toast = useToast();
   const searchParams = useSearchParams();
   const slug = params?.slug as string;
   const openInApp = searchParams?.get('app') === '1';
@@ -146,22 +151,42 @@ export default function CreatorProfilePage() {
   }
 
   async function handleFollow() {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      router.push(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
+      return;
+    }
+
+    if (user.id === profile?.id) {
+      toast.info('Own profile', 'You cannot follow yourself.');
+      return;
+    }
+
     setFollowLoading(true);
     try {
       if (isFollowing) {
-        const response = await fetch(`/api/social/follow?photographerId=${profile?.id}`, { method: 'DELETE' });
+        const response = await fetch(
+          `/api/social/follow?targetType=creator&targetId=${encodeURIComponent(profile?.id || '')}`,
+          { method: 'DELETE' }
+        );
         if (response.ok) {
           setIsFollowing(false);
           // Refresh follower count
           if (profile) {
             setProfile({ ...profile, follower_count: Math.max(0, (profile.follower_count || 0) - 1) });
           }
+          toast.success('Unfollowed', `You unfollowed ${profile?.display_name || 'this creator'}.`);
+        } else {
+          const data = await response.json().catch(() => ({}));
+          toast.error('Unfollow failed', data?.error || 'Please try again.');
         }
       } else {
         const response = await fetch('/api/social/follow', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ photographerId: profile?.id }),
+          body: JSON.stringify({ targetType: 'creator', targetId: profile?.id }),
         });
         if (response.ok) {
           setIsFollowing(true);
@@ -169,10 +194,15 @@ export default function CreatorProfilePage() {
           if (profile) {
             setProfile({ ...profile, follower_count: (profile.follower_count || 0) + 1 });
           }
+          toast.success('Following', `You are now following ${profile?.display_name || 'this creator'}.`);
+        } else {
+          const data = await response.json().catch(() => ({}));
+          toast.error('Follow failed', data?.error || 'Please try again.');
         }
       }
     } catch (error) {
       console.error('Follow error:', error);
+      toast.error('Follow failed', 'Please try again.');
     } finally {
       setFollowLoading(false);
     }
