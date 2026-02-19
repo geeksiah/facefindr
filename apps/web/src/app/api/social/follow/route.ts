@@ -59,7 +59,7 @@ async function getAttendeeByIdentifier(supabase: any, identifier: string) {
   const withUserId = await supabase
     .from('attendees')
     .select('id, is_public_profile, public_profile_slug, user_id, allow_follows')
-    .or(`id.eq.${identifier},public_profile_slug.eq.${identifier}`)
+    .or(`id.eq.${identifier},public_profile_slug.eq.${identifier},user_id.eq.${identifier}`)
     .single();
 
   if (
@@ -92,7 +92,7 @@ async function getCreatorByIdentifier(supabase: any, identifier: string) {
   const withUserId = await supabase
     .from('photographers')
     .select('id, is_public_profile, public_profile_slug, user_id, allow_follows')
-    .or(`id.eq.${identifier},public_profile_slug.eq.${identifier}`)
+    .or(`id.eq.${identifier},public_profile_slug.eq.${identifier},user_id.eq.${identifier}`)
     .single();
 
   if (

@@ -89,10 +89,14 @@ export async function GET(request: NextRequest) {
 
     const row = rows?.[0];
     if (!row) {
-      return NextResponse.json(
-        { error: 'Drop-in record not found yet', pending: true },
-        { status: 404 }
-      );
+      return NextResponse.json({
+        success: true,
+        pending: true,
+        status: 'not_found',
+        ready: false,
+        message: 'Drop-in record not found yet',
+        dropInPhoto: null,
+      });
     }
 
     const status = deriveStatus(row);

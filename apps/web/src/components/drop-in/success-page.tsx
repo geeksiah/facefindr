@@ -50,10 +50,6 @@ export function DropInSuccessPage({ basePath }: DropInSuccessPageProps) {
         cache: 'no-store',
       });
 
-      if (response.status === 404) {
-        return false;
-      }
-
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         setState('timeout');
@@ -89,6 +85,12 @@ export function DropInSuccessPage({ basePath }: DropInSuccessPageProps) {
         setState('processing_failed');
         setMessage('Payment succeeded, but processing failed. Please retry processing.');
         return true;
+      }
+
+      if (status === 'not_found') {
+        setState('processing');
+        setMessage('Waiting for your upload record to be created...');
+        return false;
       }
 
       setState('processing');
