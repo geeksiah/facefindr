@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 
+import { getCountryFromRequest, getEffectiveCurrency } from '@/lib/currency';
 import {
   isFlutterwaveConfigured,
   initializeRecurringPayment,
@@ -86,7 +87,11 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const normalizedCurrency = String(requestedCurrency || plan.currency || 'USD').toUpperCase();
+    const detectedCountry = getCountryFromRequest(request.headers) || undefined;
+    const fallbackCurrency = await getEffectiveCurrency(user.id, detectedCountry);
+    const normalizedCurrency = String(
+      requestedCurrency || fallbackCurrency || plan.currency || 'USD'
+    ).toUpperCase();
     const normalizedBillingCycle =
       billingCycle === 'yearly' || billingCycle === 'annual' ? 'annual' : 'monthly';
     const rawPrice = normalizedBillingCycle === 'annual' ? plan.price_yearly : plan.price_monthly;

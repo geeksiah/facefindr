@@ -69,6 +69,7 @@ export async function POST(request: NextRequest) {
     }
 
     const serviceClient = createServiceClient();
+    let orderCurrency: string | null = null;
 
     for (const item of items) {
       if (!item.productId || !item.mediaId || !item.quantity || item.quantity < 1 || item.quantity > 20) {
@@ -85,6 +86,21 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           { error: `Product pricing is not configured for ${item.productName || item.productId}` },
           { status: 503 }
+        );
+      }
+      const itemCurrency = String(pricing.currency || '').toUpperCase();
+      if (!itemCurrency) {
+        return NextResponse.json(
+          { error: `Product currency is not configured for ${item.productName || item.productId}` },
+          { status: 503 }
+        );
+      }
+      if (!orderCurrency) {
+        orderCurrency = itemCurrency;
+      } else if (orderCurrency !== itemCurrency) {
+        return NextResponse.json(
+          { error: 'All print items must use the same currency.' },
+          { status: 400 }
         );
       }
 
@@ -106,6 +122,8 @@ export async function POST(request: NextRequest) {
     const subtotal = normalizedItems.reduce((sum, item) => sum + (item.unitPrice * item.quantity), 0);
     const shippingCost = shipping.shippingCost || 0;
     const total = subtotal + shippingCost;
+    const finalCurrency = orderCurrency || 'USD';
+    const stripeCurrency = finalCurrency.toLowerCase();
 
     // Create order using database function
     const { data: orderId, error: createError } = await serviceClient
@@ -132,7 +150,7 @@ export async function POST(request: NextRequest) {
           quantity: item.quantity,
           unit_price: item.unitPrice,
         })),
-        p_currency: 'USD',
+        p_currency: finalCurrency,
       });
 
     if (createError || !orderId) {
@@ -153,7 +171,7 @@ export async function POST(request: NextRequest) {
     // Create Stripe Checkout Session
     const lineItems = normalizedItems.map(item => ({
       price_data: {
-        currency: 'usd',
+        currency: stripeCurrency,
         product_data: {
           name: `${item.productName} - ${item.productSize}`,
           images: [item.photoUrl],
@@ -167,7 +185,7 @@ export async function POST(request: NextRequest) {
     if (shippingCost > 0) {
       lineItems.push({
         price_data: {
-          currency: 'usd',
+          currency: stripeCurrency,
           product_data: {
             name: 'Shipping',
             images: [],
@@ -226,7 +244,7 @@ export async function POST(request: NextRequest) {
         subtotal,
         shipping: shippingCost,
         total,
-        currency: 'USD',
+        currency: finalCurrency,
       },
     });
 

@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getCountryFromRequest, getEffectiveCurrency } from '@/lib/currency';
 import { getAppUrl } from '@/lib/env';
 import {
   isFlutterwaveConfigured,
@@ -67,7 +68,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const normalizedCurrency = String(requestedCurrency || 'USD').toUpperCase();
+    const detectedCountry = getCountryFromRequest(request.headers) || undefined;
+    const fallbackCurrency = await getEffectiveCurrency(user.id, detectedCountry);
+    const normalizedCurrency = String(requestedCurrency || fallbackCurrency || 'USD').toUpperCase();
     const amountInCents =
       plan.prices?.[normalizedCurrency] ??
       plan.prices?.USD ??

@@ -48,6 +48,7 @@ interface Transaction {
   id: string;
   type: 'purchase' | 'credit_purchase' | 'refund';
   amount: number;
+  currency: string;
   description: string;
   status: 'completed' | 'pending' | 'failed';
   createdAt: string;
@@ -165,6 +166,7 @@ export default function BillingPage() {
           id: t.id,
           type: t.type,
           amount: t.amount,
+          currency: String(t.currency || wallet.currency || 'USD').toUpperCase(),
           description: t.description,
           status: t.status,
           createdAt: t.created_at,
@@ -183,7 +185,7 @@ export default function BillingPage() {
       const response = await fetch('/api/attendee/subscription', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planCode: pack.code }),
+        body: JSON.stringify({ planCode: pack.code, currency: pack.currency }),
       });
       const data = await response.json();
 
@@ -413,7 +415,7 @@ export default function BillingPage() {
                       {new Date(tx.createdAt).toLocaleDateString()}
                     </td>
                     <td className="px-4 py-3 text-sm text-right font-medium text-foreground">
-                      {tx.type === 'refund' ? '-' : ''}{formatCurrency(tx.amount)}
+                      {tx.type === 'refund' ? '-' : ''}{formatCurrency(tx.amount, tx.currency)}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <span className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full ${

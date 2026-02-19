@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getCountryFromRequest, getEffectiveCurrency } from '@/lib/currency';
 import {
   isFlutterwaveConfigured,
   initializeRecurringPayment,
@@ -104,7 +105,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const normalizedCurrency = String(requestedCurrency || 'USD').toUpperCase();
+    const detectedCountry = getCountryFromRequest(request.headers) || undefined;
+    const fallbackCurrency = await getEffectiveCurrency(user.id, detectedCountry);
+    const normalizedCurrency = String(requestedCurrency || fallbackCurrency || 'USD').toUpperCase();
     const planPrices = (plan.prices as Record<string, number> | null) || {};
     const unitAmount = planPrices[normalizedCurrency] ?? planPrices.USD ?? plan.base_price_usd ?? 0;
     if (!unitAmount || unitAmount <= 0) {

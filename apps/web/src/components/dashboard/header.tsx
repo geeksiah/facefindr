@@ -64,7 +64,7 @@ export function DashboardHeader() {
       abortControllerRef.current.abort();
     }
 
-    if (trimmedQuery.length < 1) {
+    if (trimmedQuery.length < 2) {
       setSearchResults([]);
       setIsSearching(false);
       setShowResults(false);
@@ -191,7 +191,7 @@ export function DashboardHeader() {
             placeholder="Search people by name or @FaceTag"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            onFocus={() => setShowResults(searchQuery.trim().length > 0)}
+            onFocus={() => setShowResults(searchQuery.trim().length >= 2)}
             onKeyDown={handleKeyDown}
             className="h-10 w-72 rounded-xl border border-border bg-background pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground transition-all duration-200 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-accent"
           />
@@ -205,7 +205,7 @@ export function DashboardHeader() {
           )}
 
           {/* Search Results Dropdown */}
-          {showResults && searchQuery.trim().length > 0 && (
+          {showResults && searchQuery.trim().length >= 2 && (
             <div className="absolute top-full left-0 right-0 mt-2 bg-card border border-border rounded-xl shadow-lg overflow-hidden z-50">
               {isSearching ? (
                 <div className="p-4 text-center text-muted-foreground text-sm">
@@ -324,7 +324,7 @@ export function DashboardHeader() {
               placeholder="Search events, photographers..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              onFocus={() => setShowResults(searchQuery.trim().length > 0)}
+              onFocus={() => setShowResults(searchQuery.trim().length >= 2)}
               className="h-11 w-full rounded-xl border border-border bg-background pl-10 pr-10 text-sm text-foreground placeholder:text-muted-foreground transition-all duration-200 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-accent"
               autoFocus
             />
@@ -339,7 +339,7 @@ export function DashboardHeader() {
           </div>
           
           {/* Mobile search results */}
-          {showResults && searchQuery.trim().length > 0 && (
+          {showResults && searchQuery.trim().length >= 2 && (
             <div className="mt-2 bg-card border border-border rounded-xl overflow-hidden">
               {isSearching ? (
                 <div className="p-4 text-center text-muted-foreground text-sm">
