@@ -30,11 +30,11 @@ export async function GET(
     `;
     const minimalSelect = 'id, display_name, face_tag, profile_photo_url';
 
-    const queryProfile = async (selectClause: string) => {
+    const queryProfile = async (selectClause: string, useUserId = true) => {
       let query = supabase.from('attendees').select(selectClause);
 
       if (isUuid) {
-        query = query.eq('id', slug);
+        query = useUserId ? query.or(`id.eq.${slug},user_id.eq.${slug}`) : query.eq('id', slug);
       } else if (isFaceTag) {
         const tag = slug.startsWith('@') ? slug : `@${slug}`;
         query = query.eq('face_tag', tag);
@@ -49,7 +49,7 @@ export async function GET(
 
     // Fallback if columns don't exist
     if (error?.code === '42703') {
-      const fallback = await queryProfile(minimalSelect);
+      const fallback = await queryProfile(minimalSelect, false);
       profile = fallback.data;
       error = fallback.error;
     }

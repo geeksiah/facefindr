@@ -130,29 +130,45 @@ async function resolveFollowingUserId(
   targetType: 'creator' | 'attendee',
   identifier: string
 ) {
-  if (targetType === 'attendee') {
-    const { data, error } = await getAttendeeByIdentifier(supabase, identifier);
+  const tryResolve = async (type: 'creator' | 'attendee') => {
+    if (type === 'attendee') {
+      const { data, error } = await getAttendeeByIdentifier(supabase, identifier);
+      if (error || !data) return { data: null, error };
+      return {
+        data: {
+          profileId: data.id,
+          userId: (data as any).user_id || data.id,
+          isPublicProfile: Boolean((data as any).is_public_profile),
+          allowFollows: (data as any).allow_follows !== false,
+          resolvedType: 'attendee' as const,
+        },
+        error: null,
+      };
+    }
+
+    const { data, error } = await getCreatorByIdentifier(supabase, identifier);
     if (error || !data) return { data: null, error };
     return {
       data: {
         profileId: data.id,
         userId: (data as any).user_id || data.id,
         isPublicProfile: Boolean((data as any).is_public_profile),
+        allowFollows: (data as any).allow_follows !== false,
+        resolvedType: 'creator' as const,
       },
       error: null,
     };
-  }
-
-  const { data, error } = await getCreatorByIdentifier(supabase, identifier);
-  if (error || !data) return { data: null, error };
-  return {
-    data: {
-      profileId: data.id,
-      userId: (data as any).user_id || data.id,
-      isPublicProfile: Boolean((data as any).is_public_profile),
-    },
-    error: null,
   };
+
+  const primary = await tryResolve(targetType);
+  if (primary.data) return primary;
+
+  // Fallback for legacy clients passing wrong targetType.
+  const fallbackType = targetType === 'creator' ? 'attendee' : 'creator';
+  const fallback = await tryResolve(fallbackType);
+  if (fallback.data) return fallback;
+
+  return primary;
 }
 
 // POST - Follow a creator
@@ -169,7 +185,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const { photographerId, attendeeId, targetId, targetType } = body;
-    const resolvedTargetType =
+    let resolvedTargetType =
       targetType === 'attendee'
         ? 'attendee'
         : targetType === 'creator' || targetType === 'photographer'
@@ -185,54 +201,44 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Target ID required' }, { status: 400 });
     }
 
-    let followingUserId = resolvedTargetId;
+    const target = await resolveFollowingUserId(
+      lookupClient,
+      resolvedTargetType as 'creator' | 'attendee',
+      resolvedTargetId
+    );
 
-    if (resolvedTargetType === 'creator') {
-      // Check if photographer exists and allows follows
-      const creatorResult = await getCreatorByIdentifier(lookupClient, resolvedTargetId);
-      const photographer = creatorResult.data as any;
+    if (!target.data) {
+      return NextResponse.json(
+        { error: resolvedTargetType === 'creator' ? 'Creator not found' : 'User not found' },
+        { status: 404 }
+      );
+    }
 
-      if (!photographer) {
-        return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
-      }
+    resolvedTargetType = target.data.resolvedType;
+    const followingUserId = target.data.userId;
 
-      followingUserId = photographer.user_id || photographer.id;
+    if (!target.data.isPublicProfile) {
+      return NextResponse.json(
+        {
+          error:
+            resolvedTargetType === 'creator'
+              ? 'Creator profile is private'
+              : 'User profile is private',
+        },
+        { status: 403 }
+      );
+    }
 
-      if (!photographer.is_public_profile) {
-        return NextResponse.json({ error: 'Creator profile is private' }, { status: 403 });
-      }
-
-      if (photographer.allow_follows === false) {
-        return NextResponse.json({ error: 'This creator does not accept followers' }, { status: 400 });
-      }
-    } else {
-      const attendeeWithAllow = await getAttendeeByIdentifier(lookupClient, resolvedTargetId);
-
-      const attendee =
-        attendeeWithAllow.error && isMissingColumnError(attendeeWithAllow.error, 'allow_follows')
-          ? (
-              await lookupClient
-                .from('attendees')
-                .select('id, is_public_profile, display_name')
-                .eq('id', resolvedTargetId)
-                .limit(1)
-                .maybeSingle()
-            ).data
-          : attendeeWithAllow.data;
-
-      if (!attendee) {
-        return NextResponse.json({ error: 'User not found' }, { status: 404 });
-      }
-
-      followingUserId = (attendee as any).user_id || attendee.id;
-
-      if (!attendee.is_public_profile) {
-        return NextResponse.json({ error: 'User profile is private' }, { status: 403 });
-      }
-
-      if ((attendee as any).allow_follows === false) {
-        return NextResponse.json({ error: 'This user does not accept followers' }, { status: 400 });
-      }
+    if (!target.data.allowFollows) {
+      return NextResponse.json(
+        {
+          error:
+            resolvedTargetType === 'creator'
+              ? 'This creator does not accept followers'
+              : 'This user does not accept followers',
+        },
+        { status: 400 }
+      );
     }
 
     const normalizedFollowerType =
@@ -324,13 +330,14 @@ export async function DELETE(request: NextRequest) {
 
     const resolvedTarget = await resolveFollowingUserId(lookupClient, targetType as 'creator' | 'attendee', targetId);
     const followingUserId = resolvedTarget.data?.userId || targetId;
+    const resolvedFollowingType = resolvedTarget.data?.resolvedType || targetType;
 
     const { error } = await supabase
       .from('follows')
       .delete()
       .eq('follower_id', user.id)
       .eq('following_id', followingUserId)
-      .eq('following_type', targetType);
+      .eq('following_type', resolvedFollowingType);
 
     if (error) {
       throw error;
@@ -342,10 +349,10 @@ export async function DELETE(request: NextRequest) {
         actor_id: user.id,
         action: 'follow_deleted',
         resource_type: 'follow',
-        resource_id: `${user.id}:${targetType}:${targetId}`,
+        resource_id: `${user.id}:${resolvedFollowingType}:${targetId}`,
         metadata: {
           following_id: followingUserId,
-          following_type: targetType,
+          following_type: resolvedFollowingType,
         },
         ip_address:
           request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
@@ -354,7 +361,7 @@ export async function DELETE(request: NextRequest) {
       }).catch(() => {});
     }
 
-    return NextResponse.json({ success: true, followingType: targetType, followingId: targetId, followingUserId });
+    return NextResponse.json({ success: true, followingType: resolvedFollowingType, followingId: targetId, followingUserId });
 
   } catch (error) {
     console.error('Unfollow error:', error);
@@ -395,6 +402,7 @@ export async function GET(request: NextRequest) {
         targetId
       );
       const followingUserId = resolvedTarget.data?.userId || targetId;
+      const resolvedFollowingType = resolvedTarget.data?.resolvedType || targetType;
 
       // Check if following a specific user
       const { data } = await supabase
@@ -402,7 +410,7 @@ export async function GET(request: NextRequest) {
         .select('id')
         .eq('follower_id', user.id)
         .eq('following_id', followingUserId)
-        .eq('following_type', targetType)
+        .eq('following_type', resolvedFollowingType)
         .single();
 
       return NextResponse.json({ isFollowing: !!data });

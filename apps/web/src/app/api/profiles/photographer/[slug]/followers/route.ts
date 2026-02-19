@@ -10,6 +10,10 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { createServiceClient } from '@/lib/supabase/server';
 
+function isMissingColumnError(error: any, columnName: string) {
+  return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { slug: string } }
@@ -20,11 +24,25 @@ export async function GET(
     const includeList = request.nextUrl.searchParams.get('include') === 'list';
 
     // Get photographer by slug or ID
-    const { data: photographer } = await supabase
+    const withUserId = await supabase
       .from('photographers')
       .select('id, user_id, follower_count, public_profile_slug, is_public_profile')
       .or(`id.eq.${slug},public_profile_slug.eq.${slug},user_id.eq.${slug}`)
-      .single();
+      .limit(1)
+      .maybeSingle();
+
+    const fallback = await supabase
+      .from('photographers')
+      .select('id, follower_count, public_profile_slug, is_public_profile')
+      .or(`id.eq.${slug},public_profile_slug.eq.${slug}`)
+      .limit(1)
+      .maybeSingle();
+
+    const photographer =
+      withUserId.data ||
+      (withUserId.error && isMissingColumnError(withUserId.error, 'user_id')
+        ? (fallback.data ? { ...fallback.data, user_id: fallback.data.id } : null)
+        : null);
 
     if (!photographer) {
       return NextResponse.json({ error: 'Creator not found' }, { status: 404 });

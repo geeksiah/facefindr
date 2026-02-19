@@ -28,6 +28,7 @@ import { useState, useEffect , useRef } from 'react';
 
 
 import { RatingsDisplay } from '@/components/photographer/ratings-display';
+import { TipCreator } from '@/components/social/tip-photographer';
 import { Button } from '@/components/ui/button';
 import { Logo } from '@/components/ui/logo';
 import { QRCodeWithLogo, downloadQRCodeWithLogo } from '@/components/ui/qr-code-with-logo';
@@ -78,6 +79,7 @@ export default function CreatorProfilePage() {
   const [followLoading, setFollowLoading] = useState(false);
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [showQRCode, setShowQRCode] = useState(false);
+  const [showTipModal, setShowTipModal] = useState(false);
   const [copied, setCopied] = useState(false);
   const [downloadingQr, setDownloadingQr] = useState(false);
   const qrCodeRef = useRef<HTMLDivElement>(null);
@@ -393,7 +395,7 @@ export default function CreatorProfilePage() {
                 <p className="text-secondary">Events</p>
               </div>
               <div className="text-center">
-                <RatingsDisplay photographerId={profile.id} variant="compact" />
+                <RatingsDisplay photographerId={profile.id} showRatingButton={true} variant="compact" />
               </div>
             </div>
 
@@ -423,26 +425,31 @@ export default function CreatorProfilePage() {
 
             {/* Follow Button */}
             <div className="mt-6">
-              <Button
-                onClick={handleFollow}
-                disabled={followLoading}
-                variant={isFollowing ? 'outline' : 'default'}
-                className="min-w-[140px]"
-              >
-                {followLoading ? (
-                  <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                ) : isFollowing ? (
-                  <>
-                    <UserCheck className="h-4 w-4 mr-2" />
-                    Following
-                  </>
-                ) : (
-                  <>
-                    <UserPlus className="h-4 w-4 mr-2" />
-                    Follow
-                  </>
-                )}
-              </Button>
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  onClick={handleFollow}
+                  disabled={followLoading}
+                  variant={isFollowing ? 'outline' : 'default'}
+                  className="min-w-[140px]"
+                >
+                  {followLoading ? (
+                    <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                  ) : isFollowing ? (
+                    <>
+                      <UserCheck className="h-4 w-4 mr-2" />
+                      Following
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="h-4 w-4 mr-2" />
+                      Follow
+                    </>
+                  )}
+                </Button>
+                <Button variant="outline" onClick={() => setShowTipModal(true)}>
+                  Tip Creator
+                </Button>
+              </div>
             </div>
           </div>
         </div>
@@ -579,6 +586,24 @@ export default function CreatorProfilePage() {
               {downloadingQr ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
               {downloadingQr ? 'Downloading...' : 'Download QR Code'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {showTipModal && (
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={() => setShowTipModal(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-border bg-card p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <TipCreator
+              photographerId={profile.id}
+              photographerName={profile.display_name}
+              onCancel={() => setShowTipModal(false)}
+            />
           </div>
         </div>
       )}

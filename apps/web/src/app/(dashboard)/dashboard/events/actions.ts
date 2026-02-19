@@ -9,7 +9,7 @@ import {
   LimitExceededError,
   FeatureNotEnabledError,
 } from '@/lib/subscription/enforcement';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 import {
   createEventSchema,
   updateEventSchema,
@@ -310,7 +310,7 @@ export async function updateEventStatus(
   // Verify ownership
   const { data: existingEvent } = await supabase
     .from('events')
-    .select('photographer_id')
+    .select('photographer_id, status, is_public, name, public_slug')
     .eq('id', eventId)
     .single();
 
@@ -330,6 +330,62 @@ export async function updateEventStatus(
   if (error) {
     console.error('Error updating event status:', error);
     return { error: 'Failed to update event status' };
+  }
+
+  // Notify followers when a public event becomes active.
+  if (status === 'active' && existingEvent.is_public) {
+    try {
+      const service = createServiceClient();
+      const [{ data: followers }, { data: creatorProfile }] = await Promise.all([
+        service
+          .from('follows')
+          .select('follower_id')
+          .eq('following_id', user.id)
+          .in('following_type', ['creator', 'photographer'])
+          .eq('status', 'active')
+          .eq('notify_new_event', true),
+        service
+          .from('photographers')
+          .select('display_name')
+          .eq('id', user.id)
+          .maybeSingle(),
+      ]);
+
+      const followerIds = Array.from(
+        new Set((followers || []).map((row: any) => row.follower_id).filter((id: string) => id && id !== user.id))
+      );
+
+      if (followerIds.length > 0) {
+        const creatorName = creatorProfile?.display_name || 'A creator';
+        const eventName = existingEvent.name || 'New Event';
+        const eventPath = existingEvent.public_slug
+          ? `/e/${existingEvent.public_slug}`
+          : `/e/${eventId}`;
+        const now = new Date().toISOString();
+
+        await service.from('notifications').insert(
+          followerIds.map((followerId) => ({
+            user_id: followerId,
+            template_code: 'creator_new_public_event',
+            channel: 'in_app',
+            subject: `${creatorName} published a new event`,
+            body: `${creatorName} just published: ${eventName}`,
+            status: 'delivered',
+            sent_at: now,
+            delivered_at: now,
+            metadata: {
+              type: 'new_public_event',
+              creatorId: user.id,
+              eventId,
+              eventName,
+              eventPath,
+            },
+          }))
+        );
+      }
+    } catch (notifyError) {
+      console.error('Failed to notify followers about new public event:', notifyError);
+    }
   }
 
   revalidatePath(`/dashboard/events/${eventId}`);

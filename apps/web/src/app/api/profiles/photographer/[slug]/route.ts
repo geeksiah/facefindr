@@ -113,6 +113,14 @@ export async function GET(
       .eq('status', 'active');
     eventCount = count;
 
+    const followTargetId = (profile as any).user_id || profile.id;
+    const { count: followersCount } = await supabase
+      .from('follows')
+      .select('id', { count: 'exact', head: true })
+      .eq('following_id', followTargetId)
+      .in('following_type', ['creator', 'photographer'])
+      .eq('status', 'active');
+
     // Generate signed cover image URLs for events
     const eventsWithCovers = (events || []).map((event: any) => {
       if (event.cover_image_url && !event.cover_image_url.startsWith('http')) {
@@ -126,6 +134,7 @@ export async function GET(
     return NextResponse.json({
       profile: {
         ...profile,
+        follower_count: followersCount || profile.follower_count || 0,
         follow_target_id: (profile as any).user_id || profile.id,
         website_url: (profile as any).website_url ?? (profile as any).website ?? null,
         instagram_url: (profile as any).instagram_url ?? (profile as any).instagram ?? null,

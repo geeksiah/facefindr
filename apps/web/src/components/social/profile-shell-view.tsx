@@ -16,6 +16,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
+import { RatingsDisplay } from '@/components/photographer/ratings-display';
+import { TipCreator } from '@/components/social/tip-photographer';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { useRealtimeSubscription } from '@/hooks/use-realtime';
@@ -83,6 +85,7 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
   const [isFollowing, setIsFollowing] = useState(false);
   const [followLoading, setFollowLoading] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [showTipModal, setShowTipModal] = useState(false);
 
   const apiPath = useMemo(
     () =>
@@ -419,6 +422,21 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
             <p className="text-xs text-secondary">Account Type</p>
           </div>
         </div>
+
+        {isCreator && (
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <RatingsDisplay
+              photographerId={creatorProfile.id}
+              showRatingButton={currentUserId !== targetFollowId}
+              variant="full"
+            />
+            {currentUserId !== targetFollowId && (
+              <Button variant="outline" size="sm" onClick={() => setShowTipModal(true)}>
+                Tip Creator
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       {isCreator && Array.isArray(creatorProfile.events) && creatorProfile.events.length > 0 && (
@@ -442,6 +460,18 @@ export function ProfileShellView({ profileType, shell, slug }: ProfileShellViewP
                 </div>
               </Link>
             ))}
+          </div>
+        </div>
+      )}
+
+      {isCreator && showTipModal && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6">
+            <TipCreator
+              photographerId={creatorProfile.id}
+              photographerName={creatorProfile.display_name}
+              onCancel={() => setShowTipModal(false)}
+            />
           </div>
         </div>
       )}
