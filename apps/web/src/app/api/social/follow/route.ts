@@ -60,7 +60,8 @@ async function getAttendeeByIdentifier(supabase: any, identifier: string) {
     .from('attendees')
     .select('id, is_public_profile, public_profile_slug, user_id, allow_follows')
     .or(`id.eq.${identifier},public_profile_slug.eq.${identifier},user_id.eq.${identifier}`)
-    .single();
+    .limit(1)
+    .maybeSingle();
 
   if (
     !withUserId.error ||
@@ -74,7 +75,8 @@ async function getAttendeeByIdentifier(supabase: any, identifier: string) {
     .from('attendees')
     .select('id, is_public_profile, public_profile_slug')
     .or(`id.eq.${identifier},public_profile_slug.eq.${identifier}`)
-    .single();
+    .limit(1)
+    .maybeSingle();
 
   return {
     data: fallback.data
@@ -93,7 +95,8 @@ async function getCreatorByIdentifier(supabase: any, identifier: string) {
     .from('photographers')
     .select('id, is_public_profile, public_profile_slug, user_id, allow_follows')
     .or(`id.eq.${identifier},public_profile_slug.eq.${identifier},user_id.eq.${identifier}`)
-    .single();
+    .limit(1)
+    .maybeSingle();
 
   if (
     !withUserId.error ||
@@ -107,7 +110,8 @@ async function getCreatorByIdentifier(supabase: any, identifier: string) {
     .from('photographers')
     .select('id, is_public_profile, public_profile_slug')
     .or(`id.eq.${identifier},public_profile_slug.eq.${identifier}`)
-    .single();
+    .limit(1)
+    .maybeSingle();
 
   return {
     data: fallback.data
@@ -156,6 +160,7 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = await getAuthClient(request);
     const serviceClient = getOptionalServiceClient();
+    const lookupClient = serviceClient ?? supabase;
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -184,7 +189,7 @@ export async function POST(request: NextRequest) {
 
     if (resolvedTargetType === 'creator') {
       // Check if photographer exists and allows follows
-      const creatorResult = await getCreatorByIdentifier(supabase, resolvedTargetId);
+      const creatorResult = await getCreatorByIdentifier(lookupClient, resolvedTargetId);
       const photographer = creatorResult.data as any;
 
       if (!photographer) {
@@ -201,16 +206,17 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'This creator does not accept followers' }, { status: 400 });
       }
     } else {
-      const attendeeWithAllow = await getAttendeeByIdentifier(supabase, resolvedTargetId);
+      const attendeeWithAllow = await getAttendeeByIdentifier(lookupClient, resolvedTargetId);
 
       const attendee =
         attendeeWithAllow.error && isMissingColumnError(attendeeWithAllow.error, 'allow_follows')
           ? (
-              await supabase
+              await lookupClient
                 .from('attendees')
                 .select('id, is_public_profile, display_name')
                 .eq('id', resolvedTargetId)
-                .single()
+                .limit(1)
+                .maybeSingle()
             ).data
           : attendeeWithAllow.data;
 
@@ -289,6 +295,7 @@ export async function DELETE(request: NextRequest) {
   try {
     const supabase = await getAuthClient(request);
     const serviceClient = getOptionalServiceClient();
+    const lookupClient = serviceClient ?? supabase;
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -315,7 +322,7 @@ export async function DELETE(request: NextRequest) {
     const normalizedFollowerType =
       normalizeUserType(user.user_metadata?.user_type) === 'creator' ? 'creator' : 'attendee';
 
-    const resolvedTarget = await resolveFollowingUserId(supabase, targetType as 'creator' | 'attendee', targetId);
+    const resolvedTarget = await resolveFollowingUserId(lookupClient, targetType as 'creator' | 'attendee', targetId);
     const followingUserId = resolvedTarget.data?.userId || targetId;
 
     const { error } = await supabase
@@ -359,6 +366,8 @@ export async function DELETE(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const supabase = await getAuthClient(request);
+    const serviceClient = getOptionalServiceClient();
+    const lookupClient = serviceClient ?? supabase;
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -381,7 +390,7 @@ export async function GET(request: NextRequest) {
 
     if (type === 'check' && targetId) {
       const resolvedTarget = await resolveFollowingUserId(
-        supabase,
+        lookupClient,
         targetType as 'creator' | 'attendee',
         targetId
       );
@@ -459,7 +468,7 @@ export async function GET(request: NextRequest) {
           targetAttendeeId = attendee.id;
           targetAttendeeFollowId = user.id;
         } else {
-          const { data: attendee } = await getAttendeeByIdentifier(supabase, targetAttendeeId);
+          const { data: attendee } = await getAttendeeByIdentifier(lookupClient, targetAttendeeId);
 
           if (!attendee) {
             return NextResponse.json({ error: 'User not found' }, { status: 404 });
@@ -556,7 +565,7 @@ export async function GET(request: NextRequest) {
         targetCreatorFollowId = user.id;
       } else {
         // Check if photographer exists and profile is public
-        const { data: photographer } = await getCreatorByIdentifier(supabase, targetCreatorId);
+        const { data: photographer } = await getCreatorByIdentifier(lookupClient, targetCreatorId);
 
         if (!photographer) {
           return NextResponse.json({ error: 'Creator not found' }, { status: 404 });

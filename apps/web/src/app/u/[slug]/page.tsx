@@ -147,7 +147,11 @@ export default function AttendeeProfilePage() {
   }
 
   async function handleFollowToggle() {
-    if (!profile?.id || followLoading || profile.allow_follows === false) {
+    if (!profile?.id || followLoading) {
+      return;
+    }
+    if (profile.allow_follows === false) {
+      toast.info('Follows disabled', 'This user does not accept new followers.');
       return;
     }
     const followTargetId = profile.follow_target_id || profile.id;
