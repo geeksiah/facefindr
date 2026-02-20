@@ -119,7 +119,7 @@ export async function validateShareLink(
       .select(`
         *,
         events (
-          id, name, date, location, cover_image_url, photographer_id,
+          id, name, event_date, location, cover_image_url, photographer_id,
           status, public_slug, is_publicly_listed, allow_anonymous_scan,
           photographers (display_name, profile_photo_url)
         )
@@ -219,7 +219,7 @@ export async function getPublicEvent(
     const { data: event, error } = await supabase
       .from('events')
       .select(`
-        id, name, description, date, end_date, location, cover_image_url,
+        id, name, description, event_date, expires_at, location, cover_image_url,
         status, public_slug, short_link, is_publicly_listed, allow_anonymous_scan,
         require_access_code, public_access_code, currency_code,
         photographers (id, display_name, profile_photo_url, bio)
@@ -252,7 +252,7 @@ export async function getPublicEvent(
       .from('media')
       .select('id, thumbnail_path, created_at')
       .eq('event_id', event.id)
-      .eq('is_processed', true)
+      .is('deleted_at', null)
       .order('created_at', { ascending: false })
       .limit(100);
     
@@ -261,7 +261,7 @@ export async function getPublicEvent(
       .from('media')
       .select('id', { count: 'exact', head: true })
       .eq('event_id', event.id)
-      .eq('is_processed', true);
+      .is('deleted_at', null);
     
     return { 
       success: true, 

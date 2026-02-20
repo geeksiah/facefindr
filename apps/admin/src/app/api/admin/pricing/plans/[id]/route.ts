@@ -107,12 +107,23 @@ export async function DELETE(
 
     const { id } = params;
 
-    // Check if any active subscriptions use this plan
+    const { data: plan, error: planError } = await supabaseAdmin
+      .from('subscription_plans')
+      .select('code')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (planError) throw planError;
+    if (!plan) {
+      return NextResponse.json({ error: 'Plan not found' }, { status: 404 });
+    }
+
+    // Check if any active creator subscriptions use this plan code
     const { count } = await supabaseAdmin
       .from('subscriptions')
       .select('id', { count: 'exact', head: true })
-      .eq('plan_id', id)
-      .eq('status', 'active');
+      .eq('plan_code', plan.code)
+      .in('status', ['active', 'trialing', 'past_due']);
 
     if (count && count > 0) {
       return NextResponse.json(

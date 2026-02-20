@@ -11,11 +11,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
 // Helper to check admin status
-async function isAdmin(supabase: any, userId: string): Promise<boolean> {
+async function isAdmin(supabase: any, email: string | undefined): Promise<boolean> {
+  if (!email) return false;
   const { data } = await supabase
     .from('admin_users')
     .select('id')
-    .eq('user_id', userId)
+    .eq('email', email.toLowerCase())
     .eq('is_active', true)
     .single();
   
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
     const supabase = await createClient();
     
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user || !(await isAdmin(supabase, user.id))) {
+    if (!user || !(await isAdmin(supabase, user.email))) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

@@ -35,17 +35,16 @@ export async function GET(
       id, display_name, face_tag, bio, profile_photo_url,
       website, instagram, twitter, facebook,
       is_public_profile, allow_follows, follower_count,
-      public_profile_slug, created_at, user_id
+      public_profile_slug, created_at
     `;
     const minimalSelect =
       'id, display_name, face_tag, bio, profile_photo_url, website, instagram, twitter, facebook, is_public_profile, allow_follows, follower_count, created_at';
 
     const queryProfile = async (selectClause: string) => {
-      const supportsUserId = selectClause.includes('user_id');
       let q = supabase.from('photographers').select(selectClause);
 
       if (isUuid) {
-        q = supportsUserId ? q.or(`id.eq.${slug},user_id.eq.${slug}`) : q.eq('id', slug);
+        q = q.eq('id', slug);
       } else if (isFaceTag) {
         const tag = slug.startsWith('@') ? slug : `@${slug}`;
         q = q.eq('face_tag', tag);
@@ -118,7 +117,7 @@ export async function GET(
       .eq('status', 'active');
     eventCount = count;
 
-    const followTargetIds = uniqueStringValues([(profile as any).user_id || profile.id, profile.id]);
+    const followTargetIds = [profile.id];
     let followersCountQuery = supabase
       .from('follows')
       .select('id', { count: 'exact', head: true })
@@ -145,7 +144,7 @@ export async function GET(
       profile: {
         ...profile,
         follower_count: followersCount || profile.follower_count || 0,
-        follow_target_id: (profile as any).user_id || profile.id,
+        follow_target_id: profile.id,
         website_url: (profile as any).website_url ?? (profile as any).website ?? null,
         instagram_url: (profile as any).instagram_url ?? (profile as any).instagram ?? null,
         twitter_url: (profile as any).twitter_url ?? (profile as any).twitter ?? null,

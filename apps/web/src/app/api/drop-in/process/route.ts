@@ -220,7 +220,6 @@ export async function POST(request: NextRequest) {
               status: 'pending',
               requires_premium: !areContacts && !dropInPhoto.is_gifted && !isRegisteredForEvents,
               is_gifted: dropInPhoto.is_gifted,
-              gift_message_available: dropInPhoto.is_gifted && !!dropInPhoto.gift_message,
             });
 
           await supabase

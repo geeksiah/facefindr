@@ -41,7 +41,6 @@ interface CreatorRow extends ReconcileRowBase {
 interface AttendeeRow extends ReconcileRowBase {
   attendee_id: string;
   plan_code: string;
-  cancel_at_period_end?: boolean | null;
   canceled_at?: string | null;
 }
 
@@ -166,7 +165,7 @@ async function fetchAttendeeRows(
   let query = supabase
     .from('attendee_subscriptions')
     .select(
-      'id, attendee_id, plan_code, status, payment_provider, external_subscription_id, external_customer_id, external_plan_id, billing_cycle, currency, amount_cents, current_period_start, current_period_end, cancel_at_period_end, canceled_at, metadata'
+      'id, attendee_id, plan_code, status, payment_provider, external_subscription_id, external_customer_id, external_plan_id, billing_cycle, currency, amount_cents, current_period_start, current_period_end, canceled_at, metadata'
     )
     .not('external_subscription_id', 'is', null)
     .limit(limit);
@@ -269,7 +268,16 @@ async function reconcileSubscriptionRow(params: {
           : null),
       currentPeriodStart: row.current_period_start || null,
       currentPeriodEnd: row.current_period_end || null,
-      cancelAtPeriodEnd: scope === 'vault_subscription' ? isCancelled : Boolean((row as CreatorRow | AttendeeRow).cancel_at_period_end),
+      cancelAtPeriodEnd:
+        scope === 'vault_subscription'
+          ? isCancelled
+          : scope === 'creator_subscription'
+          ? Boolean((row as CreatorRow).cancel_at_period_end)
+          : Boolean(
+              (row as AttendeeRow).metadata &&
+                typeof (row as AttendeeRow).metadata === 'object' &&
+                (row as AttendeeRow).metadata?.cancel_at_period_end === true
+            ),
       canceledAt:
         isCancelled
           ? new Date().toISOString()

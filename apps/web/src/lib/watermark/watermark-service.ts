@@ -273,9 +273,8 @@ export async function updateMediaPreviews(
   const { error } = await supabase
     .from('media')
     .update({
-      preview_path: previewPath,
+      watermarked_path: previewPath,
       thumbnail_path: thumbnailPath,
-      processing_status: 'completed',
     })
     .eq('id', mediaId);
 
@@ -299,10 +298,10 @@ export async function batchGeneratePreviews(
   // Get all media without previews
   const { data: mediaList } = await supabase
     .from('media')
-    .select('id, file_path')
+    .select('id, storage_path')
     .eq('event_id', eventId)
-    .is('preview_path', null)
-    .eq('processing_status', 'pending');
+    .is('watermarked_path', null)
+    .is('deleted_at', null);
 
   if (!mediaList || mediaList.length === 0) {
     return { processed: 0, failed: 0 };
@@ -316,12 +315,6 @@ export async function batchGeneratePreviews(
   
   for (const media of mediaList) {
     try {
-      // Update status to processing
-      await supabase
-        .from('media')
-        .update({ processing_status: 'processing' })
-        .eq('id', media.id);
-
       // Generate preview
       // In production, this would call the Edge Function
       // For now, just mark as completed
@@ -329,18 +322,13 @@ export async function batchGeneratePreviews(
       await supabase
         .from('media')
         .update({
-          processing_status: 'completed',
-          // preview_path would be set by Edge Function
+          // watermarked_path would be set by the watermark processor in production
         })
         .eq('id', media.id);
 
       processed++;
     } catch {
       failed++;
-      await supabase
-        .from('media')
-        .update({ processing_status: 'failed' })
-        .eq('id', media.id);
     }
   }
 

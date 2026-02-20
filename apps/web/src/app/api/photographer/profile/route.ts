@@ -10,23 +10,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { createClient } from '@/lib/supabase/server';
 
-function isMissingColumnError(error: any, columnName: string) {
-  return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
-}
-
 async function resolvePhotographerProfileByUser(supabase: any, userId: string) {
-  const byUserId = await supabase
-    .from('photographers')
-    .select('*')
-    .eq('user_id', userId)
-    .limit(1)
-    .maybeSingle();
-
-  if (!byUserId.error || !isMissingColumnError(byUserId.error, 'user_id')) {
-    return byUserId;
-  }
-
-  const fallback = await supabase
+  const byId = await supabase
     .from('photographers')
     .select('*')
     .eq('id', userId)
@@ -34,8 +19,8 @@ async function resolvePhotographerProfileByUser(supabase: any, userId: string) {
     .maybeSingle();
 
   return {
-    data: fallback.data ? { ...fallback.data, user_id: fallback.data.id } : fallback.data,
-    error: fallback.error,
+    data: byId.data ? { ...byId.data, user_id: byId.data.id } : byId.data,
+    error: byId.error,
   };
 }
 

@@ -248,7 +248,7 @@ async function handleRefund(
     .single();
 
   if (transaction) {
-    await supabase.from('entitlements').delete().eq('transaction_id', transaction.id);
+    await supabase.from('entitlements').delete().eq('purchase_id', transaction.id);
   }
 }
 
@@ -337,7 +337,7 @@ async function createEntitlements(
     // Create bulk entitlement for all event photos
     await supabase.from('entitlements').insert({
       event_id: transaction.event_id,
-      transaction_id: transaction.id,
+      purchase_id: transaction.id,
       attendee_id: transaction.attendee_id,
       entitlement_type: 'bulk',
     });
@@ -345,7 +345,7 @@ async function createEntitlements(
     // Create individual entitlements
     const entitlements = mediaIds.map((mediaId: string) => ({
       event_id: transaction.event_id,
-      transaction_id: transaction.id,
+      purchase_id: transaction.id,
       attendee_id: transaction.attendee_id,
       media_id: mediaId,
       entitlement_type: 'single' as const,
@@ -415,16 +415,16 @@ async function handleSubscriptionLifecycle(
           amount_cents: amountCents,
           current_period_start: currentPeriodStart,
           current_period_end: currentPeriodEnd,
-          cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
           canceled_at: canceledAt,
-          can_discover_non_contacts: isPremium,
-          can_upload_drop_ins: isPremium,
-          can_receive_all_drop_ins: isPremium,
-          can_search_social_media: isPremiumPlus,
-          can_search_web: isPremiumPlus,
           last_webhook_event_at: new Date().toISOString(),
           metadata: {
             stripe_event: eventType,
+            cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
+            can_discover_non_contacts: isPremium,
+            can_upload_drop_ins: isPremium,
+            can_receive_all_drop_ins: isPremium,
+            can_search_social_media: isPremiumPlus,
+            can_search_web: isPremiumPlus,
           },
         },
         { onConflict: 'attendee_id' }
@@ -478,7 +478,6 @@ async function handleSubscriptionLifecycle(
       {
         photographer_id: photographerId,
         plan_code: metadata.plan_code || 'free',
-        plan_id: metadata.plan_id || null,
         status,
         stripe_subscription_id: subscription.id,
         stripe_customer_id: typeof subscription.customer === 'string' ? subscription.customer : null,

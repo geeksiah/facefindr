@@ -38,7 +38,6 @@ export async function GET(request: NextRequest) {
         sent_at,
         viewed_at,
         is_gifted,
-        gift_message_available,
         gift_message_viewed,
         requires_premium,
         drop_in_photo_id,
@@ -178,7 +177,7 @@ export async function POST(request: NextRequest) {
       updates.viewed_at = new Date().toISOString();
 
       // Unlock gift message if available
-      if (notification.gift_message_available && !notification.gift_message_viewed) {
+      if (dropInPhoto?.is_gifted && dropInPhoto?.gift_message && !notification.gift_message_viewed) {
         updates.gift_message_viewed = true;
 
         // Update drop-in photo to mark message as unlocked
@@ -190,15 +189,23 @@ export async function POST(request: NextRequest) {
     } else if (action === 'dismiss') {
       updates.status = 'dismissed';
       updates.dismissed_at = new Date().toISOString();
+      updates.recipient_decision = 'dismissed';
+      updates.sender_status = 'recipient_declined';
+      updates.sender_notified_at = notification.sender_notified_at || new Date().toISOString();
     } else if (action === 'thank') {
-      updates.user_action = 'thanked';
-      updates.user_action_at = new Date().toISOString();
+      updates.status = notification.status === 'pending' ? 'viewed' : notification.status;
+      updates.viewed_at = notification.viewed_at || new Date().toISOString();
+      updates.sender_status = notification.sender_status || 'recipient_viewed';
     } else if (action === 'save') {
-      updates.user_action = 'saved';
-      updates.user_action_at = new Date().toISOString();
+      updates.status = notification.status === 'pending' ? 'viewed' : notification.status;
+      updates.viewed_at = notification.viewed_at || new Date().toISOString();
+      updates.sender_status = notification.sender_status || 'recipient_viewed';
     } else if (action === 'block') {
-      updates.user_action = 'blocked';
-      updates.user_action_at = new Date().toISOString();
+      updates.status = 'dismissed';
+      updates.dismissed_at = new Date().toISOString();
+      updates.recipient_decision = 'declined_connection';
+      updates.sender_status = 'recipient_declined';
+      updates.sender_notified_at = notification.sender_notified_at || new Date().toISOString();
 
       // Block the uploader
       if (uploaderId) {
@@ -218,10 +225,11 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Uploader not found' }, { status: 404 });
       }
 
-      updates.user_action = 'accepted_connection';
-      updates.user_action_at = new Date().toISOString();
       updates.status = 'viewed';
       updates.viewed_at = notification.viewed_at || new Date().toISOString();
+      updates.recipient_decision = 'accepted_connection';
+      updates.sender_status = 'recipient_accepted';
+      updates.sender_notified_at = notification.sender_notified_at || new Date().toISOString();
 
       await supabase
         .from('contacts')
@@ -261,10 +269,11 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Uploader not found' }, { status: 404 });
       }
 
-      updates.user_action = 'declined_connection';
-      updates.user_action_at = new Date().toISOString();
       updates.status = 'dismissed';
       updates.dismissed_at = new Date().toISOString();
+      updates.recipient_decision = 'declined_connection';
+      updates.sender_status = 'recipient_declined';
+      updates.sender_notified_at = notification.sender_notified_at || new Date().toISOString();
 
       await supabase.from('notifications').insert({
         user_id: uploaderId,
@@ -281,6 +290,8 @@ export async function POST(request: NextRequest) {
           recipientAccepted: false,
         },
       });
+    } else {
+      return NextResponse.json({ error: 'Unsupported action' }, { status: 400 });
     }
 
     const { error: updateError } = await supabase

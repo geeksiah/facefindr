@@ -157,7 +157,7 @@ export async function getCart(attendeeId: string): Promise<CartItem[]> {
         resolution
       ),
       media:media_id (
-        preview_path,
+        watermarked_path,
         thumbnail_path
       ),
       event:event_id (
@@ -185,7 +185,7 @@ export async function getCart(attendeeId: string): Promise<CartItem[]> {
     productName: row.digital_product?.name,
     productType: row.digital_product?.product_type,
     resolution: row.digital_product?.resolution,
-    mediaPreviewUrl: row.media?.preview_path || row.media?.thumbnail_path,
+    mediaPreviewUrl: row.media?.watermarked_path || row.media?.thumbnail_path,
     eventName: row.event?.name,
   }));
 }
@@ -514,18 +514,37 @@ export async function completePurchase(
     }
   }
 
-  // Credit photographer's wallet
-  const { error: creditError } = await supabase
-    .from('wallets')
-    .update({
-      pending_balance: supabase.rpc('increment_balance', {
-        amount: purchase.photographer_amount,
-      }),
-    })
-    .eq('photographer_id', purchase.photographer_id);
+  // Credit photographer wallet balance using the canonical wallet_balances table.
+  try {
+    const { data: wallet } = await supabase
+      .from('wallets')
+      .select('id, provider, preferred_currency')
+      .eq('photographer_id', purchase.photographer_id)
+      .maybeSingle();
 
-  if (creditError) {
-    console.error('Failed to credit wallet:', creditError);
+    if (wallet?.id) {
+      const { data: existingBalance } = await supabase
+        .from('wallet_balances')
+        .select('available_balance, total_earnings, total_paid_out, pending_payout')
+        .eq('wallet_id', wallet.id)
+        .maybeSingle();
+
+      await supabase.from('wallet_balances').upsert({
+        wallet_id: wallet.id,
+        photographer_id: purchase.photographer_id,
+        provider: wallet.provider || 'stripe',
+        currency: purchase.currency || wallet.preferred_currency || 'USD',
+        status: 'active',
+        available_balance:
+          Number(existingBalance?.available_balance || 0) + Number(purchase.photographer_amount || 0),
+        total_earnings:
+          Number(existingBalance?.total_earnings || 0) + Number(purchase.photographer_amount || 0),
+        total_paid_out: Number(existingBalance?.total_paid_out || 0),
+        pending_payout: Number(existingBalance?.pending_payout || 0),
+      });
+    }
+  } catch (creditError) {
+    console.error('Failed to credit wallet balance:', creditError);
   }
 
   // Clear cart items that were purchased

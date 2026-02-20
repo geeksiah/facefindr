@@ -20,10 +20,6 @@ function isFaceTag(value: string) {
   return value.includes('+') || /^@?[a-z0-9_.]+[+.]?\d{3,5}$/i.test(value);
 }
 
-function isMissingColumnError(error: any, columnName: string) {
-  return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
-}
-
 function uniqueStringValues(values: Array<string | null | undefined>) {
   return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))];
 }
@@ -31,10 +27,6 @@ function uniqueStringValues(values: Array<string | null | undefined>) {
 function addProfileLookupEntry(map: Map<string, any>, profile: any) {
   if (!profile?.id) return;
   map.set(profile.id, profile);
-  const userId = typeof profile.user_id === 'string' ? profile.user_id : null;
-  if (userId) {
-    map.set(userId, profile);
-  }
 }
 
 async function fetchAttendeeProfilesByIdentifiers(supabase: any, identifiers: string[]) {
@@ -44,28 +36,11 @@ async function fetchAttendeeProfilesByIdentifiers(supabase: any, identifiers: st
 
   const idRows = await supabase
     .from('attendees')
-    .select('id, user_id, display_name, face_tag, profile_photo_url, public_profile_slug')
+    .select('id, display_name, face_tag, profile_photo_url, public_profile_slug')
     .in('id', ids);
 
-  if (!idRows.error && Array.isArray(idRows.data)) {
+  if (Array.isArray(idRows.data)) {
     for (const row of idRows.data) addProfileLookupEntry(lookup, row);
-  } else if (isMissingColumnError(idRows.error, 'user_id')) {
-    const fallbackRows = await supabase
-      .from('attendees')
-      .select('id, display_name, face_tag, profile_photo_url, public_profile_slug')
-      .in('id', ids);
-    if (Array.isArray(fallbackRows.data)) {
-      for (const row of fallbackRows.data) addProfileLookupEntry(lookup, { ...row, user_id: row.id });
-    }
-    return lookup;
-  }
-
-  const byUserRows = await supabase
-    .from('attendees')
-    .select('id, user_id, display_name, face_tag, profile_photo_url, public_profile_slug')
-    .in('user_id', ids);
-  if (Array.isArray(byUserRows.data)) {
-    for (const row of byUserRows.data) addProfileLookupEntry(lookup, row);
   }
 
   return lookup;
@@ -78,28 +53,11 @@ async function fetchCreatorProfilesByIdentifiers(supabase: any, identifiers: str
 
   const idRows = await supabase
     .from('photographers')
-    .select('id, user_id, display_name, face_tag, profile_photo_url, public_profile_slug')
+    .select('id, display_name, face_tag, profile_photo_url, public_profile_slug')
     .in('id', ids);
 
-  if (!idRows.error && Array.isArray(idRows.data)) {
+  if (Array.isArray(idRows.data)) {
     for (const row of idRows.data) addProfileLookupEntry(lookup, row);
-  } else if (isMissingColumnError(idRows.error, 'user_id')) {
-    const fallbackRows = await supabase
-      .from('photographers')
-      .select('id, display_name, face_tag, profile_photo_url, public_profile_slug')
-      .in('id', ids);
-    if (Array.isArray(fallbackRows.data)) {
-      for (const row of fallbackRows.data) addProfileLookupEntry(lookup, { ...row, user_id: row.id });
-    }
-    return lookup;
-  }
-
-  const byUserRows = await supabase
-    .from('photographers')
-    .select('id, user_id, display_name, face_tag, profile_photo_url, public_profile_slug')
-    .in('user_id', ids);
-  if (Array.isArray(byUserRows.data)) {
-    for (const row of byUserRows.data) addProfileLookupEntry(lookup, row);
   }
 
   return lookup;
@@ -115,17 +73,15 @@ export async function GET(
     const queryType = request.nextUrl.searchParams.get('type');
 
     const fullSelect =
-      'id, user_id, display_name, face_tag, profile_photo_url, is_public_profile, public_profile_slug';
-    const fallbackSelect =
       'id, display_name, face_tag, profile_photo_url, is_public_profile, public_profile_slug';
 
-    const queryProfile = async (includeUserId: boolean) => {
+    const queryProfile = async () => {
       let q = supabase
         .from('attendees')
-        .select(includeUserId ? fullSelect : fallbackSelect);
+        .select(fullSelect);
 
       if (isUuid(slug)) {
-        q = includeUserId ? q.or(`id.eq.${slug},user_id.eq.${slug}`) : q.eq('id', slug);
+        q = q.eq('id', slug);
       } else if (isFaceTag(slug)) {
         q = q.eq('face_tag', slug.startsWith('@') ? slug : `@${slug}`);
       } else {
@@ -135,13 +91,7 @@ export async function GET(
       return q.maybeSingle();
     };
 
-    let { data: profile, error } = await queryProfile(true);
-
-    if (error && isMissingColumnError(error, 'user_id')) {
-      const fallback = await queryProfile(false);
-      profile = fallback.data ? { ...fallback.data, user_id: fallback.data.id } : fallback.data;
-      error = fallback.error;
-    }
+    let { data: profile, error } = await queryProfile();
 
     if (!profile && !error && !isUuid(slug) && !isFaceTag(slug)) {
       const { data: byFaceTag, error: byFaceTagError } = await supabase
@@ -149,22 +99,13 @@ export async function GET(
         .select(fullSelect)
         .eq('face_tag', slug.startsWith('@') ? slug : `@${slug}`)
         .maybeSingle();
-      if (byFaceTagError && isMissingColumnError(byFaceTagError, 'user_id')) {
-        const fallback = await supabase
-          .from('attendees')
-          .select(fallbackSelect)
-          .eq('face_tag', slug.startsWith('@') ? slug : `@${slug}`)
-          .maybeSingle();
-        profile = fallback.data ? { ...fallback.data, user_id: fallback.data.id } : fallback.data;
-      } else {
-        profile = byFaceTag;
-      }
+      profile = byFaceTagError ? null : byFaceTag;
     }
 
     if (error || !profile) {
       return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
     }
-    const ownerUserId = (profile as any).user_id || profile.id;
+    const ownerUserId = profile.id;
     const followTargetIds = uniqueStringValues([ownerUserId, profile.id]);
 
     const authClient = await createClient();
@@ -251,8 +192,8 @@ export async function GET(
         display_name: profile.display_name,
         face_tag: profile.face_tag,
         profile_photo_url: profile.profile_photo_url,
-        public_profile_slug: profile.public_profile_slug,
-      },
+          public_profile_slug: profile.public_profile_slug,
+        },
       followers,
       total: followers.length,
       type: queryType || 'followers',

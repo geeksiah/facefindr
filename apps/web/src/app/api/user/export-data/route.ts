@@ -175,7 +175,7 @@ async function processDataExport(
       // Fetch entitlements (purchased photos)
       const { data: entitlements } = await supabase
         .from('entitlements')
-        .select('*, media:media_id(id, file_path, thumbnail_path)')
+        .select('*, media:media_id(id, storage_path, thumbnail_path)')
         .eq('attendee_id', userId);
       
       exportData.purchases = entitlements || [];
@@ -206,12 +206,17 @@ async function processDataExport(
         .eq('photographer_id', userId);
       
       exportData.events = events || [];
+      const eventIds = (events || []).map((event: any) => event.id);
 
-      // Fetch media count (not full data for privacy)
-      const { count: mediaCount } = await supabase
-        .from('media')
-        .select('*', { count: 'exact', head: true })
-        .eq('photographer_id', userId);
+      // Fetch media count for all creator-owned events
+      let mediaCount = 0;
+      if (eventIds.length > 0) {
+        const mediaCountResult = await supabase
+          .from('media')
+          .select('id', { count: 'exact', head: true })
+          .in('event_id', eventIds);
+        mediaCount = mediaCountResult.count || 0;
+      }
       
       exportData.mediaCount = mediaCount || 0;
 
@@ -225,10 +230,14 @@ async function processDataExport(
       exportData.wallet = wallet;
 
       // Fetch transactions
-      const { data: transactions } = await supabase
-        .from('transactions')
-        .select('*')
-        .eq('photographer_id', userId);
+      let transactions: any[] = [];
+      if (eventIds.length > 0) {
+        const { data: txRows } = await supabase
+          .from('transactions')
+          .select('*')
+          .in('event_id', eventIds);
+        transactions = txRows || [];
+      }
       
       exportData.transactions = transactions || [];
     }

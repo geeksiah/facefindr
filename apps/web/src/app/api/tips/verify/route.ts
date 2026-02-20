@@ -11,6 +11,7 @@ import { createClient, createServiceClient } from '@/lib/supabase/server';
 type TipRecord = {
   id: string;
   from_user_id: string;
+  to_photographer_id: string;
   amount: number;
   currency: string;
   status: 'pending' | 'completed' | 'failed' | 'refunded';
@@ -53,6 +54,7 @@ export async function GET(request: NextRequest) {
       .select(`
         id,
         from_user_id,
+        to_photographer_id,
         amount,
         currency,
         status,
@@ -167,6 +169,45 @@ export async function GET(request: NextRequest) {
 
     if (txUpdateError) {
       console.error('Failed to update tip transaction after verification:', txUpdateError);
+    }
+
+    try {
+      const now = new Date().toISOString();
+      await serviceClient.from('notifications').insert([
+        {
+          user_id: user.id,
+          channel: 'in_app',
+          template_code: 'tip_sent',
+          subject: 'Tip sent successfully',
+          body: `Your ${tip.currency} ${(tip.amount / 100).toFixed(2)} tip was successful.`,
+          status: 'delivered',
+          sent_at: now,
+          delivered_at: now,
+          metadata: {
+            tipId: tip.id,
+            amount: tip.amount,
+            currency: tip.currency,
+          },
+        },
+        {
+          user_id: tip.to_photographer_id,
+          channel: 'in_app',
+          template_code: 'tip_received',
+          subject: 'You received a tip',
+          body: `You received a ${tip.currency} ${(tip.amount / 100).toFixed(2)} tip.`,
+          status: 'delivered',
+          sent_at: now,
+          delivered_at: now,
+          metadata: {
+            tipId: tip.id,
+            amount: tip.amount,
+            currency: tip.currency,
+            fromUserId: user.id,
+          },
+        },
+      ]);
+    } catch (notificationError) {
+      console.error('Tip notification fanout failed:', notificationError);
     }
 
     return NextResponse.json({

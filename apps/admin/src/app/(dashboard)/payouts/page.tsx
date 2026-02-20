@@ -66,7 +66,7 @@ async function getPayoutStats() {
   const { data: setting } = await supabaseAdmin
     .from('platform_settings')
     .select('value')
-    .eq('key', 'payouts_enabled')
+    .eq('setting_key', 'payouts_enabled')
     .single();
 
   const payoutsEnabled = setting?.value === 'true' || setting?.value === true;

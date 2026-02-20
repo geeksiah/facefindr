@@ -19,15 +19,23 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: 'Permission denied' }, { status: 403 });
         }
 
+        const { data: wallet } = await supabaseAdmin
+          .from('wallets')
+          .select('provider')
+          .eq('id', walletId)
+          .maybeSingle();
+
         // Create payout record
         const { data: payout, error } = await supabaseAdmin
           .from('payouts')
           .insert({
             wallet_id: walletId,
+            payment_provider: wallet?.provider || null,
             amount,
             currency: currency || 'USD',
             status: 'pending',
-            mode: 'manual',
+            payout_method: 'manual',
+            initiated_at: new Date().toISOString(),
           })
           .select()
           .single();
@@ -69,19 +77,29 @@ export async function POST(request: NextRequest) {
         // Get eligible balances
         const { data: eligible } = await supabaseAdmin
           .from('wallet_balances')
-          .select('wallet_id, available_balance, currency')
+          .select(`
+            wallet_id,
+            available_balance,
+            currency,
+            wallets:wallet_id (
+              provider
+            )
+          `)
           .gt('available_balance', 0);
 
         let processed = 0;
         for (const balance of eligible || []) {
           const minimum = minimums[balance.currency] || minimums['USD'] || 5000;
           if (balance.available_balance >= minimum) {
+            const wallet = Array.isArray(balance.wallets) ? balance.wallets[0] : balance.wallets;
             await supabaseAdmin.from('payouts').insert({
               wallet_id: balance.wallet_id,
+              payment_provider: wallet?.provider || null,
               amount: balance.available_balance,
               currency: balance.currency,
               status: 'pending',
-              mode: 'threshold',
+              payout_method: 'threshold',
+              initiated_at: new Date().toISOString(),
             });
             processed++;
           }
@@ -124,7 +142,7 @@ export async function POST(request: NextRequest) {
         await supabaseAdmin
           .from('platform_settings')
           .update({ value: 'false' })
-          .eq('key', 'payouts_enabled');
+          .eq('setting_key', 'payouts_enabled');
 
         await logAction('payout_pause', 'settings', undefined, { enabled: false });
 
@@ -139,7 +157,7 @@ export async function POST(request: NextRequest) {
         await supabaseAdmin
           .from('platform_settings')
           .update({ value: 'true' })
-          .eq('key', 'payouts_enabled');
+          .eq('setting_key', 'payouts_enabled');
 
         await logAction('payout_pause', 'settings', undefined, { enabled: true });
 

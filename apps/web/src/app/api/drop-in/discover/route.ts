@@ -50,12 +50,15 @@ export async function GET(request: NextRequest) {
     // Check premium access OR if user is registered for events (free tier)
     const { data: subscription } = await supabase
       .from('attendee_subscriptions')
-      .select('plan_code, status, can_discover_non_contacts')
+      .select('plan_code, status, metadata')
       .eq('attendee_id', attendee.id)
       .eq('status', 'active')
       .single();
 
-    const hasPremium = subscription?.can_discover_non_contacts || false;
+    const subscriptionMetadata = (subscription?.metadata as Record<string, any> | null) || null;
+    const hasPremium =
+      Boolean(subscriptionMetadata?.can_discover_non_contacts) ||
+      ['premium', 'premium_plus'].includes(String(subscription?.plan_code || ''));
 
     // Check if user is registered for any events (free tier allows discovery from registered events)
     // Check entitlements table which links attendees to events
@@ -134,7 +137,7 @@ export async function GET(request: NextRequest) {
     if (matchIds.length > 0) {
       const { data: notifications } = await supabase
         .from('drop_in_notifications')
-        .select('id, drop_in_match_id, user_action')
+        .select('id, drop_in_match_id, recipient_decision')
         .eq('recipient_id', attendee.id)
         .in('drop_in_match_id', matchIds);
 
@@ -143,7 +146,7 @@ export async function GET(request: NextRequest) {
           notification.drop_in_match_id,
           {
             id: notification.id,
-            userAction: notification.user_action || null,
+            userAction: notification.recipient_decision || null,
           },
         ])
       );

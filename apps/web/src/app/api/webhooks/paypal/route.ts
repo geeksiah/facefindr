@@ -279,14 +279,14 @@ async function processSuccessfulPayment(
   if (unlockAll) {
     await supabase.from('entitlements').insert({
       event_id: transaction.event_id,
-      transaction_id: transaction.id,
+      purchase_id: transaction.id,
       attendee_id: transaction.attendee_id,
       entitlement_type: 'bulk',
     });
   } else if (mediaIds.length > 0) {
     const entitlements = mediaIds.map((mediaId: string) => ({
       event_id: transaction.event_id,
-      transaction_id: transaction.id,
+      purchase_id: transaction.id,
       attendee_id: transaction.attendee_id,
       media_id: mediaId,
       entitlement_type: 'single' as const,
@@ -333,7 +333,7 @@ async function handleCaptureFailed(
       .single();
 
     if (transaction) {
-      await supabase.from('entitlements').delete().eq('transaction_id', transaction.id);
+      await supabase.from('entitlements').delete().eq('purchase_id', transaction.id);
     }
   }
 }

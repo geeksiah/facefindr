@@ -144,14 +144,38 @@ export function RatingsDisplay({
   if (!stats || stats.total_ratings === 0) {
     return (
       <div className={cn('flex items-center gap-2', className)}>
-        <div className="flex items-center gap-1">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <Star key={i} className="h-4 w-4 text-muted-foreground" />
-          ))}
+        <div
+          className="flex items-center gap-1"
+          onMouseLeave={() => setHoveredStar(null)}
+        >
+          {[1, 2, 3, 4, 5].map((star) =>
+            showRatingButton ? (
+              <button
+                key={star}
+                type="button"
+                onClick={() => handleRate(star)}
+                onMouseEnter={() => setHoveredStar(star)}
+                disabled={ratingLoading}
+                className="transition-colors hover:scale-110"
+              >
+                <Star
+                  className={cn(
+                    'h-4 w-4',
+                    star <= (hoveredStar || 0)
+                      ? 'fill-yellow-400 text-yellow-400'
+                      : 'text-muted-foreground'
+                  )}
+                />
+              </button>
+            ) : (
+              <Star key={star} className="h-4 w-4 text-muted-foreground" />
+            )
+          )}
         </div>
         <span className="text-sm text-secondary">No ratings yet</span>
         {showRatingButton && (
           <Button
+            type="button"
             variant="outline"
             size="sm"
             onClick={() => setShowRatingModal(true)}
@@ -222,6 +246,7 @@ export function RatingsDisplay({
       {/* Rate Button */}
       {showRatingButton && !userRating && (
         <Button
+          type="button"
           variant="outline"
           size="sm"
           onClick={() => setShowRatingModal(true)}
@@ -258,6 +283,7 @@ export function RatingsDisplay({
             </div>
             <div className="flex gap-2">
               <Button
+                type="button"
                 variant="ghost"
                 className="w-full"
                 onClick={() => setShowRatingModal(false)}

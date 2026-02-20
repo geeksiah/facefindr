@@ -10,10 +10,6 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
-function isMissingColumnError(error: any, columnName: string) {
-  return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
-}
-
 async function resolveCreatorId(userId: string, userEmail?: string) {
   const serviceClient = createServiceClient();
 
@@ -26,22 +22,6 @@ async function resolveCreatorId(userId: string, userEmail?: string) {
 
   if (byIdResult.data?.id) {
     return byIdResult.data.id as string;
-  }
-
-  // Try user_id column (if it exists)
-  const byUserIdResult = await serviceClient
-    .from('photographers')
-    .select('id')
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  const missingUserIdColumn =
-    byUserIdResult.error?.code === '42703' ||
-    (typeof byUserIdResult.error?.message === 'string' &&
-      byUserIdResult.error.message.includes('user_id'));
-
-  if (!missingUserIdColumn && byUserIdResult.data?.id) {
-    return byUserIdResult.data.id as string;
   }
 
   // Try email lookup as final fallback
@@ -96,21 +76,11 @@ export async function POST(request: NextRequest) {
       const byIdentifier = await supabase
         .from('attendees')
         .select('id, display_name, face_tag')
-        .or(`id.eq.${attendeeId},user_id.eq.${attendeeId}`)
+        .eq('id', attendeeId)
         .maybeSingle();
 
-      if (!byIdentifier.error || !isMissingColumnError(byIdentifier.error, 'user_id')) {
-        attendee = byIdentifier.data;
-        attendeeError = byIdentifier.error;
-      } else {
-        const fallback = await supabase
-          .from('attendees')
-          .select('id, display_name, face_tag')
-          .eq('id', attendeeId)
-          .maybeSingle();
-        attendee = fallback.data;
-        attendeeError = fallback.error;
-      }
+      attendee = byIdentifier.data;
+      attendeeError = byIdentifier.error;
     } else {
       // Normalize FaceTag
       const trimmedTag = String(attendeeFaceTag || '').trim();

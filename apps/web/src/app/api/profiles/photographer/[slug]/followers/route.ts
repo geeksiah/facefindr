@@ -10,10 +10,6 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
-function isMissingColumnError(error: any, columnName: string) {
-  return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
-}
-
 function uniqueStringValues(values: Array<string | null | undefined>) {
   return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))];
 }
@@ -21,10 +17,6 @@ function uniqueStringValues(values: Array<string | null | undefined>) {
 function addProfileLookupEntry(map: Map<string, any>, profile: any) {
   if (!profile?.id) return;
   map.set(profile.id, profile);
-  const userId = typeof profile.user_id === 'string' ? profile.user_id : null;
-  if (userId) {
-    map.set(userId, profile);
-  }
 }
 
 async function fetchAttendeeProfilesByIdentifiers(supabase: any, identifiers: string[]) {
@@ -34,28 +26,11 @@ async function fetchAttendeeProfilesByIdentifiers(supabase: any, identifiers: st
 
   const idRows = await supabase
     .from('attendees')
-    .select('id, user_id, display_name, face_tag, profile_photo_url, public_profile_slug')
+    .select('id, display_name, face_tag, profile_photo_url, public_profile_slug')
     .in('id', ids);
 
-  if (!idRows.error && Array.isArray(idRows.data)) {
+  if (Array.isArray(idRows.data)) {
     for (const row of idRows.data) addProfileLookupEntry(lookup, row);
-  } else if (isMissingColumnError(idRows.error, 'user_id')) {
-    const fallbackRows = await supabase
-      .from('attendees')
-      .select('id, display_name, face_tag, profile_photo_url, public_profile_slug')
-      .in('id', ids);
-    if (Array.isArray(fallbackRows.data)) {
-      for (const row of fallbackRows.data) addProfileLookupEntry(lookup, { ...row, user_id: row.id });
-    }
-    return lookup;
-  }
-
-  const byUserRows = await supabase
-    .from('attendees')
-    .select('id, user_id, display_name, face_tag, profile_photo_url, public_profile_slug')
-    .in('user_id', ids);
-  if (Array.isArray(byUserRows.data)) {
-    for (const row of byUserRows.data) addProfileLookupEntry(lookup, row);
   }
 
   return lookup;
@@ -68,28 +43,11 @@ async function fetchCreatorProfilesByIdentifiers(supabase: any, identifiers: str
 
   const idRows = await supabase
     .from('photographers')
-    .select('id, user_id, display_name, face_tag, profile_photo_url, public_profile_slug')
+    .select('id, display_name, face_tag, profile_photo_url, public_profile_slug')
     .in('id', ids);
 
-  if (!idRows.error && Array.isArray(idRows.data)) {
+  if (Array.isArray(idRows.data)) {
     for (const row of idRows.data) addProfileLookupEntry(lookup, row);
-  } else if (isMissingColumnError(idRows.error, 'user_id')) {
-    const fallbackRows = await supabase
-      .from('photographers')
-      .select('id, display_name, face_tag, profile_photo_url, public_profile_slug')
-      .in('id', ids);
-    if (Array.isArray(fallbackRows.data)) {
-      for (const row of fallbackRows.data) addProfileLookupEntry(lookup, { ...row, user_id: row.id });
-    }
-    return lookup;
-  }
-
-  const byUserRows = await supabase
-    .from('photographers')
-    .select('id, user_id, display_name, face_tag, profile_photo_url, public_profile_slug')
-    .in('user_id', ids);
-  if (Array.isArray(byUserRows.data)) {
-    for (const row of byUserRows.data) addProfileLookupEntry(lookup, row);
   }
 
   return lookup;
@@ -105,31 +63,18 @@ export async function GET(
     const includeList = request.nextUrl.searchParams.get('include') === 'list';
 
     // Get photographer by slug or ID
-    const withUserId = await supabase
-      .from('photographers')
-      .select('id, user_id, follower_count, public_profile_slug, is_public_profile')
-      .or(`id.eq.${slug},public_profile_slug.eq.${slug},user_id.eq.${slug}`)
-      .limit(1)
-      .maybeSingle();
-
-    const fallback = await supabase
+    const { data: photographer } = await supabase
       .from('photographers')
       .select('id, follower_count, public_profile_slug, is_public_profile')
       .or(`id.eq.${slug},public_profile_slug.eq.${slug}`)
       .limit(1)
       .maybeSingle();
 
-    const photographer =
-      withUserId.data ||
-      (withUserId.error && isMissingColumnError(withUserId.error, 'user_id')
-        ? (fallback.data ? { ...fallback.data, user_id: fallback.data.id } : null)
-        : null);
-
     if (!photographer) {
       return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
     }
 
-    const ownerUserId = (photographer as any).user_id || photographer.id;
+    const ownerUserId = photographer.id;
     const followTargetIds = uniqueStringValues([ownerUserId, photographer.id]);
 
     // Get actual follower count from follows table (more accurate than cached count)

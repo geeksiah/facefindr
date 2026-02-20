@@ -395,7 +395,7 @@ async function createEntitlements(
   if (unlockAll) {
     await supabase.from('entitlements').insert({
       event_id: transaction.event_id,
-      transaction_id: transaction.id,
+      purchase_id: transaction.id,
       attendee_id: transaction.attendee_id,
       entitlement_type: 'bulk',
     });
@@ -405,7 +405,7 @@ async function createEntitlements(
   if (mediaIds.length > 0) {
     const entitlements = mediaIds.map((mediaId) => ({
       event_id: transaction.event_id,
-      transaction_id: transaction.id,
+      purchase_id: transaction.id,
       attendee_id: transaction.attendee_id,
       media_id: mediaId,
       entitlement_type: 'single' as const,

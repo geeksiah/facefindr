@@ -29,10 +29,6 @@ function getOptionalServiceClient() {
   }
 }
 
-function isMissingColumnError(error: any, columnName: string) {
-  return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
-}
-
 function uniqueStringValues(values: Array<string | null | undefined>) {
   return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))];
 }
@@ -51,10 +47,6 @@ function applyFollowingIdFilter(query: any, followingIds: string[]) {
 function addProfileLookupEntry(map: Map<string, any>, profile: any) {
   if (!profile?.id) return;
   map.set(profile.id, profile);
-  const userId = typeof profile.user_id === 'string' ? profile.user_id : null;
-  if (userId) {
-    map.set(userId, profile);
-  }
 }
 
 async function fetchAttendeeProfilesByIdentifiers(supabase: any, identifiers: string[]) {
@@ -64,28 +56,11 @@ async function fetchAttendeeProfilesByIdentifiers(supabase: any, identifiers: st
 
   const idRows = await supabase
     .from('attendees')
-    .select('id, user_id, display_name, face_tag, profile_photo_url, public_profile_slug, email')
+    .select('id, display_name, face_tag, profile_photo_url, public_profile_slug, email')
     .in('id', ids);
 
-  if (!idRows.error && Array.isArray(idRows.data)) {
+  if (Array.isArray(idRows.data)) {
     for (const row of idRows.data) addProfileLookupEntry(lookup, row);
-  } else if (isMissingColumnError(idRows.error, 'user_id')) {
-    const fallbackRows = await supabase
-      .from('attendees')
-      .select('id, display_name, face_tag, profile_photo_url, public_profile_slug, email')
-      .in('id', ids);
-    if (Array.isArray(fallbackRows.data)) {
-      for (const row of fallbackRows.data) addProfileLookupEntry(lookup, { ...row, user_id: row.id });
-    }
-    return lookup;
-  }
-
-  const byUserRows = await supabase
-    .from('attendees')
-    .select('id, user_id, display_name, face_tag, profile_photo_url, public_profile_slug, email')
-    .in('user_id', ids);
-  if (Array.isArray(byUserRows.data)) {
-    for (const row of byUserRows.data) addProfileLookupEntry(lookup, row);
   }
 
   return lookup;
@@ -98,28 +73,11 @@ async function fetchCreatorProfilesByIdentifiers(supabase: any, identifiers: str
 
   const idRows = await supabase
     .from('photographers')
-    .select('id, user_id, display_name, face_tag, profile_photo_url, bio, public_profile_slug, email')
+    .select('id, display_name, face_tag, profile_photo_url, bio, public_profile_slug, email')
     .in('id', ids);
 
-  if (!idRows.error && Array.isArray(idRows.data)) {
+  if (Array.isArray(idRows.data)) {
     for (const row of idRows.data) addProfileLookupEntry(lookup, row);
-  } else if (isMissingColumnError(idRows.error, 'user_id')) {
-    const fallbackRows = await supabase
-      .from('photographers')
-      .select('id, display_name, face_tag, profile_photo_url, bio, public_profile_slug, email')
-      .in('id', ids);
-    if (Array.isArray(fallbackRows.data)) {
-      for (const row of fallbackRows.data) addProfileLookupEntry(lookup, { ...row, user_id: row.id });
-    }
-    return lookup;
-  }
-
-  const byUserRows = await supabase
-    .from('photographers')
-    .select('id, user_id, display_name, face_tag, profile_photo_url, bio, public_profile_slug, email')
-    .in('user_id', ids);
-  if (Array.isArray(byUserRows.data)) {
-    for (const row of byUserRows.data) addProfileLookupEntry(lookup, row);
   }
 
   return lookup;
@@ -130,16 +88,6 @@ async function resolveProfileIdByUser(
   table: 'attendees' | 'photographers',
   userId: string
 ) {
-  const byUserId = await supabase
-    .from(table)
-    .select('id')
-    .eq('user_id', userId)
-    .single();
-
-  if (!byUserId.error || !isMissingColumnError(byUserId.error, 'user_id')) {
-    return byUserId;
-  }
-
   return supabase
     .from(table)
     .select('id')
@@ -148,72 +96,42 @@ async function resolveProfileIdByUser(
 }
 
 async function getAttendeeByIdentifier(supabase: any, identifier: string) {
-  const withUserId = await supabase
+  const result = await supabase
     .from('attendees')
-    .select('id, is_public_profile, public_profile_slug, user_id, allow_follows')
-    .or(`id.eq.${identifier},public_profile_slug.eq.${identifier},user_id.eq.${identifier}`)
-    .limit(1)
-    .maybeSingle();
-
-  if (
-    !withUserId.error ||
-    (!isMissingColumnError(withUserId.error, 'user_id') &&
-      !isMissingColumnError(withUserId.error, 'allow_follows'))
-  ) {
-    return withUserId;
-  }
-
-  const fallback = await supabase
-    .from('attendees')
-    .select('id, is_public_profile, public_profile_slug')
+    .select('id, is_public_profile, public_profile_slug, allow_follows')
     .or(`id.eq.${identifier},public_profile_slug.eq.${identifier}`)
     .limit(1)
     .maybeSingle();
 
   return {
-    data: fallback.data
+    data: result.data
       ? {
-          ...fallback.data,
-          user_id: fallback.data.id,
-          allow_follows: true,
+          ...result.data,
+          user_id: result.data.id,
+          allow_follows: (result.data as any).allow_follows !== false,
         }
-      : fallback.data,
-    error: fallback.error,
+      : result.data,
+    error: result.error,
   };
 }
 
 async function getCreatorByIdentifier(supabase: any, identifier: string) {
-  const withUserId = await supabase
+  const result = await supabase
     .from('photographers')
-    .select('id, is_public_profile, public_profile_slug, user_id, allow_follows')
-    .or(`id.eq.${identifier},public_profile_slug.eq.${identifier},user_id.eq.${identifier}`)
-    .limit(1)
-    .maybeSingle();
-
-  if (
-    !withUserId.error ||
-    (!isMissingColumnError(withUserId.error, 'user_id') &&
-      !isMissingColumnError(withUserId.error, 'allow_follows'))
-  ) {
-    return withUserId;
-  }
-
-  const fallback = await supabase
-    .from('photographers')
-    .select('id, is_public_profile, public_profile_slug')
+    .select('id, is_public_profile, public_profile_slug, allow_follows')
     .or(`id.eq.${identifier},public_profile_slug.eq.${identifier}`)
     .limit(1)
     .maybeSingle();
 
   return {
-    data: fallback.data
+    data: result.data
       ? {
-          ...fallback.data,
-          user_id: fallback.data.id,
-          allow_follows: true,
+          ...result.data,
+          user_id: result.data.id,
+          allow_follows: (result.data as any).allow_follows !== false,
         }
-      : fallback.data,
-    error: fallback.error,
+      : result.data,
+    error: result.error,
   };
 }
 
@@ -284,6 +202,31 @@ async function getActiveFollowerCount(
 
   const { count } = await query;
   return count || 0;
+}
+
+async function createInAppNotification(
+  supabase: any,
+  userId: string,
+  templateCode: string,
+  subject: string,
+  body: string,
+  metadata: Record<string, unknown>
+) {
+  try {
+    await supabase.from('notifications').insert({
+      user_id: userId,
+      channel: 'in_app',
+      template_code: templateCode,
+      subject,
+      body,
+      status: 'delivered',
+      sent_at: new Date().toISOString(),
+      delivered_at: new Date().toISOString(),
+      metadata,
+    });
+  } catch {
+    // Non-blocking notification fan-out.
+  }
 }
 
 // POST - Follow a creator
@@ -443,6 +386,21 @@ export async function POST(request: NextRequest) {
       } catch {
         // Non-blocking audit trail.
       }
+
+      if (followingUserId && followingUserId !== user.id) {
+        await createInAppNotification(
+          serviceClient,
+          followingUserId,
+          'social_new_follower',
+          'You have a new follower',
+          'Someone started following your profile.',
+          {
+            followerId: user.id,
+            followerType: normalizedFollowerType,
+            followingType: resolvedTargetType,
+          }
+        );
+      }
     }
 
     return NextResponse.json({
@@ -534,6 +492,21 @@ export async function DELETE(request: NextRequest) {
         });
       } catch {
         // Non-blocking audit trail.
+      }
+
+      if (followingUserId && followingUserId !== user.id) {
+        await createInAppNotification(
+          serviceClient,
+          followingUserId,
+          'social_follower_removed',
+          'A follower unfollowed you',
+          'Someone stopped following your profile.',
+          {
+            followerId: user.id,
+            followerType: normalizedFollowerType,
+            followingType: resolvedFollowingType,
+          }
+        );
       }
     }
 

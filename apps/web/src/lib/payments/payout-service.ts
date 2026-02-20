@@ -62,9 +62,7 @@ export interface PayoutResult {
 export async function processPayout(request: PayoutRequest): Promise<PayoutResult> {
   const supabase = createServiceClient();
   const reference = `PO-${uuidv4().slice(0, 8).toUpperCase()}`;
-  const payoutIdentityKey =
-    request.identityKey ||
-    `wallet:${request.walletId}:mode:${request.mode}:currency:${request.currency.toUpperCase()}:amount:${request.amount}`;
+  const dedupeWindowStartIso = new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
   try {
     // Get wallet details
@@ -89,6 +87,32 @@ export async function processPayout(request: PayoutRequest): Promise<PayoutResul
       return { success: false, error: 'Payouts not enabled for this wallet' };
     }
 
+    // Best-effort dedupe against recent equivalent payouts.
+    const { data: existingPayout } = await supabase
+      .from('payouts')
+      .select('id, status, provider_payout_id, failure_reason')
+      .eq('wallet_id', request.walletId)
+      .eq('amount', request.amount)
+      .eq('currency', request.currency)
+      .in('status', ['pending', 'processing', 'completed'])
+      .gte('created_at', dedupeWindowStartIso)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingPayout) {
+      const terminalFailure = existingPayout.status === 'failed';
+      return {
+        success: !terminalFailure,
+        payoutId: existingPayout.id,
+        providerReference: existingPayout.provider_payout_id || undefined,
+        error: terminalFailure
+          ? existingPayout.failure_reason || 'Payout already failed for this request'
+          : undefined,
+        deduped: true,
+      };
+    }
+
     // Create payout record
     const { data: payout, error: createError } = await supabase
       .from('payouts')
@@ -100,32 +124,12 @@ export async function processPayout(request: PayoutRequest): Promise<PayoutResul
         status: 'processing',
         payout_method: wallet.provider === 'momo' ? wallet.momo_provider : 'bank',
         provider_payout_id: reference,
-        payout_identity_key: payoutIdentityKey,
+        initiated_at: new Date().toISOString(),
       })
       .select()
       .single();
 
     if (createError || !payout) {
-      if (createError?.code === '23505') {
-        const { data: existingPayout } = await supabase
-          .from('payouts')
-          .select('id, status, provider_payout_id, failure_reason')
-          .eq('payout_identity_key', payoutIdentityKey)
-          .maybeSingle();
-
-        if (existingPayout) {
-          const terminalFailure = existingPayout.status === 'failed';
-          return {
-            success: !terminalFailure,
-            payoutId: existingPayout.id,
-            providerReference: existingPayout.provider_payout_id || undefined,
-            error: terminalFailure
-              ? existingPayout.failure_reason || 'Payout already failed for this identity key'
-              : undefined,
-            deduped: true,
-          };
-        }
-      }
       return { success: false, error: 'Failed to create payout record' };
     }
 

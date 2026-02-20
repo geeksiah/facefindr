@@ -29,16 +29,16 @@ export async function GET(
     const isFaceTag = slug.includes('+') || /^@?[a-z0-9_.]+[+.]?\d{3,5}$/i.test(slug);
 
     const fullSelect = `
-      id, user_id, display_name, face_tag, profile_photo_url,
+      id, display_name, face_tag, profile_photo_url,
       is_public_profile, allow_follows, following_count, public_profile_slug
     `;
     const minimalSelect = 'id, display_name, face_tag, profile_photo_url';
 
-    const queryProfile = async (selectClause: string, useUserId = true) => {
+    const queryProfile = async (selectClause: string) => {
       let query = supabase.from('attendees').select(selectClause);
 
       if (isUuid) {
-        query = useUserId ? query.or(`id.eq.${slug},user_id.eq.${slug}`) : query.eq('id', slug);
+        query = query.eq('id', slug);
       } else if (isFaceTag) {
         const tag = slug.startsWith('@') ? slug : `@${slug}`;
         query = query.eq('face_tag', tag);
@@ -53,7 +53,7 @@ export async function GET(
 
     // Fallback if columns don't exist
     if (error?.code === '42703') {
-      const fallback = await queryProfile(minimalSelect, false);
+      const fallback = await queryProfile(minimalSelect);
       profile = fallback.data;
       error = fallback.error;
     }
@@ -77,7 +77,7 @@ export async function GET(
       }
     }
 
-    const followTargetIds = uniqueStringValues([(profile as any).user_id || profile.id, profile.id]);
+    const followTargetIds = [profile.id];
 
     let followersQuery = supabase
       .from('follows')
@@ -106,7 +106,7 @@ export async function GET(
       supabase
         .from('user_privacy_settings')
         .select('profile_visible, show_in_search, allow_follows')
-        .eq('user_id', (profile as any).user_id || profile.id)
+        .eq('user_id', profile.id)
         .maybeSingle(),
     ]);
 
@@ -123,7 +123,7 @@ export async function GET(
           privacySettings?.allow_follows ??
           (profile as any)?.allow_follows ??
           isPublicProfile,
-        follow_target_id: (profile as any).user_id || profile.id,
+        follow_target_id: profile.id,
         followers_count: followersCount || 0,
         following_count:
           typeof profile.following_count === 'number'

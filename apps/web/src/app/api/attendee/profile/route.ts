@@ -4,27 +4,12 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
-function isMissingColumnError(error: any, columnName: string) {
-  return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
-}
-
 function uniqueStringValues(values: Array<string | null | undefined>) {
   return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))];
 }
 
 async function resolveAttendeeProfileByUser(supabase: any, userId: string) {
-  const byUserId = await supabase
-    .from('attendees')
-    .select('*')
-    .eq('user_id', userId)
-    .limit(1)
-    .maybeSingle();
-
-  if (!byUserId.error || !isMissingColumnError(byUserId.error, 'user_id')) {
-    return byUserId;
-  }
-
-  const fallback = await supabase
+  const byId = await supabase
     .from('attendees')
     .select('*')
     .eq('id', userId)
@@ -32,8 +17,8 @@ async function resolveAttendeeProfileByUser(supabase: any, userId: string) {
     .maybeSingle();
 
   return {
-    data: fallback.data ? { ...fallback.data, user_id: fallback.data.id } : fallback.data,
-    error: fallback.error,
+    data: byId.data ? { ...byId.data, user_id: byId.data.id } : byId.data,
+    error: byId.error,
   };
 }
 

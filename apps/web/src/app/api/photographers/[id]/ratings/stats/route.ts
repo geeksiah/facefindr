@@ -13,10 +13,6 @@ import { createServiceClient } from '@/lib/supabase/server';
 const PRIOR_MEAN = 4.0;
 const MIN_CONFIDENCE_COUNT = 5;
 
-function isMissingColumnError(error: any, columnName: string) {
-  return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
-}
-
 function getAdjustedAverage(rawAverage: number, totalRatings: number) {
   if (totalRatings <= 0) return 0;
   return (
@@ -31,25 +27,13 @@ async function resolvePhotographerByIdentifier(supabase: any, identifier: string
     ? normalizedIdentifier
     : `@${normalizedIdentifier}`;
 
-  const withUserId = await supabase
-    .from('photographers')
-    .select('id')
-    .or(
-      `id.eq.${normalizedIdentifier},user_id.eq.${normalizedIdentifier},public_profile_slug.eq.${normalizedIdentifier},face_tag.eq.${faceTag}`
-    )
-    .limit(1)
-    .maybeSingle();
-
-  if (!withUserId.error || !isMissingColumnError(withUserId.error, 'user_id')) {
-    return withUserId;
-  }
-
   return supabase
     .from('photographers')
     .select('id')
     .or(
       `id.eq.${normalizedIdentifier},public_profile_slug.eq.${normalizedIdentifier},face_tag.eq.${faceTag}`
     )
+    .limit(1)
     .maybeSingle();
 }
 

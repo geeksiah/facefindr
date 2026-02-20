@@ -234,20 +234,7 @@ export async function POST(
         status: 'queued',
         sent_at: null,
         sent_count: 0,
-        queued_count: queuedCount,
-        delivered_count: 0,
-        failed_count: 0,
-        delivery_completed_at: null,
-        delivery_synced_at: new Date().toISOString(),
-        delivery_summary: {
-          total: queuedCount,
-          pending: queuedCount,
-          successful: 0,
-          failed: 0,
-          by_channel: {},
-          by_status: { pending: queuedCount },
-          updated_at: new Date().toISOString(),
-        },
+        updated_at: new Date().toISOString(),
       })
       .eq('id', id);
 

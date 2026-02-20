@@ -273,7 +273,7 @@ export async function POST(
       return NextResponse.json({ error: 'Refund succeeded but local update failed' }, { status: 500 });
     }
 
-    await supabaseAdmin.from('entitlements').delete().eq('transaction_id', tx.id);
+    await supabaseAdmin.from('entitlements').delete().eq('purchase_id', tx.id);
 
     await logAction('refund_issue', 'transaction', tx.id, {
       provider,

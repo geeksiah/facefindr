@@ -10,64 +10,38 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
-function isMissingColumnError(error: any, columnName: string) {
-  return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
-}
-
 async function resolvePhotographerByIdentifier(supabase: any, identifier: string) {
   const normalizedIdentifier = typeof identifier === 'string' ? identifier.trim() : '';
   const faceTag = normalizedIdentifier.startsWith('@')
     ? normalizedIdentifier
     : `@${normalizedIdentifier}`;
 
-  const withUserId = await supabase
-    .from('photographers')
-    .select('id, user_id')
-    .or(
-      `id.eq.${normalizedIdentifier},user_id.eq.${normalizedIdentifier},public_profile_slug.eq.${normalizedIdentifier},face_tag.eq.${faceTag}`
-    )
-    .limit(1)
-    .maybeSingle();
-
-  if (!withUserId.error || !isMissingColumnError(withUserId.error, 'user_id')) {
-    return withUserId;
-  }
-
-  const fallback = await supabase
+  const result = await supabase
     .from('photographers')
     .select('id')
     .or(
       `id.eq.${normalizedIdentifier},public_profile_slug.eq.${normalizedIdentifier},face_tag.eq.${faceTag}`
     )
+    .limit(1)
     .maybeSingle();
 
   return {
-    data: fallback.data ? { ...fallback.data, user_id: fallback.data.id } : fallback.data,
-    error: fallback.error,
+    data: result.data ? { ...result.data, user_id: result.data.id } : result.data,
+    error: result.error,
   };
 }
 
 async function resolveAttendeeByUser(supabase: any, userId: string) {
-  const byUserId = await supabase
-    .from('attendees')
-    .select('id, user_id')
-    .eq('user_id', userId)
-    .limit(1)
-    .maybeSingle();
-
-  if (!byUserId.error || !isMissingColumnError(byUserId.error, 'user_id')) {
-    return byUserId;
-  }
-
-  const fallback = await supabase
+  const byId = await supabase
     .from('attendees')
     .select('id')
     .eq('id', userId)
+    .limit(1)
     .maybeSingle();
 
   return {
-    data: fallback.data ? { ...fallback.data, user_id: fallback.data.id } : fallback.data,
-    error: fallback.error,
+    data: byId.data ? { ...byId.data, user_id: byId.data.id } : byId.data,
+    error: byId.error,
   };
 }
 
@@ -221,22 +195,48 @@ export async function POST(
 
     const isVerified = eligibility.hasConnection || eligibility.hasEntitlement;
 
-    // Upsert rating (one rating per attendee per photographer)
-    const { data: ratingData, error: ratingError } = await serviceClient
+    const ratingPayload = {
+      photographer_id: photographerId,
+      attendee_id: attendee.id,
+      event_id: eventId,
+      rating,
+      review_text: body.reviewText || null,
+      is_verified: isVerified,
+      is_public: body.isPublic !== false, // Default to public
+    };
+
+    const { data: existingRating } = await serviceClient
       .from('photographer_ratings')
-      .upsert({
-        photographer_id: photographerId,
-        attendee_id: attendee.id,
-        event_id: eventId,
-        rating,
-        review_text: body.reviewText || null,
-        is_verified: isVerified,
-        is_public: body.isPublic !== false, // Default to public
-      }, {
-        onConflict: 'photographer_id,attendee_id',
-      })
-      .select()
-      .single();
+      .select('id')
+      .eq('photographer_id', photographerId)
+      .eq('attendee_id', attendee.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    let ratingData: any = null;
+    let ratingError: any = null;
+    if (existingRating?.id) {
+      const updateResult = await serviceClient
+        .from('photographer_ratings')
+        .update({
+          ...ratingPayload,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existingRating.id)
+        .select()
+        .single();
+      ratingData = updateResult.data;
+      ratingError = updateResult.error;
+    } else {
+      const insertResult = await serviceClient
+        .from('photographer_ratings')
+        .insert(ratingPayload)
+        .select()
+        .single();
+      ratingData = insertResult.data;
+      ratingError = insertResult.error;
+    }
 
     if (ratingError) {
       throw ratingError;
@@ -268,6 +268,29 @@ export async function POST(
       });
     } catch {
       // Non-blocking audit trail.
+    }
+
+    try {
+      const now = new Date().toISOString();
+      await serviceClient.from('notifications').insert({
+        user_id: photographerUserId,
+        channel: 'in_app',
+        template_code: 'creator_new_rating',
+        subject: 'You received a new rating',
+        body: `Someone rated your profile ${rating}/5.`,
+        status: 'delivered',
+        sent_at: now,
+        delivered_at: now,
+        metadata: {
+          photographerId,
+          attendeeId: attendee.id,
+          rating,
+          isVerified,
+          eventId,
+        },
+      });
+    } catch {
+      // Non-blocking notification fan-out.
     }
 
     return NextResponse.json({ rating: ratingData });

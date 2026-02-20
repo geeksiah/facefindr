@@ -58,6 +58,30 @@ async function getEventAccess(supabase: any, eventId: string, photographerIds: s
   };
 }
 
+function getMissingColumnName(error: any): string | null {
+  if (error?.code !== '42703' || typeof error?.message !== 'string') return null;
+  const match = error.message.match(/column \"([^\"]+)\"/i);
+  return match?.[1] || null;
+}
+
+async function resolveEventIdByIdentifier(supabase: any, identifier: string) {
+  const byId = await supabase
+    .from('events')
+    .select('id')
+    .eq('id', identifier)
+    .maybeSingle();
+  if (byId.data?.id) return byId.data.id as string;
+
+  const bySlug = await supabase
+    .from('events')
+    .select('id')
+    .eq('public_slug', identifier)
+    .maybeSingle();
+  if (bySlug.data?.id) return bySlug.data.id as string;
+
+  return identifier;
+}
+
 // GET - Get event settings
 export async function GET(
   request: NextRequest,
@@ -73,8 +97,9 @@ export async function GET(
     }
 
     const { id } = params;
+    const eventId = await resolveEventIdByIdentifier(serviceClient, id);
     const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
-    const access = await getEventAccess(serviceClient, id, photographerIdCandidates);
+    const access = await getEventAccess(serviceClient, eventId, photographerIdCandidates);
     if (!access.canView) {
       return NextResponse.json({ error: 'Not authorized to manage this event' }, { status: 403 });
     }
@@ -85,7 +110,7 @@ export async function GET(
         *,
         event_pricing (*)
       `)
-      .eq('id', id)
+      .eq('id', eventId)
       .single();
 
     if (error || !event) {
@@ -129,22 +154,53 @@ export async function PUT(
     }
 
     const { id } = params;
+    const eventId = await resolveEventIdByIdentifier(serviceClient, id);
     const body = await request.json();
     const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
 
-    const access = await getEventAccess(serviceClient, id, photographerIdCandidates);
+    const access = await getEventAccess(serviceClient, eventId, photographerIdCandidates);
     if (!access.canEdit) {
       return NextResponse.json({ error: 'Not authorized to manage this event' }, { status: 403 });
     }
 
     // Verify event and get current currency
-    const { data: event } = await serviceClient
-      .from('events')
-      .select('id, currency_code, event_date, event_timezone')
-      .eq('id', id)
-      .single();
+    const eventSelectColumns = ['id', 'currency_code', 'event_date', 'event_timezone'];
+    let eventResult: any = null;
+    const selectedColumns = [...eventSelectColumns];
 
-    if (!event) {
+    while (selectedColumns.length > 0) {
+      const result = await serviceClient
+        .from('events')
+        .select(selectedColumns.join(', '))
+        .eq('id', eventId)
+        .single();
+
+      if (!result.error) {
+        eventResult = result;
+        break;
+      }
+
+      const missingColumn = getMissingColumnName(result.error);
+      if (missingColumn && selectedColumns.includes(missingColumn)) {
+        const idx = selectedColumns.indexOf(missingColumn);
+        selectedColumns.splice(idx, 1);
+        continue;
+      }
+
+      if (result.error?.code === 'PGRST116') {
+        return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+      }
+
+      throw result.error;
+    }
+
+    const event = {
+      id: eventResult?.data?.id || eventId,
+      currency_code: (eventResult?.data as any)?.currency_code || 'USD',
+      event_date: (eventResult?.data as any)?.event_date || null,
+      event_timezone: (eventResult?.data as any)?.event_timezone || null,
+    } as any;
+    if (!event.id) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 });
     }
 
@@ -202,12 +258,12 @@ export async function PUT(
       const { data: existingPricing } = await serviceClient
         .from('event_pricing')
         .select('id')
-        .eq('event_id', id)
+        .eq('event_id', eventId)
         .single();
 
       // Build pricing data
       const pricingData: Record<string, any> = {
-        event_id: id,
+        event_id: eventId,
         is_free: body.pricing_type === 'free',
         pricing_type: body.pricing_type || 'per_photo',
         price_per_media: body.price_per_photo || 0,
@@ -234,7 +290,7 @@ export async function PUT(
         const { error: pricingError } = await serviceClient
           .from('event_pricing')
           .update(pricingData)
-          .eq('event_id', id);
+          .eq('event_id', eventId);
 
         if (pricingError) {
           throw pricingError;
@@ -254,7 +310,7 @@ export async function PUT(
         const { count: transactionCount } = await serviceClient
           .from('transactions')
           .select('id', { count: 'exact', head: true })
-          .eq('event_id', id)
+          .eq('event_id', eventId)
           .in('status', ['pending', 'succeeded']);
 
         if (transactionCount && transactionCount > 0) {
@@ -271,26 +327,26 @@ export async function PUT(
       serviceClient
         .from('events')
         .update(payload)
-        .eq('id', id);
+        .eq('id', eventId);
 
-    let { error: updateError } = await runEventUpdate(updates);
+    let updateError: any = null;
+    const updatePayload = { ...updates };
+    if (Object.keys(updatePayload).length > 0) {
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const attemptResult = await runEventUpdate(updatePayload);
+        updateError = attemptResult.error;
+        if (!updateError) break;
 
-    const missingDateTimeColumns =
-      updateError?.code === '42703' &&
-      typeof updateError?.message === 'string' &&
-      (updateError.message.includes('event_start_at_utc') ||
-        updateError.message.includes('event_end_at_utc'));
+        const missingColumn = getMissingColumnName(updateError);
+        if (!missingColumn || !(missingColumn in updatePayload)) {
+          break;
+        }
 
-    if (missingDateTimeColumns) {
-      const legacyUpdates = { ...updates };
-      delete legacyUpdates.event_start_at_utc;
-      delete legacyUpdates.event_end_at_utc;
-
-      if (Object.keys(legacyUpdates).length > 0) {
-        const legacyUpdate = await runEventUpdate(legacyUpdates);
-        updateError = legacyUpdate.error;
-      } else {
-        updateError = null;
+        delete updatePayload[missingColumn];
+        if (Object.keys(updatePayload).length === 0) {
+          updateError = null;
+          break;
+        }
       }
     }
 

@@ -360,7 +360,7 @@ async function createEntitlements(
     // Create bulk entitlement for all event photos
     await supabase.from('entitlements').insert({
       event_id: transaction.event_id,
-      transaction_id: transaction.id,
+      purchase_id: transaction.id,
       attendee_id: transaction.attendee_id,
       entitlement_type: 'bulk',
     });
@@ -368,7 +368,7 @@ async function createEntitlements(
     // Create individual entitlements
     const entitlements = mediaIds.map((mediaId: string) => ({
       event_id: transaction.event_id,
-      transaction_id: transaction.id,
+      purchase_id: transaction.id,
       attendee_id: transaction.attendee_id,
       media_id: mediaId,
       entitlement_type: 'single' as const,

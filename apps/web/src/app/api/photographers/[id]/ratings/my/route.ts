@@ -10,28 +10,11 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
-function isMissingColumnError(error: any, columnName: string) {
-  return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
-}
-
 async function resolvePhotographerByIdentifier(supabase: any, identifier: string) {
   const normalizedIdentifier = typeof identifier === 'string' ? identifier.trim() : '';
   const faceTag = normalizedIdentifier.startsWith('@')
     ? normalizedIdentifier
     : `@${normalizedIdentifier}`;
-
-  const withUserId = await supabase
-    .from('photographers')
-    .select('id')
-    .or(
-      `id.eq.${normalizedIdentifier},user_id.eq.${normalizedIdentifier},public_profile_slug.eq.${normalizedIdentifier},face_tag.eq.${faceTag}`
-    )
-    .limit(1)
-    .maybeSingle();
-
-  if (!withUserId.error || !isMissingColumnError(withUserId.error, 'user_id')) {
-    return withUserId;
-  }
 
   return supabase
     .from('photographers')
@@ -39,21 +22,11 @@ async function resolvePhotographerByIdentifier(supabase: any, identifier: string
     .or(
       `id.eq.${normalizedIdentifier},public_profile_slug.eq.${normalizedIdentifier},face_tag.eq.${faceTag}`
     )
+    .limit(1)
     .maybeSingle();
 }
 
 async function resolveAttendeeByUser(supabase: any, userId: string) {
-  const byUserId = await supabase
-    .from('attendees')
-    .select('id')
-    .eq('user_id', userId)
-    .limit(1)
-    .maybeSingle();
-
-  if (!byUserId.error || !isMissingColumnError(byUserId.error, 'user_id')) {
-    return byUserId;
-  }
-
   return supabase
     .from('attendees')
     .select('id')

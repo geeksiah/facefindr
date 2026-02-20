@@ -3,6 +3,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 
+function normalizePrintProductRow(row: any) {
+  return {
+    ...row,
+    type: row.category || 'print',
+    base_price_usd: row.base_price ?? 0,
+    sizes: [],
+  };
+}
+
 // PUT - Update a print product
 export async function PUT(
   request: NextRequest,
@@ -20,17 +29,19 @@ export async function PUT(
 
     const { id } = params;
     const body = await request.json();
-    const { name, type, description, base_price_usd, is_active, sizes } = body;
+    const { name, type, description, base_price_usd, is_active } = body;
+    const normalizedBasePrice = Number(base_price_usd || 0);
 
     const { data, error } = await supabaseAdmin
       .from('print_products')
       .update({
         name,
-        type,
+        category: type || 'print',
         description,
-        base_price_usd,
+        base_cost: normalizedBasePrice,
+        base_price: normalizedBasePrice,
+        suggested_price: normalizedBasePrice,
         is_active,
-        sizes: sizes || [],
         updated_at: new Date().toISOString(),
       })
       .eq('id', id)
@@ -41,7 +52,7 @@ export async function PUT(
 
     await logAction('print_product_update', 'print_product', id, { name });
 
-    return NextResponse.json({ success: true, product: data });
+    return NextResponse.json({ success: true, product: normalizePrintProductRow(data) });
   } catch (error) {
     console.error('Update print product error:', error);
     return NextResponse.json({ error: 'Failed to update product' }, { status: 500 });

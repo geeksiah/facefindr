@@ -106,15 +106,17 @@ export async function syncRecurringSubscriptionRecord(input: RecurringSyncInput)
       amount_cents: amountCents,
       current_period_start: currentPeriodStart,
       current_period_end: currentPeriodEnd,
-      cancel_at_period_end: Boolean(input.cancelAtPeriodEnd),
       canceled_at: canceledAt,
-      can_discover_non_contacts: isPremium,
-      can_upload_drop_ins: isPremium,
-      can_receive_all_drop_ins: isPremium,
-      can_search_social_media: isPremiumPlus,
-      can_search_web: isPremiumPlus,
       last_webhook_event_at: nowIso,
-      metadata: providerMetadata,
+      metadata: {
+        ...providerMetadata,
+        cancel_at_period_end: Boolean(input.cancelAtPeriodEnd),
+        can_discover_non_contacts: isPremium,
+        can_upload_drop_ins: isPremium,
+        can_receive_all_drop_ins: isPremium,
+        can_search_social_media: isPremiumPlus,
+        can_search_web: isPremiumPlus,
+      },
     };
 
     if (input.attendeeId) {
@@ -185,7 +187,6 @@ export async function syncRecurringSubscriptionRecord(input: RecurringSyncInput)
   const payload = {
     ...(input.photographerId ? { photographer_id: input.photographerId } : {}),
     plan_code: input.planCode || 'free',
-    plan_id: input.planId || null,
     status,
     payment_provider: input.provider,
     external_subscription_id: input.externalSubscriptionId || null,
@@ -199,7 +200,10 @@ export async function syncRecurringSubscriptionRecord(input: RecurringSyncInput)
     cancel_at_period_end: Boolean(input.cancelAtPeriodEnd),
     canceled_at: canceledAt,
     last_webhook_event_at: nowIso,
-    metadata: providerMetadata,
+    metadata: {
+      ...providerMetadata,
+      plan_id: input.planId || null,
+    },
   };
 
   if (input.photographerId) {

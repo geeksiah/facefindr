@@ -11,20 +11,9 @@ export type AnnouncementDeliveryStatus =
   | 'sent'
   | 'cancelled';
 
-interface ChannelStats {
-  total: number;
-  pending: number;
-  successful: number;
-  failed: number;
-}
-
 const SUCCESS_STATUSES = new Set(['sent', 'delivered', 'read']);
 const FAILED_STATUSES = new Set(['failed']);
 const PENDING_STATUSES = new Set(['pending']);
-
-function createChannelStats(): ChannelStats {
-  return { total: 0, pending: 0, successful: 0, failed: 0 };
-}
 
 function deriveAnnouncementStatus(
   total: number,
@@ -87,9 +76,6 @@ export async function syncAnnouncementDeliveryState(announcementId: string): Pro
     throw notificationsError;
   }
 
-  const byChannel: Record<string, ChannelStats> = {};
-  const byStatus: Record<string, number> = {};
-
   let total = 0;
   let pending = 0;
   let successful = 0;
@@ -97,28 +83,17 @@ export async function syncAnnouncementDeliveryState(announcementId: string): Pro
 
   for (const notification of notifications || []) {
     total++;
-    const channel = String(notification.channel || 'unknown');
     const status = String(notification.status || 'pending');
-    const stats = byChannel[channel] || createChannelStats();
-
-    stats.total++;
-    byStatus[status] = (byStatus[status] || 0) + 1;
 
     if (PENDING_STATUSES.has(status)) {
-      stats.pending++;
       pending++;
     } else if (SUCCESS_STATUSES.has(status)) {
-      stats.successful++;
       successful++;
     } else if (FAILED_STATUSES.has(status)) {
-      stats.failed++;
       failed++;
     } else {
-      stats.pending++;
       pending++;
     }
-
-    byChannel[channel] = stats;
   }
 
   const nextStatus = deriveAnnouncementStatus(total, pending, successful, failed, currentStatus);
@@ -129,22 +104,9 @@ export async function syncAnnouncementDeliveryState(announcementId: string): Pro
     .from('platform_announcements')
     .update({
       status: nextStatus,
-      queued_count: pending,
-      delivered_count: successful,
-      failed_count: failed,
       sent_count: successful,
       sent_at: isTerminal ? (announcement.sent_at || nowIso) : null,
-      delivery_synced_at: nowIso,
-      delivery_completed_at: isTerminal ? nowIso : null,
-      delivery_summary: {
-        total,
-        pending,
-        successful,
-        failed,
-        by_channel: byChannel,
-        by_status: byStatus,
-        updated_at: nowIso,
-      },
+      updated_at: nowIso,
     })
     .eq('id', announcementId);
 

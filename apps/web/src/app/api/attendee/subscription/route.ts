@@ -380,7 +380,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'No active subscription' }, { status: 404 });
     }
 
-    // Cancel Stripe subscription (for other providers we mark cancel_at_period_end locally)
+    // Cancel Stripe subscription (for other providers we mark cancellation intent locally)
     if (
       (subscription.payment_provider === 'stripe' || !subscription.payment_provider) &&
       subscription.stripe_subscription_id &&
@@ -395,7 +395,8 @@ export async function DELETE(request: NextRequest) {
     await supabase
       .from('attendee_subscriptions')
       .update({
-        cancel_at_period_end: true,
+        canceled_at: new Date().toISOString(),
+        last_webhook_event_at: new Date().toISOString(),
       })
       .eq('attendee_id', user.id);
 

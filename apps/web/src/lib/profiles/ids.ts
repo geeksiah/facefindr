@@ -1,7 +1,3 @@
-function isMissingColumnError(error: any, columnName: string) {
-  return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
-}
-
 function unique(values: Array<string | null | undefined>) {
   return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))];
 }
@@ -11,51 +7,12 @@ async function selectProfileById(
   table: 'photographers' | 'attendees',
   id: string
 ) {
-  const withUserId = await supabase
-    .from(table)
-    .select('id, user_id')
-    .eq('id', id)
-    .limit(1)
-    .maybeSingle();
-
-  if (!withUserId.error || !isMissingColumnError(withUserId.error, 'user_id')) {
-    return withUserId;
-  }
-
-  const withoutUserId = await supabase
+  return supabase
     .from(table)
     .select('id')
     .eq('id', id)
     .limit(1)
     .maybeSingle();
-
-  if (withoutUserId.data?.id) {
-    return {
-      data: { id: withoutUserId.data.id, user_id: id },
-      error: null,
-    };
-  }
-
-  return withoutUserId;
-}
-
-async function selectProfileByUserId(
-  supabase: any,
-  table: 'photographers' | 'attendees',
-  userId: string
-) {
-  const withUserId = await supabase
-    .from(table)
-    .select('id, user_id')
-    .eq('user_id', userId)
-    .limit(1)
-    .maybeSingle();
-
-  if (!withUserId.error || !isMissingColumnError(withUserId.error, 'user_id')) {
-    return withUserId;
-  }
-
-  return { data: null, error: withUserId.error };
 }
 
 export async function resolvePhotographerProfileByUser(
@@ -64,19 +21,8 @@ export async function resolvePhotographerProfileByUser(
   userEmail?: string | null
 ) {
   const byId = await selectProfileById(supabase, 'photographers', userId);
-
   if (byId.data?.id) {
-    return { data: { ...byId.data, user_id: (byId.data as any).user_id || userId }, error: null };
-  }
-
-  const byUserId = await selectProfileByUserId(supabase, 'photographers', userId);
-
-  if (byUserId.data?.id) {
-    return byUserId;
-  }
-
-  if (byUserId.error && !isMissingColumnError(byUserId.error, 'user_id')) {
-    return { data: null, error: byUserId.error };
+    return { data: { id: byId.data.id, user_id: byId.data.id }, error: null };
   }
 
   if (userEmail) {
@@ -89,13 +35,14 @@ export async function resolvePhotographerProfileByUser(
 
     if (byEmail.data?.id) {
       return {
-        data: { id: byEmail.data.id, user_id: userId },
+        data: { id: byEmail.data.id, user_id: byEmail.data.id },
         error: null,
       };
     }
+    return { data: null, error: byEmail.error };
   }
 
-  return { data: null, error: byUserId.error };
+  return { data: null, error: byId.error };
 }
 
 export async function getPhotographerIdCandidates(
@@ -113,19 +60,8 @@ export async function resolveAttendeeProfileByUser(
   userEmail?: string | null
 ) {
   const byId = await selectProfileById(supabase, 'attendees', userId);
-
   if (byId.data?.id) {
-    return { data: { ...byId.data, user_id: (byId.data as any).user_id || userId }, error: null };
-  }
-
-  const byUserId = await selectProfileByUserId(supabase, 'attendees', userId);
-
-  if (byUserId.data?.id) {
-    return byUserId;
-  }
-
-  if (byUserId.error && !isMissingColumnError(byUserId.error, 'user_id')) {
-    return { data: null, error: byUserId.error };
+    return { data: { id: byId.data.id, user_id: byId.data.id }, error: null };
   }
 
   if (userEmail) {
@@ -138,13 +74,14 @@ export async function resolveAttendeeProfileByUser(
 
     if (byEmail.data?.id) {
       return {
-        data: { id: byEmail.data.id, user_id: userId },
+        data: { id: byEmail.data.id, user_id: byEmail.data.id },
         error: null,
       };
     }
+    return { data: null, error: byEmail.error };
   }
 
-  return { data: null, error: byUserId.error };
+  return { data: null, error: byId.error };
 }
 
 export async function getAttendeeIdCandidates(

@@ -118,28 +118,18 @@ export default function BillingPage() {
       if (methods) {
         setPaymentMethods(methods.map((m: any) => ({
           id: m.id,
-          type: m.type,
-          last4: m.last_four,
-          brand: m.brand,
-          phone: m.phone_number,
-          provider: m.provider,
+          type:
+            m.method_type === 'mobile_money'
+              ? 'mobile_money'
+              : m.method_type === 'paypal'
+              ? 'paypal'
+              : 'card',
+          last4: m.card_last_four || m.bank_account_last_four,
+          brand: m.card_brand,
+          phone: m.mobile_money_number,
+          provider: m.mobile_money_provider || m.display_name,
           isDefault: m.is_default,
         })));
-      }
-
-      // Load wallet balance
-      const { data: walletData } = await supabase
-        .from('wallet_balances')
-        .select('*')
-        .eq('user_id', user.id)
-        .single();
-
-      if (walletData) {
-        setWallet({
-          available: walletData.available_balance || 0,
-          pending: walletData.pending_balance || 0,
-          currency: walletData.currency || 'USD',
-        });
       }
 
       // Load drop-in credits
@@ -156,19 +146,26 @@ export default function BillingPage() {
       // Load recent transactions
       const { data: txs } = await supabase
         .from('transactions')
-        .select('*')
-        .eq('user_id', user.id)
+        .select('id, gross_amount, currency, status, created_at, metadata')
+        .eq('attendee_id', user.id)
         .order('created_at', { ascending: false })
         .limit(10);
 
       if (txs) {
         setTransactions(txs.map((t: any) => ({
           id: t.id,
-          type: t.type,
-          amount: t.amount,
+          type: t.status === 'refunded' ? 'refund' : 'purchase',
+          amount: Number(t.gross_amount || 0),
           currency: String(t.currency || wallet.currency || 'USD').toUpperCase(),
-          description: t.description,
-          status: t.status,
+          description:
+            (t.metadata as any)?.description ||
+            ((t.metadata as any)?.type === 'tip' ? 'Tip payment' : 'Photo purchase'),
+          status:
+            t.status === 'succeeded'
+              ? 'completed'
+              : t.status === 'pending'
+              ? 'pending'
+              : 'failed',
           createdAt: t.created_at,
         })));
       }

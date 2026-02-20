@@ -13,7 +13,7 @@ async function getRuntimeVersion() {
   const supabase = createServiceClient();
   const [plans, currencies, regions, runtimeMarker] = await Promise.all([
     supabase.from('subscription_plans').select('updated_at').order('updated_at', { ascending: false }).limit(1).maybeSingle(),
-    supabase.from('supported_currencies').select('updated_at').order('updated_at', { ascending: false }).limit(1).maybeSingle(),
+    supabase.from('supported_currencies').select('created_at').order('created_at', { ascending: false }).limit(1).maybeSingle(),
     supabase.from('region_config').select('updated_at').order('updated_at', { ascending: false }).limit(1).maybeSingle(),
     supabase
       .from('platform_settings')
@@ -26,7 +26,7 @@ async function getRuntimeVersion() {
 
   const stamps = [
     plans.data?.updated_at ? Date.parse(plans.data.updated_at) : 0,
-    currencies.data?.updated_at ? Date.parse(currencies.data.updated_at) : 0,
+    currencies.data?.created_at ? Date.parse(currencies.data.created_at) : 0,
     regions.data?.updated_at ? Date.parse(regions.data.updated_at) : 0,
     runtimeMarker.data?.updated_at ? Date.parse(runtimeMarker.data.updated_at) : 0,
   ];

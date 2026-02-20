@@ -10,13 +10,17 @@ import {
 } from '@/lib/payments/payout-service';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
-async function isAdmin(supabase: any, userId: string): Promise<boolean> {
+async function isAdmin(
+  supabase: any,
+  user: { id: string; email?: string | null }
+): Promise<boolean> {
+  if (!user.email) return false;
   const { data } = await supabase
     .from('admin_users')
     .select('id')
-    .eq('user_id', userId)
+    .eq('email', user.email.toLowerCase())
     .eq('is_active', true)
-    .single();
+    .maybeSingle();
 
   return !!data;
 }
@@ -28,7 +32,7 @@ export async function GET(request: Request) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     
-    if (!user || !(await isAdmin(supabase, user.id))) {
+    if (!user || !(await isAdmin(supabase, user))) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     
@@ -107,7 +111,7 @@ export async function POST(request: Request) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     
-    if (!user || !(await isAdmin(supabase, user.id))) {
+    if (!user || !(await isAdmin(supabase, user))) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

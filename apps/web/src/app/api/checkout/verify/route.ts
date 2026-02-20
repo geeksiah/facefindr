@@ -6,7 +6,7 @@ import { verifyTransactionByRef } from '@/lib/payments/flutterwave';
 import { resolvePaystackSecretKey, verifyPaystackTransaction } from '@/lib/payments/paystack';
 import { getOrder } from '@/lib/payments/paypal';
 import { getCheckoutSession } from '@/lib/payments/stripe';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 export async function GET(request: Request) {
   try {
@@ -19,8 +19,9 @@ export async function GET(request: Request) {
     const provider = searchParams.get('provider') || 'stripe';
 
     const supabase = await createClient();
+    const serviceClient = createServiceClient();
 
-    let transaction;
+    let transaction: any;
 
     // Verify with the appropriate provider
     if (provider === 'stripe' && sessionId) {
@@ -113,6 +114,65 @@ export async function GET(request: Request) {
         { error: 'Transaction not found' },
         { status: 404 }
       );
+    }
+
+    if (transaction.status !== 'succeeded') {
+      await serviceClient
+        .from('transactions')
+        .update({ status: 'succeeded' })
+        .eq('id', transaction.id);
+
+      const { data: wallet } = await serviceClient
+        .from('wallets')
+        .select('photographer_id')
+        .eq('id', transaction.wallet_id)
+        .maybeSingle();
+
+      try {
+        const now = new Date().toISOString();
+        const notifications: any[] = [
+          {
+            user_id: transaction.attendee_id,
+            channel: 'in_app',
+            template_code: 'purchase_completed',
+            subject: 'Purchase completed',
+            body: `Your purchase for ${transaction.events?.name || 'this event'} is complete.`,
+            status: 'delivered',
+            sent_at: now,
+            delivered_at: now,
+            metadata: {
+              transactionId: transaction.id,
+              eventId: transaction.event_id,
+              amount: transaction.gross_amount,
+              currency: transaction.currency,
+            },
+          },
+        ];
+
+        if (wallet?.photographer_id) {
+          notifications.push({
+            user_id: wallet.photographer_id,
+            channel: 'in_app',
+            template_code: 'purchase_received',
+            subject: 'New purchase received',
+            body: `A new purchase was completed for ${transaction.events?.name || 'your event'}.`,
+            status: 'delivered',
+            sent_at: now,
+            delivered_at: now,
+            metadata: {
+              transactionId: transaction.id,
+              eventId: transaction.event_id,
+              amount: transaction.gross_amount,
+              currency: transaction.currency,
+              attendeeId: transaction.attendee_id,
+            },
+          });
+        }
+
+        await serviceClient.from('notifications').insert(notifications);
+      } catch (notificationError) {
+        console.error('Checkout notification fanout failed:', notificationError);
+      }
     }
 
     // Get photo count from metadata
