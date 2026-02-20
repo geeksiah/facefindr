@@ -26,6 +26,13 @@ async function getAnalyticsData() {
     .gte('created_at', thirtyDaysAgo.toISOString())
     .order('created_at', { ascending: true });
 
+  const { data: tipsByDay } = await supabaseAdmin
+    .from('tips')
+    .select('amount, created_at')
+    .eq('status', 'completed')
+    .gte('created_at', thirtyDaysAgo.toISOString())
+    .order('created_at', { ascending: true });
+
   // Aggregate by day
   const dailyRevenue: Record<string, { gross: number; fees: number; count: number }> = {};
   revenueByDay?.forEach((tx) => {
@@ -37,6 +44,16 @@ async function getAnalyticsData() {
     dailyRevenue[day].fees += tx.platform_fee || 0;
     dailyRevenue[day].count += 1;
   });
+  tipsByDay?.forEach((tip) => {
+    const day = tip.created_at.split('T')[0];
+    if (!dailyRevenue[day]) {
+      dailyRevenue[day] = { gross: 0, fees: 0, count: 0 };
+    }
+    const amount = Number(tip.amount || 0);
+    dailyRevenue[day].gross += amount;
+    dailyRevenue[day].fees += Math.round(amount * 0.1);
+    dailyRevenue[day].count += 1;
+  });
 
   // Get revenue by provider
   const { data: revenueByProvider } = await supabaseAdmin
@@ -45,10 +62,19 @@ async function getAnalyticsData() {
     .eq('status', 'succeeded')
     .gte('created_at', ninetyDaysAgo.toISOString());
 
+  const { data: tipRevenueByProvider } = await supabaseAdmin
+    .from('tips')
+    .select('amount')
+    .eq('status', 'completed')
+    .gte('created_at', ninetyDaysAgo.toISOString());
+
   const providerTotals: Record<string, number> = {};
   revenueByProvider?.forEach((tx) => {
     const provider = tx.payment_provider || 'unknown';
     providerTotals[provider] = (providerTotals[provider] || 0) + (tx.gross_amount || 0);
+  });
+  tipRevenueByProvider?.forEach((tip) => {
+    providerTotals.tip = (providerTotals.tip || 0) + Number(tip.amount || 0);
   });
 
   // Get user growth

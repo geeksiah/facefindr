@@ -63,6 +63,30 @@ const DEFAULT_CURRENCIES: Currency[] = [
   { code: 'XAF', name: 'Central African CFA', symbol: 'FCFA', symbolPosition: 'after', decimalPlaces: 0, countries: ['CM', 'GA', 'CG'] },
 ];
 
+const COUNTRY_CURRENCY_FALLBACK: Record<string, string> = {
+  US: 'USD',
+  GB: 'GBP',
+  DE: 'EUR',
+  FR: 'EUR',
+  IT: 'EUR',
+  ES: 'EUR',
+  NL: 'EUR',
+  GH: 'GHS',
+  NG: 'NGN',
+  KE: 'KES',
+  ZA: 'ZAR',
+  UG: 'UGX',
+  TZ: 'TZS',
+  RW: 'RWF',
+  SN: 'XOF',
+  CI: 'XOF',
+  CM: 'XAF',
+  JP: 'JPY',
+  IN: 'INR',
+  CA: 'CAD',
+  AU: 'AUD',
+};
+
 export async function getSupportedCurrencies(): Promise<Map<string, Currency>> {
   const now = Date.now();
   
@@ -118,12 +142,18 @@ export async function getCurrency(code: string): Promise<Currency | null> {
 // ============================================
 
 export async function getCurrencyForCountry(countryCode: string): Promise<string> {
+  const normalizedCountry = countryCode.trim().toUpperCase();
   const currencies = await getSupportedCurrencies();
   
   for (const [code, currency] of currencies) {
-    if (currency.countries.includes(countryCode)) {
+    if (currency.countries.map((value) => String(value).toUpperCase()).includes(normalizedCountry)) {
       return code;
     }
+  }
+
+  const fallbackCode = COUNTRY_CURRENCY_FALLBACK[normalizedCountry];
+  if (fallbackCode) {
+    return fallbackCode;
   }
   
   return getPlatformBaseCurrency();
@@ -231,13 +261,14 @@ export async function setDetectedLocation(
   countryCode: string
 ): Promise<void> {
   const supabase = createServiceClient();
-  const currency = await getCurrencyForCountry(countryCode);
+  const normalizedCountry = countryCode.trim().toUpperCase();
+  const currency = await getCurrencyForCountry(normalizedCountry);
   
   await supabase
     .from('user_currency_preferences')
     .upsert({
       user_id: userId,
-      detected_country: countryCode,
+      detected_country: normalizedCountry,
       detected_currency: currency,
     }, {
       onConflict: 'user_id',
@@ -480,12 +511,18 @@ export async function getSubscriptionPricing(
 // ============================================
 
 export function getCountryFromRequest(headers: Headers): string | null {
+  const normalizeCountry = (value: string | null): string | null => {
+    if (!value) return null;
+    const normalized = value.trim().toUpperCase();
+    return /^[A-Z]{2}$/.test(normalized) ? normalized : null;
+  };
+
   // Vercel provides this header
-  const country = headers.get('x-vercel-ip-country');
+  const country = normalizeCountry(headers.get('x-vercel-ip-country'));
   if (country) return country;
   
   // Cloudflare provides this
-  const cfCountry = headers.get('cf-ipcountry');
+  const cfCountry = normalizeCountry(headers.get('cf-ipcountry'));
   if (cfCountry) return cfCountry;
   
   return null;

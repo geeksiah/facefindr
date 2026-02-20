@@ -137,7 +137,6 @@ export async function uploadPhotos(formData: FormData) {
       .from('media')
       .insert({
         event_id: eventId,
-        photographer_id: event.photographer_id, // Event owner for RLS
         uploader_id: actorPhotographerId, // Actual uploader for revenue tracking
         storage_path: storagePath,
         original_filename: file.name,

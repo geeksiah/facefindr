@@ -16,6 +16,47 @@ interface RouteParams {
   params: { id: string };
 }
 
+interface EventAccessResult {
+  eventOwnerId: string;
+  isOwner: boolean;
+  collaboratorAccess: {
+    role: string;
+    can_invite_collaborators: boolean;
+  } | null;
+}
+
+async function getEventAccess(
+  db: ReturnType<typeof createServiceClient>,
+  eventId: string,
+  photographerIdCandidates: string[]
+): Promise<EventAccessResult | null> {
+  const { data: event } = await db
+    .from('events')
+    .select('id, photographer_id')
+    .eq('id', eventId)
+    .maybeSingle();
+
+  if (!event) {
+    return null;
+  }
+
+  const isOwner = photographerIdCandidates.includes(event.photographer_id);
+
+  const { data: collaboratorAccess } = await db
+    .from('event_collaborators')
+    .select('role, can_invite_collaborators')
+    .eq('event_id', eventId)
+    .in('photographer_id', photographerIdCandidates)
+    .eq('status', 'active')
+    .maybeSingle();
+
+  return {
+    eventOwnerId: event.photographer_id,
+    isOwner,
+    collaboratorAccess: collaboratorAccess || null,
+  };
+}
+
 // GET - List collaborators for an event
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
@@ -33,16 +74,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
     }
 
-    // Check if user is a collaborator on this event
-    const { data: myAccess } = await db
-      .from('event_collaborators')
-      .select('role, can_invite_collaborators')
-      .eq('event_id', eventId)
-      .in('photographer_id', photographerIdCandidates)
-      .eq('status', 'active')
-      .single();
+    const access = await getEventAccess(db, eventId, photographerIdCandidates);
+    if (!access) {
+      return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+    }
 
-    if (!myAccess) {
+    const canView = access.isOwner || Boolean(access.collaboratorAccess);
+    if (!canView) {
       return NextResponse.json({ error: 'Not authorized to view this event' }, { status: 403 });
     }
 
@@ -102,8 +140,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     return NextResponse.json({
       collaborators: collaboratorsWithCounts || [],
-      myRole: myAccess.role,
-      canInvite: myAccess.can_invite_collaborators || myAccess.role === 'owner',
+      myRole: access.isOwner ? 'owner' : access.collaboratorAccess?.role || 'collaborator',
+      canInvite: access.isOwner || Boolean(access.collaboratorAccess?.can_invite_collaborators),
     });
 
   } catch (error) {
@@ -135,16 +173,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
     }
 
-    // Check if user can invite collaborators
-    const { data: myAccess } = await db
-      .from('event_collaborators')
-      .select('role, can_invite_collaborators')
-      .eq('event_id', eventId)
-      .in('photographer_id', photographerIdCandidates)
-      .eq('status', 'active')
-      .single();
+    const access = await getEventAccess(db, eventId, photographerIdCandidates);
+    if (!access) {
+      return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+    }
 
-    if (!myAccess || (!myAccess.can_invite_collaborators && myAccess.role !== 'owner')) {
+    const canInvite = access.isOwner || Boolean(access.collaboratorAccess?.can_invite_collaborators);
+    if (!canInvite) {
       return NextResponse.json({ error: 'Not authorized to invite collaborators' }, { status: 403 });
     }
 
@@ -153,7 +188,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       .from('events')
       .select('id, name, photographer_id')
       .eq('id', eventId)
-      .single();
+      .maybeSingle();
 
     if (!event) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 });
@@ -338,15 +373,13 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 
     // For other updates, check if user can manage collaborators
-    const { data: myAccess } = await db
-      .from('event_collaborators')
-      .select('role, can_invite_collaborators')
-      .eq('event_id', eventId)
-      .in('photographer_id', photographerIdCandidates)
-      .eq('status', 'active')
-      .single();
+    const access = await getEventAccess(db, eventId, photographerIdCandidates);
+    if (!access) {
+      return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+    }
 
-    if (!myAccess || (myAccess.role !== 'owner' && !myAccess.can_invite_collaborators)) {
+    const canManageCollaborators = access.isOwner || Boolean(access.collaboratorAccess?.can_invite_collaborators);
+    if (!canManageCollaborators) {
       return NextResponse.json({ error: 'Not authorized to manage collaborators' }, { status: 403 });
     }
 
@@ -457,15 +490,8 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     const isSelf = photographerIdCandidates.includes(collaborator.photographer_id);
     
     if (!isSelf) {
-      const { data: myAccess } = await db
-        .from('event_collaborators')
-        .select('role')
-        .eq('event_id', eventId)
-        .in('photographer_id', photographerIdCandidates)
-        .eq('status', 'active')
-        .single();
-
-      if (!myAccess || myAccess.role !== 'owner') {
+      const access = await getEventAccess(db, eventId, photographerIdCandidates);
+      if (!access || !access.isOwner) {
         return NextResponse.json({ error: 'Not authorized to remove collaborators' }, { status: 403 });
       }
     }

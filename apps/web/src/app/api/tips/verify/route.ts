@@ -144,6 +144,31 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to finalize tip status' }, { status: 500 });
     }
 
+    const transactionUpdate: Record<string, unknown> = {
+      status: 'succeeded',
+    };
+    if (provider === 'stripe' && resolvedReference) {
+      transactionUpdate.stripe_payment_intent_id = resolvedReference;
+    }
+    if (provider === 'flutterwave' && resolvedReference) {
+      transactionUpdate.flutterwave_tx_ref = resolvedReference;
+    }
+    if (provider === 'paypal' && resolvedReference) {
+      transactionUpdate.paypal_order_id = resolvedReference;
+    }
+    if (provider === 'paystack' && resolvedReference) {
+      transactionUpdate.paystack_reference = resolvedReference;
+    }
+
+    const { error: txUpdateError } = await serviceClient
+      .from('transactions')
+      .update(transactionUpdate)
+      .contains('metadata', { tip_id: tip.id });
+
+    if (txUpdateError) {
+      console.error('Failed to update tip transaction after verification:', txUpdateError);
+    }
+
     return NextResponse.json({
       tipId: tip.id,
       status: 'completed',

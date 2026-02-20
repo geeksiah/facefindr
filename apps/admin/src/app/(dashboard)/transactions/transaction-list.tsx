@@ -114,7 +114,7 @@ export function TransactionList({ transactions, total, page, limit }: Transactio
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-2">
-                    {statusIcons[tx.status]}
+                    {statusIcons[tx.status] || <Clock className="h-4 w-4 text-muted-foreground" />}
                     <span className="capitalize text-foreground">{tx.status}</span>
                   </div>
                 </td>
@@ -122,37 +122,41 @@ export function TransactionList({ transactions, total, page, limit }: Transactio
                   {formatDateTime(tx.created_at)}
                 </td>
                 <td className="px-6 py-4">
-                  <div className="flex justify-end relative">
-                    <button
-                      onClick={() => setActionMenuId(actionMenuId === tx.id ? null : tx.id)}
-                      className="p-2 rounded-lg hover:bg-muted transition-colors"
-                    >
-                      <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
-                    </button>
+                  {tx.payment_provider === 'tip' ? (
+                    <div className="text-right text-sm text-muted-foreground">-</div>
+                  ) : (
+                    <div className="flex justify-end relative">
+                      <button
+                        onClick={() => setActionMenuId(actionMenuId === tx.id ? null : tx.id)}
+                        className="p-2 rounded-lg hover:bg-muted transition-colors"
+                      >
+                        <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                      </button>
 
-                    {actionMenuId === tx.id && (
-                      <div className="absolute right-0 top-full mt-1 w-40 rounded-lg border border-border bg-card shadow-lg z-10">
-                        <div className="py-1">
-                          <Link
-                            href={`/transactions/${tx.id}`}
-                            className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted"
-                          >
-                            <Eye className="h-4 w-4" />
-                            View Details
-                          </Link>
-                          {tx.status === 'succeeded' && (
-                            <button
-                              onClick={() => handleRefund(tx.id)}
-                              className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-500 hover:bg-muted"
+                      {actionMenuId === tx.id && (
+                        <div className="absolute right-0 top-full mt-1 w-40 rounded-lg border border-border bg-card shadow-lg z-10">
+                          <div className="py-1">
+                            <Link
+                              href={`/transactions/${tx.id}`}
+                              className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted"
                             >
-                              <RotateCcw className="h-4 w-4" />
-                              Issue Refund
-                            </button>
-                          )}
+                              <Eye className="h-4 w-4" />
+                              View Details
+                            </Link>
+                            {tx.status === 'succeeded' && (
+                              <button
+                                onClick={() => handleRefund(tx.id)}
+                                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-500 hover:bg-muted"
+                              >
+                                <RotateCcw className="h-4 w-4" />
+                                Issue Refund
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
+                      )}
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}

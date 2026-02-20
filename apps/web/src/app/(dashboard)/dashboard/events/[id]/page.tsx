@@ -22,6 +22,7 @@ import { ShareButton } from '@/components/events/share-button';
 import { Button } from '@/components/ui/button';
 import { getCurrencySymbol } from '@/lib/currency-utils';
 import { formatEventDateDisplay } from '@/lib/events/time';
+import { getPhotographerIdCandidates } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { cn } from '@/lib/utils';
 
@@ -65,7 +66,8 @@ export default async function EventPage({ params }: EventPageProps) {
     return notFound();
   }
 
-  const isOwner = event.photographer_id === user.id;
+  const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
+  const isOwner = photographerIdCandidates.includes(event.photographer_id);
   let hasCollaboratorAccess = false;
 
   if (!isOwner) {
@@ -73,7 +75,7 @@ export default async function EventPage({ params }: EventPageProps) {
       .from('event_collaborators')
       .select('id')
       .eq('event_id', params.id)
-      .eq('photographer_id', user.id)
+      .in('photographer_id', photographerIdCandidates)
       .eq('status', 'active')
       .maybeSingle();
 

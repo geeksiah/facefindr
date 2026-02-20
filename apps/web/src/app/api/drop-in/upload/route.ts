@@ -10,6 +10,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 
+import { convertCurrency, getCountryFromRequest, getEffectiveCurrency } from '@/lib/currency/currency-service';
 import { isFlutterwaveConfigured, initializePayment } from '@/lib/payments/flutterwave';
 import { GatewaySelectionError, selectPaymentGateway } from '@/lib/payments/gateway-selector';
 import { isPayPalConfigured, createOrder, getApprovalUrl } from '@/lib/payments/paypal';
@@ -19,13 +20,26 @@ import { stripe } from '@/lib/payments/stripe';
 import { resolveDropInPricingConfig } from '@/lib/drop-in/pricing';
 import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
-async function getDropInPricing() {
+async function getDropInPricing(userId: string | undefined, requestHeaders: Headers) {
   const pricing = await resolveDropInPricingConfig();
+  const detectedCountry = getCountryFromRequest(requestHeaders);
+  const effectiveCurrency = await getEffectiveCurrency(userId, detectedCountry || undefined);
+
+  let uploadFeeCents = pricing.uploadFeeCents;
+  let giftFeeCents = pricing.giftFeeCents;
+  let currencyCode = pricing.currencyCode;
+
+  if (effectiveCurrency && effectiveCurrency !== pricing.currencyCode) {
+    uploadFeeCents = await convertCurrency(pricing.uploadFeeCents, pricing.currencyCode, effectiveCurrency);
+    giftFeeCents = await convertCurrency(pricing.giftFeeCents, pricing.currencyCode, effectiveCurrency);
+    currencyCode = effectiveCurrency;
+  }
+
   return {
-    uploadFeeCents: pricing.uploadFeeCents,
-    giftFeeCents: pricing.giftFeeCents,
-    currencyCode: pricing.currencyCode,
-    currencyLower: pricing.currencyLower,
+    uploadFeeCents,
+    giftFeeCents,
+    currencyCode,
+    currencyLower: currencyCode.toLowerCase(),
   };
 }
 
@@ -50,7 +64,7 @@ export async function POST(request: NextRequest) {
 
     let dropInPricing;
     try {
-      dropInPricing = await getDropInPricing();
+      dropInPricing = await getDropInPricing(user.id, request.headers);
     } catch (pricingError) {
       const message = pricingError instanceof Error
         ? pricingError.message
@@ -234,9 +248,11 @@ export async function POST(request: NextRequest) {
     // Select payment gateway based on user preference and country
     let gatewaySelection;
     try {
+      const detectedCountry = getCountryFromRequest(request.headers);
       gatewaySelection = await selectPaymentGateway({
         userId: user.id,
         currency: dropInPricing.currencyLower,
+        countryCode: detectedCountry || undefined,
         productType: 'drop_in',
       });
     } catch (gatewayError) {
@@ -412,12 +428,18 @@ export async function POST(request: NextRequest) {
       // Clean up drop-in record if checkout fails
       await serviceClient.from('drop_in_photos').delete().eq('id', dropInPhoto.id);
       await serviceClient.storage.from('media').remove([storagePath]);
+      const detail = error instanceof Error ? error.message : String(error);
+      const suggestedGateway = gatewaySelection.availableGateways.find(
+        (gateway) => gateway !== selectedGateway
+      );
       
-      console.error('Checkout session error:', error);
+      console.error('Checkout session error:', { selectedGateway, detail, error });
       return NextResponse.json(
         { 
-          error: 'Failed to create checkout session',
+          error: detail ? `Failed to create checkout session: ${detail}` : 'Failed to create checkout session',
+          detail,
           gateway: selectedGateway,
+          suggestedGateway: suggestedGateway || null,
           availableGateways: gatewaySelection.availableGateways,
         },
         { status: 500 }

@@ -111,6 +111,15 @@ export async function getUserCountry(userId: string): Promise<string | null> {
   const creatorCountry = await resolveCountryFromTable('photographers');
   if (creatorCountry) return creatorCountry;
 
+  const { data: currencyPreference } = await supabase
+    .from('user_currency_preferences')
+    .select('detected_country')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  const detectedCountry = normalize(currencyPreference?.detected_country);
+  if (detectedCountry) return detectedCountry;
+
   const { data: user } = await supabase.auth.admin.getUserById(userId);
   const metadataCountry =
     normalize((user?.user?.user_metadata as any)?.country_code) ||
@@ -118,6 +127,19 @@ export async function getUserCountry(userId: string): Promise<string | null> {
   if (metadataCountry) return metadataCountry;
 
   return null;
+}
+
+function orderGatewaysForCountry(gateways: PaymentGateway[], countryCode: string): PaymentGateway[] {
+  const normalizedCountry = countryCode.trim().toUpperCase();
+  const priority: PaymentGateway[] =
+    normalizedCountry === 'GH' || normalizedCountry === 'NG'
+      ? ['paystack', 'flutterwave', 'stripe', 'paypal']
+      : normalizedCountry === 'KE' || normalizedCountry === 'UG' || normalizedCountry === 'TZ' || normalizedCountry === 'RW'
+        ? ['flutterwave', 'paystack', 'stripe', 'paypal']
+        : ['stripe', 'paypal', 'flutterwave', 'paystack'];
+
+  const deduped = Array.from(new Set(gateways));
+  return deduped.sort((a, b) => priority.indexOf(a) - priority.indexOf(b));
 }
 
 /**
@@ -156,10 +178,7 @@ export async function selectPaymentGateway(options: {
   void currency;
   const environment: RuntimeEnvironment = options.environment || (process.env.NODE_ENV === 'production' ? 'production' : 'development');
 
-  const userCountry = countryCode || await getUserCountry(userId);
-  if (!userCountry) {
-    throw new GatewaySelectionError('No country available for gateway selection', 'missing_country');
-  }
+  const userCountry = countryCode || await getUserCountry(userId) || 'US';
 
   let regionGateways = await getConfiguredGateways(userCountry);
   // Keep checkout operational even when region config is missing by falling back
@@ -217,11 +236,12 @@ export async function selectPaymentGateway(options: {
   }
 
   const preferredGateway = await getUserPreferredGateway(userId);
-  if (preferredGateway && productGateways.includes(preferredGateway)) {
+  const orderedGateways = orderGatewaysForCountry(productGateways, userCountry);
+  if (preferredGateway && orderedGateways.includes(preferredGateway)) {
     return {
       gateway: preferredGateway,
       reason: 'User preference',
-      availableGateways: productGateways,
+      availableGateways: orderedGateways,
       countryCode: userCountry.toUpperCase(),
       productType,
       environment,
@@ -229,9 +249,9 @@ export async function selectPaymentGateway(options: {
   }
 
   return {
-    gateway: productGateways[0],
-    reason: selectionReason,
-    availableGateways: productGateways,
+    gateway: orderedGateways[0],
+    reason: `${selectionReason} (country-priority ordering)`,
+    availableGateways: orderedGateways,
     countryCode: userCountry.toUpperCase(),
     productType,
     environment,

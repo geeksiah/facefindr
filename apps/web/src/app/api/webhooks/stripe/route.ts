@@ -269,6 +269,25 @@ async function updateTipStatus(
   if (error) {
     console.error(`Failed to update tip ${tipId}:`, error);
   }
+
+  const transactionStatus =
+    status === 'completed' ? 'succeeded' : status === 'refunded' ? 'refunded' : 'failed';
+  const transactionUpdate: Record<string, unknown> = {
+    status: transactionStatus,
+  };
+
+  if (typeof extra.stripe_payment_intent_id === 'string' && extra.stripe_payment_intent_id) {
+    transactionUpdate.stripe_payment_intent_id = extra.stripe_payment_intent_id;
+  }
+
+  const { error: txError } = await supabase
+    .from('transactions')
+    .update(transactionUpdate)
+    .contains('metadata', { tip_id: tipId });
+
+  if (txError) {
+    console.error(`Failed to update tip transaction ledger ${tipId}:`, txError);
+  }
 }
 
 async function handleAccountUpdate(

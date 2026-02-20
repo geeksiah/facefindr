@@ -172,6 +172,14 @@ async function handleChargeCompleted(
         stripe_payment_intent_id: data.tx_ref,
       })
       .eq('id', tipId);
+    await supabase
+      .from('transactions')
+      .update({
+        status: 'succeeded',
+        flutterwave_tx_ref: data.tx_ref,
+        flutterwave_tx_id: String(data.id),
+      })
+      .contains('metadata', { tip_id: tipId });
     return;
   }
 
@@ -216,6 +224,10 @@ async function handleChargeFailed(
       .from('tips')
       .update({ status: 'failed' })
       .eq('id', tipId);
+    await supabase
+      .from('transactions')
+      .update({ status: 'failed' })
+      .contains('metadata', { tip_id: tipId });
     await syncRecurringFromFlutterwaveData(supabase, 'charge.failed', data, 'past_due');
     return;
   }

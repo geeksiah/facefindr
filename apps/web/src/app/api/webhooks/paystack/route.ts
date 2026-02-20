@@ -139,13 +139,21 @@ async function handleChargeSuccess(
     return;
   }
   if (metadata.tip_id) {
+    const tipId = String(metadata.tip_id);
     await supabase
       .from('tips')
       .update({
         status: 'completed',
         stripe_payment_intent_id: reference,
       })
-      .eq('id', String(metadata.tip_id));
+      .eq('id', tipId);
+    await (supabase.from('transactions') as any)
+      .update({
+        status: 'succeeded',
+        paystack_reference: reference,
+        paystack_transaction_id: payload.data?.id ? String(payload.data.id) : null,
+      })
+      .contains('metadata', { tip_id: tipId });
     return;
   }
   if (metadata.subscription_scope) {
@@ -207,10 +215,14 @@ async function handleChargeFailure(
     return;
   }
   if (metadata.tip_id) {
+    const tipId = String(metadata.tip_id);
     await supabase
       .from('tips')
       .update({ status: 'failed' })
-      .eq('id', String(metadata.tip_id));
+      .eq('id', tipId);
+    await (supabase.from('transactions') as any)
+      .update({ status: 'failed' })
+      .contains('metadata', { tip_id: tipId });
     return;
   }
   if (metadata.subscription_scope) {

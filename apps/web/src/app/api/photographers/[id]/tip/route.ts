@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 
-import { getEffectiveCurrency, getPlatformBaseCurrency } from '@/lib/currency/currency-service';
+import { getCountryFromRequest, getEffectiveCurrency, getPlatformBaseCurrency } from '@/lib/currency/currency-service';
 import { calculateFees } from '@/lib/payments/fee-calculator';
 import {
   initializePayment,
@@ -69,6 +69,26 @@ async function resolvePhotographerByIdentifier(supabase: any, identifier: string
   };
 }
 
+async function resolveLedgerEventIdForTip(
+  supabase: ReturnType<typeof createServiceClient>,
+  photographerId: string,
+  explicitEventId?: string | null
+): Promise<string | null> {
+  if (explicitEventId) {
+    return explicitEventId;
+  }
+
+  const { data: fallbackEvent } = await supabase
+    .from('events')
+    .select('id')
+    .eq('photographer_id', photographerId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return fallbackEvent?.id || null;
+}
+
 
 // POST - Create tip payment
 export async function POST(
@@ -86,7 +106,7 @@ export async function POST(
     }
 
     const body = await request.json();
-    const { 
+    const {
       amount, 
       currency: providedCurrency, 
       provider, // Optional: specific provider preference
@@ -99,11 +119,12 @@ export async function POST(
       typeof providedCurrency === 'string' && providedCurrency.trim()
         ? providedCurrency.trim().toUpperCase()
         : undefined;
+    const detectedCountry = getCountryFromRequest(request.headers);
 
     // Validate amount (minimum $2.00 = 200 cents)
     if (!amount || amount < 200) {
       return NextResponse.json(
-        { error: 'Minimum tip amount is $2.00' },
+        { error: 'Minimum tip amount is 2.00 (in selected currency)' },
         { status: 400 }
       );
     }
@@ -145,7 +166,7 @@ export async function POST(
 
     // Determine transaction currency (use provided, user preference, or event currency)
     const transactionCurrency = normalizedProvidedCurrency || 
-      await getEffectiveCurrency(user.id, eventCountryCode || photographer.country_code || undefined) || 
+      await getEffectiveCurrency(user.id, eventCountryCode || photographer.country_code || detectedCountry || undefined) || 
       eventCurrency;
 
     // Select payment gateway based on user preference, country, and availability
@@ -155,7 +176,7 @@ export async function POST(
         userId: user.id,
         photographerId: photographerId,
         currency: transactionCurrency,
-        countryCode: eventCountryCode || photographer.country_code || undefined,
+        countryCode: eventCountryCode || photographer.country_code || detectedCountry || undefined,
         productType: 'tip',
       });
     } catch (gatewayError) {
@@ -443,6 +464,58 @@ export async function POST(
         { error: 'Invalid payment provider' },
         { status: 400 }
       );
+    }
+
+    const ledgerEventId = await resolveLedgerEventIdForTip(serviceClient, photographerId, eventId || null);
+    if (ledgerEventId) {
+      const transactionPayload: Record<string, any> = {
+        event_id: ledgerEventId,
+        wallet_id: wallet.id,
+        attendee_id: user.id,
+        attendee_email: user.email || null,
+        gross_amount: amount,
+        platform_fee: adjustedFeeCalculation.platformFee,
+        stripe_fee: adjustedFeeCalculation.providerFee,
+        provider_fee: adjustedFeeCalculation.providerFee,
+        net_amount: adjustedFeeCalculation.netAmount,
+        currency: transactionCurrency,
+        status: 'pending',
+        payment_provider: selectedProvider,
+        metadata: {
+          type: 'tip',
+          tip_id: tip.id,
+          photographer_id: photographerId,
+          from_user_id: user.id,
+          event_id: eventId || null,
+          media_id: mediaId || null,
+          message: message || null,
+          is_anonymous: isAnonymous,
+        },
+      };
+
+      if (selectedProvider === 'stripe') {
+        transactionPayload.stripe_checkout_session_id = sessionId;
+        transactionPayload.stripe_payment_intent_id = txRef;
+      } else if (selectedProvider === 'flutterwave') {
+        transactionPayload.flutterwave_tx_ref = sessionId;
+      } else if (selectedProvider === 'paypal') {
+        transactionPayload.paypal_order_id = sessionId;
+      } else if (selectedProvider === 'paystack') {
+        transactionPayload.paystack_reference = sessionId;
+      }
+
+      const { error: transactionError } = await serviceClient
+        .from('transactions')
+        .insert(transactionPayload);
+
+      if (transactionError) {
+        console.error('Failed to create tip transaction ledger row:', transactionError);
+      }
+    } else {
+      console.warn('Tip ledger event could not be resolved; transaction trace skipped', {
+        tipId: tip.id,
+        photographerId,
+      });
     }
 
     // Update tip with payment session ID

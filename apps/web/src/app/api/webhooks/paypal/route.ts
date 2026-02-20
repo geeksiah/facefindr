@@ -194,6 +194,13 @@ async function handleCaptureCompleted(
         stripe_payment_intent_id: tipMeta.reference || resource.id,
       })
       .eq('id', tipMeta.tipId);
+    await supabase
+      .from('transactions')
+      .update({
+        status: 'succeeded',
+        paypal_order_id: tipMeta.reference || resource.id,
+      })
+      .contains('metadata', { tip_id: tipMeta.tipId });
     return;
   }
 
@@ -301,6 +308,10 @@ async function handleCaptureFailed(
       .from('tips')
       .update({ status })
       .eq('id', tipMeta.tipId);
+    await supabase
+      .from('transactions')
+      .update({ status: status === 'refunded' ? 'refunded' : 'failed' })
+      .contains('metadata', { tip_id: tipMeta.tipId });
     return;
   }
 

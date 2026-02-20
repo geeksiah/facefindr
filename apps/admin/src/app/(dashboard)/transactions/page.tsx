@@ -17,7 +17,7 @@ async function getTransactions(searchParams: SearchParams) {
   const limit = 20;
   const offset = (page - 1) * limit;
 
-  let query = supabaseAdmin
+  let transactionQuery = supabaseAdmin
     .from('transactions')
     .select(`
       *,
@@ -26,31 +26,107 @@ async function getTransactions(searchParams: SearchParams) {
     `, { count: 'exact' });
 
   if (searchParams.search) {
-    query = query.ilike('id', `%${searchParams.search}%`);
+    transactionQuery = transactionQuery.ilike('id', `%${searchParams.search}%`);
   }
 
   if (searchParams.status) {
-    query = query.eq('status', searchParams.status);
+    transactionQuery = transactionQuery.eq('status', searchParams.status);
   }
 
   if (searchParams.provider) {
-    query = query.eq('payment_provider', searchParams.provider);
+    transactionQuery = transactionQuery.eq('payment_provider', searchParams.provider);
   }
 
-  query = query
+  transactionQuery = transactionQuery
     .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1);
+    .limit(500);
 
-  const { data, count, error } = await query;
+  const { data: transactionRows, error } = await transactionQuery;
 
   if (error) {
     console.error('Error fetching transactions:', error);
     return { transactions: [], total: 0, page, limit };
   }
 
+  let tipRows: any[] = [];
+  const includeTips = !searchParams.provider || searchParams.provider === 'tip';
+
+  if (includeTips) {
+    let tipQuery = supabaseAdmin
+      .from('tips')
+      .select('id, amount, currency, status, created_at, event_id, stripe_payment_intent_id');
+
+    if (searchParams.search) {
+      tipQuery = tipQuery.ilike('id', `%${searchParams.search}%`);
+    }
+
+    if (searchParams.status === 'succeeded') {
+      tipQuery = tipQuery.eq('status', 'completed');
+    } else if (searchParams.status === 'failed') {
+      tipQuery = tipQuery.eq('status', 'failed');
+    } else if (searchParams.status === 'refunded') {
+      tipQuery = tipQuery.eq('status', 'refunded');
+    } else if (searchParams.status === 'pending') {
+      tipQuery = tipQuery.eq('status', 'pending');
+    }
+
+    const { data: tips, error: tipsError } = await tipQuery
+      .order('created_at', { ascending: false })
+      .limit(500);
+
+    if (tipsError) {
+      console.error('Error fetching tips for transaction list:', tipsError);
+    } else {
+      tipRows = tips || [];
+    }
+  }
+
+  const tipEventIds = Array.from(
+    new Set(tipRows.map((tip) => tip.event_id).filter(Boolean))
+  ) as string[];
+  let tipEventsById = new Map<string, { id: string; name: string }>();
+
+  if (tipEventIds.length > 0) {
+    const { data: tipEvents } = await supabaseAdmin
+      .from('events')
+      .select('id, name')
+      .in('id', tipEventIds);
+
+    tipEventsById = new Map((tipEvents || []).map((event) => [event.id, event]));
+  }
+
+  const normalizedTips = tipRows.map((tip) => {
+    const platformFee = Math.round(Number(tip.amount || 0) * 0.1);
+    const normalizedStatus =
+      tip.status === 'completed'
+        ? 'succeeded'
+        : tip.status === 'pending'
+          ? 'pending'
+          : tip.status;
+
+    return {
+      id: tip.id,
+      gross_amount: Number(tip.amount || 0),
+      net_amount: Number(tip.amount || 0) - platformFee,
+      platform_fee: platformFee,
+      provider_fee: 0,
+      currency: tip.currency || 'USD',
+      status: normalizedStatus,
+      payment_provider: 'tip',
+      stripe_payment_intent_id: tip.stripe_payment_intent_id || null,
+      created_at: tip.created_at,
+      events: tip.event_id ? tipEventsById.get(tip.event_id) || null : null,
+    };
+  });
+
+  const merged = [...(transactionRows || []), ...normalizedTips].sort(
+    (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+  const paginated = merged.slice(offset, offset + limit);
+
   return {
-    transactions: data || [],
-    total: count || 0,
+    transactions: paginated,
+    total: merged.length,
     page,
     limit,
   };
