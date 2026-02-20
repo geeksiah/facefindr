@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { detectFaces } from '@/lib/aws/rekognition';
 import { searchDropInFaces } from '@/lib/aws/rekognition-drop-in';
+import { getAttendeeIdCandidates } from '@/lib/profiles/ids';
 import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
 export async function POST(request: NextRequest) {
@@ -22,6 +23,7 @@ export async function POST(request: NextRequest) {
     const internalAuthorized = !!processSecret && secretHeader === processSecret;
 
     let requesterId: string | null = null;
+    let requesterAttendeeIdCandidates: string[] = [];
     if (!internalAuthorized) {
       const authHeader = request.headers.get('authorization');
       const accessToken = authHeader?.startsWith('Bearer ')
@@ -38,6 +40,11 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
       }
       requesterId = user.id;
+      requesterAttendeeIdCandidates = await getAttendeeIdCandidates(
+        createServiceClient(),
+        user.id,
+        user.email
+      );
     }
 
     const { dropInPhotoId } = await request.json();
@@ -59,9 +66,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Drop-in photo not found' }, { status: 404 });
     }
 
-    if (!internalAuthorized && requesterId !== dropInPhoto.uploader_id) {
+    if (
+      !internalAuthorized &&
+      !requesterAttendeeIdCandidates.includes(dropInPhoto.uploader_id) &&
+      requesterId !== dropInPhoto.uploader_id
+    ) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
+
+    const { data: uploaderProfile } = await supabase
+      .from('attendees')
+      .select('id, display_name')
+      .eq('id', dropInPhoto.uploader_id)
+      .maybeSingle();
+    const uploaderDisplayName = uploaderProfile?.display_name || 'A user';
 
     // Check payment status
     if (dropInPhoto.upload_payment_status !== 'paid') {
@@ -229,7 +247,7 @@ export async function POST(request: NextRequest) {
               channel: 'in_app',
               template_code: 'drop_in_match',
               subject: 'New drop-in photo match',
-              body: `${dropInPhoto.uploader_display_name || 'A user'} shared a drop-in photo that matched your FaceTag.`,
+              body: `${uploaderDisplayName} shared a drop-in photo that matched your FaceTag.`,
               status: 'delivered',
               sent_at: new Date().toISOString(),
               delivered_at: new Date().toISOString(),

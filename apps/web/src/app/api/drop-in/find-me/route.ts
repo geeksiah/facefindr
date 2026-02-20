@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { crawlExternalPlatforms, hasExternalCrawlerProviderConfigured } from '@/lib/drop-in/external-crawler';
+import { getAttendeeIdCandidates, resolveAttendeeProfileByUser } from '@/lib/profiles/ids';
 import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
 type SearchType = 'internal' | 'contacts' | 'external';
@@ -31,13 +32,19 @@ export async function GET(request: NextRequest) {
     }
 
     const serviceClient = createServiceClient();
+    const resolvedAttendee = await resolveAttendeeProfileByUser(serviceClient, user.id, user.email);
+    const attendeeId = resolvedAttendee.data?.id;
+    if (!attendeeId) {
+      return NextResponse.json({ error: 'Attendee profile not found' }, { status: 404 });
+    }
+    const attendeeIdCandidates = await getAttendeeIdCandidates(serviceClient, user.id, user.email);
 
     const [{ data: attendee }, { data: searches }, { data: rawResults }] = await Promise.all([
-      serviceClient.from('attendees').select('drop_in_credits').eq('id', user.id).maybeSingle(),
+      serviceClient.from('attendees').select('drop_in_credits').eq('id', attendeeId).maybeSingle(),
       supabase
         .from('drop_in_searches')
         .select('id, search_type, status, match_count, credits_used, error_message, created_at, completed_at')
-        .eq('attendee_id', user.id)
+        .in('attendee_id', attendeeIdCandidates)
         .order('created_at', { ascending: false })
         .limit(20),
       supabase
@@ -64,7 +71,7 @@ export async function GET(request: NextRequest) {
             )
           `
         )
-        .eq('attendee_id', user.id)
+        .in('attendee_id', attendeeIdCandidates)
         .order('created_at', { ascending: false })
         .limit(40),
     ]);
@@ -137,6 +144,12 @@ export async function POST(request: NextRequest) {
     }
 
     const serviceClient = createServiceClient();
+    const resolvedAttendee = await resolveAttendeeProfileByUser(serviceClient, user.id, user.email);
+    const attendeeId = resolvedAttendee.data?.id;
+    if (!attendeeId) {
+      return NextResponse.json({ error: 'Attendee profile not found' }, { status: 404 });
+    }
+    const attendeeIdCandidates = await getAttendeeIdCandidates(serviceClient, user.id, user.email);
     const payload = await request.json().catch(() => ({}));
     const searchType = payload?.searchType;
     const contactQuery = typeof payload?.contactQuery === 'string' ? payload.contactQuery.trim() : '';
@@ -148,7 +161,7 @@ export async function POST(request: NextRequest) {
     const { data: search, error: searchCreateError } = await supabase
       .from('drop_in_searches')
       .insert({
-        attendee_id: user.id,
+        attendee_id: attendeeId,
         search_type: searchType,
         status: 'processing',
         started_at: new Date().toISOString(),
@@ -190,7 +203,7 @@ export async function POST(request: NextRequest) {
     const { data: attendeeProfile } = await serviceClient
       .from('attendees')
       .select('display_name, face_tag, drop_in_credits')
-      .eq('id', user.id)
+      .eq('id', attendeeId)
       .maybeSingle();
 
     if (!attendeeProfile?.display_name) {
@@ -232,7 +245,7 @@ export async function POST(request: NextRequest) {
       }
 
       const { data: creditsConsumed, error: creditsError } = await supabase.rpc('use_drop_in_credits', {
-        p_attendee_id: user.id,
+        p_attendee_id: attendeeId,
         p_action: 'external_search',
         p_credits_needed: requiredCredits,
         p_metadata: {
@@ -249,7 +262,7 @@ export async function POST(request: NextRequest) {
       creditsUsed = requiredCredits;
 
       const searchResultsToInsert = externalResults.map((result) => ({
-        attendee_id: user.id,
+        attendee_id: attendeeId,
         search_id: search.id,
         media_id: null,
         source: result.source,
@@ -277,7 +290,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { data: creditsConsumed, error: creditsError } = await supabase.rpc('use_drop_in_credits', {
-      p_attendee_id: user.id,
+      p_attendee_id: attendeeId,
       p_action: searchType === 'contacts' ? 'contacts_search' : 'internal_search',
       p_credits_needed: requiredCredits,
       p_metadata: {
@@ -297,12 +310,12 @@ export async function POST(request: NextRequest) {
     const { data: selfMatches } = await serviceClient
       .from('photo_drop_matches')
       .select('media_id')
-      .eq('attendee_id', user.id);
+      .in('attendee_id', attendeeIdCandidates);
 
     const { data: purchasedRows } = await supabase
       .from('entitlements')
       .select('media_id')
-      .eq('attendee_id', user.id)
+      .in('attendee_id', attendeeIdCandidates)
       .not('media_id', 'is', null);
 
     const internalMediaIds = Array.from(
@@ -324,12 +337,12 @@ export async function POST(request: NextRequest) {
       const { data: contacts } = await supabase
         .from('contacts')
         .select('user_id, contact_id, contact_type')
-        .or(`user_id.eq.${user.id},contact_id.eq.${user.id}`)
+        .or(`user_id.eq.${attendeeId},contact_id.eq.${attendeeId}`)
         .neq('contact_type', 'blocked');
 
       const rawContactIds = (contacts || [])
-        .map((contact) => (contact.user_id === user.id ? contact.contact_id : contact.user_id))
-        .filter((id): id is string => !!id && id !== user.id);
+        .map((contact) => (contact.user_id === attendeeId ? contact.contact_id : contact.user_id))
+        .filter((id): id is string => !!id && id !== attendeeId);
       const uniqueContactIds = Array.from(new Set(rawContactIds));
 
       let candidateContactIds = uniqueContactIds;
@@ -384,7 +397,7 @@ export async function POST(request: NextRequest) {
       .limit(60);
 
     const searchResultsToInsert = (mediaRows || []).map((media: any) => ({
-      attendee_id: user.id,
+      attendee_id: attendeeId,
       search_id: search.id,
       media_id: media.id,
       source: 'ferchr',

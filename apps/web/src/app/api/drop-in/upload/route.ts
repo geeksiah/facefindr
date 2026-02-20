@@ -43,10 +43,6 @@ async function getDropInPricing(userId: string | undefined, requestHeaders: Head
   };
 }
 
-function isMissingColumnError(error: any, columnName: string) {
-  return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
-}
-
 function extractMissingColumnName(error: any): string | null {
   if (error?.code !== '42703' || typeof error?.message !== 'string') return null;
 
@@ -69,16 +65,6 @@ async function tryInsertAttendeeProfile(
   serviceClient: ReturnType<typeof createServiceClient>,
   payload: Record<string, any>
 ) {
-  const selectWithUserId = await serviceClient
-    .from('attendees')
-    .insert(payload)
-    .select('id, display_name, user_id')
-    .single();
-
-  if (!selectWithUserId.error || !isMissingColumnError(selectWithUserId.error, 'user_id')) {
-    return selectWithUserId;
-  }
-
   return serviceClient
     .from('attendees')
     .insert(payload)
@@ -106,7 +92,6 @@ async function ensureAttendeeProfile(
 
   let payload: Record<string, any> = {
     id: user.id,
-    user_id: user.id,
     display_name: displayName,
     email: user.email,
     username,
@@ -130,7 +115,6 @@ async function ensureAttendeeProfile(
       return {
         id: createResult.data.id,
         display_name: (createResult.data as any).display_name || displayName,
-        user_id: (createResult.data as any).user_id || user.id,
       };
     }
 
@@ -165,7 +149,7 @@ async function ensureAttendeeProfile(
   // Last-chance fallback for existing rows in partially migrated environments.
   const byId = await serviceClient
     .from('attendees')
-    .select('id, display_name, user_id')
+    .select('id, display_name')
     .eq('id', user.id)
     .limit(1)
     .maybeSingle();
@@ -173,14 +157,13 @@ async function ensureAttendeeProfile(
     return {
       id: byId.data.id,
       display_name: (byId.data as any).display_name || displayName,
-      user_id: (byId.data as any).user_id || user.id,
     };
   }
 
   if (user.email) {
     const byEmail = await serviceClient
       .from('attendees')
-      .select('id, display_name, user_id')
+      .select('id, display_name')
       .eq('email', user.email)
       .limit(1)
       .maybeSingle();
@@ -188,7 +171,6 @@ async function ensureAttendeeProfile(
       return {
         id: byEmail.data.id,
         display_name: (byEmail.data as any).display_name || displayName,
-        user_id: (byEmail.data as any).user_id || user.id,
       };
     }
   }
@@ -266,7 +248,7 @@ export async function POST(request: NextRequest) {
     // Check user's subscription/plan
     const { data: subscription } = await serviceClient
       .from('attendee_subscriptions')
-      .select('plan_code, status, can_upload_drop_ins')
+      .select('plan_code, status')
       .eq('attendee_id', attendee.id)
       .eq('status', 'active')
       .single();

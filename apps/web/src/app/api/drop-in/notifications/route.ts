@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getAttendeeIdCandidates } from '@/lib/profiles/ids';
 import { createClient, createClientWithAccessToken } from '@/lib/supabase/server';
 
 // GET - List notifications
@@ -24,6 +25,10 @@ export async function GET(request: NextRequest) {
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const attendeeIdCandidates = await getAttendeeIdCandidates(supabase, user.id, user.email);
+    if (!attendeeIdCandidates.length) {
+      return NextResponse.json({ error: 'Attendee profile not found' }, { status: 404 });
     }
 
     const { searchParams } = new URL(request.url);
@@ -63,7 +68,7 @@ export async function GET(request: NextRequest) {
           verification_status
         )
       `)
-      .eq('recipient_id', user.id)
+      .in('recipient_id', attendeeIdCandidates)
       .eq('status', status)
       .order('created_at', { ascending: false })
       .limit(50);
@@ -123,6 +128,10 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const attendeeIdCandidates = await getAttendeeIdCandidates(supabase, user.id, user.email);
+    if (!attendeeIdCandidates.length) {
+      return NextResponse.json({ error: 'Attendee profile not found' }, { status: 404 });
+    }
 
     const { notificationId, action } = await request.json();
 
@@ -131,16 +140,29 @@ export async function POST(request: NextRequest) {
     }
 
     // Get notification
-    const { data: notification, error: notifError } = await supabase
+    let { data: notification, error: notifError } = await supabase
       .from('drop_in_notifications')
       .select('*')
       .eq('id', notificationId)
-      .eq('recipient_id', user.id)
       .single();
 
     if (notifError || !notification) {
+      const fallback = await supabase
+        .from('drop_in_notifications')
+        .select('*')
+        .eq('drop_in_match_id', notificationId)
+        .in('recipient_id', attendeeIdCandidates)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      notification = fallback.data;
+      notifError = fallback.error;
+    }
+
+    if (notifError || !notification || !attendeeIdCandidates.includes(notification.recipient_id)) {
       return NextResponse.json({ error: 'Notification not found' }, { status: 404 });
     }
+    const recipientAttendeeId = notification.recipient_id as string;
 
     const { data: dropInPhoto } = await supabase
       .from('drop_in_photos')
@@ -156,7 +178,7 @@ export async function POST(request: NextRequest) {
     if (action === 'view') {
       if (notification.requires_premium && !notification.is_gifted && !notification.viewed_at) {
         const { data: creditsConsumed, error: creditsError } = await supabase.rpc('use_drop_in_credits', {
-          p_attendee_id: user.id,
+          p_attendee_id: recipientAttendeeId,
           p_action: 'drop_in_recipient_unlock',
           p_credits_needed: 1,
           p_metadata: {
@@ -213,7 +235,7 @@ export async function POST(request: NextRequest) {
           .from('contacts')
           .upsert(
             {
-              user_id: user.id,
+              user_id: recipientAttendeeId,
               contact_id: uploaderId,
               contact_type: 'blocked',
             },
@@ -236,13 +258,13 @@ export async function POST(request: NextRequest) {
         .upsert(
           [
             {
-              user_id: user.id,
+              user_id: recipientAttendeeId,
               contact_id: uploaderId,
               contact_type: 'mutual',
             },
             {
               user_id: uploaderId,
-              contact_id: user.id,
+              contact_id: recipientAttendeeId,
               contact_type: 'mutual',
             },
           ],

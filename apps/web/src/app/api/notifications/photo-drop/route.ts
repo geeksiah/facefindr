@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { searchFacesByImage } from '@/lib/aws/rekognition';
+import { getPhotographerIdCandidates } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // ============================================
@@ -39,6 +40,11 @@ export async function POST(request: NextRequest) {
     }
 
     const serviceClient = createServiceClient();
+    const photographerIdCandidates = await getPhotographerIdCandidates(
+      serviceClient,
+      user.id,
+      user.email
+    );
 
     // Verify photographer owns this event
     const { data: event, error: eventError } = await serviceClient
@@ -51,7 +57,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 });
     }
 
-    if (event.photographer_id !== user.id) {
+    if (!photographerIdCandidates.includes(event.photographer_id)) {
       return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
     }
 
@@ -112,7 +118,7 @@ export async function POST(request: NextRequest) {
       // Download image and search against attendee collection
       try {
         const { data: imageData } = await serviceClient.storage
-          .from('photos')
+          .from('media')
           .download(media.storage_path);
 
         if (imageData) {
