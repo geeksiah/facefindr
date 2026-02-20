@@ -3,35 +3,131 @@ import {
   TrendingUp, 
   Users, 
   Calendar,
-  Download,
 } from 'lucide-react';
 import { Suspense } from 'react';
 
 import { supabaseAdmin } from '@/lib/supabase';
-import { formatCurrency, formatNumber, formatDate } from '@/lib/utils';
+import { formatCurrency, formatNumber } from '@/lib/utils';
 
 import { AnalyticsCharts } from './charts';
 import { ExportButton } from './export-button';
+
+const DEFAULT_BASE_CURRENCY = 'USD';
+
+function parseCurrencySetting(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim().toUpperCase();
+  }
+  if (value && typeof value === 'object') {
+    const payload = value as Record<string, unknown>;
+    const candidates = [payload.code, payload.currency, payload.value];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim().toUpperCase();
+      }
+    }
+  }
+  return null;
+}
+
+async function resolvePlatformBaseCurrency(): Promise<string> {
+  const { data } = await supabaseAdmin
+    .from('platform_settings')
+    .select('setting_key, value')
+    .in('setting_key', ['platform_base_currency', 'base_currency', 'default_currency']);
+
+  const byKey = new Map<string, unknown>();
+  for (const row of data || []) {
+    byKey.set(String((row as any).setting_key || ''), (row as any).value);
+  }
+
+  const resolved =
+    parseCurrencySetting(byKey.get('platform_base_currency')) ||
+    parseCurrencySetting(byKey.get('base_currency')) ||
+    parseCurrencySetting(byKey.get('default_currency'));
+
+  return resolved || DEFAULT_BASE_CURRENCY;
+}
+
+async function loadUsdRates(codes: string[]) {
+  const { data } = await supabaseAdmin
+    .from('exchange_rates')
+    .select('to_currency, rate, valid_from, created_at')
+    .eq('from_currency', 'USD')
+    .in('to_currency', codes)
+    .or('valid_until.is.null,valid_until.gt.now()')
+    .order('valid_from', { ascending: false });
+
+  const ratesToUsdBase = new Map<string, number>();
+  for (const row of data || []) {
+    const code = String((row as any).to_currency || '').toUpperCase();
+    if (!code || ratesToUsdBase.has(code)) continue;
+    const rate = Number((row as any).rate);
+    if (Number.isFinite(rate) && rate > 0) {
+      ratesToUsdBase.set(code, rate);
+    }
+  }
+
+  ratesToUsdBase.set('USD', 1);
+  return ratesToUsdBase;
+}
+
+function convertToBaseAmount(
+  amountCents: number,
+  fromCurrency: string,
+  baseCurrency: string,
+  usdRates: Map<string, number>
+): number {
+  const from = fromCurrency.toUpperCase();
+  const base = baseCurrency.toUpperCase();
+
+  if (from === base) return amountCents;
+
+  const usdToFrom = usdRates.get(from);
+  const usdToBase = usdRates.get(base) || 1;
+
+  if (!usdToFrom || usdToFrom <= 0) {
+    return amountCents;
+  }
+
+  const amountInUsd = amountCents / usdToFrom;
+  if (base === 'USD') {
+    return Math.round(amountInUsd);
+  }
+
+  return Math.round(amountInUsd * usdToBase);
+}
 
 async function getAnalyticsData() {
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+  const baseCurrency = await resolvePlatformBaseCurrency();
 
   // Get revenue by day for last 30 days
   const { data: revenueByDay } = await supabaseAdmin
     .from('transactions')
-    .select('gross_amount, platform_fee, created_at')
+    .select('gross_amount, platform_fee, currency, metadata, created_at')
     .eq('status', 'succeeded')
     .gte('created_at', thirtyDaysAgo.toISOString())
     .order('created_at', { ascending: true });
 
-  const { data: tipsByDay } = await supabaseAdmin
-    .from('tips')
-    .select('amount, created_at')
-    .eq('status', 'completed')
+  const { data: creditsByDay } = await supabaseAdmin
+    .from('drop_in_credit_purchases')
+    .select('amount_paid, currency, status, created_at')
+    .in('status', ['active', 'exhausted'])
     .gte('created_at', thirtyDaysAgo.toISOString())
     .order('created_at', { ascending: true });
+
+  const transactionCurrencies = new Set<string>();
+  for (const row of revenueByDay || []) {
+    transactionCurrencies.add(String((row as any).currency || DEFAULT_BASE_CURRENCY).toUpperCase());
+  }
+  for (const row of creditsByDay || []) {
+    transactionCurrencies.add(String((row as any).currency || DEFAULT_BASE_CURRENCY).toUpperCase());
+  }
+  transactionCurrencies.add(baseCurrency);
+  const usdRates = await loadUsdRates(Array.from(transactionCurrencies));
 
   // Aggregate by day
   const dailyRevenue: Record<string, { gross: number; fees: number; count: number }> = {};
@@ -40,41 +136,49 @@ async function getAnalyticsData() {
     if (!dailyRevenue[day]) {
       dailyRevenue[day] = { gross: 0, fees: 0, count: 0 };
     }
-    dailyRevenue[day].gross += tx.gross_amount || 0;
-    dailyRevenue[day].fees += tx.platform_fee || 0;
+    const currency = String((tx as any).currency || DEFAULT_BASE_CURRENCY).toUpperCase();
+    dailyRevenue[day].gross += convertToBaseAmount(Number(tx.gross_amount || 0), currency, baseCurrency, usdRates);
+    dailyRevenue[day].fees += convertToBaseAmount(Number(tx.platform_fee || 0), currency, baseCurrency, usdRates);
     dailyRevenue[day].count += 1;
   });
-  tipsByDay?.forEach((tip) => {
-    const day = tip.created_at.split('T')[0];
+  creditsByDay?.forEach((creditPurchase) => {
+    const day = creditPurchase.created_at.split('T')[0];
     if (!dailyRevenue[day]) {
       dailyRevenue[day] = { gross: 0, fees: 0, count: 0 };
     }
-    const amount = Number(tip.amount || 0);
+    const currency = String((creditPurchase as any).currency || DEFAULT_BASE_CURRENCY).toUpperCase();
+    const amount = convertToBaseAmount(Number(creditPurchase.amount_paid || 0), currency, baseCurrency, usdRates);
     dailyRevenue[day].gross += amount;
-    dailyRevenue[day].fees += Math.round(amount * 0.1);
     dailyRevenue[day].count += 1;
   });
 
-  // Get revenue by provider
-  const { data: revenueByProvider } = await supabaseAdmin
+  // Get revenue by transaction type (last 90 days)
+  const { data: revenueByTypeRows } = await supabaseAdmin
     .from('transactions')
-    .select('payment_provider, gross_amount')
+    .select('gross_amount, currency, metadata')
     .eq('status', 'succeeded')
     .gte('created_at', ninetyDaysAgo.toISOString());
 
-  const { data: tipRevenueByProvider } = await supabaseAdmin
-    .from('tips')
-    .select('amount')
-    .eq('status', 'completed')
+  const { data: creditsByTypeRows } = await supabaseAdmin
+    .from('drop_in_credit_purchases')
+    .select('amount_paid, currency, status')
+    .in('status', ['active', 'exhausted'])
     .gte('created_at', ninetyDaysAgo.toISOString());
 
-  const providerTotals: Record<string, number> = {};
-  revenueByProvider?.forEach((tx) => {
-    const provider = tx.payment_provider || 'unknown';
-    providerTotals[provider] = (providerTotals[provider] || 0) + (tx.gross_amount || 0);
+  const transactionTypeTotals: Record<string, number> = {};
+  revenueByTypeRows?.forEach((tx) => {
+    const metadata = (tx as any).metadata as Record<string, unknown> | null;
+    const rawType = typeof metadata?.type === 'string' ? metadata.type : 'photo_purchase';
+    const transactionType = rawType === 'tip' ? 'tip' : rawType;
+    const currency = String((tx as any).currency || DEFAULT_BASE_CURRENCY).toUpperCase();
+    const amount = convertToBaseAmount(Number(tx.gross_amount || 0), currency, baseCurrency, usdRates);
+    transactionTypeTotals[transactionType] = (transactionTypeTotals[transactionType] || 0) + amount;
   });
-  tipRevenueByProvider?.forEach((tip) => {
-    providerTotals.tip = (providerTotals.tip || 0) + Number(tip.amount || 0);
+  creditsByTypeRows?.forEach((creditPurchase) => {
+    const currency = String((creditPurchase as any).currency || DEFAULT_BASE_CURRENCY).toUpperCase();
+    const amount = convertToBaseAmount(Number(creditPurchase.amount_paid || 0), currency, baseCurrency, usdRates);
+    transactionTypeTotals.drop_in_credit_purchase =
+      (transactionTypeTotals.drop_in_credit_purchase || 0) + amount;
   });
 
   // Get user growth
@@ -137,8 +241,8 @@ async function getAnalyticsData() {
       fees: data.fees,
       transactions: data.count,
     })),
-    providerTotals: Object.entries(providerTotals).map(([provider, amount]) => ({
-      provider,
+    providerTotals: Object.entries(transactionTypeTotals).map(([provider, amount]) => ({
+      provider: provider.replaceAll('_', ' '),
       amount,
     })),
     userGrowth: Object.entries(userGrowth).map(([date, data]) => ({
@@ -159,6 +263,7 @@ async function getAnalyticsData() {
       totalFees,
       totalTransactions,
       avgTransactionValue: totalTransactions > 0 ? totalRevenue / totalTransactions : 0,
+      currency: baseCurrency,
     },
   };
 }
@@ -183,14 +288,14 @@ export default async function AnalyticsPage() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <SummaryCard
           title="Total Revenue (30d)"
-          value={formatCurrency(data.summary.totalRevenue)}
+          value={formatCurrency(data.summary.totalRevenue, data.summary.currency)}
           icon={DollarSign}
           iconColor="text-green-500"
           iconBg="bg-green-500/10"
         />
         <SummaryCard
           title="Platform Fees (30d)"
-          value={formatCurrency(data.summary.totalFees)}
+          value={formatCurrency(data.summary.totalFees, data.summary.currency)}
           icon={TrendingUp}
           iconColor="text-blue-500"
           iconBg="bg-blue-500/10"
@@ -204,7 +309,7 @@ export default async function AnalyticsPage() {
         />
         <SummaryCard
           title="Avg Transaction"
-          value={formatCurrency(data.summary.avgTransactionValue)}
+          value={formatCurrency(data.summary.avgTransactionValue, data.summary.currency)}
           icon={Users}
           iconColor="text-orange-500"
           iconBg="bg-orange-500/10"
@@ -213,7 +318,7 @@ export default async function AnalyticsPage() {
 
       {/* Charts */}
       <Suspense fallback={<ChartsLoading />}>
-        <AnalyticsCharts data={data} />
+        <AnalyticsCharts data={data} currencyCode={data.summary.currency} />
       </Suspense>
     </div>
   );

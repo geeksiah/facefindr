@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { 
   CreditCard, 
   Wallet, 
@@ -73,6 +73,7 @@ export default function BillingPage() {
   const [customCredits, setCustomCredits] = useState('10');
   const [packsError, setPacksError] = useState<string | null>(null);
   const [purchasingCode, setPurchasingCode] = useState<string | null>(null);
+  const hasHandledCreditsRedirect = useRef(false);
 
   useEffect(() => {
     void loadBillingData();
@@ -161,8 +162,16 @@ export default function BillingPage() {
         .order('created_at', { ascending: false })
         .limit(10);
 
+      const { data: creditPurchases } = await supabase
+        .from('drop_in_credit_purchases')
+        .select('id, credits_purchased, amount_paid, currency, status, created_at')
+        .eq('attendee_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      const mappedTransactions: Transaction[] = [];
       if (txs) {
-        setTransactions(txs.map((t: any) => ({
+        mappedTransactions.push(...txs.map((t: any) => ({
           id: t.id,
           type: t.status === 'refunded' ? 'refund' : 'purchase',
           amount: Number(t.gross_amount || 0),
@@ -179,6 +188,31 @@ export default function BillingPage() {
           createdAt: t.created_at,
         })));
       }
+
+      if (creditPurchases) {
+        mappedTransactions.push(
+          ...creditPurchases.map((purchase: any) => ({
+            id: purchase.id,
+            type: 'credit_purchase' as const,
+            amount: Number(purchase.amount_paid || 0),
+            currency: String(purchase.currency || wallet.currency || 'USD').toUpperCase(),
+            description: `Drop-in credits (${Number(purchase.credits_purchased || 0)})`,
+            status:
+              purchase.status === 'active' || purchase.status === 'exhausted'
+                ? 'completed'
+                : purchase.status === 'pending'
+                  ? 'pending'
+                  : 'failed',
+            createdAt: purchase.created_at,
+          }))
+        );
+      }
+
+      setTransactions(
+        mappedTransactions
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .slice(0, 10)
+      );
     } catch (err) {
       console.error('Failed to load billing data:', err);
     } finally {
@@ -230,6 +264,37 @@ export default function BillingPage() {
       throw new Error(data.error || 'Payment verification failed');
     }
   };
+
+  useEffect(() => {
+    if (hasHandledCreditsRedirect.current) return;
+    hasHandledCreditsRedirect.current = true;
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const creditsStatus = String(searchParams.get('credits') || '').toLowerCase();
+    const provider = String(searchParams.get('provider') || '').toLowerCase();
+    const purchaseId = String(searchParams.get('purchase_id') || '').trim();
+    const reference = String(searchParams.get('reference') || '').trim();
+
+    if (creditsStatus !== 'success' || provider !== 'paystack' || !purchaseId || !reference) {
+      return;
+    }
+
+    const nextUrl = `${window.location.pathname}`;
+    window.history.replaceState({}, document.title, nextUrl);
+
+    void (async () => {
+      try {
+        await verifyCreditsPurchase(purchaseId, reference);
+        toast.success('Credits added', 'Your payment was confirmed and credits were applied.');
+        await loadBillingData();
+      } catch (verifyError: any) {
+        toast.error(
+          'Credit confirmation failed',
+          verifyError?.message || 'Payment succeeded but verification failed. Please contact support.'
+        );
+      }
+    })();
+  }, []);
 
   const purchaseCredits = async (credits: number, buttonKey: string) => {
     try {

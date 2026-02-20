@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
+import {
+  ensureCorePhotographerPlanFeatures,
+  normalizeFeaturePlanType,
+} from '@/lib/pricing/core-features';
 import { bumpRuntimeConfigVersion } from '@/lib/runtime-config-version';
 import { supabaseAdmin } from '@/lib/supabase';
 
@@ -13,7 +17,13 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
-    const planType = searchParams.get('plan_type'); // 'photographer' | 'drop_in' | null (all)
+    const planType = searchParams.get('plan_type'); // 'photographer' | 'drop_in' | 'payg' | null
+    const normalizedPlanType = normalizeFeaturePlanType(planType);
+
+    // Safety net for older databases where this feature was never seeded.
+    if (!normalizedPlanType || normalizedPlanType === 'photographer') {
+      await ensureCorePhotographerPlanFeatures(supabaseAdmin);
+    }
 
     let query = supabaseAdmin
       .from('plan_features')
@@ -22,8 +32,8 @@ export async function GET(request: NextRequest) {
       .order('category', { ascending: true })
       .order('display_order', { ascending: true });
 
-    if (planType) {
-      query = query.contains('applicable_to', [planType]);
+    if (normalizedPlanType) {
+      query = query.contains('applicable_to', [normalizedPlanType]);
     }
 
     const { data, error } = await query;

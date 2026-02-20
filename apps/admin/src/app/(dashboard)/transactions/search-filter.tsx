@@ -95,7 +95,6 @@ export function SearchFilter({ searchParams, total }: SearchFilterProps) {
           <option value="flutterwave">Flutterwave</option>
           <option value="paypal">PayPal</option>
           <option value="paystack">Paystack</option>
-          <option value="tip">Tips</option>
         </select>
 
         <button

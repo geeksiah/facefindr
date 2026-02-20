@@ -28,6 +28,8 @@ interface Transaction {
   stripe_payment_intent_id: string | null;
   created_at: string;
   events: { id: string; name: string } | null;
+  metadata?: { type?: string; credits_purchased?: number } | null;
+  transaction_type?: string | null;
 }
 
 interface TransactionListProps {
@@ -95,7 +97,13 @@ export function TransactionList({ transactions, total, page, limit }: Transactio
                   <span className="font-mono text-sm text-foreground">{tx.id.slice(0, 8)}...</span>
                 </td>
                 <td className="px-6 py-4">
-                  <span className="text-foreground">{tx.events?.name || 'Unknown'}</span>
+                  <span className="text-foreground">
+                    {tx.events?.name ||
+                      (tx.transaction_type === 'drop_in_credit_purchase' ||
+                      tx.metadata?.type === 'drop_in_credit_purchase'
+                        ? 'Drop-in Credits'
+                        : 'Unknown')}
+                  </span>
                 </td>
                 <td className="px-6 py-4">
                   <p className="font-medium text-foreground">{formatCurrency(tx.gross_amount, tx.currency)}</p>
@@ -122,20 +130,20 @@ export function TransactionList({ transactions, total, page, limit }: Transactio
                   {formatDateTime(tx.created_at)}
                 </td>
                 <td className="px-6 py-4">
-                  {tx.payment_provider === 'tip' ? (
-                    <div className="text-right text-sm text-muted-foreground">-</div>
-                  ) : (
-                    <div className="flex justify-end relative">
-                      <button
-                        onClick={() => setActionMenuId(actionMenuId === tx.id ? null : tx.id)}
-                        className="p-2 rounded-lg hover:bg-muted transition-colors"
-                      >
-                        <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
-                      </button>
+                  <div className="flex justify-end relative">
+                    <button
+                      onClick={() => setActionMenuId(actionMenuId === tx.id ? null : tx.id)}
+                      className="p-2 rounded-lg hover:bg-muted transition-colors"
+                    >
+                      <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                    </button>
 
-                      {actionMenuId === tx.id && (
-                        <div className="absolute right-0 top-full mt-1 w-40 rounded-lg border border-border bg-card shadow-lg z-10">
-                          <div className="py-1">
+                    {actionMenuId === tx.id && (
+                      <div className="absolute right-0 top-full mt-1 w-40 rounded-lg border border-border bg-card shadow-lg z-10">
+                        <div className="py-1">
+                          {tx.transaction_type === 'drop_in_credit_purchase' ? (
+                            <div className="px-4 py-2 text-sm text-muted-foreground">No detailed view</div>
+                          ) : (
                             <Link
                               href={`/transactions/${tx.id}`}
                               className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted"
@@ -143,20 +151,20 @@ export function TransactionList({ transactions, total, page, limit }: Transactio
                               <Eye className="h-4 w-4" />
                               View Details
                             </Link>
-                            {tx.status === 'succeeded' && (
-                              <button
-                                onClick={() => handleRefund(tx.id)}
-                                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-500 hover:bg-muted"
-                              >
-                                <RotateCcw className="h-4 w-4" />
-                                Issue Refund
-                              </button>
-                            )}
-                          </div>
+                          )}
+                          {tx.status === 'succeeded' && tx.transaction_type !== 'drop_in_credit_purchase' && (
+                            <button
+                              onClick={() => handleRefund(tx.id)}
+                              className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-500 hover:bg-muted"
+                            >
+                              <RotateCcw className="h-4 w-4" />
+                              Issue Refund
+                            </button>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  )}
+                      </div>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

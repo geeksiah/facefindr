@@ -16,7 +16,7 @@ import {
   Legend,
 } from 'recharts';
 
-import { formatCurrency, formatNumber } from '@/lib/utils';
+import { formatCurrency } from '@/lib/utils';
 
 interface AnalyticsData {
   dailyRevenue: Array<{
@@ -46,7 +46,7 @@ interface AnalyticsData {
 
 const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
-export function AnalyticsCharts({ data }: { data: AnalyticsData }) {
+export function AnalyticsCharts({ data, currencyCode }: { data: AnalyticsData; currencyCode?: string }) {
   return (
     <div className="space-y-6">
       {/* Revenue Chart */}
@@ -70,7 +70,7 @@ export function AnalyticsCharts({ data }: { data: AnalyticsData }) {
                 <YAxis 
                   stroke="hsl(var(--muted-foreground))"
                   fontSize={12}
-                  tickFormatter={(value) => `$${(value / 100).toFixed(0)}`}
+                  tickFormatter={(value) => formatCurrency(Number(value || 0), currencyCode || 'USD')}
                 />
                 <Tooltip 
                   contentStyle={{ 
@@ -78,7 +78,7 @@ export function AnalyticsCharts({ data }: { data: AnalyticsData }) {
                     border: '1px solid hsl(var(--border))',
                     borderRadius: '8px',
                   }}
-                  formatter={(value: number) => [formatCurrency(value), 'Revenue']}
+                  formatter={(value: number) => [formatCurrency(value, currencyCode || 'USD'), 'Revenue']}
                   labelFormatter={(label) => new Date(label).toLocaleDateString()}
                 />
                 <Area 
@@ -135,9 +135,9 @@ export function AnalyticsCharts({ data }: { data: AnalyticsData }) {
           )}
         </div>
 
-        {/* Revenue by Provider */}
+        {/* Revenue by Transaction Type */}
         <div className="rounded-xl border border-border bg-card p-6">
-          <h2 className="font-semibold text-foreground mb-6">Revenue by Provider</h2>
+          <h2 className="font-semibold text-foreground mb-6">Revenue by Transaction Type</h2>
           {data.providerTotals.length === 0 ? (
             <div className="h-64 flex items-center justify-center text-muted-foreground">
               No provider data available
@@ -166,7 +166,7 @@ export function AnalyticsCharts({ data }: { data: AnalyticsData }) {
                       border: '1px solid hsl(var(--border))',
                       borderRadius: '8px',
                     }}
-                    formatter={(value: number) => formatCurrency(value)}
+                    formatter={(value: number) => formatCurrency(value, currencyCode || 'USD')}
                   />
                 </PieChart>
               </ResponsiveContainer>

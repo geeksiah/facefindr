@@ -10,6 +10,21 @@ function asString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function mapCurrencyToRegionCode(currency: string): string | null {
+  switch (currency.trim().toUpperCase()) {
+    case 'GHS':
+      return 'GH';
+    case 'NGN':
+      return 'NG';
+    case 'ZAR':
+      return 'ZA';
+    case 'KES':
+      return 'KE';
+    default:
+      return null;
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -67,7 +82,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Payment reference is required' }, { status: 400 });
     }
 
-    const secretKey = await resolvePaystackSecretKey(undefined);
+    const { data: attendeeRegion } = await serviceClient
+      .from('attendees')
+      .select('country_code')
+      .eq('id', attendee.id)
+      .maybeSingle();
+
+    const candidateRegionCodes = [
+      asString((attendeeRegion as any)?.country_code).toUpperCase(),
+      mapCurrencyToRegionCode(asString(purchase.currency)) || '',
+    ].filter(Boolean);
+
+    let secretKey: string | null = null;
+    for (const regionCode of [...candidateRegionCodes, undefined]) {
+      secretKey = await resolvePaystackSecretKey(regionCode || undefined);
+      if (secretKey) break;
+    }
+
     if (!secretKey) {
       return NextResponse.json({ error: 'Paystack is not configured' }, { status: 500 });
     }

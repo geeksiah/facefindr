@@ -12,6 +12,22 @@ interface SearchParams {
   page?: string;
 }
 
+function deriveDropInProvider(paymentIntentId: string | null): string {
+  const value = String(paymentIntentId || '').toLowerCase();
+  if (!value) return 'unknown';
+  if (value.startsWith('cs_')) return 'stripe';
+  if (value.startsWith('dropincredits_')) return 'paystack';
+  return 'unknown';
+}
+
+function mapDropInPurchaseStatus(status: string | null): string {
+  const normalized = String(status || '').toLowerCase();
+  if (normalized === 'active' || normalized === 'exhausted') return 'succeeded';
+  if (normalized === 'pending') return 'pending';
+  if (normalized === 'failed') return 'failed';
+  return 'pending';
+}
+
 async function getTransactions(searchParams: SearchParams) {
   const page = parseInt(searchParams.page || '1');
   const limit = 20;
@@ -48,78 +64,64 @@ async function getTransactions(searchParams: SearchParams) {
     return { transactions: [], total: 0, page, limit };
   }
 
-  let tipRows: any[] = [];
-  const includeTips = !searchParams.provider || searchParams.provider === 'tip';
+  let creditRows: any[] = [];
+  let creditQuery = supabaseAdmin
+    .from('drop_in_credit_purchases')
+    .select('id, attendee_id, credits_purchased, amount_paid, currency, status, payment_intent_id, created_at');
 
-  if (includeTips) {
-    let tipQuery = supabaseAdmin
-      .from('tips')
-      .select('id, amount, currency, status, created_at, event_id, stripe_payment_intent_id');
-
-    if (searchParams.search) {
-      tipQuery = tipQuery.ilike('id', `%${searchParams.search}%`);
-    }
-
-    if (searchParams.status === 'succeeded') {
-      tipQuery = tipQuery.eq('status', 'completed');
-    } else if (searchParams.status === 'failed') {
-      tipQuery = tipQuery.eq('status', 'failed');
-    } else if (searchParams.status === 'refunded') {
-      tipQuery = tipQuery.eq('status', 'refunded');
-    } else if (searchParams.status === 'pending') {
-      tipQuery = tipQuery.eq('status', 'pending');
-    }
-
-    const { data: tips, error: tipsError } = await tipQuery
-      .order('created_at', { ascending: false })
-      .limit(500);
-
-    if (tipsError) {
-      console.error('Error fetching tips for transaction list:', tipsError);
-    } else {
-      tipRows = tips || [];
+  if (searchParams.search) {
+    creditQuery = creditQuery.ilike('id', `%${searchParams.search}%`);
+  }
+  if (searchParams.status) {
+    const requested = searchParams.status;
+    if (requested === 'succeeded') {
+      creditQuery = creditQuery.in('status', ['active', 'exhausted']);
+    } else if (requested === 'pending') {
+      creditQuery = creditQuery.eq('status', 'pending');
+    } else if (requested === 'failed') {
+      creditQuery = creditQuery.eq('status', 'failed');
+    } else if (requested === 'refunded') {
+      creditQuery = creditQuery.eq('status', '__none__');
     }
   }
 
-  const tipEventIds = Array.from(
-    new Set(tipRows.map((tip) => tip.event_id).filter(Boolean))
-  ) as string[];
-  let tipEventsById = new Map<string, { id: string; name: string }>();
+  const { data: dropInPurchases, error: dropInPurchaseError } = await creditQuery
+    .order('created_at', { ascending: false })
+    .limit(500);
 
-  if (tipEventIds.length > 0) {
-    const { data: tipEvents } = await supabaseAdmin
-      .from('events')
-      .select('id, name')
-      .in('id', tipEventIds);
-
-    tipEventsById = new Map((tipEvents || []).map((event) => [event.id, event]));
+  if (dropInPurchaseError) {
+    console.error('Error fetching drop-in credit purchases for transaction list:', dropInPurchaseError);
+  } else {
+    creditRows = (dropInPurchases || [])
+      .map((purchase) => {
+        const provider = deriveDropInProvider(purchase.payment_intent_id);
+        if (searchParams.provider && provider !== searchParams.provider) {
+          return null;
+        }
+        return {
+          id: purchase.id,
+          gross_amount: Number(purchase.amount_paid || 0),
+          net_amount: Number(purchase.amount_paid || 0),
+          platform_fee: 0,
+          provider_fee: 0,
+          currency: purchase.currency || 'USD',
+          status: mapDropInPurchaseStatus(purchase.status),
+          payment_provider: provider,
+          stripe_payment_intent_id: purchase.payment_intent_id || null,
+          created_at: purchase.created_at,
+          events: null,
+          transaction_type: 'drop_in_credit_purchase',
+          metadata: {
+            type: 'drop_in_credit_purchase',
+            credits_purchased: Number(purchase.credits_purchased || 0),
+            attendee_id: purchase.attendee_id || null,
+          },
+        };
+      })
+      .filter(Boolean) as any[];
   }
 
-  const normalizedTips = tipRows.map((tip) => {
-    const platformFee = Math.round(Number(tip.amount || 0) * 0.1);
-    const normalizedStatus =
-      tip.status === 'completed'
-        ? 'succeeded'
-        : tip.status === 'pending'
-          ? 'pending'
-          : tip.status;
-
-    return {
-      id: tip.id,
-      gross_amount: Number(tip.amount || 0),
-      net_amount: Number(tip.amount || 0) - platformFee,
-      platform_fee: platformFee,
-      provider_fee: 0,
-      currency: tip.currency || 'USD',
-      status: normalizedStatus,
-      payment_provider: 'tip',
-      stripe_payment_intent_id: tip.stripe_payment_intent_id || null,
-      created_at: tip.created_at,
-      events: tip.event_id ? tipEventsById.get(tip.event_id) || null : null,
-    };
-  });
-
-  const merged = [...(transactionRows || []), ...normalizedTips].sort(
+  const merged = [...(transactionRows || []), ...creditRows].sort(
     (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
   const paginated = merged.slice(offset, offset + limit);
