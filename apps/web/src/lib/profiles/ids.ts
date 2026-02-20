@@ -6,31 +6,77 @@ function unique(values: Array<string | null | undefined>) {
   return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))];
 }
 
-export async function resolvePhotographerProfileByUser(
+async function selectProfileById(
   supabase: any,
-  userId: string,
-  userEmail?: string | null
+  table: 'photographers' | 'attendees',
+  id: string
 ) {
-  const byId = await supabase
-    .from('photographers')
+  const withUserId = await supabase
+    .from(table)
     .select('id, user_id')
-    .eq('id', userId)
+    .eq('id', id)
     .limit(1)
     .maybeSingle();
 
-  if (byId.data?.id) {
-    return { data: { ...byId.data, user_id: (byId.data as any).user_id || userId }, error: null };
+  if (!withUserId.error || !isMissingColumnError(withUserId.error, 'user_id')) {
+    return withUserId;
   }
 
-  const byUserId = await supabase
-    .from('photographers')
+  const withoutUserId = await supabase
+    .from(table)
+    .select('id')
+    .eq('id', id)
+    .limit(1)
+    .maybeSingle();
+
+  if (withoutUserId.data?.id) {
+    return {
+      data: { id: withoutUserId.data.id, user_id: id },
+      error: null,
+    };
+  }
+
+  return withoutUserId;
+}
+
+async function selectProfileByUserId(
+  supabase: any,
+  table: 'photographers' | 'attendees',
+  userId: string
+) {
+  const withUserId = await supabase
+    .from(table)
     .select('id, user_id')
     .eq('user_id', userId)
     .limit(1)
     .maybeSingle();
 
-  if (!byUserId.error || !isMissingColumnError(byUserId.error, 'user_id')) {
+  if (!withUserId.error || !isMissingColumnError(withUserId.error, 'user_id')) {
+    return withUserId;
+  }
+
+  return { data: null, error: withUserId.error };
+}
+
+export async function resolvePhotographerProfileByUser(
+  supabase: any,
+  userId: string,
+  userEmail?: string | null
+) {
+  const byId = await selectProfileById(supabase, 'photographers', userId);
+
+  if (byId.data?.id) {
+    return { data: { ...byId.data, user_id: (byId.data as any).user_id || userId }, error: null };
+  }
+
+  const byUserId = await selectProfileByUserId(supabase, 'photographers', userId);
+
+  if (byUserId.data?.id) {
     return byUserId;
+  }
+
+  if (byUserId.error && !isMissingColumnError(byUserId.error, 'user_id')) {
+    return { data: null, error: byUserId.error };
   }
 
   if (userEmail) {
@@ -66,26 +112,20 @@ export async function resolveAttendeeProfileByUser(
   userId: string,
   userEmail?: string | null
 ) {
-  const byId = await supabase
-    .from('attendees')
-    .select('id, user_id')
-    .eq('id', userId)
-    .limit(1)
-    .maybeSingle();
+  const byId = await selectProfileById(supabase, 'attendees', userId);
 
   if (byId.data?.id) {
     return { data: { ...byId.data, user_id: (byId.data as any).user_id || userId }, error: null };
   }
 
-  const byUserId = await supabase
-    .from('attendees')
-    .select('id, user_id')
-    .eq('user_id', userId)
-    .limit(1)
-    .maybeSingle();
+  const byUserId = await selectProfileByUserId(supabase, 'attendees', userId);
 
-  if (!byUserId.error || !isMissingColumnError(byUserId.error, 'user_id')) {
+  if (byUserId.data?.id) {
     return byUserId;
+  }
+
+  if (byUserId.error && !isMissingColumnError(byUserId.error, 'user_id')) {
+    return { data: null, error: byUserId.error };
   }
 
   if (userEmail) {

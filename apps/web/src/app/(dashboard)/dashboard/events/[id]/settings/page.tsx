@@ -833,7 +833,9 @@ export default function EventSettingsPage() {
                   Unlock All Photos Price (Optional)
                 </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                    {getCurrencySymbol(settings.currency_code || 'USD')}
+                  </span>
                   <Input
                     type="number"
                     step="0.01"

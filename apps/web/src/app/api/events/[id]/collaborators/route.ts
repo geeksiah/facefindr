@@ -69,7 +69,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const eventId = params.id;
-    const photographerIdCandidates = await getPhotographerIdCandidates(supabase, user.id, user.email);
+    const photographerIdCandidates = await getPhotographerIdCandidates(db, user.id, user.email);
     if (!photographerIdCandidates.length) {
       return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
     }
@@ -164,8 +164,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const eventId = params.id;
     const body = await request.json();
     const { photographerId, photographerFaceTag, role = 'collaborator', permissions = {}, revenueSharePercent = 100 } = body;
-    const photographerIdCandidates = await getPhotographerIdCandidates(supabase, user.id, user.email);
-    const { data: inviterProfile } = await resolvePhotographerProfileByUser(supabase, user.id, user.email);
+    const photographerIdCandidates = await getPhotographerIdCandidates(db, user.id, user.email);
+    const { data: inviterProfile } = await resolvePhotographerProfileByUser(db, user.id, user.email);
     if (!photographerIdCandidates.length) {
       return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
     }
@@ -338,7 +338,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     const eventId = params.id;
     const body = await request.json();
     const { collaboratorId, action, permissions, revenueSharePercent, role } = body;
-    const photographerIdCandidates = await getPhotographerIdCandidates(supabase, user.id, user.email);
+    const photographerIdCandidates = await getPhotographerIdCandidates(db, user.id, user.email);
     if (!photographerIdCandidates.length) {
       return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
     }
@@ -460,7 +460,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     const eventId = params.id;
     const { searchParams } = new URL(request.url);
     const collaboratorId = searchParams.get('collaboratorId');
-    const photographerIdCandidates = await getPhotographerIdCandidates(supabase, user.id, user.email);
+    const photographerIdCandidates = await getPhotographerIdCandidates(db, user.id, user.email);
     if (!photographerIdCandidates.length) {
       return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
     }

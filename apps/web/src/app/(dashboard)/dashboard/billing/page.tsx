@@ -92,6 +92,17 @@ export default function BillingPage() {
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
   const [lastSubscriptionVersion, setLastSubscriptionVersion] = useState(0);
 
+  const openCheckoutPopup = useCallback((checkoutUrl: string) => {
+    const popup = window.open(
+      checkoutUrl,
+      'ferchrBillingCheckout',
+      'popup=yes,width=520,height=760,menubar=no,toolbar=no,location=yes,status=no'
+    );
+    if (!popup) {
+      window.location.href = checkoutUrl;
+    }
+  }, []);
+
   // Load subscription and usage data
   const loadData = useCallback(async () => {
     try {
@@ -166,7 +177,7 @@ export default function BillingPage() {
       if (response.ok) {
         const data = await response.json();
         if (data.onboardingUrl) {
-          window.location.href = data.onboardingUrl;
+          openCheckoutPopup(data.onboardingUrl);
         }
       }
     } catch (error) {
@@ -193,7 +204,7 @@ export default function BillingPage() {
       if (response.ok) {
         const data = await response.json();
         if (data.checkoutUrl) {
-          window.location.href = data.checkoutUrl;
+          openCheckoutPopup(data.checkoutUrl);
         }
       }
     } catch (error) {

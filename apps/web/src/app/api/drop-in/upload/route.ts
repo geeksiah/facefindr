@@ -47,6 +47,155 @@ function isMissingColumnError(error: any, columnName: string) {
   return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
 }
 
+function extractMissingColumnName(error: any): string | null {
+  if (error?.code !== '42703' || typeof error?.message !== 'string') return null;
+
+  const quoted = error.message.match(/column\s+"([^"]+)"/i);
+  if (quoted?.[1]) return quoted[1];
+
+  const bare = error.message.match(/column\s+([a-zA-Z0-9_]+)/i);
+  return bare?.[1] || null;
+}
+
+function needsFaceTag(error: any): boolean {
+  return (
+    error?.code === '23502' &&
+    typeof error?.message === 'string' &&
+    error.message.toLowerCase().includes('face_tag')
+  );
+}
+
+async function tryInsertAttendeeProfile(
+  serviceClient: ReturnType<typeof createServiceClient>,
+  payload: Record<string, any>
+) {
+  const selectWithUserId = await serviceClient
+    .from('attendees')
+    .insert(payload)
+    .select('id, display_name, user_id')
+    .single();
+
+  if (!selectWithUserId.error || !isMissingColumnError(selectWithUserId.error, 'user_id')) {
+    return selectWithUserId;
+  }
+
+  return serviceClient
+    .from('attendees')
+    .insert(payload)
+    .select('id, display_name')
+    .single();
+}
+
+async function ensureAttendeeProfile(
+  serviceClient: ReturnType<typeof createServiceClient>,
+  user: { id: string; email?: string | null; user_metadata?: Record<string, any> }
+) {
+  let { data: attendee } = await resolveAttendeeProfileByUser(serviceClient, user.id, user.email);
+  if (attendee) return attendee;
+
+  const baseUsername =
+    String(user.user_metadata?.username || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '') ||
+    String(user.user_metadata?.display_name || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '') ||
+    String(user.email || '')
+      .split('@')[0]
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, '') ||
+    `user_${Date.now()}`;
+  const username = baseUsername.slice(0, 24);
+  const displayName = user.user_metadata?.display_name || user.email?.split('@')[0] || 'User';
+
+  let payload: Record<string, any> = {
+    id: user.id,
+    user_id: user.id,
+    display_name: displayName,
+    email: user.email,
+    username,
+  };
+
+  let addFaceTag = false;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const attemptPayload = addFaceTag
+      ? (() => {
+          const suffix = Math.floor(1000 + Math.random() * 9000).toString();
+          return {
+            ...payload,
+            face_tag: payload.face_tag || `@${username.slice(0, 12)}${suffix}`,
+            face_tag_suffix: payload.face_tag_suffix || suffix,
+          };
+        })()
+      : payload;
+
+    const createResult = await tryInsertAttendeeProfile(serviceClient, attemptPayload);
+    if (!createResult.error && createResult.data) {
+      return {
+        id: createResult.data.id,
+        display_name: (createResult.data as any).display_name || displayName,
+        user_id: (createResult.data as any).user_id || user.id,
+      };
+    }
+
+    const error = createResult.error;
+    if (!error) break;
+
+    const missingColumn = extractMissingColumnName(error);
+    if (missingColumn && Object.prototype.hasOwnProperty.call(payload, missingColumn)) {
+      const { [missingColumn]: _omitted, ...nextPayload } = payload;
+      void _omitted;
+      payload = nextPayload;
+      continue;
+    }
+
+    if (needsFaceTag(error)) {
+      addFaceTag = true;
+      continue;
+    }
+
+    if (
+      error.code === '23505' &&
+      typeof error.message === 'string' &&
+      error.message.toLowerCase().includes('username')
+    ) {
+      payload.username = `${username}${Math.floor(100 + Math.random() * 900)}`;
+      continue;
+    }
+
+    break;
+  }
+
+  // Last-chance fallback for existing rows in partially migrated environments.
+  const byId = await serviceClient
+    .from('attendees')
+    .select('id, display_name, user_id')
+    .eq('id', user.id)
+    .limit(1)
+    .maybeSingle();
+  if (byId.data?.id) {
+    return {
+      id: byId.data.id,
+      display_name: (byId.data as any).display_name || displayName,
+      user_id: (byId.data as any).user_id || user.id,
+    };
+  }
+
+  if (user.email) {
+    const byEmail = await serviceClient
+      .from('attendees')
+      .select('id, display_name, user_id')
+      .eq('email', user.email)
+      .limit(1)
+      .maybeSingle();
+    if (byEmail.data?.id) {
+      return {
+        id: byEmail.data.id,
+        display_name: (byEmail.data as any).display_name || displayName,
+        user_id: (byEmail.data as any).user_id || user.id,
+      };
+    }
+  }
+
+  return null;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization');
@@ -72,77 +221,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: message, failClosed: true }, { status: 503 });
     }
 
-    // Get attendee profile (use service client to bypass RLS)
+    // Get attendee profile (use service client to bypass RLS).
+    // Drop-in rows are keyed to attendees.uploader_id, so we must have an attendee profile.
     const serviceClient = createServiceClient();
-    let { data: attendee } = await resolveAttendeeProfileByUser(serviceClient, user.id, user.email);
+    const attendee = await ensureAttendeeProfile(serviceClient, {
+      id: user.id,
+      email: user.email,
+      user_metadata: user.user_metadata || {},
+    });
 
     if (!attendee) {
-      // Auto-create attendee profile if it doesn't exist yet
-      const username =
-        String(user.user_metadata?.username || '').trim() ||
-        String(user.user_metadata?.display_name || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '') ||
-        String(user.email || '')
-          .split('@')[0]
-          .toLowerCase()
-          .replace(/[^a-z0-9_]/g, '') ||
-        `user_${Date.now()}`;
-      const displayName = user.user_metadata?.display_name || user.email?.split('@')[0] || 'User';
-      const insertPayload: Record<string, any> = {
-        id: user.id,
-        user_id: user.id,
-        display_name: displayName,
-        email: user.email,
-        username,
-      };
-
-      let createResult = await serviceClient
-        .from('attendees')
-        .insert(insertPayload)
-        .select('id, display_name, user_id')
-        .single();
-
-      if (createResult.error && isMissingColumnError(createResult.error, 'user_id')) {
-        const { user_id, ...withoutUserId } = insertPayload;
-        createResult = await serviceClient
-          .from('attendees')
-          .insert(withoutUserId)
-          .select('id, display_name')
-          .single();
-      }
-
-      if (createResult.error && isMissingColumnError(createResult.error, 'username')) {
-        const { username: omittedUsername, ...withoutUsername } = insertPayload;
-        void omittedUsername;
-        createResult = await serviceClient
-          .from('attendees')
-          .insert(withoutUsername)
-          .select('id, display_name, user_id')
-          .single();
-      }
-
-      if (
-        createResult.error?.code === '23502' &&
-        typeof createResult.error?.message === 'string' &&
-        createResult.error.message.includes('face_tag')
-      ) {
-        const suffix = Math.floor(1000 + Math.random() * 9000).toString();
-        const generatedFaceTag = `@${username.slice(0, 12)}${suffix}`;
-        createResult = await serviceClient
-          .from('attendees')
-          .insert({
-            ...insertPayload,
-            face_tag: generatedFaceTag,
-            face_tag_suffix: suffix,
-          })
-          .select('id, display_name, user_id')
-          .single();
-      }
-
-      if (createResult.error || !createResult.data) {
-        return NextResponse.json({ error: 'Failed to create attendee profile' }, { status: 500 });
-      }
-
-      attendee = createResult.data;
+      return NextResponse.json({ error: 'Failed to create attendee profile' }, { status: 500 });
     }
 
     const formData = await request.formData();

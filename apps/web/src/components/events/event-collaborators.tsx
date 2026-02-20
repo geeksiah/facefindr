@@ -147,12 +147,15 @@ export function EventCollaborators({ eventId }: EventCollaboratorsProps) {
             </p>
           </div>
         </div>
-        {canInvite && (
-          <Button size="sm" onClick={() => setShowInviteModal(true)}>
-            <UserPlus className="h-4 w-4 mr-2" />
-            Invite
-          </Button>
-        )}
+        <Button
+          size="sm"
+          onClick={() => setShowInviteModal(true)}
+          disabled={!canInvite}
+          title={canInvite ? 'Invite collaborator' : 'Only event owners or authorized collaborators can invite'}
+        >
+          <UserPlus className="h-4 w-4 mr-2" />
+          Invite
+        </Button>
       </div>
 
       {/* Active Collaborators */}

@@ -30,6 +30,26 @@ export function DropInUploadPage({ basePath }: DropInUploadPageProps) {
   const [giftFee, setGiftFee] = useState<number | null>(null);
   const [currency, setCurrency] = useState('USD');
 
+  const openCheckoutPopup = useCallback((checkoutUrl: string) => {
+    const popup = window.open(
+      checkoutUrl,
+      'ferchrPayment',
+      'popup=yes,width=520,height=760,menubar=no,toolbar=no,location=yes,status=no'
+    );
+
+    if (!popup) {
+      window.location.href = checkoutUrl;
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      if (popup.closed) {
+        window.clearInterval(timer);
+        void router.refresh();
+      }
+    }, 600);
+  }, [router]);
+
   useEffect(() => {
     const loadPricing = async () => {
       const response = await fetch('/api/runtime/drop-in/pricing', { cache: 'no-store' });
@@ -105,7 +125,7 @@ export function DropInUploadPage({ basePath }: DropInUploadPageProps) {
       }
 
       if (data.checkoutUrl) {
-        window.location.href = data.checkoutUrl;
+        openCheckoutPopup(data.checkoutUrl);
         return;
       }
 

@@ -92,6 +92,19 @@ export function TipCreator({
     setCustomAmount('');
   };
 
+  const openCheckoutPopup = (checkoutUrl: string) => {
+    const popup = window.open(
+      checkoutUrl,
+      'ferchrTipPayment',
+      'popup=yes,width=520,height=760,menubar=no,toolbar=no,location=yes,status=no'
+    );
+
+    if (!popup) {
+      window.location.href = checkoutUrl;
+      return;
+    }
+  };
+
   const handleCustomAmount = (value: string) => {
     setCustomAmount(value);
     const dollars = parseFloat(value);
@@ -134,7 +147,7 @@ export function TipCreator({
 
       // Redirect to Stripe Checkout
       if (data.checkoutUrl) {
-        window.location.href = data.checkoutUrl;
+        openCheckoutPopup(data.checkoutUrl);
       } else {
         throw new Error('No checkout URL returned');
       }
