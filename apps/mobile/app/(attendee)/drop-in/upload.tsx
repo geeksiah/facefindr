@@ -37,9 +37,10 @@ import { alertMissingPublicAppUrl, buildPublicUrl } from '@/lib/runtime-config';
 
 interface DropInUploadScreenProps {
   noHeader?: boolean;
+  onCreditsChanged?: () => void;
 }
 
-export default function DropInUploadScreen({ noHeader = false }: DropInUploadScreenProps) {
+export default function DropInUploadScreen({ noHeader = false, onCreditsChanged }: DropInUploadScreenProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { session } = useAuthStore();
@@ -203,6 +204,7 @@ export default function DropInUploadScreen({ noHeader = false }: DropInUploadScr
       }
 
       setAttendeeCredits(Number(data.remainingCredits ?? attendeeCredits));
+      onCreditsChanged?.();
       Alert.alert(
         'Success',
         `Your drop-in photo was uploaded. ${Number(data.creditsUsed || totalCreditsRequired)} credit(s) used.`

@@ -15,6 +15,7 @@ import {
   RefreshControl,
   ActivityIndicator,
   Modal,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -56,9 +57,10 @@ interface DropInPhoto {
 
 interface DropInDiscoverScreenProps {
   noHeader?: boolean;
+  onCreditsChanged?: () => void;
 }
 
-export default function DropInDiscoverScreen({ noHeader = false }: DropInDiscoverScreenProps) {
+export default function DropInDiscoverScreen({ noHeader = false, onCreditsChanged }: DropInDiscoverScreenProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { profile, session } = useAuthStore();
@@ -120,7 +122,7 @@ export default function DropInDiscoverScreen({ noHeader = false }: DropInDiscove
     // Mark notification as viewed
     try {
       const baseUrl = getApiBaseUrl();
-      await fetch(`${baseUrl}/api/drop-in/notifications`, {
+      const response = await fetch(`${baseUrl}/api/drop-in/notifications`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -131,8 +133,26 @@ export default function DropInDiscoverScreen({ noHeader = false }: DropInDiscove
           action: 'view',
         }),
       });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (response.status === 402) {
+          Alert.alert(
+            'Credits Required',
+            payload?.error || 'You need credits to unlock this Drop-In photo.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Buy Credits', onPress: () => router.push('/settings/billing') },
+            ]
+          );
+          return;
+        }
+        throw new Error(payload?.error || 'Failed to open photo');
+      }
+      onCreditsChanged?.();
     } catch (error) {
       console.error('Failed to mark as viewed:', error);
+      Alert.alert('Open Failed', 'Unable to open this Drop-In photo right now.');
+      return;
     }
 
     setSelectedPhoto(photo);

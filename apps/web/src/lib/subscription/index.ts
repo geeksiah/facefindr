@@ -252,13 +252,15 @@ export async function getPlanByCode(code: string, planType: PlanType = 'creator'
 export async function getUserPlan(userId: string, userType: 'creator' | 'photographer' | 'attendee'): Promise<FullPlanDetails | null> {
   try {
     const supabase = createServiceClient();
+    const nowIso = new Date().toISOString();
     
     // Get active subscription
     const { data: subscription } = await supabase
       .from('subscriptions')
-      .select('plan_id, plan_code, status')
+      .select('plan_id, plan_code, status, current_period_end')
       .eq((userType === 'creator' || userType === 'photographer') ? 'photographer_id' : 'attendee_id', userId)
       .in('status', ['active', 'trialing'])
+      .or(`current_period_end.is.null,current_period_end.gte.${nowIso}`)
       .order('created_at', { ascending: false })
       .limit(1)
       .single();

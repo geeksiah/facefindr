@@ -20,6 +20,10 @@
     {
       "path": "/api/cron/payouts",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/subscriptions/reconcile",
+      "schedule": "0 */4 * * *"
     }
   ],
   "headers": [

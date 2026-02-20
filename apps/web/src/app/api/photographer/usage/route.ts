@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 
 import { getUsageSummary, checkLimit } from '@/lib/subscription/enforcement';
-import { getUserPlan } from '@/lib/subscription';
+import { getPlanByCode, getUserPlan } from '@/lib/subscription';
 import { resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
@@ -33,15 +33,16 @@ export async function GET() {
     }
     const creatorId = creatorProfile.id as string;
     const currentPlan = await getUserPlan(creatorId, 'photographer');
-    const resolvedPlanCode = currentPlan?.code || 'free';
+    const freePlan = await getPlanByCode('free', 'creator');
+    const resolvedPlanCode = currentPlan?.code || freePlan?.code || 'free';
     const resolvedPlanLimits = {
-      maxEvents: currentPlan?.limits.maxActiveEvents ?? 3,
-      maxPhotosPerEvent: currentPlan?.limits.maxPhotosPerEvent ?? 100,
-      maxStorageGb: currentPlan?.limits.storageGb ?? 5,
-      maxTeamMembers: currentPlan?.limits.teamMembers ?? 1,
-      maxFaceOps: currentPlan?.limits.maxFaceOpsPerEvent ?? 500,
+      maxEvents: currentPlan?.limits.maxActiveEvents ?? freePlan?.limits.maxActiveEvents ?? 1,
+      maxPhotosPerEvent: currentPlan?.limits.maxPhotosPerEvent ?? freePlan?.limits.maxPhotosPerEvent ?? 50,
+      maxStorageGb: currentPlan?.limits.storageGb ?? freePlan?.limits.storageGb ?? 1,
+      maxTeamMembers: currentPlan?.limits.teamMembers ?? freePlan?.limits.teamMembers ?? 1,
+      maxFaceOps: currentPlan?.limits.maxFaceOpsPerEvent ?? freePlan?.limits.maxFaceOpsPerEvent ?? 0,
     };
-    const resolvedPlatformFee = currentPlan?.platformFeePercent ?? 20;
+    const resolvedPlatformFee = currentPlan?.platformFeePercent ?? freePlan?.platformFeePercent ?? 20;
 
     // Get comprehensive usage summary
     const usage = await getUsageSummary(creatorId);

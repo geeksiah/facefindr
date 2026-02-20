@@ -6,7 +6,7 @@ import { resolveDropInCreditRules } from '@/lib/drop-in/credit-rules';
 import { resolveDropInPricingConfig } from '@/lib/drop-in/pricing';
 import { convertCurrency, getCountryFromRequest, getEffectiveCurrency } from '@/lib/currency/currency-service';
 import { resolveAttendeeProfileByUser } from '@/lib/profiles/ids';
-import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
 export async function GET(request: Request) {
   try {
@@ -14,7 +14,9 @@ export async function GET(request: Request) {
       resolveDropInPricingConfig(),
       resolveDropInCreditRules(),
     ]);
-    const supabase = await createClient();
+    const authHeader = request.headers.get('authorization');
+    const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    const supabase = accessToken ? createClientWithAccessToken(accessToken) : await createClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();

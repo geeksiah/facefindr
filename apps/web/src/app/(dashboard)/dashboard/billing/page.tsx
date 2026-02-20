@@ -394,7 +394,7 @@ export default function BillingPage() {
       <div className={`grid gap-6 ${plans.length <= 3 ? 'md:grid-cols-3' : 'md:grid-cols-4'}`}>
         {plans.map((plan) => {
           const isCurrentPlan = plan.planCode === currentPlan;
-          const isPopular = plan.isPopular || plan.planCode === 'pro';
+          const isPopular = Boolean(plan.isPopular);
           const price = billingCycle === 'monthly' ? plan.formattedMonthly : plan.formattedAnnual;
           const features = plan.features;
 

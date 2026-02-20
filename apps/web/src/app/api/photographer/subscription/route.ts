@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 
-import { getUserPlan, getCreatorPlanFeatures } from '@/lib/subscription';
+import { getUserPlan, getCreatorPlanFeatures, getPlanByCode } from '@/lib/subscription';
 import { resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
@@ -35,16 +35,19 @@ export async function GET() {
 
     // Get current plan with full details from modular system
     const currentPlan = await getUserPlan(creatorId, 'photographer');
+    const freePlan = await getPlanByCode('free', 'creator');
     
     // Also get legacy features for backward compatibility
     const legacyFeatures = await getCreatorPlanFeatures(creatorId);
 
     // Get subscription record
+    const nowIso = new Date().toISOString();
     const { data: subscription } = await supabase
       .from('subscriptions')
       .select('*')
       .eq('photographer_id', creatorId)
       .in('status', ['active', 'trialing'])
+      .or(`current_period_end.is.null,current_period_end.gte.${nowIso}`)
       .order('created_at', { ascending: false })
       .limit(1)
       .single();
@@ -98,8 +101,8 @@ export async function GET() {
     // Note: To get actual payment method details, you'd need to call Stripe API
 
     // Build response with both new and legacy formats
-    const resolvedPlanCode = currentPlan?.code || subscription?.plan_code || 'free';
-    const resolvedLimits = currentPlan?.limits || {
+    const resolvedPlanCode = currentPlan?.code || subscription?.plan_code || freePlan?.code || 'free';
+    const resolvedLimits = currentPlan?.limits || freePlan?.limits || {
       maxActiveEvents: legacyFeatures.maxActiveEvents,
       maxPhotosPerEvent: legacyFeatures.maxPhotosPerEvent,
       maxFaceOpsPerEvent: legacyFeatures.maxFaceOpsPerEvent,
@@ -107,29 +110,30 @@ export async function GET() {
       teamMembers: legacyFeatures.teamMembers,
     };
 
-    const resolvedLegacyFeatures = currentPlan
+    const effectivePlan = currentPlan || freePlan;
+    const resolvedLegacyFeatures = effectivePlan
       ? {
           ...legacyFeatures,
-          planCode: currentPlan.code as any,
-          maxActiveEvents: currentPlan.limits.maxActiveEvents,
-          maxPhotosPerEvent: currentPlan.limits.maxPhotosPerEvent,
-          maxFaceOpsPerEvent: currentPlan.limits.maxFaceOpsPerEvent,
-          storageGb: currentPlan.limits.storageGb,
-          teamMembers: currentPlan.limits.teamMembers,
-          platformFeePercent: currentPlan.platformFeePercent,
-          customWatermark: currentPlan.capabilities.customWatermark,
-          customBranding: currentPlan.capabilities.customBranding,
-          liveEventMode: currentPlan.capabilities.liveEventMode,
-          advancedAnalytics: currentPlan.capabilities.advancedAnalytics,
-          apiAccess: currentPlan.capabilities.apiAccess,
-          prioritySupport: currentPlan.capabilities.prioritySupport,
-          whiteLabel: currentPlan.capabilities.whiteLabel,
-          printProductsEnabled: currentPlan.capabilities.printProducts,
-          printCommissionPercent: currentPlan.printCommissionPercent,
+          planCode: effectivePlan.code as any,
+          maxActiveEvents: effectivePlan.limits.maxActiveEvents,
+          maxPhotosPerEvent: effectivePlan.limits.maxPhotosPerEvent,
+          maxFaceOpsPerEvent: effectivePlan.limits.maxFaceOpsPerEvent,
+          storageGb: effectivePlan.limits.storageGb,
+          teamMembers: effectivePlan.limits.teamMembers,
+          platformFeePercent: effectivePlan.platformFeePercent,
+          customWatermark: effectivePlan.capabilities.customWatermark,
+          customBranding: effectivePlan.capabilities.customBranding,
+          liveEventMode: effectivePlan.capabilities.liveEventMode,
+          advancedAnalytics: effectivePlan.capabilities.advancedAnalytics,
+          apiAccess: effectivePlan.capabilities.apiAccess,
+          prioritySupport: effectivePlan.capabilities.prioritySupport,
+          whiteLabel: effectivePlan.capabilities.whiteLabel,
+          printProductsEnabled: effectivePlan.capabilities.printProducts,
+          printCommissionPercent: effectivePlan.printCommissionPercent,
           monthlyPrice:
-            currentPlan.prices?.USD ??
-            currentPlan.basePriceUsd,
-          annualPrice: Math.round((currentPlan.prices?.USD ?? currentPlan.basePriceUsd) * 10),
+            effectivePlan.prices?.USD ??
+            effectivePlan.basePriceUsd,
+          annualPrice: Math.round((effectivePlan.prices?.USD ?? effectivePlan.basePriceUsd) * 10),
         }
       : legacyFeatures;
 
