@@ -238,25 +238,29 @@ export async function POST(
       throw tipError;
     }
 
-    await serviceClient.from('audit_logs').insert({
-      actor_type: 'attendee',
-      actor_id: user.id,
-      action: 'tip_created',
-      resource_type: 'tip',
-      resource_id: tip.id,
-      metadata: {
-        to_photographer_id: photographerId,
-        amount,
-        currency: transactionCurrency,
-        event_id: eventId || null,
-        media_id: mediaId || null,
-        is_anonymous: isAnonymous,
-      },
-      ip_address:
-        request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-        request.headers.get('x-real-ip') ||
-        null,
-    }).catch(() => {});
+    try {
+      await serviceClient.from('audit_logs').insert({
+        actor_type: 'attendee',
+        actor_id: user.id,
+        action: 'tip_created',
+        resource_type: 'tip',
+        resource_id: tip.id,
+        metadata: {
+          to_photographer_id: photographerId,
+          amount,
+          currency: transactionCurrency,
+          event_id: eventId || null,
+          media_id: mediaId || null,
+          is_anonymous: isAnonymous,
+        },
+        ip_address:
+          request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+          request.headers.get('x-real-ip') ||
+          null,
+      });
+    } catch {
+      // Non-blocking audit trail.
+    }
 
     // Calculate fees using centralized calculator (10% platform fee for tips)
     // Note: For tips, we always use 10% platform fee regardless of photographer plan

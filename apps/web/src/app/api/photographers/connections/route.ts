@@ -10,6 +10,10 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
+function isMissingColumnError(error: any, columnName: string) {
+  return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
+}
+
 async function resolveCreatorId(userId: string, userEmail?: string) {
   const serviceClient = createServiceClient();
 
@@ -86,18 +90,39 @@ export async function POST(request: NextRequest) {
       .from('attendees')
       .select('id, display_name, face_tag');
 
+    let attendee: any = null;
+    let attendeeError: any = null;
     if (attendeeId) {
-      attendeeQuery = attendeeQuery.eq('id', attendeeId);
+      const byIdentifier = await supabase
+        .from('attendees')
+        .select('id, display_name, face_tag')
+        .or(`id.eq.${attendeeId},user_id.eq.${attendeeId}`)
+        .maybeSingle();
+
+      if (!byIdentifier.error || !isMissingColumnError(byIdentifier.error, 'user_id')) {
+        attendee = byIdentifier.data;
+        attendeeError = byIdentifier.error;
+      } else {
+        const fallback = await supabase
+          .from('attendees')
+          .select('id, display_name, face_tag')
+          .eq('id', attendeeId)
+          .maybeSingle();
+        attendee = fallback.data;
+        attendeeError = fallback.error;
+      }
     } else {
       // Normalize FaceTag
       const trimmedTag = String(attendeeFaceTag || '').trim();
       const normalizedTag = trimmedTag.startsWith('@')
         ? trimmedTag
         : `@${trimmedTag}`;
-      attendeeQuery = attendeeQuery.ilike('face_tag', normalizedTag);
+      const byFaceTag = await attendeeQuery
+        .or(`face_tag.ilike.${normalizedTag},face_tag.ilike.${normalizedTag.replace(/\./g, '')}`)
+        .maybeSingle();
+      attendee = byFaceTag.data;
+      attendeeError = byFaceTag.error;
     }
-
-    const { data: attendee, error: attendeeError } = await attendeeQuery.maybeSingle();
 
     if (attendeeError || !attendee) {
       return NextResponse.json({ error: 'Attendee not found' }, { status: 404 });

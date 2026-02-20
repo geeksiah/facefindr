@@ -12,14 +12,22 @@ import {
   normalizeIsoDate,
   normalizeUtcTimestamp,
 } from '@/lib/events/time';
+import { getPhotographerIdCandidates } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
-async function getEventAccess(supabase: any, eventId: string, userId: string) {
+async function getEventAccess(supabase: any, eventId: string, photographerIds: string[]) {
+  if (!photographerIds.length) {
+    return {
+      canView: false,
+      canEdit: false,
+    };
+  }
+
   const { data: ownedEvent } = await supabase
     .from('events')
     .select('id')
     .eq('id', eventId)
-    .eq('photographer_id', userId)
+    .in('photographer_id', photographerIds)
     .maybeSingle();
 
   if (ownedEvent) {
@@ -33,7 +41,7 @@ async function getEventAccess(supabase: any, eventId: string, userId: string) {
     .from('event_collaborators')
     .select('can_edit_event, can_manage_pricing, status')
     .eq('event_id', eventId)
-    .eq('photographer_id', userId)
+    .in('photographer_id', photographerIds)
     .eq('status', 'active')
     .maybeSingle();
 
@@ -65,7 +73,8 @@ export async function GET(
     }
 
     const { id } = params;
-    const access = await getEventAccess(serviceClient, id, user.id);
+    const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
+    const access = await getEventAccess(serviceClient, id, photographerIdCandidates);
     if (!access.canView) {
       return NextResponse.json({ error: 'Not authorized to manage this event' }, { status: 403 });
     }
@@ -121,8 +130,9 @@ export async function PUT(
 
     const { id } = params;
     const body = await request.json();
+    const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
 
-    const access = await getEventAccess(serviceClient, id, user.id);
+    const access = await getEventAccess(serviceClient, id, photographerIdCandidates);
     if (!access.canEdit) {
       return NextResponse.json({ error: 'Not authorized to manage this event' }, { status: 403 });
     }

@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getPhotographerIdCandidates } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // GET - Check if current user has full access
@@ -56,15 +57,16 @@ export async function POST(
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
 
     // Check if user is the event owner
-    const { data: event } = await supabase
+    const { data: event } = await serviceClient
       .from('events')
       .select('photographer_id')
       .eq('id', eventId)
       .single();
 
-    if (!event || event.photographer_id !== user.id) {
+    if (!event || !photographerIdCandidates.includes(event.photographer_id)) {
       return NextResponse.json({ error: 'Only event owner can grant access' }, { status: 403 });
     }
 
@@ -117,15 +119,15 @@ export async function POST(
 
       // Grant access
       const { data: access, error } = await serviceClient
-        .from('event_full_access')
-        .upsert({
-          event_id: eventId,
-          user_id: userId,
-          user_type: userType,
-          granted_by: user.id,
-          notes,
-          expires_at: expiresAt || null,
-          is_active: true,
+      .from('event_full_access')
+      .upsert({
+        event_id: eventId,
+        user_id: userId,
+        user_type: userType,
+        granted_by: event.photographer_id,
+        notes,
+        expires_at: expiresAt || null,
+        is_active: true,
         }, {
           onConflict: 'event_id,user_id',
         })
@@ -147,7 +149,7 @@ export async function POST(
         event_id: eventId,
         user_id: targetUser.id,
         user_type: userType,
-        granted_by: user.id,
+        granted_by: event.photographer_id,
         notes,
         expires_at: expiresAt || null,
         is_active: true,
@@ -184,20 +186,22 @@ export async function DELETE(
     }
 
     const supabase = await createClient();
+    const serviceClient = createServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
     
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
 
     // Check if user is the event owner
-    const { data: event } = await supabase
+    const { data: event } = await serviceClient
       .from('events')
       .select('photographer_id')
       .eq('id', eventId)
       .single();
 
-    if (!event || event.photographer_id !== user.id) {
+    if (!event || !photographerIdCandidates.includes(event.photographer_id)) {
       return NextResponse.json({ error: 'Only event owner can revoke access' }, { status: 403 });
     }
 

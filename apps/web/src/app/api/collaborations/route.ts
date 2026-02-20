@@ -8,12 +8,14 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createClient } from '@/lib/supabase/server';
+import { getPhotographerIdCandidates } from '@/lib/profiles/ids';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // GET - List all collaborations for the current photographer
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();
+    const serviceClient = createServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -22,9 +24,13 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status'); // 'pending', 'active', or null for all
+    const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
+    if (!photographerIdCandidates.length) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
 
     // Build query
-    let query = supabase
+    let query = serviceClient
       .from('event_collaborators')
       .select(`
         id,
@@ -54,7 +60,7 @@ export async function GET(request: NextRequest) {
           )
         )
       `)
-      .eq('photographer_id', user.id)
+      .in('photographer_id', photographerIdCandidates)
       .neq('role', 'owner'); // Exclude events they own
 
     if (status) {
@@ -91,6 +97,7 @@ export async function GET(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();
+    const serviceClient = createServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -99,17 +106,21 @@ export async function PATCH(request: NextRequest) {
 
     const body = await request.json();
     const { collaborationId, action } = body;
+    const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
+    if (!photographerIdCandidates.length) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
 
     if (!collaborationId || !['accept', 'decline'].includes(action)) {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
     }
 
     // Verify this is the user's invitation
-    const { data: collaboration } = await supabase
+    const { data: collaboration } = await serviceClient
       .from('event_collaborators')
       .select('id, photographer_id, status')
       .eq('id', collaborationId)
-      .eq('photographer_id', user.id)
+      .in('photographer_id', photographerIdCandidates)
       .eq('status', 'pending')
       .single();
 
@@ -118,7 +129,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     // Update status
-    const { error } = await supabase
+    const { error } = await serviceClient
       .from('event_collaborators')
       .update({
         status: action === 'accept' ? 'active' : 'declined',

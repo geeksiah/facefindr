@@ -424,21 +424,25 @@ export async function POST(request: NextRequest) {
     );
 
     if (serviceClient) {
-      await serviceClient.from('audit_logs').insert({
-        actor_type: normalizedFollowerType,
-        actor_id: user.id,
-        action: 'follow_created',
-        resource_type: 'follow',
-        resource_id: `${user.id}:${resolvedTargetType}:${resolvedTargetId}`,
-        metadata: {
-          following_id: followingUserId,
-          following_type: resolvedTargetType,
-        },
-        ip_address:
-          request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-          request.headers.get('x-real-ip') ||
-          null,
-      }).catch(() => {});
+      try {
+        await serviceClient.from('audit_logs').insert({
+          actor_type: normalizedFollowerType,
+          actor_id: user.id,
+          action: 'follow_created',
+          resource_type: 'follow',
+          resource_id: `${user.id}:${resolvedTargetType}:${resolvedTargetId}`,
+          metadata: {
+            following_id: followingUserId,
+            following_type: resolvedTargetType,
+          },
+          ip_address:
+            request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+            request.headers.get('x-real-ip') ||
+            null,
+        });
+      } catch {
+        // Non-blocking audit trail.
+      }
     }
 
     return NextResponse.json({
@@ -512,21 +516,25 @@ export async function DELETE(request: NextRequest) {
     }
 
     if (serviceClient) {
-      await serviceClient.from('audit_logs').insert({
-        actor_type: normalizedFollowerType,
-        actor_id: user.id,
-        action: 'follow_deleted',
-        resource_type: 'follow',
-        resource_id: `${user.id}:${resolvedFollowingType}:${targetId}`,
-        metadata: {
-          following_id: followingUserId,
-          following_type: resolvedFollowingType,
-        },
-        ip_address:
-          request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-          request.headers.get('x-real-ip') ||
-          null,
-      }).catch(() => {});
+      try {
+        await serviceClient.from('audit_logs').insert({
+          actor_type: normalizedFollowerType,
+          actor_id: user.id,
+          action: 'follow_deleted',
+          resource_type: 'follow',
+          resource_id: `${user.id}:${resolvedFollowingType}:${targetId}`,
+          metadata: {
+            following_id: followingUserId,
+            following_type: resolvedFollowingType,
+          },
+          ip_address:
+            request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+            request.headers.get('x-real-ip') ||
+            null,
+        });
+      } catch {
+        // Non-blocking audit trail.
+      }
     }
 
     const activeFollowers = await getActiveFollowerCount(

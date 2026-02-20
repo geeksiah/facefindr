@@ -53,14 +53,42 @@ export async function getPlatformSettings(): Promise<Record<string, unknown>> {
 
   try {
     const supabase = createServiceClient();
-    const { data } = await supabase
+    let settingsQuery = await supabase
       .from('platform_settings')
-      .select('setting_key, setting_value');
+      .select('setting_key, value, setting_value');
+
+    const missingValueColumn =
+      settingsQuery.error?.code === '42703' &&
+      String(settingsQuery.error?.message || '').includes('value');
+    const missingSettingValueColumn =
+      settingsQuery.error?.code === '42703' &&
+      String(settingsQuery.error?.message || '').includes('setting_value');
+
+    if (missingValueColumn) {
+      settingsQuery = await supabase
+        .from('platform_settings')
+        .select('setting_key, setting_value');
+    } else if (missingSettingValueColumn) {
+      settingsQuery = await supabase
+        .from('platform_settings')
+        .select('setting_key, value');
+    }
+
+    const { data } = settingsQuery;
 
     if (data) {
       cachedSettings = {};
       for (const row of data) {
-        cachedSettings[row.setting_key] = row.setting_value;
+        const rawValue = (row as any).value ?? (row as any).setting_value;
+        if (typeof rawValue === 'string') {
+          try {
+            cachedSettings[row.setting_key] = JSON.parse(rawValue);
+          } catch {
+            cachedSettings[row.setting_key] = rawValue;
+          }
+        } else {
+          cachedSettings[row.setting_key] = rawValue;
+        }
       }
       cacheTimestamp = now;
       return cachedSettings;

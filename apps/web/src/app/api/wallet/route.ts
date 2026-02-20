@@ -3,12 +3,14 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 
 import { getConnectAccount, createLoginLink, isStripeConfigured } from '@/lib/payments/stripe';
-import { createClient } from '@/lib/supabase/server';
+import { getPhotographerIdCandidates } from '@/lib/profiles/ids';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // GET: Fetch wallet details and balance
 export async function GET() {
   try {
     const supabase = await createClient();
+    const serviceClient = createServiceClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -16,12 +18,16 @@ export async function GET() {
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
+    if (!photographerIdCandidates.length) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
 
     // Get all wallets for this photographer
-    const { data: wallets, error: walletsError } = await supabase
+    const { data: wallets, error: walletsError } = await serviceClient
       .from('wallets')
       .select('*')
-      .eq('photographer_id', user.id);
+      .in('photographer_id', photographerIdCandidates);
 
     if (walletsError) {
       return NextResponse.json({ error: 'Failed to fetch wallets' }, { status: 500 });
@@ -45,7 +51,7 @@ export async function GET() {
 
             // Update wallet status if needed
             if (account.charges_enabled && wallet.status !== 'active') {
-              await supabase
+              await serviceClient
                 .from('wallets')
                 .update({
                   status: 'active',
@@ -76,10 +82,10 @@ export async function GET() {
     );
 
     // Get balance from transactions
-    const { data: balanceData } = await supabase
+    const { data: balanceData } = await serviceClient
       .from('wallet_balances')
       .select('*')
-      .eq('photographer_id', user.id);
+      .in('photographer_id', photographerIdCandidates);
 
     return NextResponse.json({
       wallets: enrichedWallets,
@@ -98,12 +104,17 @@ export async function GET() {
 export async function DELETE(request: Request) {
   try {
     const supabase = await createClient();
+    const serviceClient = createServiceClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
+    if (!photographerIdCandidates.length) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
     }
 
     const { searchParams } = new URL(request.url);
@@ -114,11 +125,11 @@ export async function DELETE(request: Request) {
     }
 
     // Verify ownership
-    const { data: wallet, error: walletError } = await supabase
+    const { data: wallet, error: walletError } = await serviceClient
       .from('wallets')
       .select('*')
       .eq('id', walletId)
-      .eq('photographer_id', user.id)
+      .in('photographer_id', photographerIdCandidates)
       .single();
 
     if (walletError || !wallet) {
@@ -126,7 +137,7 @@ export async function DELETE(request: Request) {
     }
 
     // Check for pending payouts
-    const { count: pendingPayouts } = await supabase
+    const { count: pendingPayouts } = await serviceClient
       .from('payouts')
       .select('id', { count: 'exact' })
       .eq('wallet_id', walletId)
@@ -142,7 +153,7 @@ export async function DELETE(request: Request) {
     // Note: We don't delete the Stripe Connect account - just our reference
     // The photographer can re-onboard if needed
 
-    const { error: deleteError } = await supabase
+    const { error: deleteError } = await serviceClient
       .from('wallets')
       .delete()
       .eq('id', walletId);

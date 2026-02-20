@@ -243,24 +243,32 @@ export async function POST(
     }
 
     // Refresh rating stats
-    await serviceClient.rpc('refresh_photographer_rating_stats').catch(() => {});
+    try {
+      await serviceClient.rpc('refresh_photographer_rating_stats');
+    } catch {
+      // Non-blocking stats refresh.
+    }
 
-    await serviceClient.from('audit_logs').insert({
-      actor_type: 'attendee',
-      actor_id: user.id,
-      action: 'photographer_rating_upsert',
-      resource_type: 'photographer_rating',
-      resource_id: ratingData.id,
-      metadata: {
-        photographer_id: photographerId,
-        rating,
-        is_verified: isVerified,
-      },
-      ip_address:
-        request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-        request.headers.get('x-real-ip') ||
-        null,
-    }).catch(() => {});
+    try {
+      await serviceClient.from('audit_logs').insert({
+        actor_type: 'attendee',
+        actor_id: user.id,
+        action: 'photographer_rating_upsert',
+        resource_type: 'photographer_rating',
+        resource_id: ratingData.id,
+        metadata: {
+          photographer_id: photographerId,
+          rating,
+          is_verified: isVerified,
+        },
+        ip_address:
+          request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+          request.headers.get('x-real-ip') ||
+          null,
+      });
+    } catch {
+      // Non-blocking audit trail.
+    }
 
     return NextResponse.json({ rating: ratingData });
 

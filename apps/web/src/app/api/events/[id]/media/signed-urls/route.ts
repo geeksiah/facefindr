@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getPhotographerIdCandidates } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 interface MediaInput {
@@ -81,6 +82,7 @@ export async function POST(
     }
 
     const serviceClient = createServiceClient();
+    const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
     const { data: event, error: eventError } = await serviceClient
       .from('events')
       .select('id, photographer_id')
@@ -91,13 +93,13 @@ export async function POST(
       return NextResponse.json({ error: 'Event not found' }, { status: 404 });
     }
 
-    let hasAccess = event.photographer_id === user.id;
+    let hasAccess = photographerIdCandidates.includes(event.photographer_id);
     if (!hasAccess) {
       const { data: collaborator } = await serviceClient
         .from('event_collaborators')
         .select('id')
         .eq('event_id', eventId)
-        .eq('photographer_id', user.id)
+        .in('photographer_id', photographerIdCandidates)
         .in('status', ['accepted', 'active'])
         .maybeSingle();
 
@@ -134,4 +136,3 @@ export async function POST(
     return NextResponse.json({ error: 'Failed to sign media URLs' }, { status: 500 });
   }
 }
-

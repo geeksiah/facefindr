@@ -26,6 +26,7 @@ export default function UploadPage() {
   const [events, setEvents] = useState<Event[]>([]);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [creatorId, setCreatorId] = useState<string | null>(null);
+  const [creatorFallbackId, setCreatorFallbackId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const loadEvents = useCallback(async () => {
@@ -40,20 +41,44 @@ export default function UploadPage() {
         return;
       }
 
-      const currentCreatorId = userRes.user.id;
+      const authUserId = userRes.user.id;
+      let currentCreatorId = authUserId;
+      const creatorByUserId = await supabase
+        .from('photographers')
+        .select('id')
+        .eq('user_id', authUserId)
+        .maybeSingle();
+      const missingUserIdColumn =
+        creatorByUserId.error?.code === '42703' ||
+        String(creatorByUserId.error?.message || '').includes('user_id');
+      if (!creatorByUserId.error && creatorByUserId.data?.id) {
+        currentCreatorId = creatorByUserId.data.id;
+      } else if (!missingUserIdColumn) {
+        const creatorById = await supabase
+          .from('photographers')
+          .select('id')
+          .eq('id', authUserId)
+          .maybeSingle();
+        if (creatorById.data?.id) {
+          currentCreatorId = creatorById.data.id;
+        }
+      }
+
+      const creatorIdCandidates = Array.from(new Set([authUserId, currentCreatorId]));
       setCreatorId(currentCreatorId);
+      setCreatorFallbackId(authUserId !== currentCreatorId ? authUserId : null);
 
       const [{ data: ownedEventsRes, error: ownedEventsError }, { data: collaboratorRows, error: collaboratorError }] = await Promise.all([
         supabase
         .from('events')
         .select('id, name, event_date, event_timezone, status')
-          .eq('photographer_id', currentCreatorId)
+          .in('photographer_id', creatorIdCandidates)
           .in('status', ['draft', 'active', 'closed'])
           .order('created_at', { ascending: false }),
         supabase
           .from('event_collaborators')
           .select('event_id')
-          .eq('photographer_id', currentCreatorId)
+          .in('photographer_id', creatorIdCandidates)
           .eq('status', 'active'),
       ]);
 
@@ -149,11 +174,25 @@ export default function UploadPage() {
       : 'photographer_id=eq.00000000-0000-0000-0000-000000000000',
     onChange: loadEvents,
   });
+  useRealtimeSubscription({
+    table: 'events',
+    filter: creatorFallbackId
+      ? `photographer_id=eq.${creatorFallbackId}`
+      : 'photographer_id=eq.00000000-0000-0000-0000-000000000000',
+    onChange: loadEvents,
+  });
 
   useRealtimeSubscription({
     table: 'event_collaborators',
     filter: creatorId
       ? `photographer_id=eq.${creatorId}`
+      : 'photographer_id=eq.00000000-0000-0000-0000-000000000000',
+    onChange: loadEvents,
+  });
+  useRealtimeSubscription({
+    table: 'event_collaborators',
+    filter: creatorFallbackId
+      ? `photographer_id=eq.${creatorFallbackId}`
       : 'photographer_id=eq.00000000-0000-0000-0000-000000000000',
     onChange: loadEvents,
   });

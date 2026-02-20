@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getPhotographerIdCandidates } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // ============================================
@@ -18,6 +19,7 @@ export async function GET(
 ) {
   try {
     const supabase = createClient();
+    const serviceClient = createServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -25,9 +27,9 @@ export async function GET(
     }
 
     const eventId = params.id;
+    const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
 
     // Get event with live mode status
-    const serviceClient = createServiceClient();
     const { data: event, error } = await serviceClient
       .from('events')
       .select('id, name, live_mode_enabled, photographer_id')
@@ -39,7 +41,7 @@ export async function GET(
     }
 
     // Verify ownership
-    if (event.photographer_id !== user.id) {
+    if (!photographerIdCandidates.includes(event.photographer_id)) {
       return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
     }
 
@@ -67,6 +69,7 @@ export async function POST(
 ) {
   try {
     const supabase = createClient();
+    const serviceClient = createServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -76,12 +79,11 @@ export async function POST(
     const eventId = params.id;
     const body = await request.json();
     const { enabled } = body;
+    const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
 
     if (typeof enabled !== 'boolean') {
       return NextResponse.json({ error: 'enabled must be a boolean' }, { status: 400 });
     }
-
-    const serviceClient = createServiceClient();
 
     // Get event and verify ownership
     const { data: event, error: fetchError } = await serviceClient
@@ -94,7 +96,7 @@ export async function POST(
       return NextResponse.json({ error: 'Event not found' }, { status: 404 });
     }
 
-    if (event.photographer_id !== user.id) {
+    if (!photographerIdCandidates.includes(event.photographer_id)) {
       return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
     }
 

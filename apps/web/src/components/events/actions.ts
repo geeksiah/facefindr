@@ -3,8 +3,9 @@
 import { revalidatePath } from 'next/cache';
 
 import { deleteFaces } from '@/lib/aws/rekognition';
-import { checkLimit, checkFeature } from '@/lib/subscription/enforcement';
-import { createClient } from '@/lib/supabase/server';
+import { getPhotographerIdCandidates, resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
+import { checkLimit } from '@/lib/subscription/enforcement';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // ============================================
 // UPLOAD PHOTOS
@@ -12,11 +13,22 @@ import { createClient } from '@/lib/supabase/server';
 
 export async function uploadPhotos(formData: FormData) {
   const supabase = await createClient();
+  const serviceClient = createServiceClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
     return { error: 'Not authenticated' };
   }
+  const photographerIdCandidates = await getPhotographerIdCandidates(supabase, user.id, user.email);
+  const { data: actorPhotographerProfile } = await resolvePhotographerProfileByUser(
+    supabase,
+    user.id,
+    user.email
+  );
+  if (!actorPhotographerProfile?.id) {
+    return { error: 'Creator profile not found' };
+  }
+  const actorPhotographerId = actorPhotographerProfile.id as string;
 
   const file = formData.get('file') as File;
   const eventId = formData.get('eventId') as string;
@@ -37,7 +49,7 @@ export async function uploadPhotos(formData: FormData) {
   }
 
   // Check if user is owner or collaborator with upload permission
-  let canUpload = event.photographer_id === user.id;
+  let canUpload = photographerIdCandidates.includes(event.photographer_id);
   const photographerId = event.photographer_id; // Use event owner for limit checks
   
   if (!canUpload) {
@@ -46,7 +58,7 @@ export async function uploadPhotos(formData: FormData) {
       .from('event_collaborators')
       .select('can_upload')
       .eq('event_id', eventId)
-      .eq('photographer_id', user.id)
+      .in('photographer_id', photographerIdCandidates)
       .eq('status', 'active')
       .single();
     
@@ -105,7 +117,7 @@ export async function uploadPhotos(formData: FormData) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = new Uint8Array(arrayBuffer);
 
-    const { error: uploadError } = await supabase.storage
+    const { error: uploadError } = await serviceClient.storage
       .from('media')
       .upload(storagePath, buffer, {
         contentType: file.type,
@@ -121,12 +133,12 @@ export async function uploadPhotos(formData: FormData) {
     }
 
     // Create media record with uploader_id for collaborator tracking
-    const { data: media, error: dbError } = await supabase
+    const { data: media, error: dbError } = await serviceClient
       .from('media')
       .insert({
         event_id: eventId,
         photographer_id: event.photographer_id, // Event owner for RLS
-        uploader_id: user.id, // Actual uploader for revenue tracking
+        uploader_id: actorPhotographerId, // Actual uploader for revenue tracking
         storage_path: storagePath,
         original_filename: file.name,
         media_type: 'photo',
@@ -144,12 +156,12 @@ export async function uploadPhotos(formData: FormData) {
 
     if (dbError) {
       console.error('Database insert error:', dbError);
-      // Clean up uploaded file if database insert fails
-      try {
-        await supabase.storage.from('media').remove([storagePath]);
-      } catch (cleanupError) {
-        console.error('Failed to cleanup uploaded file:', cleanupError);
-      }
+        // Clean up uploaded file if database insert fails
+        try {
+          await serviceClient.storage.from('media').remove([storagePath]);
+        } catch (cleanupError) {
+          console.error('Failed to cleanup uploaded file:', cleanupError);
+        }
       return { 
         error: dbError.message || 'Failed to save media record to database' 
       };
@@ -158,7 +170,7 @@ export async function uploadPhotos(formData: FormData) {
     if (!media) {
       console.error('Media record not returned after insert');
       try {
-        await supabase.storage.from('media').remove([storagePath]);
+        await serviceClient.storage.from('media').remove([storagePath]);
       } catch (cleanupError) {
         console.error('Failed to cleanup uploaded file:', cleanupError);
       }
@@ -216,6 +228,7 @@ export async function processMediaFaces(mediaId: string, eventId: string) {
   if (!user) {
     return { error: 'Not authenticated' };
   }
+  const photographerIdCandidates = await getPhotographerIdCandidates(supabase, user.id, user.email);
 
   // Verify event ownership
   const { data: event } = await supabase
@@ -224,7 +237,7 @@ export async function processMediaFaces(mediaId: string, eventId: string) {
     .eq('id', eventId)
     .single();
 
-  if (!event || event.photographer_id !== user.id) {
+  if (!event || !photographerIdCandidates.includes(event.photographer_id)) {
     return { error: 'Event not found' };
   }
 
@@ -254,14 +267,22 @@ export async function processMediaFaces(mediaId: string, eventId: string) {
 
 export async function deletePhoto(mediaId: string, eventId: string) {
   const supabase = await createClient();
+  const serviceClient = createServiceClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
     return { error: 'Not authenticated' };
   }
+  const photographerIdCandidates = await getPhotographerIdCandidates(supabase, user.id, user.email);
+  const { data: actorPhotographerProfile } = await resolvePhotographerProfileByUser(
+    supabase,
+    user.id,
+    user.email
+  );
+  const actorPhotographerId = actorPhotographerProfile?.id as string | undefined;
 
   // Get media record first to check ownership
-  const { data: media } = await supabase
+  const { data: media } = await serviceClient
     .from('media')
     .select('storage_path, thumbnail_path, watermarked_path, uploader_id')
     .eq('id', mediaId)
@@ -284,15 +305,15 @@ export async function deletePhoto(mediaId: string, eventId: string) {
     return { error: 'Event not found' };
   }
 
-  let canDelete = event.photographer_id === user.id;
+  let canDelete = photographerIdCandidates.includes(event.photographer_id);
   
-  if (!canDelete && media.uploader_id === user.id) {
+  if (!canDelete && actorPhotographerId && media.uploader_id === actorPhotographerId) {
     // Check if collaborator can delete own photos
     const { data: collaborator } = await supabase
       .from('event_collaborators')
       .select('can_delete_own_photos')
       .eq('event_id', eventId)
-      .eq('photographer_id', user.id)
+      .in('photographer_id', photographerIdCandidates)
       .eq('status', 'active')
       .single();
     
@@ -304,7 +325,7 @@ export async function deletePhoto(mediaId: string, eventId: string) {
   }
 
   // Get face IDs to delete from Rekognition
-  const { data: faceEmbeddings } = await supabase
+  const { data: faceEmbeddings } = await serviceClient
     .from('face_embeddings')
     .select('rekognition_face_id')
     .eq('media_id', mediaId);
@@ -321,16 +342,16 @@ export async function deletePhoto(mediaId: string, eventId: string) {
     if (media.thumbnail_path) pathsToDelete.push(media.thumbnail_path);
     if (media.watermarked_path) pathsToDelete.push(media.watermarked_path);
 
-    await supabase.storage.from('media').remove(pathsToDelete);
+    await serviceClient.storage.from('media').remove(pathsToDelete);
 
     // Delete face embeddings from database (cascade should handle this, but explicit is better)
-    await supabase
+    await serviceClient
       .from('face_embeddings')
       .delete()
       .eq('media_id', mediaId);
 
     // Delete media record
-    const { error: deleteError } = await supabase
+    const { error: deleteError } = await serviceClient
       .from('media')
       .delete()
       .eq('id', mediaId);

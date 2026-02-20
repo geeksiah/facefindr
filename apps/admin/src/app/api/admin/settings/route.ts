@@ -50,7 +50,8 @@ export async function PUT(request: NextRequest) {
         .from('platform_settings')
         .update({ 
           value: typeof value === 'string' ? value : JSON.stringify(value),
-          updated_by: session.adminId,
+          // Keep nullable until all environments have a consistent FK target.
+          updated_by: null,
           updated_at: new Date().toISOString(),
         })
         .eq('setting_key', key);

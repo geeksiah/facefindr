@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getPhotographerIdCandidates, resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import { checkLimit } from '@/lib/subscription/enforcement';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
@@ -19,6 +20,7 @@ interface RouteParams {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const supabase = await createClient();
+    const db = createServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -26,13 +28,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const eventId = params.id;
+    const photographerIdCandidates = await getPhotographerIdCandidates(supabase, user.id, user.email);
+    if (!photographerIdCandidates.length) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
 
     // Check if user is a collaborator on this event
-    const { data: myAccess } = await supabase
+    const { data: myAccess } = await db
       .from('event_collaborators')
       .select('role, can_invite_collaborators')
       .eq('event_id', eventId)
-      .eq('photographer_id', user.id)
+      .in('photographer_id', photographerIdCandidates)
       .eq('status', 'active')
       .single();
 
@@ -41,7 +47,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     // Get all collaborators
-    const { data: collaborators, error } = await supabase
+    const { data: collaborators, error } = await db
       .from('event_collaborators')
       .select(`
         id,
@@ -78,8 +84,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     // Get photo counts per collaborator
-    const serviceClient = createServiceClient();
-    const { data: photoCounts } = await serviceClient
+    const { data: photoCounts } = await db
       .from('media')
       .select('uploader_id')
       .eq('event_id', eventId);
@@ -111,6 +116,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const supabase = await createClient();
+    const db = createServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -120,13 +126,21 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const eventId = params.id;
     const body = await request.json();
     const { photographerId, photographerFaceTag, role = 'collaborator', permissions = {}, revenueSharePercent = 100 } = body;
+    const photographerIdCandidates = await getPhotographerIdCandidates(supabase, user.id, user.email);
+    const { data: inviterProfile } = await resolvePhotographerProfileByUser(supabase, user.id, user.email);
+    if (!photographerIdCandidates.length) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
+    if (!inviterProfile?.id) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
 
     // Check if user can invite collaborators
-    const { data: myAccess } = await supabase
+    const { data: myAccess } = await db
       .from('event_collaborators')
       .select('role, can_invite_collaborators')
       .eq('event_id', eventId)
-      .eq('photographer_id', user.id)
+      .in('photographer_id', photographerIdCandidates)
       .eq('status', 'active')
       .single();
 
@@ -135,7 +149,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // Check team member limit based on plan
-    const { data: event } = await supabase
+    const { data: event } = await db
       .from('events')
       .select('id, name, photographer_id')
       .eq('id', eventId)
@@ -161,7 +175,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Find photographer by ID or FaceTag
     let targetCreatorId = photographerId;
     if (!targetCreatorId && photographerFaceTag) {
-      const { data: photographer } = await supabase
+      const { data: photographer } = await db
         .from('photographers')
         .select('id')
         .ilike('face_tag', photographerFaceTag.startsWith('@') ? photographerFaceTag : `@${photographerFaceTag}`)
@@ -178,7 +192,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // Check if already a collaborator
-    const { data: existing } = await supabase
+    const { data: existing } = await db
       .from('event_collaborators')
       .select('id, status')
       .eq('event_id', eventId)
@@ -210,11 +224,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       can_view_revenue: permissions.canViewRevenue ?? false,
       revenue_share_percent: revenueSharePercent,
       status: 'pending',
-      invited_by: user.id,
+      invited_by: inviterProfile.id,
       invited_at: new Date().toISOString(),
     };
 
-    const { data: collaborator, error } = await supabase
+    const { data: collaborator, error } = await db
       .from('event_collaborators')
       .upsert(collaboratorData, { onConflict: 'event_id,photographer_id' })
       .select(`
@@ -230,9 +244,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Send in-app notification to invited photographer.
     try {
       const inviterName = user.user_metadata?.display_name || user.email?.split('@')[0] || 'A creator';
-      const serviceClient = createServiceClient();
-
-      await serviceClient
+      await db
         .from('notifications')
         .insert({
           user_id: targetCreatorId,
@@ -281,6 +293,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
     const supabase = await createClient();
+    const db = createServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -290,14 +303,18 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     const eventId = params.id;
     const body = await request.json();
     const { collaboratorId, action, permissions, revenueSharePercent, role } = body;
+    const photographerIdCandidates = await getPhotographerIdCandidates(supabase, user.id, user.email);
+    if (!photographerIdCandidates.length) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
 
     // Handle accept/decline actions
     if (action === 'accept' || action === 'decline') {
-      const { data: invitation } = await supabase
+      const { data: invitation } = await db
         .from('event_collaborators')
         .select('id, photographer_id, status')
         .eq('event_id', eventId)
-        .eq('photographer_id', user.id)
+        .in('photographer_id', photographerIdCandidates)
         .eq('status', 'pending')
         .single();
 
@@ -305,7 +322,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         return NextResponse.json({ error: 'No pending invitation found' }, { status: 404 });
       }
 
-      const { error } = await supabase
+      const { error } = await db
         .from('event_collaborators')
         .update({
           status: action === 'accept' ? 'active' : 'declined',
@@ -321,11 +338,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 
     // For other updates, check if user can manage collaborators
-    const { data: myAccess } = await supabase
+    const { data: myAccess } = await db
       .from('event_collaborators')
       .select('role, can_invite_collaborators')
       .eq('event_id', eventId)
-      .eq('photographer_id', user.id)
+      .in('photographer_id', photographerIdCandidates)
       .eq('status', 'active')
       .single();
 
@@ -334,7 +351,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 
     // Get the collaborator being updated
-    const { data: collaborator } = await supabase
+    const { data: collaborator } = await db
       .from('event_collaborators')
       .select('id, role, photographer_id')
       .eq('id', collaboratorId)
@@ -379,7 +396,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
     updateData.updated_at = new Date().toISOString();
 
-    const { error } = await supabase
+    const { error } = await db
       .from('event_collaborators')
       .update(updateData)
       .eq('id', collaboratorId);
@@ -400,6 +417,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
     const supabase = await createClient();
+    const db = createServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -409,13 +427,17 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     const eventId = params.id;
     const { searchParams } = new URL(request.url);
     const collaboratorId = searchParams.get('collaboratorId');
+    const photographerIdCandidates = await getPhotographerIdCandidates(supabase, user.id, user.email);
+    if (!photographerIdCandidates.length) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
 
     if (!collaboratorId) {
       return NextResponse.json({ error: 'Collaborator ID required' }, { status: 400 });
     }
 
     // Get the collaborator
-    const { data: collaborator } = await supabase
+    const { data: collaborator } = await db
       .from('event_collaborators')
       .select('id, role, photographer_id')
       .eq('id', collaboratorId)
@@ -432,14 +454,14 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     }
 
     // Check if user can remove collaborators (owner, or removing self)
-    const isSelf = collaborator.photographer_id === user.id;
+    const isSelf = photographerIdCandidates.includes(collaborator.photographer_id);
     
     if (!isSelf) {
-      const { data: myAccess } = await supabase
+      const { data: myAccess } = await db
         .from('event_collaborators')
         .select('role')
         .eq('event_id', eventId)
-        .eq('photographer_id', user.id)
+        .in('photographer_id', photographerIdCandidates)
         .eq('status', 'active')
         .single();
 
@@ -449,7 +471,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     }
 
     // Update status to removed (soft delete to preserve history)
-    const { error } = await supabase
+    const { error } = await db
       .from('event_collaborators')
       .update({ status: 'removed', updated_at: new Date().toISOString() })
       .eq('id', collaboratorId);

@@ -19,6 +19,7 @@ export type PaymentProductType =
   | 'attendee_subscription'
   | 'vault_subscription';
 export type RuntimeEnvironment = 'development' | 'staging' | 'production';
+const ALL_GATEWAYS: PaymentGateway[] = ['stripe', 'flutterwave', 'paypal', 'paystack'];
 
 export interface GatewaySelection {
   gateway: PaymentGateway;
@@ -160,25 +161,45 @@ export async function selectPaymentGateway(options: {
     throw new GatewaySelectionError('No country available for gateway selection', 'missing_country');
   }
 
-  const regionGateways = await getConfiguredGateways(userCountry);
+  let regionGateways = await getConfiguredGateways(userCountry);
+  // Keep checkout operational even when region config is missing by falling back
+  // to globally configured gateways.
   if (!regionGateways.length) {
-    throw new GatewaySelectionError(`No enabled payment gateways configured for region ${userCountry}`, 'no_region_gateways');
+    regionGateways = await filterConfiguredGateways(ALL_GATEWAYS, userCountry);
+  }
+  if (!regionGateways.length) {
+    throw new GatewaySelectionError(
+      `No enabled payment gateways configured for region ${userCountry}`,
+      'no_region_gateways'
+    );
   }
 
   let availableGateways = regionGateways;
+  let selectionReason = `Region configuration (${userCountry})`;
 
   if (photographerId) {
     const walletGateways = await getAvailableGateways(photographerId);
-    availableGateways = regionGateways.filter((gateway) => walletGateways.includes(gateway));
-    if (!availableGateways.length) {
-      throw new GatewaySelectionError(
-        `No shared payment gateway between region ${userCountry} and photographer wallets`,
-        'no_shared_gateway'
-      );
+    if (walletGateways.length > 0) {
+      const sharedGateways = regionGateways.filter((gateway) => walletGateways.includes(gateway));
+      if (sharedGateways.length > 0) {
+        availableGateways = sharedGateways;
+        selectionReason = `Shared region and creator wallet gateways (${userCountry})`;
+      } else {
+        // If region config and wallet config drift, prefer working creator wallets.
+        availableGateways = walletGateways;
+        selectionReason = `Creator wallet fallback (${userCountry})`;
+      }
     }
   }
 
-  const configuredGateways = await filterConfiguredGateways(availableGateways, userCountry);
+  let configuredGateways = await filterConfiguredGateways(availableGateways, userCountry);
+  if (!configuredGateways.length && photographerId) {
+    // Final fallback to region-only configured providers.
+    configuredGateways = await filterConfiguredGateways(regionGateways, userCountry);
+    if (configuredGateways.length) {
+      selectionReason = `Region credential fallback (${userCountry})`;
+    }
+  }
   if (!configuredGateways.length) {
     throw new GatewaySelectionError(
       `No configured provider credentials found for region ${userCountry}`,
@@ -209,7 +230,7 @@ export async function selectPaymentGateway(options: {
 
   return {
     gateway: productGateways[0],
-    reason: `Region configuration (${userCountry})`,
+    reason: selectionReason,
     availableGateways: productGateways,
     countryCode: userCountry.toUpperCase(),
     productType,

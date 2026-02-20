@@ -14,6 +14,7 @@ import { isFlutterwaveConfigured, initializePayment } from '@/lib/payments/flutt
 import { GatewaySelectionError, selectPaymentGateway } from '@/lib/payments/gateway-selector';
 import { isPayPalConfigured, createOrder, getApprovalUrl } from '@/lib/payments/paypal';
 import { initializePaystackPayment, resolvePaystackSecretKey } from '@/lib/payments/paystack';
+import { resolveAttendeeProfileByUser } from '@/lib/profiles/ids';
 import { stripe } from '@/lib/payments/stripe';
 import { resolveDropInPricingConfig } from '@/lib/drop-in/pricing';
 import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
@@ -26,6 +27,10 @@ async function getDropInPricing() {
     currencyCode: pricing.currencyCode,
     currencyLower: pricing.currencyLower,
   };
+}
+
+function isMissingColumnError(error: any, columnName: string) {
+  return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
 }
 
 export async function POST(request: NextRequest) {
@@ -55,29 +60,75 @@ export async function POST(request: NextRequest) {
 
     // Get attendee profile (use service client to bypass RLS)
     const serviceClient = createServiceClient();
-    let { data: attendee } = await serviceClient
-      .from('attendees')
-      .select('id, display_name')
-      .eq('id', user.id)
-      .maybeSingle();
+    let { data: attendee } = await resolveAttendeeProfileByUser(serviceClient, user.id, user.email);
 
     if (!attendee) {
       // Auto-create attendee profile if it doesn't exist yet
-      const { data: newAttendee, error: createError } = await serviceClient
+      const username =
+        String(user.user_metadata?.username || '').trim() ||
+        String(user.user_metadata?.display_name || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '') ||
+        String(user.email || '')
+          .split('@')[0]
+          .toLowerCase()
+          .replace(/[^a-z0-9_]/g, '') ||
+        `user_${Date.now()}`;
+      const displayName = user.user_metadata?.display_name || user.email?.split('@')[0] || 'User';
+      const insertPayload: Record<string, any> = {
+        id: user.id,
+        user_id: user.id,
+        display_name: displayName,
+        email: user.email,
+        username,
+      };
+
+      let createResult = await serviceClient
         .from('attendees')
-        .insert({
-          id: user.id,
-          display_name: user.user_metadata?.display_name || user.email?.split('@')[0] || 'User',
-          email: user.email,
-        })
-        .select('id, display_name')
+        .insert(insertPayload)
+        .select('id, display_name, user_id')
         .single();
 
-      if (createError || !newAttendee) {
+      if (createResult.error && isMissingColumnError(createResult.error, 'user_id')) {
+        const { user_id, ...withoutUserId } = insertPayload;
+        createResult = await serviceClient
+          .from('attendees')
+          .insert(withoutUserId)
+          .select('id, display_name')
+          .single();
+      }
+
+      if (createResult.error && isMissingColumnError(createResult.error, 'username')) {
+        const { username: omittedUsername, ...withoutUsername } = insertPayload;
+        void omittedUsername;
+        createResult = await serviceClient
+          .from('attendees')
+          .insert(withoutUsername)
+          .select('id, display_name, user_id')
+          .single();
+      }
+
+      if (
+        createResult.error?.code === '23502' &&
+        typeof createResult.error?.message === 'string' &&
+        createResult.error.message.includes('face_tag')
+      ) {
+        const suffix = Math.floor(1000 + Math.random() * 9000).toString();
+        const generatedFaceTag = `@${username.slice(0, 12)}${suffix}`;
+        createResult = await serviceClient
+          .from('attendees')
+          .insert({
+            ...insertPayload,
+            face_tag: generatedFaceTag,
+            face_tag_suffix: suffix,
+          })
+          .select('id, display_name, user_id')
+          .single();
+      }
+
+      if (createResult.error || !createResult.data) {
         return NextResponse.json({ error: 'Failed to create attendee profile' }, { status: 500 });
       }
 
-      attendee = newAttendee;
+      attendee = createResult.data;
     }
 
     const formData = await request.formData();
@@ -110,7 +161,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check user's subscription/plan
-    const { data: subscription } = await supabase
+    const { data: subscription } = await serviceClient
       .from('attendee_subscriptions')
       .select('plan_code, status, can_upload_drop_ins')
       .eq('attendee_id', attendee.id)
@@ -131,7 +182,7 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = new Uint8Array(arrayBuffer);
 
-    const { error: uploadError } = await supabase.storage
+    const { error: uploadError } = await serviceClient.storage
       .from('media')
       .upload(storagePath, buffer, {
         contentType: file.type,
@@ -148,7 +199,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create drop-in photo record first (pending payment)
-    const { data: dropInPhoto, error: dbError } = await supabase
+    const { data: dropInPhoto, error: dbError } = await serviceClient
       .from('drop_in_photos')
       .insert({
         uploader_id: attendee.id,
@@ -173,7 +224,7 @@ export async function POST(request: NextRequest) {
 
     if (dbError || !dropInPhoto) {
       // Clean up uploaded file
-      await supabase.storage.from('media').remove([storagePath]);
+      await serviceClient.storage.from('media').remove([storagePath]);
       return NextResponse.json(
         { error: 'Failed to create drop-in record' },
         { status: 500 }
@@ -184,7 +235,7 @@ export async function POST(request: NextRequest) {
     let gatewaySelection;
     try {
       gatewaySelection = await selectPaymentGateway({
-        userId: attendee.id,
+        userId: user.id,
         currency: dropInPricing.currencyLower,
         productType: 'drop_in',
       });
@@ -359,8 +410,8 @@ export async function POST(request: NextRequest) {
       }
     } catch (error) {
       // Clean up drop-in record if checkout fails
-      await supabase.from('drop_in_photos').delete().eq('id', dropInPhoto.id);
-      await supabase.storage.from('media').remove([storagePath]);
+      await serviceClient.from('drop_in_photos').delete().eq('id', dropInPhoto.id);
+      await serviceClient.storage.from('media').remove([storagePath]);
       
       console.error('Checkout session error:', error);
       return NextResponse.json(

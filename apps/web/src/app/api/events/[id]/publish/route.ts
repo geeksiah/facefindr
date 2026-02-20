@@ -6,8 +6,9 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getPhotographerIdCandidates, resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import { generateAccessCode } from '@/lib/sharing/share-service';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // POST - Publish event (draft -> active)
 export async function POST(
@@ -21,15 +22,21 @@ export async function POST(
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const serviceClient = createServiceClient();
 
     const { id } = params;
+    const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
+    const { data: creatorProfile } = await resolvePhotographerProfileByUser(serviceClient, user.id, user.email);
+    if (!photographerIdCandidates.length) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
 
     // Get event and verify ownership
-    const { data: event, error: fetchError } = await supabase
+    const { data: event, error: fetchError } = await serviceClient
       .from('events')
-      .select('id, status, public_slug, require_access_code, public_access_code')
+      .select('id, name, status, is_public, photographer_id, public_slug, require_access_code, public_access_code')
       .eq('id', id)
-      .eq('photographer_id', user.id)
+      .in('photographer_id', photographerIdCandidates)
       .single();
 
     if (fetchError || !event) {
@@ -48,7 +55,7 @@ export async function POST(
     if (!event.public_slug) {
       // Try using the database function first
       try {
-        const { data: slugData, error: slugError } = await supabase.rpc('generate_event_slug', {
+        const { data: slugData, error: slugError } = await serviceClient.rpc('generate_event_slug', {
           event_name: 'temp', // Will be replaced by actual name query
           event_id: id,
         });
@@ -57,7 +64,7 @@ export async function POST(
           updates.public_slug = slugData;
         } else {
           // Fallback: get event name and generate slug
-          const { data: eventDetails } = await supabase
+          const { data: eventDetails } = await serviceClient
             .from('events')
             .select('name')
             .eq('id', id)
@@ -75,7 +82,7 @@ export async function POST(
           
           // Ensure uniqueness
           while (true) {
-            const { data: existing } = await supabase
+            const { data: existing } = await serviceClient
               .from('events')
               .select('id')
               .eq('public_slug', finalSlug)
@@ -102,13 +109,64 @@ export async function POST(
       updates.public_access_code = generateAccessCode();
     }
 
-    const { error: updateError } = await supabase
+    const { error: updateError } = await serviceClient
       .from('events')
       .update(updates)
       .eq('id', id);
 
     if (updateError) {
       throw updateError;
+    }
+
+    if (event.is_public) {
+      try {
+        const creatorUserId = (creatorProfile as any)?.user_id || user.id;
+        const [{ data: followers }, { data: profile }] = await Promise.all([
+          serviceClient
+            .from('follows')
+            .select('follower_id')
+            .eq('following_id', creatorUserId)
+            .in('following_type', ['creator', 'photographer'])
+            .eq('status', 'active')
+            .eq('notify_new_event', true),
+          serviceClient
+            .from('photographers')
+            .select('display_name')
+            .eq('id', event.photographer_id)
+            .maybeSingle(),
+        ]);
+
+        const followerIds = Array.from(
+          new Set((followers || []).map((row: any) => row.follower_id).filter((id: string) => id && id !== creatorUserId))
+        );
+
+        if (followerIds.length > 0) {
+          const creatorName = profile?.display_name || 'A creator';
+          const eventPath = updates.public_slug ? `/e/${updates.public_slug}` : `/e/${id}`;
+          const now = new Date().toISOString();
+          await serviceClient.from('notifications').insert(
+            followerIds.map((followerId) => ({
+              user_id: followerId,
+              template_code: 'creator_new_public_event',
+              channel: 'in_app',
+              subject: `${creatorName} published a new event`,
+              body: `${creatorName} just published: ${event.name || 'New Event'}`,
+              status: 'delivered',
+              sent_at: now,
+              delivered_at: now,
+              metadata: {
+                type: 'new_public_event',
+                creatorId: creatorUserId,
+                eventId: id,
+                eventName: event.name || 'New Event',
+                eventPath,
+              },
+            }))
+          );
+        }
+      } catch (notifyError) {
+        console.error('Publish follower notify error:', notifyError);
+      }
     }
 
     return NextResponse.json({ success: true, status: 'active' });
@@ -134,15 +192,20 @@ export async function DELETE(
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const serviceClient = createServiceClient();
 
     const { id } = params;
+    const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
+    if (!photographerIdCandidates.length) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
 
     // Verify ownership
-    const { data: event } = await supabase
+    const { data: event } = await serviceClient
       .from('events')
       .select('id, status')
       .eq('id', id)
-      .eq('photographer_id', user.id)
+      .in('photographer_id', photographerIdCandidates)
       .single();
 
     if (!event) {
@@ -153,7 +216,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Event is not published' }, { status: 400 });
     }
 
-    const { error: updateError } = await supabase
+    const { error: updateError } = await serviceClient
       .from('events')
       .update({ status: 'draft' })
       .eq('id', id);

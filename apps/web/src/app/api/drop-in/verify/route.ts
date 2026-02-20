@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getAttendeeIdCandidates } from '@/lib/profiles/ids';
 import { createClient, createClientWithAccessToken } from '@/lib/supabase/server';
 
 function deriveStatus(row: {
@@ -65,13 +66,17 @@ export async function GET(request: NextRequest) {
         { status: 400 }
       );
     }
+    const attendeeIdCandidates = await getAttendeeIdCandidates(supabase, user.id, user.email);
+    if (!attendeeIdCandidates.length) {
+      return NextResponse.json({ error: 'Attendee profile not found' }, { status: 404 });
+    }
 
     let query = supabase
       .from('drop_in_photos')
       .select(
         'id, upload_payment_status, gift_payment_status, face_processing_status, matches_found, is_discoverable, upload_payment_transaction_id, created_at, updated_at'
       )
-      .eq('uploader_id', user.id)
+      .in('uploader_id', attendeeIdCandidates)
       .order('created_at', { ascending: false })
       .limit(1);
 

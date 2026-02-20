@@ -6,7 +6,8 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createClient } from '@/lib/supabase/server';
+import { getPhotographerIdCandidates } from '@/lib/profiles/ids';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // POST - Upload cover photo
 export async function POST(
@@ -20,15 +21,20 @@ export async function POST(
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const serviceClient = createServiceClient();
 
     const { id } = params;
+    const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
+    if (!photographerIdCandidates.length) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
 
     // Verify ownership
-    const { data: event } = await supabase
+    const { data: event } = await serviceClient
       .from('events')
       .select('id, cover_image_url')
       .eq('id', id)
-      .eq('photographer_id', user.id)
+      .in('photographer_id', photographerIdCandidates)
       .single();
 
     if (!event) {
@@ -69,8 +75,8 @@ export async function POST(
       try {
         const oldPath = event.cover_image_url.split('/').slice(-2).join('/');
         // Try both buckets in case old covers are in 'events' bucket
-        await supabase.storage.from('covers').remove([oldPath]).catch(() => {});
-        await supabase.storage.from('events').remove([oldPath]).catch(() => {});
+        await serviceClient.storage.from('covers').remove([oldPath]).catch(() => {});
+        await serviceClient.storage.from('events').remove([oldPath]).catch(() => {});
       } catch (e) {
         // Ignore errors when deleting old file
       }
@@ -82,7 +88,7 @@ export async function POST(
     const arrayBuffer = await file.arrayBuffer();
     const buffer = new Uint8Array(arrayBuffer);
 
-    const { error: uploadError } = await supabase.storage
+    const { error: uploadError } = await serviceClient.storage
       .from('covers')
       .upload(fileName, buffer, {
         contentType: file.type,
@@ -98,12 +104,12 @@ export async function POST(
     }
 
     // Get public URL
-    const { data: { publicUrl } } = supabase.storage
+    const { data: { publicUrl } } = serviceClient.storage
       .from('covers')
       .getPublicUrl(fileName);
 
     // Update event with new cover URL
-    const { error: updateError } = await supabase
+    const { error: updateError } = await serviceClient
       .from('events')
       .update({ cover_image_url: publicUrl })
       .eq('id', id);
@@ -111,7 +117,7 @@ export async function POST(
     if (updateError) {
       console.error('Cover update error:', updateError);
       // Try to clean up uploaded file
-      await supabase.storage.from('covers').remove([fileName]).catch(() => {});
+      await serviceClient.storage.from('covers').remove([fileName]).catch(() => {});
       return NextResponse.json(
         { error: updateError.message || 'Failed to update event with cover photo' },
         { status: 500 }
@@ -141,15 +147,20 @@ export async function DELETE(
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const serviceClient = createServiceClient();
 
     const { id } = params;
+    const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
+    if (!photographerIdCandidates.length) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
 
     // Verify ownership
-    const { data: event } = await supabase
+    const { data: event } = await serviceClient
       .from('events')
       .select('id, cover_image_url')
       .eq('id', id)
-      .eq('photographer_id', user.id)
+      .in('photographer_id', photographerIdCandidates)
       .single();
 
     if (!event) {
@@ -161,15 +172,15 @@ export async function DELETE(
       try {
         const path = event.cover_image_url.split('/').slice(-2).join('/');
         // Try both buckets in case old covers are in 'events' bucket
-        await supabase.storage.from('covers').remove([path]).catch(() => {});
-        await supabase.storage.from('events').remove([path]).catch(() => {});
+        await serviceClient.storage.from('covers').remove([path]).catch(() => {});
+        await serviceClient.storage.from('events').remove([path]).catch(() => {});
       } catch (e) {
         // Ignore errors
       }
     }
 
     // Update event
-    const { error: updateError } = await supabase
+    const { error: updateError } = await serviceClient
       .from('events')
       .update({ cover_image_url: null })
       .eq('id', id);

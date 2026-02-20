@@ -6,9 +6,8 @@ import { redirect } from 'next/navigation';
 import {
   checkLimit,
   checkFeature,
-  LimitExceededError,
-  FeatureNotEnabledError,
 } from '@/lib/subscription/enforcement';
+import { getPhotographerIdCandidates, resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 import {
   createEventSchema,
@@ -32,6 +31,21 @@ function isMissingEventStartAtUtcColumnError(error: any) {
   );
 }
 
+async function resolveCreatorContext(supabase: any, user: any) {
+  const { data: creatorProfile } = await resolvePhotographerProfileByUser(
+    supabase,
+    user.id,
+    user.email
+  );
+  if (!creatorProfile?.id) return null;
+  const ownerIdCandidates = await getPhotographerIdCandidates(supabase, user.id, user.email);
+  return {
+    creatorId: creatorProfile.id as string,
+    creatorUserId: ((creatorProfile as any).user_id as string) || user.id,
+    ownerIdCandidates,
+  };
+}
+
 // ============================================
 // CREATE EVENT
 // ============================================
@@ -46,6 +60,7 @@ export async function createEvent(formData: CreateEventInput) {
   }
 
   const supabase = await createClient();
+  const db = createServiceClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -53,9 +68,13 @@ export async function createEvent(formData: CreateEventInput) {
   if (!user) {
     return { error: 'Not authenticated' };
   }
+  const creatorContext = await resolveCreatorContext(db, user);
+  if (!creatorContext) {
+    return { error: 'Creator profile not found' };
+  }
 
   // ENFORCE: Check event limit using the enforcement system
-  const eventLimit = await checkLimit(user.id, 'events');
+  const eventLimit = await checkLimit(creatorContext.creatorId, 'events');
   if (!eventLimit.allowed) {
     return {
       error: eventLimit.message || `You've reached your event limit (${eventLimit.limit} active events). Please upgrade your plan or archive existing events.`,
@@ -68,7 +87,7 @@ export async function createEvent(formData: CreateEventInput) {
 
   // ENFORCE: Check if face recognition is enabled for the plan (if user wants it)
   if (validated.data.faceRecognitionEnabled) {
-    const canUseFaceRecognition = await checkFeature(user.id, 'face_recognition');
+    const canUseFaceRecognition = await checkFeature(creatorContext.creatorId, 'face_recognition');
     if (!canUseFaceRecognition) {
       return {
         error: 'Face recognition is not available on your current plan. Please upgrade to enable this feature.',
@@ -80,7 +99,7 @@ export async function createEvent(formData: CreateEventInput) {
 
   // ENFORCE: Check if live mode is enabled for the plan (if user wants it)
   if (validated.data.liveModeEnabled) {
-    const canUseLiveMode = await checkFeature(user.id, 'live_event_mode');
+    const canUseLiveMode = await checkFeature(creatorContext.creatorId, 'live_event_mode');
     if (!canUseLiveMode) {
       return {
         error: 'Live Event Mode is not available on your current plan. Please upgrade to enable this feature.',
@@ -90,10 +109,10 @@ export async function createEvent(formData: CreateEventInput) {
     }
   }
 
-  const { data: photographerProfile } = await supabase
+  const { data: photographerProfile } = await db
     .from('photographers')
     .select('timezone')
-    .eq('id', user.id)
+    .eq('id', creatorContext.creatorId)
     .maybeSingle();
 
   const eventDate = normalizeIsoDate(validated.data.eventDate || null);
@@ -103,7 +122,7 @@ export async function createEvent(formData: CreateEventInput) {
   const eventStartAtUtc = deriveEventStartAtUtc(eventDate, eventTimezone);
 
   const insertPayload: Record<string, any> = {
-    photographer_id: user.id,
+    photographer_id: creatorContext.creatorId,
     name: validated.data.name,
     description: validated.data.description || null,
     location: validated.data.location || null,
@@ -118,7 +137,7 @@ export async function createEvent(formData: CreateEventInput) {
   };
 
   // Create the event
-  let { data: event, error } = await supabase
+  let { data: event, error } = await db
     .from('events')
     .insert(insertPayload)
     .select()
@@ -128,7 +147,7 @@ export async function createEvent(formData: CreateEventInput) {
     const legacyPayload = { ...insertPayload };
     delete legacyPayload.event_start_at_utc;
 
-    const legacyInsert = await supabase
+    const legacyInsert = await db
       .from('events')
       .insert(legacyPayload)
       .select()
@@ -146,13 +165,13 @@ export async function createEvent(formData: CreateEventInput) {
   // Generate public slug immediately (not just when activated)
   if (event) {
     try {
-      const { data: slugData, error: slugError } = await supabase.rpc('generate_event_slug', {
+      const { data: slugData, error: slugError } = await db.rpc('generate_event_slug', {
         event_name: validated.data.name,
         event_id: event.id,
       });
 
       if (!slugError && slugData) {
-        await supabase
+        await db
           .from('events')
           .update({ public_slug: slugData })
           .eq('id', event.id);
@@ -170,7 +189,7 @@ export async function createEvent(formData: CreateEventInput) {
         
         // Check for uniqueness
         while (true) {
-          const { data: existing } = await supabase
+          const { data: existing } = await db
             .from('events')
             .select('id')
             .eq('public_slug', finalSlug)
@@ -183,7 +202,7 @@ export async function createEvent(formData: CreateEventInput) {
           finalSlug = `${baseSlug}-${counter}`;
         }
         
-        await supabase
+        await db
           .from('events')
           .update({ public_slug: finalSlug })
           .eq('id', event.id);
@@ -195,7 +214,7 @@ export async function createEvent(formData: CreateEventInput) {
   }
 
   // Create default pricing
-  await supabase.from('event_pricing').insert({
+  await db.from('event_pricing').insert({
     event_id: event.id,
     price_per_media: 0,
     unlock_all_price: null,
@@ -223,6 +242,7 @@ export async function updateEvent(eventId: string, formData: UpdateEventInput) {
   }
 
   const supabase = await createClient();
+  const db = createServiceClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -230,15 +250,19 @@ export async function updateEvent(eventId: string, formData: UpdateEventInput) {
   if (!user) {
     return { error: 'Not authenticated' };
   }
+  const creatorContext = await resolveCreatorContext(db, user);
+  if (!creatorContext) {
+    return { error: 'Creator profile not found' };
+  }
 
   // Verify ownership
-  const { data: existingEvent } = await supabase
+  const { data: existingEvent } = await db
     .from('events')
     .select('photographer_id, event_timezone')
     .eq('id', eventId)
     .single();
 
-  if (!existingEvent || existingEvent.photographer_id !== user.id) {
+  if (!existingEvent || !creatorContext.ownerIdCandidates.includes(existingEvent.photographer_id)) {
     return { error: 'Event not found' };
   }
 
@@ -262,7 +286,7 @@ export async function updateEvent(eventId: string, formData: UpdateEventInput) {
   };
 
   // Update the event
-  let { error } = await supabase
+  let { error } = await db
     .from('events')
     .update(updates)
     .eq('id', eventId);
@@ -271,7 +295,7 @@ export async function updateEvent(eventId: string, formData: UpdateEventInput) {
     const legacyUpdates = { ...updates };
     delete legacyUpdates.event_start_at_utc;
 
-    const legacyUpdate = await supabase
+    const legacyUpdate = await db
       .from('events')
       .update(legacyUpdates)
       .eq('id', eventId);
@@ -299,6 +323,7 @@ export async function updateEventStatus(
   status: 'draft' | 'active' | 'closed' | 'archived'
 ) {
   const supabase = await createClient();
+  const db = createServiceClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -306,20 +331,24 @@ export async function updateEventStatus(
   if (!user) {
     return { error: 'Not authenticated' };
   }
+  const creatorContext = await resolveCreatorContext(db, user);
+  if (!creatorContext) {
+    return { error: 'Creator profile not found' };
+  }
 
   // Verify ownership
-  const { data: existingEvent } = await supabase
+  const { data: existingEvent } = await db
     .from('events')
     .select('photographer_id, status, is_public, name, public_slug')
     .eq('id', eventId)
     .single();
 
-  if (!existingEvent || existingEvent.photographer_id !== user.id) {
+  if (!existingEvent || !creatorContext.ownerIdCandidates.includes(existingEvent.photographer_id)) {
     return { error: 'Event not found' };
   }
 
   // Update status
-  const { error } = await supabase
+  const { error } = await db
     .from('events')
     .update({
       status,
@@ -340,14 +369,14 @@ export async function updateEventStatus(
         service
           .from('follows')
           .select('follower_id')
-          .eq('following_id', user.id)
+          .eq('following_id', creatorContext.creatorUserId)
           .in('following_type', ['creator', 'photographer'])
           .eq('status', 'active')
           .eq('notify_new_event', true),
         service
           .from('photographers')
           .select('display_name')
-          .eq('id', user.id)
+          .eq('id', existingEvent.photographer_id)
           .maybeSingle(),
       ]);
 
@@ -375,7 +404,7 @@ export async function updateEventStatus(
             delivered_at: now,
             metadata: {
               type: 'new_public_event',
-              creatorId: user.id,
+              creatorId: creatorContext.creatorUserId,
               eventId,
               eventName,
               eventPath,
@@ -409,6 +438,7 @@ export async function updateEventPricing(eventId: string, formData: EventPricing
   }
 
   const supabase = await createClient();
+  const db = createServiceClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -416,20 +446,24 @@ export async function updateEventPricing(eventId: string, formData: EventPricing
   if (!user) {
     return { error: 'Not authenticated' };
   }
+  const creatorContext = await resolveCreatorContext(db, user);
+  if (!creatorContext) {
+    return { error: 'Creator profile not found' };
+  }
 
   // Verify ownership
-  const { data: existingEvent } = await supabase
+  const { data: existingEvent } = await db
     .from('events')
     .select('photographer_id')
     .eq('id', eventId)
     .single();
 
-  if (!existingEvent || existingEvent.photographer_id !== user.id) {
+  if (!existingEvent || !creatorContext.ownerIdCandidates.includes(existingEvent.photographer_id)) {
     return { error: 'Event not found' };
   }
 
   // Upsert pricing
-  const { error } = await supabase.from('event_pricing').upsert({
+  const { error } = await db.from('event_pricing').upsert({
     event_id: eventId,
     price_per_media: Math.round(validated.data.pricePerMedia * 100), // Convert to cents
     unlock_all_price: validated.data.unlockAllPrice
@@ -455,6 +489,7 @@ export async function updateEventPricing(eventId: string, formData: EventPricing
 
 export async function deleteEvent(eventId: string) {
   const supabase = await createClient();
+  const db = createServiceClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -462,20 +497,24 @@ export async function deleteEvent(eventId: string) {
   if (!user) {
     return { error: 'Not authenticated' };
   }
+  const creatorContext = await resolveCreatorContext(db, user);
+  if (!creatorContext) {
+    return { error: 'Creator profile not found' };
+  }
 
   // Verify ownership
-  const { data: existingEvent } = await supabase
+  const { data: existingEvent } = await db
     .from('events')
     .select('photographer_id')
     .eq('id', eventId)
     .single();
 
-  if (!existingEvent || existingEvent.photographer_id !== user.id) {
+  if (!existingEvent || !creatorContext.ownerIdCandidates.includes(existingEvent.photographer_id)) {
     return { error: 'Event not found' };
   }
 
   // Delete event (cascade will handle related records)
-  const { error } = await supabase.from('events').delete().eq('id', eventId);
+  const { error } = await db.from('events').delete().eq('id', eventId);
 
   if (error) {
     console.error('Error deleting event:', error);
@@ -493,6 +532,7 @@ export async function deleteEvent(eventId: string) {
 
 export async function generateAccessToken(eventId: string, label?: string) {
   const supabase = await createClient();
+  const db = createServiceClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -500,15 +540,19 @@ export async function generateAccessToken(eventId: string, label?: string) {
   if (!user) {
     return { error: 'Not authenticated' };
   }
+  const creatorContext = await resolveCreatorContext(db, user);
+  if (!creatorContext) {
+    return { error: 'Creator profile not found' };
+  }
 
   // Verify ownership
-  const { data: existingEvent } = await supabase
+  const { data: existingEvent } = await db
     .from('events')
     .select('photographer_id')
     .eq('id', eventId)
     .single();
 
-  if (!existingEvent || existingEvent.photographer_id !== user.id) {
+  if (!existingEvent || !creatorContext.ownerIdCandidates.includes(existingEvent.photographer_id)) {
     return { error: 'Event not found' };
   }
 
@@ -517,7 +561,7 @@ export async function generateAccessToken(eventId: string, label?: string) {
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('event_access_tokens')
     .insert({
       event_id: eventId,
@@ -541,3 +585,4 @@ export async function generateAccessToken(eventId: string, label?: string) {
     url: `${process.env.NEXT_PUBLIC_APP_URL}/e/${data.token}`,
   };
 }
+

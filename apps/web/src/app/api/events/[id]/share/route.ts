@@ -8,9 +8,10 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getPhotographerIdCandidates } from '@/lib/profiles/ids';
 import { generateQRCode, generateTransparentQRCode, generateEventUrls, generateEmbedCode, shortenUrl } from '@/lib/sharing/qr-service';
 import { generateAccessCode } from '@/lib/sharing/share-service';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // GET - Get sharing info for an event
 export async function GET(
@@ -24,11 +25,16 @@ export async function GET(
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const serviceClient = createServiceClient();
 
     const { id } = params;
+    const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
+    if (!photographerIdCandidates.length) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
 
     // Get event with sharing info
-    const { data: event, error } = await supabase
+    const { data: event, error } = await serviceClient
       .from('events')
       .select(`
         id, name, public_slug, short_link, is_publicly_listed,
@@ -36,7 +42,7 @@ export async function GET(
         qr_code_url, status
       `)
       .eq('id', id)
-      .eq('photographer_id', user.id)
+      .in('photographer_id', photographerIdCandidates)
       .single();
 
     if (error || !event) {
@@ -44,7 +50,7 @@ export async function GET(
     }
 
     // Get share links
-    const { data: shareLinks } = await supabase
+    const { data: shareLinks } = await serviceClient
       .from('event_share_links')
       .select('*')
       .eq('event_id', id)
@@ -116,16 +122,21 @@ export async function PUT(
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const serviceClient = createServiceClient();
 
     const { id } = params;
     const body = await request.json();
+    const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
+    if (!photographerIdCandidates.length) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
 
     // Verify ownership
-    const { data: event } = await supabase
+    const { data: event } = await serviceClient
       .from('events')
       .select('id')
       .eq('id', id)
-      .eq('photographer_id', user.id)
+      .in('photographer_id', photographerIdCandidates)
       .single();
 
     if (!event) {
@@ -158,7 +169,7 @@ export async function PUT(
     }
 
     // Update event
-    const { error: updateError } = await supabase
+    const { error: updateError } = await serviceClient
       .from('events')
       .update(updates)
       .eq('id', id);
@@ -197,16 +208,21 @@ export async function POST(
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const serviceClient = createServiceClient();
 
     const { id } = params;
     const body = await request.json();
+    const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
+    if (!photographerIdCandidates.length) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
 
     // Verify ownership
-    const { data: event } = await supabase
+    const { data: event } = await serviceClient
       .from('events')
       .select('id')
       .eq('id', id)
-      .eq('photographer_id', user.id)
+      .in('photographer_id', photographerIdCandidates)
       .single();
 
     if (!event) {
@@ -217,7 +233,7 @@ export async function POST(
     const token = `${Date.now().toString(36)}-${Math.random().toString(36).substr(2, 9)}`;
 
     // Create share link
-    const { data: shareLink, error } = await supabase
+    const { data: shareLink, error } = await serviceClient
       .from('event_share_links')
       .insert({
         event_id: id,
@@ -259,21 +275,26 @@ export async function DELETE(
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const serviceClient = createServiceClient();
 
     const { id } = params;
     const { searchParams } = new URL(request.url);
     const linkId = searchParams.get('linkId');
+    const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
+    if (!photographerIdCandidates.length) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
 
     if (!linkId) {
       return NextResponse.json({ error: 'Link ID required' }, { status: 400 });
     }
 
     // Verify ownership through event
-    const { data: event } = await supabase
+    const { data: event } = await serviceClient
       .from('events')
       .select('id')
       .eq('id', id)
-      .eq('photographer_id', user.id)
+      .in('photographer_id', photographerIdCandidates)
       .single();
 
     if (!event) {
@@ -281,7 +302,7 @@ export async function DELETE(
     }
 
     // Deactivate the link
-    const { error } = await supabase
+    const { error } = await serviceClient
       .from('event_share_links')
       .update({ is_active: false })
       .eq('id', linkId)

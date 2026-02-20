@@ -12,11 +12,13 @@ import {
   isStripeConfigured,
 } from '@/lib/payments/stripe';
 import { resolvePaystackSecretKey } from '@/lib/payments/paystack';
-import { createClient } from '@/lib/supabase/server';
+import { getPhotographerIdCandidates, resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 export async function POST(request: Request) {
   try {
     const supabase = await createClient();
+    const serviceClient = createServiceClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -38,24 +40,26 @@ export async function POST(request: Request) {
     } = body;
 
     // Get photographer profile
-    const { data: photographer, error: photographerError } = await supabase
-      .from('photographers')
-      .select('id, email, display_name, business_name')
-      .eq('id', user.id)
-      .single();
-
-    if (photographerError || !photographer) {
+    const { data: photographer } = await resolvePhotographerProfileByUser(serviceClient, user.id, user.email);
+    if (!photographer) {
       return NextResponse.json(
         { error: 'Creator profile not found' },
         { status: 404 }
       );
     }
+    const photographerId = photographer.id as string;
+    const { data: photographerDetails } = await serviceClient
+      .from('photographers')
+      .select('id, email, display_name, business_name')
+      .eq('id', photographerId)
+      .maybeSingle();
+    const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
 
     // Check for existing wallet with this provider
-    const { data: existingWallet } = await supabase
+    const { data: existingWallet } = await serviceClient
       .from('wallets')
       .select('id, status')
-      .eq('photographer_id', user.id)
+      .in('photographer_id', photographerIdCandidates)
       .eq('provider', provider)
       .single();
 
@@ -66,14 +70,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: regionConfig } = await supabase
+    const { data: regionConfig } = await serviceClient
       .from('region_config')
       .select('default_currency')
       .eq('region_code', String(country || '').toUpperCase())
       .maybeSingle();
 
     const walletData: Record<string, unknown> = {
-      photographer_id: user.id,
+      photographer_id: photographerId,
       provider,
       country_code: country,
       preferred_currency: regionConfig?.default_currency || 'USD',
@@ -92,10 +96,10 @@ export async function POST(request: Request) {
       }
 
       const account = await createConnectAccount({
-        email: photographer.email,
+        email: (photographerDetails as any)?.email || user.email,
         country,
-        businessName: businessName || photographer.business_name,
-        photographerId: user.id,
+        businessName: businessName || (photographerDetails as any)?.business_name,
+        photographerId,
       });
 
       const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
@@ -126,14 +130,17 @@ export async function POST(request: Request) {
       }
 
       const subaccount = await createSubaccount({
-        businessName: businessName || photographer.business_name || photographer.display_name,
-        email: photographer.email,
+        businessName:
+          businessName ||
+          (photographerDetails as any)?.business_name ||
+          (photographerDetails as any)?.display_name,
+        email: (photographerDetails as any)?.email || user.email,
         country,
         accountBank,
         accountNumber,
         splitType: 'percentage',
         splitValue: 85, // Creator gets 85%, platform gets 15%
-        photographerId: user.id,
+        photographerId,
       });
 
       walletData.flutterwave_subaccount_id = subaccount.subaccount_id;
@@ -198,7 +205,7 @@ export async function POST(request: Request) {
     }
 
     // Create wallet record
-    const { data: wallet, error: walletError } = await supabase
+    const { data: wallet, error: walletError } = await serviceClient
       .from('wallets')
       .insert(walletData)
       .select()

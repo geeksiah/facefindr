@@ -8,6 +8,7 @@ import {
   getPayoutMinimum,
   MINIMUM_DISPLAY,
 } from '@/lib/payments/payout-config';
+import { resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import { createClient } from '@/lib/supabase/server';
 
 // GET: Fetch photographer's payout settings
@@ -19,8 +20,12 @@ export async function GET() {
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const { data: creatorProfile } = await resolvePhotographerProfileByUser(supabase, user.id, user.email);
+    if (!creatorProfile?.id) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
 
-    const settings = await getCreatorPayoutSettings(user.id);
+    const settings = await getCreatorPayoutSettings(creatorProfile.id);
 
     // Get currency-specific minimum for display
     const minPayout = await getPayoutMinimum(settings.preferredCurrency);
@@ -64,6 +69,10 @@ export async function PUT(request: Request) {
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const { data: creatorProfile } = await resolvePhotographerProfileByUser(supabase, user.id, user.email);
+    if (!creatorProfile?.id) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
 
     const body = await request.json();
 
@@ -92,7 +101,7 @@ export async function PUT(request: Request) {
       );
     }
 
-    const success = await updateCreatorPayoutSettings(user.id, body);
+    const success = await updateCreatorPayoutSettings(creatorProfile.id, body);
 
     if (!success) {
       return NextResponse.json(
@@ -101,7 +110,7 @@ export async function PUT(request: Request) {
       );
     }
 
-    const updatedSettings = await getCreatorPayoutSettings(user.id);
+    const updatedSettings = await getCreatorPayoutSettings(creatorProfile.id);
 
     return NextResponse.json({
       success: true,

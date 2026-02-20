@@ -16,12 +16,13 @@ function buildRuntimeVersionPayload(scope: RuntimeScope) {
 export async function bumpRuntimeConfigVersion(scope: RuntimeScope, adminId?: string) {
   const now = new Date().toISOString();
   const value = buildRuntimeVersionPayload(scope);
+  void adminId;
 
   const { data: updatedRows, error: updateError } = await supabaseAdmin
     .from('platform_settings')
     .update({
       value,
-      updated_by: adminId || null,
+      updated_by: null,
       updated_at: now,
     })
     .eq('setting_key', RUNTIME_VERSION_KEY)
@@ -40,7 +41,7 @@ export async function bumpRuntimeConfigVersion(scope: RuntimeScope, adminId?: st
     .insert({
       setting_key: RUNTIME_VERSION_KEY,
       value,
-      updated_by: adminId || null,
+      updated_by: null,
       updated_at: now,
     });
 
