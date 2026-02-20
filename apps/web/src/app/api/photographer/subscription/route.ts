@@ -42,15 +42,19 @@ export async function GET() {
 
     // Get subscription record
     const nowIso = new Date().toISOString();
-    const { data: subscription } = await supabase
+    const { data: subscriptions } = await supabase
       .from('subscriptions')
       .select('*')
       .eq('photographer_id', creatorId)
       .in('status', ['active', 'trialing'])
       .or(`current_period_end.is.null,current_period_end.gte.${nowIso}`)
+      .order('updated_at', { ascending: false })
       .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
+      .limit(20);
+    const subscription =
+      subscriptions?.find((row: any) => String(row.plan_code || '').toLowerCase() !== 'free') ||
+      subscriptions?.[0] ||
+      null;
 
     // Get usage stats
     const { count: eventCount } = await supabase

@@ -211,20 +211,27 @@ export async function getPlanFeatures(planCode: PlanCode): Promise<PlanFeatures>
 export async function getCreatorPlan(photographerId: string): Promise<PlanCode> {
   try {
     const supabase = createServiceClient();
+    const nowIso = new Date().toISOString();
     const { data } = await supabase
       .from('subscriptions')
-      .select('plan_code')
+      .select('plan_code, status, current_period_end, updated_at, created_at')
       .eq('photographer_id', photographerId)
       .in('status', ['active', 'trialing'])
+      .or(`current_period_end.is.null,current_period_end.gte.${nowIso}`)
+      .order('updated_at', { ascending: false })
       .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
+      .limit(20);
 
-    if (data) {
-      return data.plan_code as PlanCode;
+    if (data && data.length > 0) {
+      const paid = data.find((row: any) => String(row.plan_code || '').toLowerCase() !== 'free');
+      const selected = paid || data[0];
+      const planCode = String((selected as any)?.plan_code || 'free').toLowerCase() as PlanCode;
+      if (planCode in DEFAULT_PLAN_FEATURES) {
+        return planCode;
+      }
     }
   } catch (error) {
-    // No subscription found
+    console.error('Failed to resolve creator plan:', error);
   }
 
   return 'free';

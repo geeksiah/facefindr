@@ -77,6 +77,15 @@ export interface FullPlanDetails extends SubscriptionPlan {
   };
 }
 
+interface SubscriptionLookupRow {
+  plan_id?: string | null;
+  plan_code?: string | null;
+  status?: string | null;
+  current_period_end?: string | null;
+  updated_at?: string | null;
+  created_at?: string | null;
+}
+
 // ============================================
 // CACHE
 // ============================================
@@ -242,46 +251,89 @@ export async function getPlanById(planId: string): Promise<FullPlanDetails | nul
 
 export async function getPlanByCode(code: string, planType: PlanType = 'creator'): Promise<FullPlanDetails | null> {
   const plans = await getAllPlans(planType);
-  return plans.find(p => p.code === code) || null;
+  const normalizedCode = String(code || '').toLowerCase();
+  return plans.find(p => p.code.toLowerCase() === normalizedCode) || null;
 }
 
 // ============================================
 // GET USER'S CURRENT PLAN
 // ============================================
 
+function subscriptionPriority(row: SubscriptionLookupRow): number {
+  let score = 0;
+  const status = String(row.status || '').toLowerCase();
+  const planCode = String(row.plan_code || '').toLowerCase();
+
+  if (status === 'active') score += 100;
+  if (status === 'trialing') score += 80;
+  if (planCode && planCode !== 'free') score += 20;
+  if (row.current_period_end) score += 5;
+
+  const updatedAt = row.updated_at ? new Date(row.updated_at).getTime() : 0;
+  const createdAt = row.created_at ? new Date(row.created_at).getTime() : 0;
+  score += Math.floor((updatedAt || createdAt) / 1000000000);
+
+  return score;
+}
+
+function pickBestSubscription(rows: SubscriptionLookupRow[]): SubscriptionLookupRow | null {
+  if (!rows.length) return null;
+  return rows.reduce((best: SubscriptionLookupRow | null, row) => {
+    if (!best) return row;
+    return subscriptionPriority(row) > subscriptionPriority(best) ? row : best;
+  }, null);
+}
+
+async function resolveFreePlan(planType: 'creator' | 'drop_in') {
+  const explicitFree = await getPlanByCode('free', planType);
+  if (explicitFree) return explicitFree;
+
+  const all = await getAllPlans(planType);
+  if (!all.length) return null;
+  return [...all].sort((a, b) => (a.basePriceUsd || 0) - (b.basePriceUsd || 0))[0] || null;
+}
+
 export async function getUserPlan(userId: string, userType: 'creator' | 'photographer' | 'attendee'): Promise<FullPlanDetails | null> {
   try {
     const supabase = createServiceClient();
     const nowIso = new Date().toISOString();
-    
-    // Get active subscription
-    const { data: subscription } = await supabase
-      .from('subscriptions')
-      .select('plan_id, plan_code, status, current_period_end')
-      .eq((userType === 'creator' || userType === 'photographer') ? 'photographer_id' : 'attendee_id', userId)
+
+    const isCreator = userType === 'creator' || userType === 'photographer';
+    const subscriptionTable = isCreator ? 'subscriptions' : 'attendee_subscriptions';
+    const ownerColumn = isCreator ? 'photographer_id' : 'attendee_id';
+
+    const { data: subscriptionRows } = await supabase
+      .from(subscriptionTable)
+      .select(isCreator ? 'plan_id, plan_code, status, current_period_end, updated_at, created_at' : 'plan_code, status, current_period_end, updated_at, created_at')
+      .eq(ownerColumn, userId)
       .in('status', ['active', 'trialing'])
       .or(`current_period_end.is.null,current_period_end.gte.${nowIso}`)
+      .order('updated_at', { ascending: false })
       .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
+      .limit(20);
+
+    const subscription = pickBestSubscription((subscriptionRows || []) as SubscriptionLookupRow[]);
+    const planType = isCreator ? 'creator' : 'drop_in';
 
     if (!subscription) {
-      // Return free plan
-      const planType = (userType === 'creator' || userType === 'photographer') ? 'creator' : 'drop_in';
-      return getPlanByCode('free', planType);
+      return resolveFreePlan(planType);
     }
 
-    // Get plan details
-    if (subscription.plan_id) {
-      return getPlanById(subscription.plan_id);
+    if (isCreator && subscription.plan_id) {
+      const byId = await getPlanById(subscription.plan_id);
+      if (byId) return byId;
     }
 
-    // Fallback to plan_code lookup
-    const planType = (userType === 'creator' || userType === 'photographer') ? 'creator' : 'drop_in';
-    return getPlanByCode(subscription.plan_code, planType);
+    if (subscription.plan_code) {
+      const byCode = await getPlanByCode(subscription.plan_code, planType);
+      if (byCode) return byCode;
+    }
+
+    return resolveFreePlan(planType);
   } catch (error) {
     console.error('Error getting user plan:', error);
-    return null;
+    const planType = userType === 'creator' || userType === 'photographer' ? 'creator' : 'drop_in';
+    return resolveFreePlan(planType);
   }
 }
 
@@ -294,9 +346,12 @@ function parseFeatureValue(value: any, featureType: string): number | boolean | 
     return featureType === 'boolean' ? false : featureType === 'numeric' || featureType === 'limit' ? 0 : '';
   }
   
-  // Handle JSONB values
+  // Handle nested JSONB payloads such as { "value": 10 }
   if (typeof value === 'object') {
-    return value;
+    if (value && !Array.isArray(value) && Object.prototype.hasOwnProperty.call(value, 'value')) {
+      return parseFeatureValue((value as any).value, featureType);
+    }
+    return featureType === 'boolean' ? false : featureType === 'numeric' || featureType === 'limit' ? 0 : '';
   }
   
   switch (featureType) {
@@ -319,10 +374,10 @@ function extractLimits(featureValues: PlanFeatureValue[], plan: any): FullPlanDe
   };
 
   return {
-    maxActiveEvents: getValue('max_active_events', 3),
-    maxPhotosPerEvent: getValue('max_photos_per_event', 100),
-    maxFaceOpsPerEvent: getValue('max_face_ops_per_event', 500),
-    storageGb: getValue('storage_gb', 5),
+    maxActiveEvents: getValue('max_active_events', 1),
+    maxPhotosPerEvent: getValue('max_photos_per_event', 50),
+    maxFaceOpsPerEvent: getValue('max_face_ops_per_event', 0),
+    storageGb: getValue('storage_gb', 1),
     teamMembers: getValue('team_members', 1),
     retentionDays: getValue('retention_days', 30),
   };
