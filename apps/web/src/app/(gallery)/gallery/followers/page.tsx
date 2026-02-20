@@ -59,8 +59,14 @@ export default function GalleryFollowersPage() {
 
   const loadFollowers = useCallback(async () => {
     try {
-      const response = await fetch('/api/social/follow?type=followers&targetType=attendee');
-      if (!response.ok) return;
+      const response = await fetch('/api/social/follow?type=followers&targetType=attendee', {
+        cache: 'no-store',
+      });
+      if (!response.ok) {
+        setRows([]);
+        setTotal(0);
+        return;
+      }
 
       const payload = (await response.json()) as FollowersPayload;
       const normalized: Row[] = (payload.followers || [])

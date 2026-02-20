@@ -157,7 +157,7 @@ export default function CreatorProfilePage() {
 
   async function loadProfile() {
     try {
-      const res = await fetch(`/api/profiles/creator/${slug}`);
+      const res = await fetch(`/api/profiles/creator/${slug}`, { cache: 'no-store' });
       const data = await res.json();
 
       if (res.ok) {

@@ -66,7 +66,7 @@ export default function CreatorFollowersPage() {
   const loadData = useCallback(async () => {
     try {
       // Load photographer info
-      const profileRes = await fetch(`/api/profiles/creator/${slug}`);
+      const profileRes = await fetch(`/api/profiles/creator/${slug}`, { cache: 'no-store' });
       if (!profileRes.ok) {
         const data = await profileRes.json();
         setError(data.error || 'Profile not found');
@@ -76,11 +76,16 @@ export default function CreatorFollowersPage() {
       setCreator(profileData.profile);
 
       // Load followers
-      const followersRes = await fetch(`/api/profiles/creator/${slug}/followers?include=list`);
+      const followersRes = await fetch(`/api/profiles/creator/${slug}/followers?include=list`, {
+        cache: 'no-store',
+      });
       if (followersRes.ok) {
         const followersData = await followersRes.json();
         setFollowers(followersData.followers || []);
         setTotal(followersData.count || followersData.total || 0);
+      } else {
+        setFollowers([]);
+        setTotal(0);
       }
     } catch (err) {
       console.error('Error loading data:', err);

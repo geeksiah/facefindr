@@ -66,11 +66,16 @@ export default function FollowersPage() {
 
   const loadFollowers = useCallback(async () => {
     try {
-      const response = await fetch('/api/social/follow?type=followers');
+      const response = await fetch('/api/social/follow?type=followers', {
+        cache: 'no-store',
+      });
       if (response.ok) {
         const data = await response.json();
         setFollowers(data.followers || []);
         setStats(data.stats || null);
+      } else {
+        setFollowers([]);
+        setStats(null);
       }
     } catch (error) {
       console.error('Error loading followers:', error);

@@ -60,12 +60,18 @@ export default function FollowingPage() {
 
   const loadFollowing = useCallback(async () => {
     try {
-      const response = await fetch('/api/social/follow?type=following&includeAttendees=true');
+      const response = await fetch('/api/social/follow?type=following&includeAttendees=true', {
+        cache: 'no-store',
+      });
       if (response.ok) {
         const data = await response.json();
         setCreatorFollowing(data.following || []);
         setAttendeeFollowing(data.followingUsers || []);
         setTotal(data.total || 0);
+      } else {
+        setCreatorFollowing([]);
+        setAttendeeFollowing([]);
+        setTotal(0);
       }
     } catch (error) {
       console.error('Error loading following:', error);

@@ -127,7 +127,7 @@ export default function AttendeeProfilePage() {
 
   async function loadProfile() {
     try {
-      const res = await fetch(`/api/profiles/user/${slug}`);
+      const res = await fetch(`/api/profiles/user/${slug}`, { cache: 'no-store' });
       const data = await res.json();
 
       if (res.ok) {
