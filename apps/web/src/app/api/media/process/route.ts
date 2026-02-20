@@ -2,7 +2,8 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { indexFacesFromImage, isRekognitionConfigured, createEventCollection } from '@/lib/aws/rekognition';
+import { indexFacesFromImage, isRekognitionConfigured } from '@/lib/aws/rekognition';
+import { getPhotographerIdCandidates } from '@/lib/profiles/ids';
 import { checkLimit, checkFeature, incrementFaceOps } from '@/lib/subscription/enforcement';
 import { createClient } from '@/lib/supabase/server';
 
@@ -31,15 +32,34 @@ export async function POST(request: NextRequest) {
         { status: 401 }
       );
     }
+    const photographerIdCandidates = await getPhotographerIdCandidates(supabase, user.id, user.email);
 
-    // Verify event ownership and face recognition is enabled
+    // Verify event access and face recognition is enabled
     const { data: event } = await supabase
       .from('events')
       .select('photographer_id, face_recognition_enabled, face_ops_used')
       .eq('id', eventId)
       .single();
 
-    if (!event || event.photographer_id !== user.id) {
+    if (!event) {
+      return NextResponse.json(
+        { error: 'Event not found' },
+        { status: 404 }
+      );
+    }
+    let hasEventAccess = photographerIdCandidates.includes(event.photographer_id);
+    if (!hasEventAccess && photographerIdCandidates.length > 0) {
+      const { data: collaborator } = await supabase
+        .from('event_collaborators')
+        .select('id')
+        .eq('event_id', eventId)
+        .in('photographer_id', photographerIdCandidates)
+        .eq('status', 'active')
+        .maybeSingle();
+      hasEventAccess = Boolean(collaborator?.id);
+    }
+
+    if (!hasEventAccess) {
       return NextResponse.json(
         { error: 'Event not found' },
         { status: 404 }

@@ -34,6 +34,8 @@ interface NotificationsState {
   fetchNotifications: (userId: string) => Promise<void>;
   markAsRead: (notificationId: string) => Promise<void>;
   markAllAsRead: (userId: string) => Promise<void>;
+  deleteNotification: (notificationId: string) => Promise<void>;
+  clearAllRemote: () => Promise<void>;
   clearNotifications: () => void;
   addNotification: (notification: Notification) => void;
   subscribeToRealtime: (userId: string) => void;
@@ -155,6 +157,73 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
       console.error('Failed to mark all notifications as read:', error);
       // Revert on error
       set({ notifications, unreadCount: notifications.filter(n => !n.read).length });
+    }
+  },
+
+  deleteNotification: async (notificationId: string) => {
+    const { notifications } = get();
+    const existing = notifications.find((n) => n.id === notificationId);
+    const updated = notifications.filter((n) => n.id !== notificationId);
+    const unreadCount = updated.filter((n) => !n.read).length;
+    set({ notifications: updated, unreadCount });
+
+    try {
+      const accessToken = useAuthStore.getState().session?.access_token;
+      if (!accessToken || !API_URL) {
+        throw new Error('Missing auth session');
+      }
+
+      const response = await fetch(`${API_URL}/api/notifications`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ notificationId }),
+      });
+      if (!response.ok) {
+        const payload = await response.json();
+        throw new Error(payload.error || 'Failed to delete notification');
+      }
+    } catch (error) {
+      console.error('Failed to delete notification:', error);
+      if (existing) {
+        const restored = [existing, ...updated].sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+        set({ notifications: restored, unreadCount: restored.filter((n) => !n.read).length });
+      }
+    }
+  },
+
+  clearAllRemote: async () => {
+    const { notifications } = get();
+    set({ notifications: [], unreadCount: 0 });
+
+    try {
+      const accessToken = useAuthStore.getState().session?.access_token;
+      if (!accessToken || !API_URL) {
+        throw new Error('Missing auth session');
+      }
+
+      const response = await fetch(`${API_URL}/api/notifications`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ clearAll: true }),
+      });
+      if (!response.ok) {
+        const payload = await response.json();
+        throw new Error(payload.error || 'Failed to clear notifications');
+      }
+    } catch (error) {
+      console.error('Failed to clear notifications:', error);
+      set({
+        notifications,
+        unreadCount: notifications.filter((n) => !n.read).length,
+      });
     }
   },
 

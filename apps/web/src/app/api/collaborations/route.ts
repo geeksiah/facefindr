@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getPhotographerIdCandidates } from '@/lib/profiles/ids';
+import { checkLimit } from '@/lib/subscription/enforcement';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // GET - List all collaborations for the current photographer
@@ -118,7 +119,7 @@ export async function PATCH(request: NextRequest) {
     // Verify this is the user's invitation
     const { data: collaboration } = await serviceClient
       .from('event_collaborators')
-      .select('id, photographer_id, status')
+      .select('id, event_id, photographer_id, status, events(photographer_id)')
       .eq('id', collaborationId)
       .in('photographer_id', photographerIdCandidates)
       .eq('status', 'pending')
@@ -126,6 +127,25 @@ export async function PATCH(request: NextRequest) {
 
     if (!collaboration) {
       return NextResponse.json({ error: 'Invitation not found' }, { status: 404 });
+    }
+
+    if (action === 'accept') {
+      const ownerId = (collaboration as any)?.events?.photographer_id as string | undefined;
+      if (ownerId) {
+        const teamLimit = await checkLimit(ownerId, 'team_members');
+        if (!teamLimit.allowed) {
+          return NextResponse.json(
+            {
+              error: teamLimit.message || `Team member limit reached (${teamLimit.limit}).`,
+              code: 'LIMIT_EXCEEDED',
+              limitType: 'team_members',
+              current: teamLimit.current,
+              limit: teamLimit.limit,
+            },
+            { status: 403 }
+          );
+        }
+      }
     }
 
     // Update status
@@ -139,6 +159,17 @@ export async function PATCH(request: NextRequest) {
       .eq('id', collaborationId);
 
     if (error) {
+      const rawMessage = `${error.message || ''}`.toLowerCase();
+      if (rawMessage.includes('limit_exceeded') || rawMessage.includes('team member limit')) {
+        return NextResponse.json(
+          {
+            error: error.message || 'Team member limit reached for this creator plan.',
+            code: 'LIMIT_EXCEEDED',
+            limitType: 'team_members',
+          },
+          { status: 403 }
+        );
+      }
       throw error;
     }
 

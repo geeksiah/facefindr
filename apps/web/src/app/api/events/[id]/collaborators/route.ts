@@ -57,6 +57,111 @@ async function getEventAccess(
   };
 }
 
+type CollaboratorRole = 'owner' | 'lead' | 'collaborator' | 'assistant';
+
+const ROLE_DEFAULT_PERMISSIONS: Record<
+  Exclude<CollaboratorRole, 'owner'>,
+  {
+    can_upload: boolean;
+    can_edit_own_photos: boolean;
+    can_delete_own_photos: boolean;
+    can_view_all_photos: boolean;
+    can_edit_event: boolean;
+    can_manage_pricing: boolean;
+    can_invite_collaborators: boolean;
+    can_view_analytics: boolean;
+    can_view_revenue: boolean;
+  }
+> = {
+  lead: {
+    can_upload: true,
+    can_edit_own_photos: true,
+    can_delete_own_photos: true,
+    can_view_all_photos: true,
+    can_edit_event: true,
+    can_manage_pricing: true,
+    can_invite_collaborators: true,
+    can_view_analytics: true,
+    can_view_revenue: true,
+  },
+  collaborator: {
+    can_upload: true,
+    can_edit_own_photos: true,
+    can_delete_own_photos: true,
+    can_view_all_photos: true,
+    can_edit_event: false,
+    can_manage_pricing: false,
+    can_invite_collaborators: false,
+    can_view_analytics: false,
+    can_view_revenue: false,
+  },
+  assistant: {
+    can_upload: true,
+    can_edit_own_photos: true,
+    can_delete_own_photos: true,
+    can_view_all_photos: false,
+    can_edit_event: false,
+    can_manage_pricing: false,
+    can_invite_collaborators: false,
+    can_view_analytics: false,
+    can_view_revenue: false,
+  },
+};
+
+function normalizeCollaboratorRole(value: unknown): Exclude<CollaboratorRole, 'owner'> {
+  const normalized = String(value || 'collaborator').toLowerCase();
+  if (normalized === 'lead' || normalized === 'assistant' || normalized === 'collaborator') {
+    return normalized;
+  }
+  return 'collaborator';
+}
+
+function normalizeRevenueShare(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 100;
+  const clamped = Math.min(100, Math.max(0, parsed));
+  return Math.round(clamped * 100) / 100;
+}
+
+function buildPermissionSet(
+  role: Exclude<CollaboratorRole, 'owner'>,
+  permissions: Record<string, unknown> | null | undefined
+) {
+  const base = { ...ROLE_DEFAULT_PERMISSIONS[role] };
+  const overrideMap: Record<string, keyof typeof base> = {
+    canUpload: 'can_upload',
+    canEditOwnPhotos: 'can_edit_own_photos',
+    canDeleteOwnPhotos: 'can_delete_own_photos',
+    canViewAllPhotos: 'can_view_all_photos',
+    canEditEvent: 'can_edit_event',
+    canManagePricing: 'can_manage_pricing',
+    canInviteCollaborators: 'can_invite_collaborators',
+    canViewAnalytics: 'can_view_analytics',
+    canViewRevenue: 'can_view_revenue',
+  };
+
+  for (const [inputKey, targetKey] of Object.entries(overrideMap)) {
+    if (typeof permissions?.[inputKey] === 'boolean') {
+      base[targetKey] = permissions[inputKey] as boolean;
+    }
+  }
+
+  // Keep permission model strict and predictable by role.
+  if (role === 'assistant') {
+    base.can_edit_event = false;
+    base.can_manage_pricing = false;
+    base.can_invite_collaborators = false;
+    base.can_view_analytics = false;
+    base.can_view_revenue = false;
+  }
+  if (role === 'collaborator') {
+    base.can_manage_pricing = false;
+    base.can_invite_collaborators = false;
+  }
+
+  return base;
+}
+
 // GET - List collaborators for an event
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
@@ -225,6 +330,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!targetCreatorId) {
       return NextResponse.json({ error: 'Creator ID or FaceTag required' }, { status: 400 });
     }
+    if (targetCreatorId === access.eventOwnerId) {
+      return NextResponse.json({ error: 'Event owner is already part of this event' }, { status: 400 });
+    }
 
     // Check if already a collaborator
     const { data: existing } = await db
@@ -243,21 +351,25 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       }
     }
 
+    const normalizedRole = normalizeCollaboratorRole(role);
+    const permissionSet = buildPermissionSet(normalizedRole, permissions || null);
+    const normalizedRevenueShare = normalizeRevenueShare(revenueSharePercent);
+
     // Create or update collaborator invitation
     const collaboratorData = {
       event_id: eventId,
       photographer_id: targetCreatorId,
-      role: role === 'owner' ? 'collaborator' : role, // Can't invite as owner
-      can_upload: permissions.canUpload ?? true,
-      can_edit_own_photos: permissions.canEditOwnPhotos ?? true,
-      can_delete_own_photos: permissions.canDeleteOwnPhotos ?? true,
-      can_view_all_photos: permissions.canViewAllPhotos ?? true,
-      can_edit_event: permissions.canEditEvent ?? false,
-      can_manage_pricing: permissions.canManagePricing ?? false,
-      can_invite_collaborators: permissions.canInviteCollaborators ?? false,
-      can_view_analytics: permissions.canViewAnalytics ?? false,
-      can_view_revenue: permissions.canViewRevenue ?? false,
-      revenue_share_percent: revenueSharePercent,
+      role: normalizedRole,
+      can_upload: permissionSet.can_upload,
+      can_edit_own_photos: permissionSet.can_edit_own_photos,
+      can_delete_own_photos: permissionSet.can_delete_own_photos,
+      can_view_all_photos: permissionSet.can_view_all_photos,
+      can_edit_event: permissionSet.can_edit_event,
+      can_manage_pricing: permissionSet.can_manage_pricing,
+      can_invite_collaborators: permissionSet.can_invite_collaborators,
+      can_view_analytics: permissionSet.can_view_analytics,
+      can_view_revenue: permissionSet.can_view_revenue,
+      revenue_share_percent: normalizedRevenueShare,
       status: 'pending',
       invited_by: inviterProfile.id,
       invited_at: new Date().toISOString(),
@@ -347,7 +459,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if (action === 'accept' || action === 'decline') {
       const { data: invitation } = await db
         .from('event_collaborators')
-        .select('id, photographer_id, status')
+        .select('id, event_id, photographer_id, status, events(photographer_id)')
         .eq('event_id', eventId)
         .in('photographer_id', photographerIdCandidates)
         .eq('status', 'pending')
@@ -355,6 +467,24 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
       if (!invitation) {
         return NextResponse.json({ error: 'No pending invitation found' }, { status: 404 });
+      }
+      if (action === 'accept') {
+        const ownerId = (invitation as any)?.events?.photographer_id as string | undefined;
+        if (ownerId) {
+          const teamLimit = await checkLimit(ownerId, 'team_members');
+          if (!teamLimit.allowed) {
+            return NextResponse.json(
+              {
+                error: teamLimit.message || `Team member limit reached (${teamLimit.limit}).`,
+                code: 'LIMIT_EXCEEDED',
+                limitType: 'team_members',
+                current: teamLimit.current,
+                limit: teamLimit.limit,
+              },
+              { status: 403 }
+            );
+          }
+        }
       }
 
       const { error } = await db
@@ -366,6 +496,17 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         .eq('id', invitation.id);
 
       if (error) {
+        const rawMessage = `${error.message || ''}`.toLowerCase();
+        if (rawMessage.includes('limit_exceeded') || rawMessage.includes('team member limit')) {
+          return NextResponse.json(
+            {
+              error: error.message || 'Team member limit reached for this creator plan.',
+              code: 'LIMIT_EXCEEDED',
+              limitType: 'team_members',
+            },
+            { status: 403 }
+          );
+        }
         throw error;
       }
 
@@ -378,8 +519,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 });
     }
 
-    const canManageCollaborators = access.isOwner || Boolean(access.collaboratorAccess?.can_invite_collaborators);
-    if (!canManageCollaborators) {
+    if (!access.isOwner) {
       return NextResponse.json({ error: 'Not authorized to manage collaborators' }, { status: 403 });
     }
 
@@ -403,24 +543,28 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     // Build update data
     const updateData: Record<string, unknown> = {};
     
-    if (permissions) {
-      if (typeof permissions.canUpload === 'boolean') updateData.can_upload = permissions.canUpload;
-      if (typeof permissions.canEditOwnPhotos === 'boolean') updateData.can_edit_own_photos = permissions.canEditOwnPhotos;
-      if (typeof permissions.canDeleteOwnPhotos === 'boolean') updateData.can_delete_own_photos = permissions.canDeleteOwnPhotos;
-      if (typeof permissions.canViewAllPhotos === 'boolean') updateData.can_view_all_photos = permissions.canViewAllPhotos;
-      if (typeof permissions.canEditEvent === 'boolean') updateData.can_edit_event = permissions.canEditEvent;
-      if (typeof permissions.canManagePricing === 'boolean') updateData.can_manage_pricing = permissions.canManagePricing;
-      if (typeof permissions.canInviteCollaborators === 'boolean') updateData.can_invite_collaborators = permissions.canInviteCollaborators;
-      if (typeof permissions.canViewAnalytics === 'boolean') updateData.can_view_analytics = permissions.canViewAnalytics;
-      if (typeof permissions.canViewRevenue === 'boolean') updateData.can_view_revenue = permissions.canViewRevenue;
+    const hasPermissionsPayload = permissions && typeof permissions === 'object';
+    const normalizedRole = role && role !== 'owner' ? normalizeCollaboratorRole(role) : null;
+    if (normalizedRole) {
+      updateData.role = normalizedRole;
+    }
+
+    if (hasPermissionsPayload || normalizedRole) {
+      const effectiveRole = (normalizedRole || collaborator.role || 'collaborator') as Exclude<CollaboratorRole, 'owner'>;
+      const permissionSet = buildPermissionSet(effectiveRole, hasPermissionsPayload ? permissions : null);
+      updateData.can_upload = permissionSet.can_upload;
+      updateData.can_edit_own_photos = permissionSet.can_edit_own_photos;
+      updateData.can_delete_own_photos = permissionSet.can_delete_own_photos;
+      updateData.can_view_all_photos = permissionSet.can_view_all_photos;
+      updateData.can_edit_event = permissionSet.can_edit_event;
+      updateData.can_manage_pricing = permissionSet.can_manage_pricing;
+      updateData.can_invite_collaborators = permissionSet.can_invite_collaborators;
+      updateData.can_view_analytics = permissionSet.can_view_analytics;
+      updateData.can_view_revenue = permissionSet.can_view_revenue;
     }
 
     if (typeof revenueSharePercent === 'number') {
-      updateData.revenue_share_percent = Math.min(100, Math.max(0, revenueSharePercent));
-    }
-
-    if (role && role !== 'owner') {
-      updateData.role = role;
+      updateData.revenue_share_percent = normalizeRevenueShare(revenueSharePercent);
     }
 
     if (Object.keys(updateData).length === 0) {

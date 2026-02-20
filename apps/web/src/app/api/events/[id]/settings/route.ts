@@ -13,19 +13,22 @@ import {
   normalizeUtcTimestamp,
 } from '@/lib/events/time';
 import { getPhotographerIdCandidates } from '@/lib/profiles/ids';
+import { checkFeature } from '@/lib/subscription/enforcement';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 async function getEventAccess(supabase: any, eventId: string, photographerIds: string[]) {
   if (!photographerIds.length) {
     return {
       canView: false,
-      canEdit: false,
+      canEditEvent: false,
+      canManagePricing: false,
+      eventOwnerId: null as string | null,
     };
   }
 
   const { data: ownedEvent } = await supabase
     .from('events')
-    .select('id')
+    .select('id, photographer_id')
     .eq('id', eventId)
     .in('photographer_id', photographerIds)
     .maybeSingle();
@@ -33,9 +36,17 @@ async function getEventAccess(supabase: any, eventId: string, photographerIds: s
   if (ownedEvent) {
     return {
       canView: true,
-      canEdit: true,
+      canEditEvent: true,
+      canManagePricing: true,
+      eventOwnerId: ownedEvent.photographer_id as string,
     };
   }
+
+  const { data: event } = await supabase
+    .from('events')
+    .select('photographer_id')
+    .eq('id', eventId)
+    .maybeSingle();
 
   const { data: collaboratorAccess } = await supabase
     .from('event_collaborators')
@@ -48,13 +59,17 @@ async function getEventAccess(supabase: any, eventId: string, photographerIds: s
   if (!collaboratorAccess) {
     return {
       canView: false,
-      canEdit: false,
+      canEditEvent: false,
+      canManagePricing: false,
+      eventOwnerId: event?.photographer_id || null,
     };
   }
 
   return {
     canView: true,
-    canEdit: Boolean(collaboratorAccess.can_edit_event || collaboratorAccess.can_manage_pricing),
+    canEditEvent: Boolean(collaboratorAccess.can_edit_event),
+    canManagePricing: Boolean(collaboratorAccess.can_manage_pricing),
+    eventOwnerId: event?.photographer_id || null,
   };
 }
 
@@ -162,12 +177,12 @@ export async function PUT(
     const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
 
     const access = await getEventAccess(serviceClient, eventId, photographerIdCandidates);
-    if (!access.canEdit) {
+    if (!access.canEditEvent && !access.canManagePricing) {
       return NextResponse.json({ error: 'Not authorized to manage this event' }, { status: 403 });
     }
 
     // Verify event and get current currency
-    const eventSelectColumns = ['id', 'currency_code', 'currency', 'event_date', 'event_timezone'];
+    const eventSelectColumns = ['id', 'photographer_id', 'currency_code', 'currency', 'event_date', 'event_timezone'];
     let eventResult: any = null;
     const selectedColumns = [...eventSelectColumns];
 
@@ -199,6 +214,7 @@ export async function PUT(
 
     const event = {
       id: eventResult?.data?.id || eventId,
+      photographer_id: (eventResult?.data as any)?.photographer_id || access.eventOwnerId || null,
       currency_code: (eventResult?.data as any)?.currency_code || 'USD',
       currency: (eventResult?.data as any)?.currency || 'USD',
       event_date: (eventResult?.data as any)?.event_date || null,
@@ -211,10 +227,53 @@ export async function PUT(
     // Build update object (only allowed fields)
     const updates: Record<string, any> = {};
     let pricingTouched = false;
+    const canEditEvent = access.canEditEvent;
+    const canManagePricing = access.canManagePricing || access.canEditEvent;
+    const eventEditableFields = [
+      'name',
+      'description',
+      'location',
+      'event_date',
+      'event_start_at_utc',
+      'event_end_at_utc',
+      'event_timezone',
+      'end_date',
+      'is_public',
+      'is_publicly_listed',
+      'include_in_public_profile',
+      'allow_anonymous_scan',
+      'require_access_code',
+      'public_access_code',
+      'face_recognition_enabled',
+      'live_mode_enabled',
+      'watermark_enabled',
+    ];
+    const requestedPricingFields = [
+      'pricing_type',
+      'price_per_photo',
+      'bulk_tiers',
+      'unlock_all_price',
+      'currency_code',
+    ];
+    const requestedEventFieldInput = eventEditableFields.some((field) => body[field] !== undefined);
+    const requestedPricingFieldChange = requestedPricingFields.some((field) => body[field] !== undefined);
 
-    if (body.name !== undefined) updates.name = body.name;
-    if (body.description !== undefined) updates.description = body.description;
-    if (body.location !== undefined) updates.location = body.location;
+    if (requestedPricingFieldChange && !canManagePricing) {
+      return NextResponse.json(
+        { error: 'Not authorized to manage event pricing.' },
+        { status: 403 }
+      );
+    }
+    if (requestedEventFieldInput && !canEditEvent && !requestedPricingFieldChange) {
+      return NextResponse.json(
+        { error: 'Not authorized to edit event details. Ask the event owner for edit permission.' },
+        { status: 403 }
+      );
+    }
+
+    if (canEditEvent && body.name !== undefined) updates.name = body.name;
+    if (canEditEvent && body.description !== undefined) updates.description = body.description;
+    if (canEditEvent && body.location !== undefined) updates.location = body.location;
     const nextEventDate =
       body.event_date !== undefined
         ? normalizeIsoDate(body.event_date)
@@ -224,30 +283,30 @@ export async function PUT(
         ? normalizeEventTimezone(body.event_timezone)
         : normalizeEventTimezone(event.event_timezone);
 
-    if (body.event_date !== undefined) updates.event_date = nextEventDate;
-    if (body.event_start_at_utc !== undefined) {
+    if (canEditEvent && body.event_date !== undefined) updates.event_date = nextEventDate;
+    if (canEditEvent && body.event_start_at_utc !== undefined) {
       updates.event_start_at_utc = normalizeUtcTimestamp(body.event_start_at_utc);
-    } else if (body.event_date !== undefined || body.event_timezone !== undefined) {
+    } else if (canEditEvent && (body.event_date !== undefined || body.event_timezone !== undefined)) {
       updates.event_start_at_utc = deriveEventStartAtUtc(nextEventDate, nextEventTimezone);
     }
-    if (body.event_end_at_utc !== undefined) {
+    if (canEditEvent && body.event_end_at_utc !== undefined) {
       updates.event_end_at_utc = normalizeUtcTimestamp(body.event_end_at_utc);
     }
-    if (body.event_timezone !== undefined) updates.event_timezone = nextEventTimezone;
-    if (body.end_date !== undefined) updates.end_date = normalizeIsoDate(body.end_date);
-    if (body.is_public !== undefined) updates.is_public = body.is_public;
-    if (body.is_publicly_listed !== undefined) updates.is_publicly_listed = body.is_publicly_listed;
-    if (body.include_in_public_profile !== undefined) updates.include_in_public_profile = body.include_in_public_profile;
-    if (body.allow_anonymous_scan !== undefined) updates.allow_anonymous_scan = body.allow_anonymous_scan;
-    if (body.require_access_code !== undefined) updates.require_access_code = body.require_access_code;
-    if (body.public_access_code !== undefined) updates.public_access_code = body.public_access_code;
-    if (body.face_recognition_enabled !== undefined) updates.face_recognition_enabled = body.face_recognition_enabled;
-    if (body.live_mode_enabled !== undefined) updates.live_mode_enabled = body.live_mode_enabled;
-    if (body.watermark_enabled !== undefined) updates.watermark_enabled = body.watermark_enabled;
-    if (body.currency_code !== undefined) updates.currency_code = body.currency_code;
+    if (canEditEvent && body.event_timezone !== undefined) updates.event_timezone = nextEventTimezone;
+    if (canEditEvent && body.end_date !== undefined) updates.end_date = normalizeIsoDate(body.end_date);
+    if (canEditEvent && body.is_public !== undefined) updates.is_public = body.is_public;
+    if (canEditEvent && body.is_publicly_listed !== undefined) updates.is_publicly_listed = body.is_publicly_listed;
+    if (canEditEvent && body.include_in_public_profile !== undefined) updates.include_in_public_profile = body.include_in_public_profile;
+    if (canEditEvent && body.allow_anonymous_scan !== undefined) updates.allow_anonymous_scan = body.allow_anonymous_scan;
+    if (canEditEvent && body.require_access_code !== undefined) updates.require_access_code = body.require_access_code;
+    if (canEditEvent && body.public_access_code !== undefined) updates.public_access_code = body.public_access_code;
+    if (canEditEvent && body.face_recognition_enabled !== undefined) updates.face_recognition_enabled = body.face_recognition_enabled;
+    if (canEditEvent && body.live_mode_enabled !== undefined) updates.live_mode_enabled = body.live_mode_enabled;
+    if (canEditEvent && body.watermark_enabled !== undefined) updates.watermark_enabled = body.watermark_enabled;
+    if ((canEditEvent || canManagePricing) && body.currency_code !== undefined) updates.currency_code = body.currency_code;
 
     // Update or create event_pricing record
-    if (body.pricing_type !== undefined || body.price_per_photo !== undefined || body.bulk_tiers !== undefined || body.currency_code !== undefined) {
+    if ((body.pricing_type !== undefined || body.price_per_photo !== undefined || body.bulk_tiers !== undefined || body.currency_code !== undefined) && canManagePricing) {
       pricingTouched = true;
 
       const currentCurrency = String(event.currency_code || event.currency || 'USD').toUpperCase();
@@ -367,6 +426,26 @@ export async function PUT(
         }
 
         if (pricingError) throw pricingError;
+      }
+    }
+
+    if (canEditEvent && body.face_recognition_enabled === true && event.photographer_id) {
+      const canUseFaceRecognition = await checkFeature(event.photographer_id, 'face_recognition');
+      if (!canUseFaceRecognition) {
+        return NextResponse.json(
+          { error: 'Face recognition is not available on this plan. Please upgrade first.' },
+          { status: 403 }
+        );
+      }
+    }
+
+    if (canEditEvent && body.live_mode_enabled === true && event.photographer_id) {
+      const canUseLiveMode = await checkFeature(event.photographer_id, 'live_event_mode');
+      if (!canUseLiveMode) {
+        return NextResponse.json(
+          { error: 'Live mode is not available on this plan. Please upgrade first.' },
+          { status: 403 }
+        );
       }
     }
 

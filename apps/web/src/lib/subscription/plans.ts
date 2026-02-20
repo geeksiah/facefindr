@@ -351,11 +351,88 @@ export async function hasFeature(
 }
 
 export async function getCreatorPlatformFee(photographerId: string): Promise<number> {
+  try {
+    const supabase = createServiceClient();
+    const { data, error } = await supabase.rpc('get_photographer_limits', {
+      p_photographer_id: photographerId,
+    });
+    const percent = Number(data?.[0]?.platform_fee_percent);
+    if (!error && Number.isFinite(percent)) {
+      return percent / 100;
+    }
+  } catch (error) {
+    console.error('Failed to resolve platform fee from plan limits RPC:', error);
+  }
+
+  try {
+    const supabase = createServiceClient();
+    const { data: subscription } = await supabase
+      .from('subscriptions')
+      .select('plan_id, plan_code')
+      .eq('photographer_id', photographerId)
+      .in('status', ['active', 'trialing'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (subscription) {
+      let planQuery = supabase
+        .from('subscription_plans')
+        .select('platform_fee_percent');
+
+      if (subscription.plan_id) {
+        planQuery = planQuery.eq('id', subscription.plan_id);
+      } else if (subscription.plan_code) {
+        planQuery = planQuery.eq('code', subscription.plan_code);
+      }
+
+      const { data: planRow } = await planQuery.maybeSingle();
+      const feePercent = Number((planRow as any)?.platform_fee_percent);
+      if (Number.isFinite(feePercent)) {
+        return feePercent / 100;
+      }
+    }
+  } catch (error) {
+    console.error('Failed to resolve platform fee from subscription plan:', error);
+  }
+
   const features = await getCreatorPlanFeatures(photographerId);
   return features.platformFeePercent / 100; // Convert to decimal
 }
 
 export async function getCreatorPrintCommission(photographerId: string): Promise<number> {
+  try {
+    const supabase = createServiceClient();
+    const { data: subscription } = await supabase
+      .from('subscriptions')
+      .select('plan_id, plan_code')
+      .eq('photographer_id', photographerId)
+      .in('status', ['active', 'trialing'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (subscription) {
+      let planQuery = supabase
+        .from('subscription_plans')
+        .select('print_commission_percent');
+
+      if (subscription.plan_id) {
+        planQuery = planQuery.eq('id', subscription.plan_id);
+      } else if (subscription.plan_code) {
+        planQuery = planQuery.eq('code', subscription.plan_code);
+      }
+
+      const { data: planRow } = await planQuery.maybeSingle();
+      const commissionPercent = Number((planRow as any)?.print_commission_percent);
+      if (Number.isFinite(commissionPercent)) {
+        return commissionPercent / 100;
+      }
+    }
+  } catch (error) {
+    console.error('Failed to resolve print commission from subscription plan:', error);
+  }
+
   const features = await getCreatorPlanFeatures(photographerId);
   return features.printCommissionPercent / 100; // Convert to decimal
 }

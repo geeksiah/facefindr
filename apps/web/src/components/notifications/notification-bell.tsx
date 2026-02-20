@@ -7,7 +7,7 @@
  * Uses real-time updates for new notifications.
  */
 
-import { Bell, Check, CheckCheck, X, ExternalLink, Loader2 } from 'lucide-react';
+import { Bell, Check, CheckCheck, X, ExternalLink, Loader2, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useState, useEffect, useCallback, useRef } from 'react';
 
@@ -30,6 +30,7 @@ export function NotificationBell() {
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isMarkingAll, setIsMarkingAll] = useState(false);
+  const [isClearingAll, setIsClearingAll] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const latestVersionRef = useRef<number>(0);
 
@@ -171,6 +172,52 @@ export function NotificationBell() {
     }
   };
 
+  const deleteNotification = async (notificationId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const previous = notifications;
+    setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
+    setUnreadCount((prev) => {
+      const removed = previous.find((n) => n.id === notificationId);
+      if (removed && !removed.readAt) return Math.max(0, prev - 1);
+      return prev;
+    });
+
+    try {
+      const response = await fetch('/api/notifications', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notificationId }),
+      });
+      if (!response.ok) throw new Error('Delete failed');
+    } catch (error) {
+      console.error('Failed to delete notification:', error);
+      setNotifications(previous);
+      setUnreadCount(previous.filter((n) => !n.readAt).length);
+    }
+  };
+
+  const clearAllNotifications = async () => {
+    if (!notifications.length) return;
+    setIsClearingAll(true);
+    const previous = notifications;
+    setNotifications([]);
+    setUnreadCount(0);
+    try {
+      const response = await fetch('/api/notifications', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clearAll: true }),
+      });
+      if (!response.ok) throw new Error('Clear all failed');
+    } catch (error) {
+      console.error('Failed to clear notifications:', error);
+      setNotifications(previous);
+      setUnreadCount(previous.filter((n) => !n.readAt).length);
+    } finally {
+      setIsClearingAll(false);
+    }
+  };
+
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
     const now = new Date();
@@ -227,6 +274,20 @@ export function NotificationBell() {
           <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
             <h3 className="font-semibold text-foreground">Notifications</h3>
             <div className="flex items-center gap-2">
+              {notifications.length > 0 && (
+                <button
+                  onClick={clearAllNotifications}
+                  disabled={isClearingAll}
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive disabled:opacity-50 transition-colors"
+                >
+                  {isClearingAll ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3 w-3" />
+                  )}
+                  Clear all
+                </button>
+              )}
               {unreadCount > 0 && (
                 <button
                   onClick={markAllAsRead}
@@ -312,6 +373,13 @@ export function NotificationBell() {
                               <Check className="h-3.5 w-3.5" />
                             </button>
                           )}
+                          <button
+                            onClick={(e) => deleteNotification(notification.id, e)}
+                            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all duration-200"
+                            title="Delete notification"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
                         </div>
                       </div>
                     </div>

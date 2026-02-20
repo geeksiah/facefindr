@@ -565,6 +565,17 @@ export default function DashboardScreen() {
               </View>
               <Text style={styles.quickActionLabel}>Events</Text>
             </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => router.push('/(creator)/collaborations' as any)}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.quickActionIcon, { backgroundColor: colors.accent + '15' }]}>
+                <Users size={22} color={colors.accent} />
+              </View>
+              <Text style={styles.quickActionLabel}>Collaborations</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -841,10 +852,11 @@ const styles = StyleSheet.create({
   // Quick Actions
   quickActionsRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing.md,
   },
   quickActionCard: {
-    flex: 1,
+    width: '47%',
     backgroundColor: colors.card,
     borderRadius: borderRadius.lg,
     borderWidth: 1,

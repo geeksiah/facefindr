@@ -14,9 +14,10 @@ import {
   trackClick,
   AdPlacementCode,
 } from '@/lib/notifications';
+import { resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import { getCreatorPlan } from '@/lib/subscription';
 import { normalizeUserType } from '@/lib/user-type';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // GET - Get ad for placement
 export async function GET(request: NextRequest) {
@@ -44,7 +45,15 @@ export async function GET(request: NextRequest) {
       userType = normalizeUserType(userData?.user_type) || undefined;
       
       if (userType === 'creator') {
-        userPlan = await getCreatorPlan(user.id);
+        const serviceClient = createServiceClient();
+        const { data: creatorProfile } = await resolvePhotographerProfileByUser(
+          serviceClient,
+          user.id,
+          user.email
+        );
+        if (creatorProfile?.id) {
+          userPlan = await getCreatorPlan(creatorProfile.id as string);
+        }
       }
     }
 

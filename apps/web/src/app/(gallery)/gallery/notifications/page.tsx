@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Check,
   Trash2,
+  Loader2,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
@@ -53,6 +54,7 @@ export default function NotificationsPage() {
     pushNotifications: false,
   });
   const [isLoading, setIsLoading] = useState(true);
+  const [isClearingAll, setIsClearingAll] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'settings'>('all');
 
   useEffect(() => {
@@ -122,12 +124,43 @@ export default function NotificationsPage() {
   };
 
   const deleteNotification = async (notificationId: string) => {
+    const previous = notifications;
     setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
 
     try {
-      // No hard-delete endpoint; UI-level dismissal only.
+      const response = await fetch('/api/notifications', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notificationId }),
+      });
+      if (!response.ok) {
+        throw new Error('Failed to delete');
+      }
     } catch (error) {
       console.error('Failed to delete notification:', error);
+      setNotifications(previous);
+    }
+  };
+
+  const clearAllNotifications = async () => {
+    if (!notifications.length) return;
+    setIsClearingAll(true);
+    const previous = notifications;
+    setNotifications([]);
+    try {
+      const response = await fetch('/api/notifications', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clearAll: true }),
+      });
+      if (!response.ok) {
+        throw new Error('Failed to clear');
+      }
+    } catch (error) {
+      console.error('Failed to clear notifications:', error);
+      setNotifications(previous);
+    } finally {
+      setIsClearingAll(false);
     }
   };
 
@@ -197,6 +230,12 @@ export default function NotificationsPage() {
           <Button variant="ghost" size="sm" onClick={markAllAsRead}>
             <Check className="mr-2 h-4 w-4" />
             Mark all read
+          </Button>
+        )}
+        {notifications.length > 0 && (
+          <Button variant="ghost" size="sm" onClick={clearAllNotifications} disabled={isClearingAll}>
+            {isClearingAll ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+            Clear all
           </Button>
         )}
       </div>

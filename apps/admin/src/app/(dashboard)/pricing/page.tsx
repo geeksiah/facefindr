@@ -1690,7 +1690,7 @@ export default function PricingPage() {
               </button>
             </div>
             <div className="flex items-center gap-2 rounded-lg border border-border px-2 py-1.5">
-              <span className="text-xs text-muted-foreground">Drop-In 1 Credit</span>
+              <span className="text-xs text-muted-foreground">Drop-In 1 Credit (System-wide)</span>
               <input
                 type="number"
                 min="0.01"

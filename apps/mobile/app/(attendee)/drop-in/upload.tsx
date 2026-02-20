@@ -4,7 +4,7 @@
  * Upload photos of people outside contacts
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -25,7 +26,6 @@ import {
   MapPin,
   Gift,
   DollarSign,
-  Check,
   X,
 } from 'lucide-react-native';
 
@@ -33,6 +33,7 @@ import { Button } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 import { getApiBaseUrl } from '@/lib/api-base';
+import { alertMissingPublicAppUrl, buildPublicUrl } from '@/lib/runtime-config';
 
 interface DropInUploadScreenProps {
   noHeader?: boolean;
@@ -41,15 +42,17 @@ interface DropInUploadScreenProps {
 export default function DropInUploadScreen({ noHeader = false }: DropInUploadScreenProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { profile, session } = useAuthStore();
+  const { session } = useAuthStore();
 
   const [image, setImage] = useState<string | null>(null);
   const [includeGift, setIncludeGift] = useState(false);
   const [giftMessage, setGiftMessage] = useState('');
   const [locationName, setLocationName] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [uploadFee, setUploadFee] = useState<number | null>(null);
-  const [giftFee, setGiftFee] = useState<number | null>(null);
+  const [attendeeCredits, setAttendeeCredits] = useState<number>(0);
+  const [creditUnit, setCreditUnit] = useState<number | null>(null);
+  const [uploadCreditsRequired, setUploadCreditsRequired] = useState<number>(1);
+  const [giftCreditsRequired, setGiftCreditsRequired] = useState<number>(1);
   const [currency, setCurrency] = useState('USD');
 
   useEffect(() => {
@@ -60,8 +63,10 @@ export default function DropInUploadScreen({ noHeader = false }: DropInUploadScr
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Pricing unavailable');
 
-      setUploadFee(Number(data.uploadFee));
-      setGiftFee(Number(data.giftFee));
+      setAttendeeCredits(Number(data.attendeeCredits || 0));
+      setCreditUnit(Number(data.creditUnit || 0));
+      setUploadCreditsRequired(Number(data.uploadCreditsRequired || 1));
+      setGiftCreditsRequired(Number(data.giftCreditsRequired || 1));
       setCurrency(String(data.currency || 'USD'));
     };
 
@@ -118,13 +123,31 @@ export default function DropInUploadScreen({ noHeader = false }: DropInUploadScr
       return;
     }
 
+    if (attendeeCredits < totalCreditsRequired) {
+      Alert.alert(
+        'Insufficient credits',
+        `You need ${totalCreditsRequired} credits, but you currently have ${attendeeCredits}.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Buy Credits',
+            onPress: async () => {
+              const billingUrl = buildPublicUrl('/gallery/billing');
+              if (!billingUrl) {
+                alertMissingPublicAppUrl();
+                return;
+              }
+              await Linking.openURL(billingUrl);
+            },
+          },
+        ]
+      );
+      return;
+    }
+
     setUploading(true);
 
     try {
-      // Convert image URI to blob
-      const response = await fetch(image);
-      const blob = await response.blob();
-
       const formData = new FormData();
       formData.append('photo', {
         uri: image,
@@ -153,17 +176,38 @@ export default function DropInUploadScreen({ noHeader = false }: DropInUploadScr
       const data = await uploadResponse.json();
 
       if (!uploadResponse.ok) {
+        if (uploadResponse.status === 402) {
+          const requiredCredits = Number(data.requiredCredits || totalCreditsRequired);
+          const available = Number(data.availableCredits || attendeeCredits);
+          Alert.alert(
+            'Insufficient credits',
+            `You need ${requiredCredits} credits, but you currently have ${available}.`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Buy Credits',
+                onPress: async () => {
+                  const billingUrl = buildPublicUrl('/gallery/billing');
+                  if (!billingUrl) {
+                    alertMissingPublicAppUrl();
+                    return;
+                  }
+                  await Linking.openURL(billingUrl);
+                },
+              },
+            ]
+          );
+          return;
+        }
         throw new Error(data.error || 'Upload failed');
       }
 
-      if (data.checkoutUrl) {
-        // Open checkout in browser or in-app browser
-        const ExpoLinking = await import('expo-linking');
-        await ExpoLinking.openURL(data.checkoutUrl);
-      } else {
-        Alert.alert('Success', 'Your drop-in photo has been uploaded');
-        router.back();
-      }
+      setAttendeeCredits(Number(data.remainingCredits ?? attendeeCredits));
+      Alert.alert(
+        'Success',
+        `Your drop-in photo was uploaded. ${Number(data.creditsUsed || totalCreditsRequired)} credit(s) used.`
+      );
+      router.back();
     } catch (error: any) {
       console.error('Upload error:', error);
       Alert.alert('Upload Failed', error.message || 'Failed to upload photo');
@@ -172,9 +216,10 @@ export default function DropInUploadScreen({ noHeader = false }: DropInUploadScr
     }
   };
 
-  const effectiveUploadFee = uploadFee ?? 0;
-  const effectiveGiftFee = giftFee ?? 0;
-  const totalCost = includeGift ? effectiveUploadFee + effectiveGiftFee : effectiveUploadFee;
+  const effectiveCreditUnit = creditUnit ?? 0;
+  const effectiveGiftCredits = includeGift ? giftCreditsRequired : 0;
+  const totalCreditsRequired = uploadCreditsRequired + effectiveGiftCredits;
+  const totalCost = effectiveCreditUnit * totalCreditsRequired;
 
   return (
     <View style={styles.container}>
@@ -276,19 +321,48 @@ export default function DropInUploadScreen({ noHeader = false }: DropInUploadScr
             <Text style={styles.sectionTitle}>Pricing</Text>
           </View>
           <View style={styles.pricingRow}>
-            <Text style={styles.pricingLabel}>Upload Fee</Text>
-            <Text style={styles.pricingValue}>{currency} {effectiveUploadFee.toFixed(2)}</Text>
+            <Text style={styles.pricingLabel}>Available Credits</Text>
+            <Text style={styles.pricingValue}>{attendeeCredits}</Text>
+          </View>
+          <View style={styles.pricingRow}>
+            <Text style={styles.pricingLabel}>Upload Credits</Text>
+            <Text style={styles.pricingValue}>{uploadCreditsRequired}</Text>
           </View>
           {includeGift && (
             <View style={styles.pricingRow}>
-              <Text style={styles.pricingLabel}>Gift Access + Message</Text>
-              <Text style={styles.pricingValue}>{currency} {effectiveGiftFee.toFixed(2)}</Text>
+              <Text style={styles.pricingLabel}>Gift Access Credits</Text>
+              <Text style={styles.pricingValue}>{giftCreditsRequired}</Text>
             </View>
           )}
           <View style={[styles.pricingRow, styles.pricingTotal]}>
-            <Text style={styles.pricingLabelTotal}>Total</Text>
-            <Text style={styles.pricingValueTotal}>{currency} {totalCost.toFixed(2)}</Text>
+            <Text style={styles.pricingLabelTotal}>Total Credits</Text>
+            <Text style={styles.pricingValueTotal}>{totalCreditsRequired}</Text>
           </View>
+          <View style={styles.pricingRow}>
+            <Text style={styles.pricingLabel}>Per Credit</Text>
+            <Text style={styles.pricingValue}>
+              {currency} {effectiveCreditUnit.toFixed(2)}
+            </Text>
+          </View>
+          <View style={styles.pricingRow}>
+            <Text style={styles.pricingLabel}>Equivalent</Text>
+            <Text style={styles.pricingValue}>
+              {currency} {totalCost.toFixed(2)}
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={styles.buyCreditsButton}
+            onPress={async () => {
+              const billingUrl = buildPublicUrl('/gallery/billing');
+              if (!billingUrl) {
+                alertMissingPublicAppUrl();
+                return;
+              }
+              await Linking.openURL(billingUrl);
+            }}
+          >
+            <Text style={styles.buyCreditsButtonText}>Buy credits</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Info */}
@@ -296,10 +370,10 @@ export default function DropInUploadScreen({ noHeader = false }: DropInUploadScr
           <Text style={styles.infoTitle}>How it works:</Text>
           <Text style={styles.infoText}>
             • Upload a photo of someone (they don't need to be in your contacts){'\n'}
-            • Pay {currency} {effectiveUploadFee.toFixed(2)} to make it discoverable{'\n'}
-            {includeGift && `• Pay an additional ${currency} ${effectiveGiftFee.toFixed(2)} to cover their access fee and unlock your message\n`}
+            • Upload consumes {uploadCreditsRequired} credit(s){'\n'}
+            {includeGift && `• Gift access consumes an additional ${giftCreditsRequired} credit(s)\n`}
             • We'll use face recognition to find them{'\n'}
-            • If no match is found within 7 days, you'll get a full refund
+            • Recipient opens free when gift is enabled; otherwise recipient unlock may require credits
           </Text>
         </View>
       </ScrollView>
@@ -308,7 +382,7 @@ export default function DropInUploadScreen({ noHeader = false }: DropInUploadScr
       <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
         <Button
           onPress={handleUpload}
-          disabled={!image || uploading || uploadFee === null || giftFee === null}
+          disabled={!image || uploading || creditUnit === null}
           fullWidth
         >
           {uploading ? (
@@ -317,7 +391,9 @@ export default function DropInUploadScreen({ noHeader = false }: DropInUploadScr
               Processing...
             </>
           ) : (
-            `Continue to Payment (${currency} ${totalCost.toFixed(2)})`
+            attendeeCredits < totalCreditsRequired
+              ? `Buy ${totalCreditsRequired - attendeeCredits} more credit(s)`
+              : `Upload (${totalCreditsRequired} credits)`
           )}
         </Button>
       </View>
@@ -519,6 +595,21 @@ const styles = StyleSheet.create({
   pricingValueTotal: {
     fontSize: fontSize.base,
     fontWeight: '700',
+    color: colors.accent,
+  },
+  buyCreditsButton: {
+    marginTop: spacing.sm,
+    alignSelf: 'flex-start',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.accent + '40',
+    backgroundColor: colors.accent + '15',
+  },
+  buyCreditsButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: '600',
     color: colors.accent,
   },
   infoBox: {

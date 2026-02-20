@@ -101,6 +101,12 @@ export default function CreatorLayout() {
           href: null, // Hide from tab bar, accessible via navigation
         }}
       />
+      <Tabs.Screen
+        name="collaborations"
+        options={{
+          href: null, // Hide from tab bar, opened from notifications/dashboard actions
+        }}
+      />
     </Tabs>
   );
 }

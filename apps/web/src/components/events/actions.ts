@@ -204,11 +204,17 @@ export async function uploadPhotos(formData: FormData) {
 // Background face processing
 async function processFacesAsync(mediaId: string, eventId: string) {
   try {
+    const supabase = await createClient();
+    const { data: { session } } = await supabase.auth.getSession();
     const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
-    
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (session?.access_token) {
+      headers.authorization = `Bearer ${session.access_token}`;
+    }
+
     await fetch(`${baseUrl}/api/media/process`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ mediaId, eventId }),
     });
   } catch (error) {
@@ -222,7 +228,10 @@ async function processFacesAsync(mediaId: string, eventId: string) {
 
 export async function processMediaFaces(mediaId: string, eventId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const [{ data: { user } }, { data: { session } }] = await Promise.all([
+    supabase.auth.getUser(),
+    supabase.auth.getSession(),
+  ]);
 
   if (!user) {
     return { error: 'Not authenticated' };
@@ -242,10 +251,14 @@ export async function processMediaFaces(mediaId: string, eventId: string) {
 
   try {
     const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
-    
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (session?.access_token) {
+      headers.authorization = `Bearer ${session.access_token}`;
+    }
+
     const response = await fetch(`${baseUrl}/api/media/process`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ mediaId, eventId }),
     });
 

@@ -13,6 +13,7 @@ import {
   RefreshControl,
   TouchableOpacity,
   StatusBar,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -29,6 +30,7 @@ import {
 } from 'lucide-react-native';
 
 import { useAuthStore } from '@/stores/auth-store';
+import { useNotificationsStore } from '@/stores/notifications-store';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 import { getApiBaseUrl } from '@/lib/api-base';
@@ -56,6 +58,7 @@ export default function NotificationsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { profile, session } = useAuthStore();
+  const { fetchNotifications } = useNotificationsStore();
   
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -167,6 +170,62 @@ export default function NotificationsScreen() {
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
   };
 
+  const deleteNotification = async (notificationId: string) => {
+    if (!session?.access_token) return;
+
+    const previous = notifications;
+    const updated = notifications.filter((n) => n.id !== notificationId);
+    setNotifications(updated);
+
+    try {
+      const response = await fetch(`${API_URL}/api/notifications`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ notificationId }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || 'Failed to delete notification');
+      }
+      if (profile?.id) {
+        void fetchNotifications(profile.id);
+      }
+    } catch (error: any) {
+      setNotifications(previous);
+      Alert.alert('Delete failed', error?.message || 'Failed to delete notification');
+    }
+  };
+
+  const clearAllNotifications = async () => {
+    if (!session?.access_token || notifications.length === 0) return;
+
+    const previous = notifications;
+    setNotifications([]);
+    try {
+      const response = await fetch(`${API_URL}/api/notifications`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ clearAll: true }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || 'Failed to clear notifications');
+      }
+      if (profile?.id) {
+        void fetchNotifications(profile.id);
+      }
+    } catch (error: any) {
+      setNotifications(previous);
+      Alert.alert('Clear failed', error?.message || 'Failed to clear notifications');
+    }
+  };
+
   const handleNotificationPress = (notification: Notification) => {
     markAsRead(notification.id);
 
@@ -215,9 +274,19 @@ export default function NotificationsScreen() {
             {formatTimeAgo(item.createdAt)}
           </Text>
         </View>
+        <TouchableOpacity
+          style={styles.deleteButton}
+          onPress={(event) => {
+            event.stopPropagation();
+            void deleteNotification(item.id);
+          }}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Trash2 size={16} color={colors.secondary} />
+        </TouchableOpacity>
       </TouchableOpacity>
     );
-  }, []);
+  }, [deleteNotification, handleNotificationPress]);
 
   const EmptyState = () => (
     <View style={styles.emptyState}>
@@ -280,6 +349,20 @@ export default function NotificationsScreen() {
           )}
         </View>
         <View style={styles.headerActions}>
+          {notifications.length > 0 && (
+            <TouchableOpacity
+              onPress={() => {
+                Alert.alert('Clear all', 'Delete all notifications?', [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Delete', style: 'destructive', onPress: () => void clearAllNotifications() },
+                ]);
+              }}
+              style={styles.headerButton}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Trash2 size={18} color={colors.secondary} />
+            </TouchableOpacity>
+          )}
           {unreadCount > 0 && (
             <TouchableOpacity 
               onPress={markAllAsRead} 
@@ -456,6 +539,14 @@ const styles = StyleSheet.create({
   },
   notificationContent: {
     flex: 1,
+  },
+  deleteButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
   },
   notificationHeader: {
     flexDirection: 'row',

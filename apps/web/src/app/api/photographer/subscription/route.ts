@@ -9,8 +9,9 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 
-import { getUserPlan, getAllPlans, getCreatorPlanFeatures } from '@/lib/subscription';
-import { createClient } from '@/lib/supabase/server';
+import { getUserPlan, getCreatorPlanFeatures } from '@/lib/subscription';
+import { resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // GET - Get subscription details
 export async function GET() {
@@ -21,18 +22,28 @@ export async function GET() {
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const serviceClient = createServiceClient();
+    const { data: creatorProfile } = await resolvePhotographerProfileByUser(
+      serviceClient,
+      user.id,
+      user.email
+    );
+    if (!creatorProfile?.id) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
+    const creatorId = creatorProfile.id as string;
 
     // Get current plan with full details from modular system
-    const currentPlan = await getUserPlan(user.id, 'photographer');
+    const currentPlan = await getUserPlan(creatorId, 'photographer');
     
     // Also get legacy features for backward compatibility
-    const legacyFeatures = await getCreatorPlanFeatures(user.id);
+    const legacyFeatures = await getCreatorPlanFeatures(creatorId);
 
     // Get subscription record
     const { data: subscription } = await supabase
       .from('subscriptions')
       .select('*')
-      .eq('photographer_id', user.id)
+      .eq('photographer_id', creatorId)
       .in('status', ['active', 'trialing'])
       .order('created_at', { ascending: false })
       .limit(1)
@@ -42,14 +53,14 @@ export async function GET() {
     const { count: eventCount } = await supabase
       .from('events')
       .select('id', { count: 'exact' })
-      .eq('photographer_id', user.id)
+      .eq('photographer_id', creatorId)
       .in('status', ['draft', 'active']);
 
     // Get photo count from most recent event
     const { data: recentEvent } = await supabase
       .from('events')
       .select('id')
-      .eq('photographer_id', user.id)
+      .eq('photographer_id', creatorId)
       .order('created_at', { ascending: false })
       .limit(1)
       .single();
@@ -80,7 +91,7 @@ export async function GET() {
     const { data: wallet } = await supabase
       .from('wallets')
       .select('stripe_account_id')
-      .eq('photographer_id', user.id)
+      .eq('photographer_id', creatorId)
       .single();
 
     const paymentMethod = null;

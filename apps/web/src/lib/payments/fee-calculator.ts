@@ -72,9 +72,9 @@ export async function calculateFees(params: CalculateFeesParams): Promise<FeeCal
   // Step 2: Get photographer's subscription plan
   const { data: subscription } = await supabase
     .from('subscriptions')
-    .select('plan_code')
+    .select('plan_code, plan_id')
     .eq('photographer_id', photographerId)
-    .eq('status', 'active')
+    .in('status', ['active', 'trialing'])
     .order('created_at', { ascending: false })
     .limit(1)
     .single();
@@ -92,6 +92,21 @@ export async function calculateFees(params: CalculateFeesParams): Promise<FeeCal
 
   // Step 4: Get platform fee rate (plan-based or region-overridden)
   let platformFeeRate = getPlanBasedPlatformFee(photographerPlan);
+  if (subscription?.plan_id || subscription?.plan_code) {
+    let planQuery = supabase
+      .from('subscription_plans')
+      .select('platform_fee_percent');
+    if (subscription.plan_id) {
+      planQuery = planQuery.eq('id', subscription.plan_id);
+    } else if (subscription.plan_code) {
+      planQuery = planQuery.eq('code', subscription.plan_code);
+    }
+    const { data: planRow } = await planQuery.maybeSingle();
+    const configuredPlanFee = Number((planRow as any)?.platform_fee_percent);
+    if (Number.isFinite(configuredPlanFee)) {
+      platformFeeRate = configuredPlanFee / 100;
+    }
+  }
 
   // Step 5: Get region config if available
   let transactionFeeRate = 0;

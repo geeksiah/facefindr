@@ -8,8 +8,9 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 
-import { getUsageSummary, getPlanLimits, checkLimit } from '@/lib/subscription/enforcement';
-import { createClient } from '@/lib/supabase/server';
+import { getUsageSummary, checkLimit } from '@/lib/subscription/enforcement';
+import { resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // GET - Get usage summary
 export async function GET() {
@@ -20,9 +21,19 @@ export async function GET() {
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const serviceClient = createServiceClient();
+    const { data: creatorProfile } = await resolvePhotographerProfileByUser(
+      serviceClient,
+      user.id,
+      user.email
+    );
+    if (!creatorProfile?.id) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
+    const creatorId = creatorProfile.id as string;
 
     // Get comprehensive usage summary
-    const usage = await getUsageSummary(user.id);
+    const usage = await getUsageSummary(creatorId);
     
     if (!usage) {
       // Return defaults if no usage data
@@ -53,9 +64,9 @@ export async function GET() {
 
     // Also get individual limit checks for more detailed info
     const [eventsCheck, storageCheck, teamCheck] = await Promise.all([
-      checkLimit(user.id, 'events'),
-      checkLimit(user.id, 'storage'),
-      checkLimit(user.id, 'team_members'),
+      checkLimit(creatorId, 'events'),
+      checkLimit(creatorId, 'storage'),
+      checkLimit(creatorId, 'team_members'),
     ]);
 
     return NextResponse.json({

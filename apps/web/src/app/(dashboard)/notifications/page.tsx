@@ -18,6 +18,7 @@ import {
   Megaphone,
   ExternalLink,
   ChevronDown,
+  Trash2,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useState, useEffect, useCallback } from 'react';
@@ -51,6 +52,7 @@ export default function NotificationsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState<FilterType>('all');
   const [isMarkingAll, setIsMarkingAll] = useState(false);
+  const [isClearingAll, setIsClearingAll] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
 
   const fetchNotifications = useCallback(async () => {
@@ -135,6 +137,48 @@ export default function NotificationsPage() {
     }
   };
 
+  const deleteNotification = async (notificationId: string) => {
+    const previous = notifications;
+    setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
+
+    try {
+      const response = await fetch('/api/notifications', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notificationId }),
+      });
+      if (!response.ok) {
+        throw new Error('Failed to delete');
+      }
+    } catch (error) {
+      console.error('Failed to delete notification:', error);
+      setNotifications(previous);
+    }
+  };
+
+  const clearAllNotifications = async () => {
+    if (!notifications.length) return;
+    setIsClearingAll(true);
+    const previous = notifications;
+    setNotifications([]);
+
+    try {
+      const response = await fetch('/api/notifications', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clearAll: true }),
+      });
+      if (!response.ok) {
+        throw new Error('Failed to clear all');
+      }
+    } catch (error) {
+      console.error('Failed to clear notifications:', error);
+      setNotifications(previous);
+    } finally {
+      setIsClearingAll(false);
+    }
+  };
+
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
     const now = new Date();
@@ -203,20 +247,36 @@ export default function NotificationsPage() {
           </p>
         </div>
         
-        {unreadCount > 0 && (
-          <Button
-            variant="secondary"
-            onClick={markAllAsRead}
-            disabled={isMarkingAll}
-          >
-            {isMarkingAll ? (
-              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-            ) : (
-              <CheckCheck className="h-4 w-4 mr-2" />
-            )}
-            Mark all read
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {notifications.length > 0 && (
+            <Button
+              variant="ghost"
+              onClick={clearAllNotifications}
+              disabled={isClearingAll}
+            >
+              {isClearingAll ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Trash2 className="h-4 w-4 mr-2" />
+              )}
+              Clear all
+            </Button>
+          )}
+          {unreadCount > 0 && (
+            <Button
+              variant="secondary"
+              onClick={markAllAsRead}
+              disabled={isMarkingAll}
+            >
+              {isMarkingAll ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <CheckCheck className="h-4 w-4 mr-2" />
+              )}
+              Mark all read
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Filters - Desktop */}
@@ -358,6 +418,17 @@ export default function NotificationsPage() {
                           <Check className="h-4 w-4" />
                         </button>
                       )}
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          deleteNotification(notification.id);
+                        }}
+                        className="p-2 rounded-xl text-secondary hover:text-destructive hover:bg-destructive/10 transition-all duration-200"
+                        title="Delete notification"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </div>
                   </div>
                 </div>
