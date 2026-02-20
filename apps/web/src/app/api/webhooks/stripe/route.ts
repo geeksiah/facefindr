@@ -10,6 +10,9 @@ import {
   markWebhookProcessed,
 } from '@/lib/payments/webhook-ledger';
 import { addCard, getUserPaymentMethods } from '@/lib/payments/payment-methods';
+import {
+  syncRecurringSubscriptionRecord,
+} from '@/lib/payments/recurring-sync';
 import { stripe } from '@/lib/payments/stripe';
 import { creditWalletFromTransaction } from '@/lib/payments/wallet-balance';
 import { constructWebhookEvent } from '@/lib/payments/stripe';
@@ -620,34 +623,29 @@ async function handleSubscriptionLifecycle(
   const photographerId = metadata.photographer_id;
   if (!photographerId) return;
 
-  await supabase
-    .from('subscriptions')
-    .upsert(
-      {
-        photographer_id: photographerId,
-        plan_code: metadata.plan_code || 'free',
-        status,
-        stripe_subscription_id: subscription.id,
-        stripe_customer_id: typeof subscription.customer === 'string' ? subscription.customer : null,
-        payment_provider: 'stripe',
-        external_subscription_id: subscription.id,
-        external_customer_id: typeof subscription.customer === 'string' ? subscription.customer : null,
-        external_plan_id: metadata.provider_plan_id || priceObj?.id || null,
-        billing_cycle: metadata.billing_cycle || 'monthly',
-        currency,
-        amount_cents: amountCents,
-        current_period_start: currentPeriodStart,
-        current_period_end: currentPeriodEnd,
-        cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
-        canceled_at: canceledAt,
-        last_webhook_event_at: new Date().toISOString(),
-        metadata: {
-          stripe_event: eventType,
-        },
-      },
-      { onConflict: 'photographer_id' }
-    )
-    .throwOnError();
+  await syncRecurringSubscriptionRecord({
+    supabase,
+    provider: 'stripe',
+    scope: 'creator_subscription',
+    status,
+    eventType,
+    externalSubscriptionId: subscription.id,
+    externalCustomerId: typeof subscription.customer === 'string' ? subscription.customer : null,
+    externalPlanId: metadata.provider_plan_id || priceObj?.id || null,
+    billingCycle: metadata.billing_cycle || 'monthly',
+    currency,
+    amountCents,
+    currentPeriodStart,
+    currentPeriodEnd,
+    cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
+    canceledAt,
+    photographerId,
+    planCode: metadata.plan_code || 'free',
+    planId: metadata.plan_id || null,
+    metadata: {
+      stripe_event: eventType,
+    },
+  });
 }
 
 async function handleSubscriptionInvoiceFailed(

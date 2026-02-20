@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
 import {
-  ensureCorePhotographerPlanFeatures,
+  ensureCoreCreatorPlanFeatures,
   normalizeFeaturePlanType,
 } from '@/lib/pricing/core-features';
 import { bumpRuntimeConfigVersion } from '@/lib/runtime-config-version';
@@ -17,12 +17,12 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
-    const planType = searchParams.get('plan_type'); // 'photographer' | 'drop_in' | 'payg' | null
+    const planType = searchParams.get('plan_type'); // 'creator' | 'photographer' | 'drop_in' | 'payg' | null
     const normalizedPlanType = normalizeFeaturePlanType(planType);
 
     // Safety net for older databases where this feature was never seeded.
-    if (!normalizedPlanType || normalizedPlanType === 'photographer') {
-      await ensureCorePhotographerPlanFeatures(supabaseAdmin);
+    if (!normalizedPlanType || normalizedPlanType === 'creator') {
+      await ensureCoreCreatorPlanFeatures(supabaseAdmin);
     }
 
     let query = supabaseAdmin
@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
         description,
         feature_type,
         default_value: default_value ? JSON.parse(JSON.stringify(default_value)) : null,
-        applicable_to: applicable_to || ['photographer', 'drop_in'],
+        applicable_to: applicable_to || ['creator', 'drop_in'],
         category,
         display_order: display_order || 0,
       })

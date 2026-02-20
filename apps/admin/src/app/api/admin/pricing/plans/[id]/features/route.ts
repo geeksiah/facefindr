@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
 import {
-  ensureCorePhotographerPlanFeatures,
+  ensureCoreCreatorPlanFeatures,
   normalizeFeaturePlanType,
 } from '@/lib/pricing/core-features';
 import { bumpRuntimeConfigVersion } from '@/lib/runtime-config-version';
@@ -36,8 +36,8 @@ export async function GET(
       .single();
 
     const normalizedPlanType = normalizeFeaturePlanType(plan?.plan_type);
-    if (!normalizedPlanType || normalizedPlanType === 'photographer') {
-      await ensureCorePhotographerPlanFeatures(supabaseAdmin);
+    if (!normalizedPlanType || normalizedPlanType === 'creator') {
+      await ensureCoreCreatorPlanFeatures(supabaseAdmin);
     }
 
     let availableFeaturesQuery = supabaseAdmin

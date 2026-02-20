@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     let currency = searchParams.get('currency');
-    const planType = searchParams.get('type') as 'creator' | 'photographer' | 'drop_in' | null;
+    const planType = searchParams.get('type') as 'creator' | 'photographer' | 'drop_in' | 'payg' | null;
     
     // If no currency specified, detect from user preference or location
     if (!currency) {
@@ -51,7 +51,9 @@ export async function GET(request: NextRequest) {
         const annualPrice = Math.round(priceInCurrency * 10);
 
         return {
+          planId: plan.id,
           planCode: plan.code,
+          planType: plan.planType,
           name: plan.name,
           description: plan.description,
           monthlyPrice: priceInCurrency,
@@ -59,7 +61,7 @@ export async function GET(request: NextRequest) {
           formattedMonthly: await formatPrice(priceInCurrency, currency!),
           formattedAnnual: await formatPrice(annualPrice, currency!),
           isPopular: plan.isPopular,
-          displayFeatures: plan.features,
+          displayFeatures: plan.features, // Optional marketing highlights only
           features: {
             maxActiveEvents: plan.limits.maxActiveEvents,
             maxPhotosPerEvent: plan.limits.maxPhotosPerEvent,

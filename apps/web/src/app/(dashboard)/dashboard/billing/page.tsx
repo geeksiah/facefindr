@@ -1,17 +1,19 @@
 'use client';
 
-import { Check, CreditCard, Download, Sparkles, Loader2, ExternalLink } from 'lucide-react';
+import { Check, Download, Sparkles, Loader2, ExternalLink } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 
 import { DashboardBanner } from '@/components/notifications';
 import { PaymentMethodsManager } from '@/components/payments';
 import { useCurrency } from '@/components/providers';
-import { Button, Switch, CurrencySwitcher } from '@/components/ui';
+import { Button, CurrencySwitcher } from '@/components/ui';
 import { useRealtimeSubscription } from '@/hooks/use-realtime';
 import { useSSEWithPolling } from '@/hooks/use-sse-fallback';
 
 interface PlanPricing {
+  planId: string;
   planCode: string;
+  planType?: 'creator' | 'drop_in' | 'payg';
   name: string;
   description: string;
   monthlyPrice: number;
@@ -39,17 +41,10 @@ interface PlanPricing {
 }
 
 interface Subscription {
+  planId?: string | null;
   planCode: string;
   status: string;
   currentPeriodEnd: string;
-}
-
-interface PaymentMethod {
-  id: string;
-  brand: string;
-  last4: string;
-  expMonth: number;
-  expYear: number;
 }
 
 interface UsageData {
@@ -76,18 +71,17 @@ interface UsageData {
     storage: number;
     team: number;
   };
+  planId?: string | null;
   planCode: string;
   platformFee: number;
 }
 
 export default function BillingPage() {
-  const { currencyCode, formatPrice } = useCurrency();
+  const { currencyCode } = useCurrency();
   const [plans, setPlans] = useState<PlanPricing[]>([]);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
   const [usageData, setUsageData] = useState<UsageData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isAddingPayment, setIsAddingPayment] = useState(false);
   const [isUpgrading, setIsUpgrading] = useState<string | null>(null);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
   const [lastSubscriptionVersion, setLastSubscriptionVersion] = useState(0);
@@ -118,7 +112,6 @@ export default function BillingPage() {
       if (subRes.ok) {
         const data = await subRes.json();
         setSubscription(data.subscription);
-        setPaymentMethod(data.paymentMethod);
       }
 
       // Load real-time usage data
@@ -164,29 +157,6 @@ export default function BillingPage() {
     },
   });
 
-  // Add payment method
-  const handleAddPaymentMethod = async () => {
-    setIsAddingPayment(true);
-    try {
-      const response = await fetch('/api/wallet/onboard', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider: 'stripe' }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.onboardingUrl) {
-          openCheckoutPopup(data.onboardingUrl);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to add payment method:', error);
-    } finally {
-      setIsAddingPayment(false);
-    }
-  };
-
   // Upgrade plan
   const handleUpgrade = async (planCode: string) => {
     setIsUpgrading(planCode);
@@ -214,8 +184,11 @@ export default function BillingPage() {
     }
   };
 
-  const currentPlan = usageData?.planCode || subscription?.planCode || 'free';
-  const currentPlanData = plans.find(p => p.planCode === currentPlan);
+  const currentPlanCode = usageData?.planCode || subscription?.planCode || 'free';
+  const currentPlanId = usageData?.planId || subscription?.planId || null;
+  const currentPlanData =
+    plans.find((plan) => (currentPlanId ? plan.planId === currentPlanId : false)) ||
+    plans.find((plan) => plan.planCode === currentPlanCode);
   
   // Use real usage data from the enforcement system
   const usage = usageData?.usage || { activeEvents: 0, totalPhotos: 0, storageUsedGb: 0, teamMembers: 1, faceOpsUsed: 0 };
@@ -278,17 +251,17 @@ export default function BillingPage() {
             <div className="flex items-center gap-2">
               <h2 className="font-semibold text-foreground">Current Plan</h2>
               <span className="rounded-full bg-accent/10 text-accent px-2.5 py-0.5 text-xs font-medium capitalize">
-                {currentPlan}
+                {currentPlanData?.name || currentPlanCode}
               </span>
             </div>
             <p className="mt-1 text-sm text-secondary">
-              {currentPlan === 'free' 
+              {currentPlanCode === 'free'
                 ? "You're on the free plan. Upgrade to unlock more features."
-                : `Platform fee: ${currentPlanData?.features?.platformFeePercent || 20}%`
+                : `Platform fee: ${currentPlanData?.features?.platformFeePercent ?? usageData?.platformFee ?? 20}%`
               }
             </p>
           </div>
-          {currentPlan === 'free' && (
+          {currentPlanCode === 'free' && (
             <Button variant="primary" size="sm" onClick={() => document.getElementById('plans')?.scrollIntoView({ behavior: 'smooth' })}>
               <Sparkles className="h-4 w-4" />
               Upgrade
@@ -393,14 +366,16 @@ export default function BillingPage() {
       {/* Plans */}
       <div className={`grid gap-6 ${plans.length <= 3 ? 'md:grid-cols-3' : 'md:grid-cols-4'}`}>
         {plans.map((plan) => {
-          const isCurrentPlan = plan.planCode === currentPlan;
+          const isCurrentPlan = currentPlanId
+            ? plan.planId === currentPlanId
+            : plan.planCode === currentPlanCode;
           const isPopular = Boolean(plan.isPopular);
           const price = billingCycle === 'monthly' ? plan.formattedMonthly : plan.formattedAnnual;
           const features = plan.features;
 
           return (
             <div
-              key={plan.planCode}
+              key={plan.planId || plan.planCode}
               className={`relative rounded-2xl p-6 transition-all duration-300 ${
                 isPopular
                   ? 'bg-foreground text-background ring-1 ring-foreground'
@@ -426,23 +401,9 @@ export default function BillingPage() {
                   /{billingCycle === 'monthly' ? 'mo' : 'yr'}
                 </span>
               </div>
-              
-              {/* Display features from admin (text list) */}
-              {plan.displayFeatures && plan.displayFeatures.length > 0 && (
-                <ul className="mt-6 space-y-2">
-                  {plan.displayFeatures.map((feature, idx) => (
-                    <li key={idx} className="flex items-start gap-2">
-                      <Check className={`h-4 w-4 mt-0.5 flex-shrink-0 ${isPopular ? 'text-accent' : 'text-success'}`} />
-                      <span className={`text-sm ${isPopular ? 'text-background/90' : 'text-foreground'}`}>
-                        {feature}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              
-              {/* Fallback to computed features if no display features */}
-              {(!plan.displayFeatures || plan.displayFeatures.length === 0) && features && (
+
+              {/* Structured limits/capabilities are authoritative */}
+              {features && (
                 <ul className="mt-6 space-y-2">
                   <li className="flex items-start gap-2">
                     <Check className={`h-4 w-4 mt-0.5 flex-shrink-0 ${isPopular ? 'text-accent' : 'text-success'}`} />
@@ -526,6 +487,20 @@ export default function BillingPage() {
                       </span>
                     </li>
                   )}
+                </ul>
+              )}
+
+              {/* Optional marketing highlights from admin; non-authoritative */}
+              {plan.displayFeatures && plan.displayFeatures.length > 0 && (
+                <ul className="mt-4 space-y-1.5">
+                  {plan.displayFeatures.slice(0, 3).map((feature, idx) => (
+                    <li key={`${plan.planId}-highlight-${idx}`} className="flex items-start gap-2">
+                      <Check className={`h-3.5 w-3.5 mt-0.5 flex-shrink-0 ${isPopular ? 'text-background/70' : 'text-muted-foreground'}`} />
+                      <span className={`text-xs ${isPopular ? 'text-background/70' : 'text-muted-foreground'}`}>
+                        {feature}
+                      </span>
+                    </li>
+                  ))}
                 </ul>
               )}
               

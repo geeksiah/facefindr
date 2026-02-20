@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 
-import { getUserPlan, getCreatorPlanFeatures, getPlanByCode } from '@/lib/subscription';
+import { getUserPlan, getPlanByCode } from '@/lib/subscription';
 import { resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
@@ -37,14 +37,11 @@ export async function GET() {
     const currentPlan = await getUserPlan(creatorId, 'photographer');
     const freePlan = await getPlanByCode('free', 'creator');
     
-    // Also get legacy features for backward compatibility
-    const legacyFeatures = await getCreatorPlanFeatures(creatorId);
-
     // Get subscription record
     const nowIso = new Date().toISOString();
     const { data: subscriptions } = await supabase
       .from('subscriptions')
-      .select('*')
+      .select('plan_id, plan_code, status, current_period_end, updated_at, created_at')
       .eq('photographer_id', creatorId)
       .in('status', ['active', 'trialing'])
       .or(`current_period_end.is.null,current_period_end.gte.${nowIso}`)
@@ -104,64 +101,62 @@ export async function GET() {
     const paymentMethod = null;
     // Note: To get actual payment method details, you'd need to call Stripe API
 
-    // Build response with both new and legacy formats
-    const resolvedPlanCode = currentPlan?.code || subscription?.plan_code || freePlan?.code || 'free';
-    const resolvedLimits = currentPlan?.limits || freePlan?.limits || {
-      maxActiveEvents: legacyFeatures.maxActiveEvents,
-      maxPhotosPerEvent: legacyFeatures.maxPhotosPerEvent,
-      maxFaceOpsPerEvent: legacyFeatures.maxFaceOpsPerEvent,
-      storageGb: legacyFeatures.storageGb,
-      teamMembers: legacyFeatures.teamMembers,
+    // Build response with structured plan details as the authoritative source.
+    const resolvedPlan = currentPlan || freePlan || null;
+    const resolvedPlanCode = resolvedPlan?.code || subscription?.plan_code || 'free';
+    const resolvedPlanId = resolvedPlan?.id || (subscription?.plan_id as string | null) || null;
+    const resolvedLimits = resolvedPlan?.limits || {
+      maxActiveEvents: 1,
+      maxPhotosPerEvent: 50,
+      maxFaceOpsPerEvent: 0,
+      storageGb: 1,
+      teamMembers: 1,
     };
 
-    const effectivePlan = currentPlan || freePlan;
-    const resolvedLegacyFeatures = effectivePlan
-      ? {
-          ...legacyFeatures,
-          planCode: effectivePlan.code as any,
-          maxActiveEvents: effectivePlan.limits.maxActiveEvents,
-          maxPhotosPerEvent: effectivePlan.limits.maxPhotosPerEvent,
-          maxFaceOpsPerEvent: effectivePlan.limits.maxFaceOpsPerEvent,
-          storageGb: effectivePlan.limits.storageGb,
-          teamMembers: effectivePlan.limits.teamMembers,
-          platformFeePercent: effectivePlan.platformFeePercent,
-          customWatermark: effectivePlan.capabilities.customWatermark,
-          customBranding: effectivePlan.capabilities.customBranding,
-          liveEventMode: effectivePlan.capabilities.liveEventMode,
-          advancedAnalytics: effectivePlan.capabilities.advancedAnalytics,
-          apiAccess: effectivePlan.capabilities.apiAccess,
-          prioritySupport: effectivePlan.capabilities.prioritySupport,
-          whiteLabel: effectivePlan.capabilities.whiteLabel,
-          printProductsEnabled: effectivePlan.capabilities.printProducts,
-          printCommissionPercent: effectivePlan.printCommissionPercent,
-          monthlyPrice:
-            effectivePlan.prices?.USD ??
-            effectivePlan.basePriceUsd,
-          annualPrice: Math.round((effectivePlan.prices?.USD ?? effectivePlan.basePriceUsd) * 10),
-        }
-      : legacyFeatures;
+    const resolvedLegacyFeatures = {
+      planCode: resolvedPlanCode,
+      maxActiveEvents: resolvedLimits.maxActiveEvents,
+      maxPhotosPerEvent: resolvedLimits.maxPhotosPerEvent,
+      maxFaceOpsPerEvent: resolvedLimits.maxFaceOpsPerEvent,
+      storageGb: resolvedLimits.storageGb,
+      teamMembers: resolvedLimits.teamMembers,
+      platformFeePercent: resolvedPlan?.platformFeePercent ?? 20,
+      customWatermark: resolvedPlan?.capabilities.customWatermark ?? false,
+      customBranding: resolvedPlan?.capabilities.customBranding ?? false,
+      liveEventMode: resolvedPlan?.capabilities.liveEventMode ?? false,
+      advancedAnalytics: resolvedPlan?.capabilities.advancedAnalytics ?? false,
+      apiAccess: resolvedPlan?.capabilities.apiAccess ?? false,
+      prioritySupport: resolvedPlan?.capabilities.prioritySupport ?? false,
+      whiteLabel: resolvedPlan?.capabilities.whiteLabel ?? false,
+      printProductsEnabled: resolvedPlan?.capabilities.printProducts ?? false,
+      printCommissionPercent: resolvedPlan?.printCommissionPercent ?? 15,
+      monthlyPrice: resolvedPlan?.prices?.USD ?? resolvedPlan?.basePriceUsd ?? 0,
+      annualPrice: Math.round((resolvedPlan?.prices?.USD ?? resolvedPlan?.basePriceUsd ?? 0) * 10),
+    };
 
     return NextResponse.json({
       // New modular plan details
-      plan: currentPlan ? {
-        id: currentPlan.id,
-        code: currentPlan.code,
-        name: currentPlan.name,
-        description: currentPlan.description,
-        basePriceUsd: currentPlan.basePriceUsd,
-        platformFeePercent: currentPlan.platformFeePercent,
-        printCommissionPercent: currentPlan.printCommissionPercent,
-        limits: currentPlan.limits,
-        capabilities: currentPlan.capabilities,
-        displayFeatures: currentPlan.features,
+      plan: resolvedPlan ? {
+        id: resolvedPlan.id,
+        code: resolvedPlan.code,
+        name: resolvedPlan.name,
+        description: resolvedPlan.description,
+        basePriceUsd: resolvedPlan.basePriceUsd,
+        platformFeePercent: resolvedPlan.platformFeePercent,
+        printCommissionPercent: resolvedPlan.printCommissionPercent,
+        limits: resolvedPlan.limits,
+        capabilities: resolvedPlan.capabilities,
+        displayFeatures: resolvedPlan.features,
       } : null,
       
       // Legacy subscription format for backward compatibility
       subscription: subscription ? {
+        planId: resolvedPlanId,
         planCode: resolvedPlanCode,
         status: subscription.status,
         currentPeriodEnd: subscription.current_period_end,
       } : {
+        planId: resolvedPlanId,
         planCode: resolvedPlanCode,
         status: 'active',
         currentPeriodEnd: null,

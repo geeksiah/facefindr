@@ -4,6 +4,14 @@ import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
 import { bumpRuntimeConfigVersion } from '@/lib/runtime-config-version';
 import { supabaseAdmin } from '@/lib/supabase';
 
+function normalizePlanTypeInput(planType: unknown): 'creator' | 'payg' | null {
+  const normalized = String(planType || '').trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === 'creator' || normalized === 'photographer') return 'creator';
+  if (normalized === 'payg') return 'payg';
+  return null;
+}
+
 // PUT - Update a plan
 export async function PUT(
   request: NextRequest,
@@ -28,8 +36,8 @@ export async function PUT(
       print_commission_percent, print_commission_fixed, print_commission_type
     } = body;
 
-    const allowedPlanTypes = new Set(['photographer', 'payg']);
-    if (plan_type !== undefined && !allowedPlanTypes.has(plan_type)) {
+    const normalizedPlanType = normalizePlanTypeInput(plan_type);
+    if (plan_type !== undefined && !normalizedPlanType) {
       return NextResponse.json(
         { error: 'Invalid plan type. Drop-In pricing is configured via credit settings.' },
         { status: 400 }
@@ -37,12 +45,12 @@ export async function PUT(
     }
 
     // Check if code is taken by another plan of the same type
-    if (code && plan_type) {
+    if (code && normalizedPlanType) {
       const { data: existing } = await supabaseAdmin
         .from('subscription_plans')
         .select('id')
         .eq('code', code)
-        .eq('plan_type', plan_type)
+        .eq('plan_type', normalizedPlanType)
         .neq('id', id)
         .single();
 
@@ -70,8 +78,8 @@ export async function PUT(
     };
 
     // Include plan_type if provided
-    if (plan_type) {
-      updateData.plan_type = plan_type;
+    if (normalizedPlanType) {
+      updateData.plan_type = normalizedPlanType;
     }
 
     const { data, error } = await supabaseAdmin
@@ -112,7 +120,7 @@ export async function DELETE(
 
     const { data: plan, error: planError } = await supabaseAdmin
       .from('subscription_plans')
-      .select('code')
+      .select('code, plan_type')
       .eq('id', id)
       .maybeSingle();
 
@@ -121,18 +129,21 @@ export async function DELETE(
       return NextResponse.json({ error: 'Plan not found' }, { status: 404 });
     }
 
-    // Check if any active creator subscriptions use this plan code
-    const { count } = await supabaseAdmin
-      .from('subscriptions')
-      .select('id', { count: 'exact', head: true })
-      .eq('plan_code', plan.code)
-      .in('status', ['active', 'trialing', 'past_due']);
+    // Check active creator subscriptions only for creator plans.
+    const normalizedPlanType = normalizePlanTypeInput(plan.plan_type);
+    if (normalizedPlanType === 'creator') {
+      const { count } = await supabaseAdmin
+        .from('subscriptions')
+        .select('id', { count: 'exact', head: true })
+        .eq('plan_code', plan.code)
+        .in('status', ['active', 'trialing', 'past_due']);
 
-    if (count && count > 0) {
-      return NextResponse.json(
-        { error: 'Cannot delete plan with active subscriptions' },
-        { status: 400 }
-      );
+      if (count && count > 0) {
+        return NextResponse.json(
+          { error: 'Cannot delete plan with active subscriptions' },
+          { status: 400 }
+        );
+      }
     }
 
     const { error } = await supabaseAdmin

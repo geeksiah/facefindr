@@ -60,10 +60,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Fail-closed to admin-managed plan configuration
-    const plan = await getPlanByCode(planCode, 'photographer');
-    if (!plan || !plan.isActive) {
+    const plan = await getPlanByCode(planCode, 'creator');
+    if (!plan || !plan.isActive || plan.planType !== 'creator') {
       return NextResponse.json(
-        { error: 'Plan is not available', failClosed: true },
+        { error: 'Plan is not available for creator subscriptions', failClosed: true },
         { status: 503 }
       );
     }

@@ -2,7 +2,7 @@
  * Subscription & Plans Service
  * 
  * Unified service for fetching plans and features from the database.
- * Supports creator, drop-in, and PAYG plans.
+ * Supports creator and drop-in plans (PAYG is excluded from creator subscription governance).
  * Falls back to defaults if database is unavailable.
  */
 
@@ -99,7 +99,16 @@ const PLANS_CACHE_TTL = 60 * 1000; // 1 minute
 // ============================================
 
 function isCreatorVisiblePlan(plan: FullPlanDetails): boolean {
-  return plan.planType === 'creator' || plan.planType === 'payg';
+  return plan.planType === 'creator';
+}
+
+function normalizePlanTypeFromRow(planType: unknown): 'creator' | 'drop_in' | 'payg' | null {
+  const normalized = String(planType || '').trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === 'creator' || normalized === 'photographer') return 'creator';
+  if (normalized === 'drop_in') return 'drop_in';
+  if (normalized === 'payg') return 'payg';
+  return null;
 }
 
 function normalizeRequestedPlanType(planType?: PlanType): 'creator' | 'drop_in' | 'payg' | null {
@@ -137,11 +146,11 @@ export async function getAllPlans(planType?: PlanType): Promise<FullPlanDetails[
       .eq('is_active', true)
       .order('base_price_usd', { ascending: true });
     
-    // Apply DB-level filters only for stable enum values.
-    // For creator plans, fetch active rows and filter in app code so this works
-    // across environments that store either "creator" or "photographer".
+    // Apply DB-level filters for normalized plan type requests.
     const normalizedType = normalizeRequestedPlanType(planType);
-    if (normalizedType === 'payg') {
+    if (normalizedType === 'creator') {
+      query = query.in('plan_type', ['creator', 'photographer']);
+    } else if (normalizedType === 'payg') {
       query = query.eq('plan_type', 'payg');
     } else if (normalizedType === 'drop_in') {
       query = query.eq('plan_type', 'drop_in');
@@ -200,10 +209,7 @@ export async function getAllPlans(planType?: PlanType): Promise<FullPlanDetails[
         code: plan.code,
         name: plan.name,
         description: plan.description || '',
-        planType:
-          (plan.plan_type === 'photographer'
-            ? 'creator'
-            : (plan.plan_type as 'creator' | 'drop_in' | 'payg')) || 'creator',
+        planType: normalizePlanTypeFromRow(plan.plan_type) || 'creator',
         basePriceUsd: plan.base_price_usd || 0,
         prices: plan.prices || {},
         isActive: plan.is_active,
@@ -238,15 +244,25 @@ export async function getAllPlans(planType?: PlanType): Promise<FullPlanDetails[
 // GET SINGLE PLAN
 // ============================================
 
-export async function getPlanById(planId: string): Promise<FullPlanDetails | null> {
+export async function getPlanById(planId: string, planType?: PlanType): Promise<FullPlanDetails | null> {
   // Check cache first
-  if (plansCache.has(planId)) {
-    return plansCache.get(planId) || null;
+  const cached = plansCache.get(planId) || null;
+  const normalizedType = normalizeRequestedPlanType(planType);
+  if (cached) {
+    if (!normalizedType) return cached;
+    if (normalizedType === 'creator' && cached.planType === 'creator') return cached;
+    if (normalizedType !== 'creator' && cached.planType === normalizedType) return cached;
+    return null;
   }
 
   // Fetch all plans to populate cache
   const plans = await getAllPlans();
-  return plans.find(p => p.id === planId) || null;
+  const found = plans.find((p) => p.id === planId) || null;
+  if (!found || !normalizedType) return found;
+  if (normalizedType === 'creator') {
+    return found.planType === 'creator' ? found : null;
+  }
+  return found.planType === normalizedType ? found : null;
 }
 
 export async function getPlanByCode(code: string, planType: PlanType = 'creator'): Promise<FullPlanDetails | null> {
@@ -320,12 +336,15 @@ export async function getUserPlan(userId: string, userType: 'creator' | 'photogr
     }
 
     if (isCreator && subscription.plan_id) {
-      const byId = await getPlanById(subscription.plan_id);
+      const byId = await getPlanById(subscription.plan_id, 'creator');
       if (byId) return byId;
     }
 
     if (subscription.plan_code) {
-      const byCode = await getPlanByCode(subscription.plan_code, planType);
+      const byCode = await getPlanByCode(
+        subscription.plan_code,
+        isCreator ? 'creator' : planType
+      );
       if (byCode) return byCode;
     }
 

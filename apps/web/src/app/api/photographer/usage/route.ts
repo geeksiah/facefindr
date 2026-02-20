@@ -34,6 +34,7 @@ export async function GET() {
     const creatorId = creatorProfile.id as string;
     const currentPlan = await getUserPlan(creatorId, 'photographer');
     const freePlan = await getPlanByCode('free', 'creator');
+    const resolvedPlanId = currentPlan?.id || freePlan?.id || null;
     const resolvedPlanCode = currentPlan?.code || freePlan?.code || 'free';
     const resolvedPlanLimits = {
       maxEvents: currentPlan?.limits.maxActiveEvents ?? freePlan?.limits.maxActiveEvents ?? 1,
@@ -65,6 +66,7 @@ export async function GET() {
           storage: 0,
           team: 0,
         },
+        planId: resolvedPlanId,
         planCode: resolvedPlanCode,
         platformFee: resolvedPlatformFee,
       });
@@ -123,6 +125,7 @@ export async function GET() {
           message: teamCheck.message,
         },
       },
+      planId: resolvedPlanId,
       planCode: resolvedPlanCode,
       platformFee: resolvedPlatformFee,
     });

@@ -4,6 +4,14 @@ import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
 import { bumpRuntimeConfigVersion } from '@/lib/runtime-config-version';
 import { supabaseAdmin } from '@/lib/supabase';
 
+function normalizePlanTypeInput(planType: unknown): 'creator' | 'payg' | null {
+  const normalized = String(planType || '').trim().toLowerCase();
+  if (!normalized) return 'creator';
+  if (normalized === 'creator' || normalized === 'photographer') return 'creator';
+  if (normalized === 'payg') return 'payg';
+  return null;
+}
+
 // GET - List all plans
 export async function GET() {
   try {
@@ -19,7 +27,12 @@ export async function GET() {
 
     if (error) throw error;
 
-    const plans = (data || []).filter((plan: any) => plan.plan_type !== 'drop_in');
+    const plans = (data || [])
+      .filter((plan: any) => plan.plan_type !== 'drop_in')
+      .map((plan: any) => ({
+        ...plan,
+        plan_type: plan.plan_type === 'photographer' ? 'creator' : plan.plan_type,
+      }));
     return NextResponse.json({ plans });
   } catch (error) {
     console.error('Get plans error:', error);
@@ -47,9 +60,8 @@ export async function POST(request: NextRequest) {
       print_commission_percent, print_commission_fixed, print_commission_type
     } = body;
 
-    const allowedPlanTypes = new Set(['photographer', 'payg']);
-    const planType = typeof plan_type === 'string' ? plan_type : 'photographer';
-    if (!allowedPlanTypes.has(planType)) {
+    const planType = normalizePlanTypeInput(plan_type);
+    if (!planType) {
       return NextResponse.json(
         { error: 'Invalid plan type. Drop-In pricing is configured via credit settings.' },
         { status: 400 }

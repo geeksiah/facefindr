@@ -36,7 +36,7 @@ interface Plan {
   print_commission_percent: number;
   print_commission_fixed: number;
   print_commission_type: 'percent' | 'fixed' | 'both';
-  plan_type?: 'photographer' | 'payg';
+  plan_type?: 'creator' | 'photographer' | 'payg';
   created_at: string;
 }
 
@@ -86,7 +86,7 @@ function FeatureManagementUI({ plans }: { plans: Plan[] }) {
     feature_type: 'boolean' as 'boolean' | 'numeric' | 'limit' | 'text',
     default_value: '',
     category: 'general',
-    applicable_to: ['photographer', 'payg'] as string[],
+    applicable_to: ['creator', 'payg'] as string[],
   });
   const [isCreatingFeature, setIsCreatingFeature] = useState(false);
 
@@ -189,7 +189,7 @@ function FeatureManagementUI({ plans }: { plans: Plan[] }) {
           feature_type: 'boolean',
           default_value: '',
           category: 'general',
-          applicable_to: ['photographer', 'payg'],
+          applicable_to: ['creator', 'payg'],
         });
         if (selectedPlanId) {
           loadPlanFeatures(selectedPlanId);
@@ -273,7 +273,10 @@ function FeatureManagementUI({ plans }: { plans: Plan[] }) {
   }
 
   const selectedPlan = plans.find(p => p.id === selectedPlanId);
-  const planType = selectedPlan?.plan_type || 'photographer';
+  const planType =
+    selectedPlan?.plan_type === 'photographer'
+      ? 'creator'
+      : selectedPlan?.plan_type || 'creator';
 
   // Group features by category
   const featuresByCategory = availableFeatures.reduce((acc, feature) => {
@@ -633,11 +636,11 @@ function FeatureManagementUI({ plans }: { plans: Plan[] }) {
                   <label className="flex items-center gap-2">
                     <input
                       type="checkbox"
-                      checked={newFeature.applicable_to.includes('photographer')}
+                      checked={newFeature.applicable_to.includes('creator')}
                       onChange={(e) => {
                         const newApplicable = e.target.checked
-                          ? [...newFeature.applicable_to, 'photographer']
-                          : newFeature.applicable_to.filter(t => t !== 'photographer');
+                          ? [...newFeature.applicable_to, 'creator']
+                          : newFeature.applicable_to.filter(t => t !== 'creator');
                         setNewFeature({ ...newFeature, applicable_to: newApplicable });
                       }}
                       className="rounded"
@@ -1134,7 +1137,7 @@ export default function PricingPage() {
     is_popular: false,
     use_auto_conversion: true,
     manual_prices: {} as Record<string, string>,
-    plan_type: 'photographer' as 'photographer' | 'payg',
+    plan_type: 'creator' as 'creator' | 'payg',
     platform_fee_percent: 20.00,
     platform_fee_fixed: 0,
     platform_fee_type: 'percent' as 'percent' | 'fixed' | 'both',
@@ -1172,7 +1175,11 @@ export default function PricingPage() {
       const res = await fetch('/api/admin/pricing/plans');
       if (res.ok) {
         const data = await res.json();
-        setPlans(data.plans || []);
+        const normalizedPlans = (data.plans || []).map((plan: Plan) => ({
+          ...plan,
+          plan_type: plan.plan_type === 'photographer' ? 'creator' : plan.plan_type,
+        }));
+        setPlans(normalizedPlans);
       }
     } catch (err) {
       console.error('Failed to load plans:', err);
@@ -1430,7 +1437,7 @@ export default function PricingPage() {
       is_popular: false,
       use_auto_conversion: true,
       manual_prices: {},
-      plan_type: 'photographer',
+      plan_type: 'creator',
       platform_fee_percent: 20.00,
       platform_fee_fixed: 0,
       platform_fee_type: 'percent',
@@ -1478,7 +1485,7 @@ export default function PricingPage() {
       manual_prices: plan.prices ? Object.fromEntries(
         Object.entries(plan.prices).map(([k, v]) => [k, (v / 100).toString()])
       ) : {},
-      plan_type: plan.plan_type || 'photographer', // Add plan_type support
+      plan_type: plan.plan_type === 'photographer' ? 'creator' : plan.plan_type || 'creator',
       platform_fee_percent: plan.platform_fee_percent ?? 0,
       platform_fee_fixed: (plan.platform_fee_fixed || 0) / 100,
       platform_fee_type: plan.platform_fee_type || 'percent',
@@ -2036,10 +2043,10 @@ export default function PricingPage() {
                   <label className="block text-sm font-medium text-foreground mb-2">Plan Type</label>
                   <select
                     value={formData.plan_type}
-                    onChange={(e) => setFormData({ ...formData, plan_type: e.target.value as 'photographer' | 'payg' })}
+                    onChange={(e) => setFormData({ ...formData, plan_type: e.target.value as 'creator' | 'payg' })}
                     className="w-full px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
                   >
-                    <option value="photographer">Creator</option>
+                    <option value="creator">Creator</option>
                     <option value="payg">Pay As You Go</option>
                   </select>
                 </div>
