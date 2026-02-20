@@ -11,6 +11,7 @@ import {
   Smartphone,
   Receipt,
   Shield,
+  X,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -65,6 +66,7 @@ export default function BillingPage() {
   const [dropInCredits, setDropInCredits] = useState(0);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [showAddPayment, setShowAddPayment] = useState(false);
+  const [connectingMethod, setConnectingMethod] = useState<string | null>(null);
   const [dropInPacks, setDropInPacks] = useState<DropInPlan[]>([]);
   const [unitPriceCents, setUnitPriceCents] = useState<number | null>(null);
   const [unitPriceCurrency, setUnitPriceCurrency] = useState('USD');
@@ -194,6 +196,22 @@ export default function BillingPage() {
     if (!popup) {
       window.location.href = checkoutUrl;
       return;
+    }
+  };
+
+  const startPaymentMethodConnect = async (method: 'card' | 'paypal') => {
+    try {
+      setConnectingMethod(method);
+      const returnTo = encodeURIComponent('/gallery/billing');
+      const href =
+        method === 'card'
+          ? `/api/payment-methods/setup-card?returnTo=${returnTo}`
+          : `/api/payment-methods/connect-paypal?returnTo=${returnTo}`;
+      window.location.href = href;
+    } catch (error: any) {
+      toast.error('Connection failed', error?.message || 'Unable to start setup');
+    } finally {
+      setConnectingMethod(null);
     }
   };
 
@@ -489,6 +507,53 @@ export default function BillingPage() {
           </div>
         )}
       </div>
+
+      {showAddPayment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-6">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold text-foreground">Add Payment Method (Optional)</h3>
+                <p className="text-sm text-secondary mt-1">
+                  You can pay without saving a method. Saving is only for faster future checkout.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAddPayment(false)}
+                className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <Button
+                className="w-full justify-start"
+                variant="outline"
+                onClick={() => void startPaymentMethodConnect('card')}
+                disabled={connectingMethod !== null}
+              >
+                <CreditCard className="h-4 w-4 mr-2" />
+                {connectingMethod === 'card' ? 'Connecting card...' : 'Save Card (Stripe)'}
+              </Button>
+              <Button
+                className="w-full justify-start"
+                variant="outline"
+                onClick={() => void startPaymentMethodConnect('paypal')}
+                disabled={connectingMethod !== null}
+              >
+                <Wallet className="h-4 w-4 mr-2" />
+                {connectingMethod === 'paypal' ? 'Connecting PayPal...' : 'Save PayPal'}
+              </Button>
+            </div>
+
+            <div className="mt-4 rounded-lg border border-border bg-muted/30 p-3 text-xs text-secondary">
+              Tip: For one-time credit purchases, just click <strong>Buy Now</strong>. You do not need to add a saved method first.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Recent Transactions */}
       <div>

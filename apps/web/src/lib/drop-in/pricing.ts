@@ -40,32 +40,40 @@ function parseNumericValue(value: unknown): number | null {
 }
 
 function parseCurrencyValue(value: unknown): string | null {
-  if (typeof value !== 'string') {
-    return null;
+  if (typeof value === 'object' && value !== null) {
+    const objectValue = value as Record<string, unknown>;
+    if ('code' in objectValue) return parseCurrencyValue(objectValue.code);
+    if ('currency' in objectValue) return parseCurrencyValue(objectValue.currency);
+    if ('value' in objectValue) return parseCurrencyValue(objectValue.value);
   }
+  if (typeof value !== 'string') return null;
   const trimmed = value.trim().toUpperCase();
   return trimmed.length > 0 ? trimmed : null;
 }
 
 async function loadLegacyPricingSettings(supabase: ReturnType<typeof createServiceClient>) {
   const keys = [...LEGACY_KEYS, ...CREDIT_KEYS];
-  const { data, error } = await supabase
+  let rows: Array<{ setting_key: string; value?: unknown; setting_value?: unknown }> = [];
+
+  const valueFirst = await supabase
     .from('platform_settings')
-    .select('setting_key, setting_value, value')
+    .select('setting_key, value')
     .in('setting_key', keys);
 
-  if (error) {
-    return {
-      creditUnitCents: null,
-      creditCurrencyCode: null,
-      uploadFeeCents: null,
-      giftFeeCents: null,
-      currencyCode: null,
-    };
+  if (!valueFirst.error) {
+    rows = (valueFirst.data || []) as Array<{ setting_key: string; value?: unknown }>;
+  } else {
+    const legacyValue = await supabase
+      .from('platform_settings')
+      .select('setting_key, setting_value')
+      .in('setting_key', keys);
+    if (!legacyValue.error) {
+      rows = (legacyValue.data || []) as Array<{ setting_key: string; setting_value?: unknown }>;
+    }
   }
 
   const byKey = new Map<string, unknown>();
-  for (const row of data || []) {
+  for (const row of rows) {
     byKey.set(row.setting_key, row.setting_value ?? row.value ?? null);
   }
 

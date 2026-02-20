@@ -9,6 +9,8 @@ import {
   markWebhookFailed,
   markWebhookProcessed,
 } from '@/lib/payments/webhook-ledger';
+import { addCard, getUserPaymentMethods } from '@/lib/payments/payment-methods';
+import { stripe } from '@/lib/payments/stripe';
 import { creditWalletFromTransaction } from '@/lib/payments/wallet-balance';
 import { constructWebhookEvent } from '@/lib/payments/stripe';
 import { createServiceClient } from '@/lib/supabase/server';
@@ -134,6 +136,32 @@ async function handleCheckoutComplete(
   supabase: ReturnType<typeof createServiceClient>,
   session: Stripe.Checkout.Session
 ) {
+  if (session.mode === 'setup') {
+    const userId = session.metadata?.user_id;
+    const setupIntentId =
+      typeof session.setup_intent === 'string' ? session.setup_intent : session.setup_intent?.id;
+    if (userId && setupIntentId && stripe) {
+      try {
+        const setupIntent = await stripe.setupIntents.retrieve(setupIntentId);
+        const paymentMethodId =
+          typeof setupIntent.payment_method === 'string'
+            ? setupIntent.payment_method
+            : setupIntent.payment_method?.id;
+
+        if (paymentMethodId) {
+          const existingMethods = await getUserPaymentMethods(userId);
+          await addCard(userId, {
+            stripePaymentMethodId: paymentMethodId,
+            setAsDefault: existingMethods.length === 0,
+          });
+        }
+      } catch (error) {
+        console.error('Failed to persist setup-mode card payment method:', error);
+      }
+    }
+    return;
+  }
+
   const { payment_intent, metadata } = session;
   if (metadata?.type === 'drop_in_upload') {
     await handleDropInPaymentSuccess(supabase, {

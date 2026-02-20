@@ -14,8 +14,16 @@ const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID;
 const PAYPAL_CLIENT_SECRET = process.env.PAYPAL_CLIENT_SECRET;
 const PAYPAL_MODE = process.env.PAYPAL_MODE || 'sandbox';
 
+function sanitizeReturnPath(raw: string | undefined): string {
+  if (!raw) return '/dashboard/billing';
+  if (!raw.startsWith('/')) return '/dashboard/billing';
+  if (raw.startsWith('//')) return '/dashboard/billing';
+  return raw;
+}
+
 export async function GET(request: NextRequest) {
   try {
+    const returnPath = sanitizeReturnPath(request.cookies.get('payment_return_to')?.value);
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
@@ -31,29 +39,29 @@ export async function GET(request: NextRequest) {
     // Check for error from PayPal
     if (error) {
       console.error('PayPal OAuth error:', error);
-      return NextResponse.redirect(new URL('/dashboard/billing?error=paypal_denied', request.url));
+      return NextResponse.redirect(new URL(`${returnPath}?error=paypal_denied`, request.url));
     }
 
     if (!code || !state) {
-      return NextResponse.redirect(new URL('/dashboard/billing?error=invalid_callback', request.url));
+      return NextResponse.redirect(new URL(`${returnPath}?error=invalid_callback`, request.url));
     }
 
     // Verify state
     const savedState = request.cookies.get('paypal_oauth_state')?.value;
     if (!savedState || savedState !== state) {
-      return NextResponse.redirect(new URL('/dashboard/billing?error=state_mismatch', request.url));
+      return NextResponse.redirect(new URL(`${returnPath}?error=state_mismatch`, request.url));
     }
 
     // Exchange code for tokens
     const tokens = await exchangeCodeForTokens(code, request);
     if (!tokens) {
-      return NextResponse.redirect(new URL('/dashboard/billing?error=token_exchange_failed', request.url));
+      return NextResponse.redirect(new URL(`${returnPath}?error=token_exchange_failed`, request.url));
     }
 
     // Get user info from PayPal
     const userInfo = await getPayPalUserInfo(tokens.access_token);
     if (!userInfo) {
-      return NextResponse.redirect(new URL('/dashboard/billing?error=userinfo_failed', request.url));
+      return NextResponse.redirect(new URL(`${returnPath}?error=userinfo_failed`, request.url));
     }
 
     // Save to database
@@ -68,13 +76,18 @@ export async function GET(request: NextRequest) {
     });
 
     // Clear the state cookie
-    const response = NextResponse.redirect(new URL('/dashboard/billing?paypal=connected', request.url));
+    const response = NextResponse.redirect(new URL(`${returnPath}?paypal=connected`, request.url));
     response.cookies.delete('paypal_oauth_state');
+    response.cookies.delete('payment_return_to');
     return response;
 
   } catch (error) {
     console.error('PayPal callback error:', error);
-    return NextResponse.redirect(new URL('/dashboard/billing?error=callback_failed', request.url));
+    const returnPath = sanitizeReturnPath(request.cookies.get('payment_return_to')?.value);
+    const response = NextResponse.redirect(new URL(`${returnPath}?error=callback_failed`, request.url));
+    response.cookies.delete('paypal_oauth_state');
+    response.cookies.delete('payment_return_to');
+    return response;
   }
 }
 

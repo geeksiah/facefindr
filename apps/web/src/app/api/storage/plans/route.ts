@@ -28,7 +28,11 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ plans });
+    const payload = (plans || []).map((plan: any) => ({
+      ...plan,
+      photo_limit: -1,
+    }));
+    return NextResponse.json({ plans: payload });
   } catch (error) {
     console.error('Storage plans error:', error);
     return NextResponse.json(

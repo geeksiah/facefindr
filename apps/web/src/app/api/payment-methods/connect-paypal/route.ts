@@ -13,8 +13,16 @@ import { createClient } from '@/lib/supabase/server';
 const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID;
 const PAYPAL_MODE = process.env.PAYPAL_MODE || 'sandbox';
 
+function resolveReturnPath(request: NextRequest): string {
+  const candidate = request.nextUrl.searchParams.get('returnTo') || '/dashboard/billing';
+  if (!candidate.startsWith('/')) return '/dashboard/billing';
+  if (candidate.startsWith('//')) return '/dashboard/billing';
+  return candidate;
+}
+
 export async function GET(request: NextRequest) {
   try {
+    const returnPath = resolveReturnPath(request);
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
@@ -24,7 +32,7 @@ export async function GET(request: NextRequest) {
 
     if (!PAYPAL_CLIENT_ID) {
       console.error('PayPal not configured');
-      return NextResponse.redirect(new URL('/dashboard/billing?error=paypal_not_configured', request.url));
+      return NextResponse.redirect(new URL(`${returnPath}?error=paypal_not_configured`, request.url));
     }
 
     // Generate state for CSRF protection
@@ -41,12 +49,19 @@ export async function GET(request: NextRequest) {
       sameSite: 'lax',
       maxAge: 600, // 10 minutes
     });
+    response.cookies.set('payment_return_to', returnPath, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 600,
+    });
 
     return response;
 
   } catch (error) {
     console.error('PayPal connect error:', error);
-    return NextResponse.redirect(new URL('/dashboard/billing?error=paypal_error', request.url));
+    const returnPath = resolveReturnPath(request);
+    return NextResponse.redirect(new URL(`${returnPath}?error=paypal_error`, request.url));
   }
 }
 

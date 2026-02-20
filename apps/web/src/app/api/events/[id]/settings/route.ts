@@ -100,6 +100,21 @@ async function resolveEventIdByIdentifier(supabase: any, identifier: string) {
   return identifier;
 }
 
+function getEmbeddedEventPricing(event: any) {
+  const embedded = event?.event_pricing;
+  if (Array.isArray(embedded)) {
+    if (embedded.length === 0) return null;
+    if (embedded.length === 1) return embedded[0];
+    return [...embedded].sort((a: any, b: any) => {
+      const aTs = Date.parse(String(a?.updated_at || a?.created_at || ''));
+      const bTs = Date.parse(String(b?.updated_at || b?.created_at || ''));
+      return (Number.isFinite(bTs) ? bTs : 0) - (Number.isFinite(aTs) ? aTs : 0);
+    })[0];
+  }
+  if (embedded && typeof embedded === 'object') return embedded;
+  return null;
+}
+
 // GET - Get event settings
 export async function GET(
   request: NextRequest,
@@ -136,7 +151,7 @@ export async function GET(
     }
 
     // Merge pricing data
-    const pricing = event.event_pricing?.[0];
+    const pricing = getEmbeddedEventPricing(event);
     const eventWithPricing = {
       ...event,
       pricing_type: pricing?.pricing_type || (pricing?.is_free ? 'free' : 'per_photo'),
@@ -306,7 +321,16 @@ export async function PUT(
     if ((canEditEvent || canManagePricing) && body.currency_code !== undefined) updates.currency_code = body.currency_code;
 
     // Update or create event_pricing record
-    if ((body.pricing_type !== undefined || body.price_per_photo !== undefined || body.bulk_tiers !== undefined || body.currency_code !== undefined) && canManagePricing) {
+    if (
+      (
+        body.pricing_type !== undefined ||
+        body.price_per_photo !== undefined ||
+        body.bulk_tiers !== undefined ||
+        body.unlock_all_price !== undefined ||
+        body.currency_code !== undefined
+      ) &&
+      canManagePricing
+    ) {
       pricingTouched = true;
 
       const currentCurrency = String(event.currency_code || event.currency || 'USD').toUpperCase();
@@ -504,7 +528,7 @@ export async function PUT(
       .eq('id', eventId)
       .maybeSingle();
 
-    const refreshedPricing = (refreshedEvent as any)?.event_pricing?.[0];
+    const refreshedPricing = getEmbeddedEventPricing(refreshedEvent);
     const eventWithPricing = refreshedEvent
       ? {
           ...refreshedEvent,

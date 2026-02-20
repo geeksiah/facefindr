@@ -1,57 +1,49 @@
 /**
  * Currency Utilities
- * 
- * Provides currency symbol and formatting functions
+ *
+ * Provides currency symbol and formatting functions.
  */
 
 /**
  * Get currency symbol for a currency code
  */
 export function getCurrencySymbol(currencyCode: string): string {
-  const symbols: Record<string, string> = {
-    USD: '$',
-    EUR: '€',
-    GBP: '£',
-    CAD: 'C$',
-    AUD: 'A$',
-    GHS: '₵',
-    NGN: '₦',
-    KES: 'KSh',
-    ZAR: 'R',
-    JPY: '¥',
-    CNY: '¥',
-    INR: '₹',
-  };
+  const normalized = String(currencyCode || '').toUpperCase();
+  if (!normalized) return '';
 
-  return symbols[currencyCode.toUpperCase()] || currencyCode;
+  try {
+    const parts = new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: normalized,
+      currencyDisplay: 'symbol',
+    }).formatToParts(1);
+    const symbol = parts.find((part) => part.type === 'currency')?.value;
+    return symbol || normalized;
+  } catch {
+    return normalized;
+  }
 }
 
 /**
  * Get currency name for a currency code
  */
 export function getCurrencyName(currencyCode: string): string {
-  const names: Record<string, string> = {
-    USD: 'US Dollar',
-    EUR: 'Euro',
-    GBP: 'British Pound',
-    CAD: 'Canadian Dollar',
-    AUD: 'Australian Dollar',
-    GHS: 'Ghanaian Cedi',
-    NGN: 'Nigerian Naira',
-    KES: 'Kenyan Shilling',
-    ZAR: 'South African Rand',
-    JPY: 'Japanese Yen',
-    CNY: 'Chinese Yuan',
-    INR: 'Indian Rupee',
-  };
+  const normalized = String(currencyCode || '').toUpperCase();
+  if (!normalized) return '';
 
-  return names[currencyCode.toUpperCase()] || currencyCode;
+  try {
+    const display = new Intl.DisplayNames(['en'], { type: 'currency' });
+    return display.of(normalized) || normalized;
+  } catch {
+    return normalized;
+  }
 }
 
 /**
  * Format currency code with symbol for display
  */
 export function formatCurrencyCode(currencyCode: string): string {
-  const symbol = getCurrencySymbol(currencyCode);
-  return `${currencyCode} (${symbol})`;
+  const normalized = String(currencyCode || '').toUpperCase();
+  const symbol = getCurrencySymbol(normalized);
+  return `${normalized} (${symbol})`;
 }

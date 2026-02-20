@@ -55,9 +55,7 @@ interface StorageUsage {
   totalPhotos: number;
   totalSizeBytes: number;
   storageLimitBytes: number;
-  photoLimit: number;
   usagePercent: number;
-  photosPercent: number;
 }
 
 interface StoragePlan {
@@ -67,8 +65,8 @@ interface StoragePlan {
   description: string;
   price_monthly: number;
   price_yearly: number;
+  currency: string;
   storage_limit_mb: number;
-  photo_limit: number;
   features: string[];
   is_popular: boolean;
 }
@@ -255,7 +253,13 @@ export default function VaultScreen() {
                 <View style={styles.planHeader}>
                   <Text style={styles.planName}>{plan.name}</Text>
                   <View style={styles.planPricing}>
-                    <Text style={styles.planPrice}>${plan.price_monthly}</Text>
+                    <Text style={styles.planPrice}>
+                      {new Intl.NumberFormat('en-US', {
+                        style: 'currency',
+                        currency: String(plan.currency || 'USD').toUpperCase(),
+                        maximumFractionDigits: 2,
+                      }).format(Number(plan.price_monthly || 0))}
+                    </Text>
                     <Text style={styles.planPeriod}>/mo</Text>
                   </View>
                 </View>
@@ -264,12 +268,6 @@ export default function VaultScreen() {
                     <HardDrive size={14} color={colors.secondary} />
                     <Text style={styles.planLimitText}>
                       {formatStorage(plan.storage_limit_mb)}
-                    </Text>
-                  </View>
-                  <View style={styles.planLimit}>
-                    <ImageIcon size={14} color={colors.secondary} />
-                    <Text style={styles.planLimitText}>
-                      {plan.photo_limit === -1 ? 'Unlimited' : `${plan.photo_limit} photos`}
                     </Text>
                   </View>
                 </View>
@@ -365,14 +363,12 @@ export default function VaultScreen() {
               <View style={styles.usageStats}>
                 <View style={styles.usageStat}>
                   <Text style={styles.usageValue}>{usage.totalPhotos}</Text>
-                  <Text style={styles.usageLabel}>
-                    / {usage.photoLimit === -1 ? '∞' : usage.photoLimit} photos
-                  </Text>
+                  <Text style={styles.usageLabel}>photos saved</Text>
                 </View>
                 <View style={styles.usageStat}>
                   <Text style={styles.usageValue}>{formatBytes(usage.totalSizeBytes)}</Text>
                   <Text style={styles.usageLabel}>
-                    / {usage.storageLimitBytes === -1 ? '∞' : formatBytes(usage.storageLimitBytes)}
+                    / {usage.storageLimitBytes === -1 ? 'Unlimited' : formatBytes(usage.storageLimitBytes)}
                   </Text>
                 </View>
               </View>
@@ -806,3 +802,4 @@ const styles = StyleSheet.create({
     color: colors.secondary,
   },
 });
+

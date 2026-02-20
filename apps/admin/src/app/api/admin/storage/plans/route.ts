@@ -36,6 +36,7 @@ export async function GET() {
 
     const payload = (plans || []).map((plan: any) => ({
       ...plan,
+      photo_limit: -1,
       activeSubscriptions: counts.get(plan.id) || 0,
     }));
 
@@ -64,7 +65,6 @@ export async function POST(request: NextRequest) {
       slug,
       description,
       storage_limit_mb,
-      photo_limit,
       price_monthly,
       price_yearly,
       currency,
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
         slug,
         description: description || null,
         storage_limit_mb: storage_limit_mb ?? 500,
-        photo_limit: photo_limit ?? 50,
+        photo_limit: -1,
         price_monthly: price_monthly ?? 0,
         price_yearly: price_yearly ?? 0,
         currency: currency || 'USD',
@@ -142,7 +142,6 @@ export async function PUT(request: NextRequest) {
     if (updates.name !== undefined) updateData.name = updates.name;
     if (updates.description !== undefined) updateData.description = updates.description;
     if (updates.storage_limit_mb !== undefined) updateData.storage_limit_mb = updates.storage_limit_mb;
-    if (updates.photo_limit !== undefined) updateData.photo_limit = updates.photo_limit;
     if (updates.price_monthly !== undefined) updateData.price_monthly = updates.price_monthly;
     if (updates.price_yearly !== undefined) updateData.price_yearly = updates.price_yearly;
     if (updates.currency !== undefined) updateData.currency = updates.currency;
@@ -150,6 +149,7 @@ export async function PUT(request: NextRequest) {
     if (updates.is_popular !== undefined) updateData.is_popular = updates.is_popular;
     if (updates.is_active !== undefined) updateData.is_active = updates.is_active;
     if (updates.sort_order !== undefined) updateData.sort_order = updates.sort_order;
+    updateData.photo_limit = -1;
 
     const { data: plan, error } = await supabaseAdmin
       .from('storage_plans')

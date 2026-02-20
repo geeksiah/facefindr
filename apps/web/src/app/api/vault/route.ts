@@ -85,7 +85,7 @@ export async function GET(request: NextRequest) {
         status,
         billing_cycle,
         current_period_end,
-        storage_plans(name, slug, storage_limit_mb, photo_limit, features)
+        storage_plans(name, slug, storage_limit_mb, features)
       `)
       .eq('user_id', user.id)
       .eq('status', 'active')
@@ -130,13 +130,11 @@ export async function GET(request: NextRequest) {
         totalPhotos: usage.total_photos,
         totalSizeBytes: usage.total_size_bytes,
         storageLimitBytes: usage.storage_limit_bytes,
-        photoLimit: usage.photo_limit,
+        photoLimit: -1,
         usagePercent: usage.storage_limit_bytes > 0 
           ? Math.round((usage.total_size_bytes / usage.storage_limit_bytes) * 100)
           : 0,
-        photosPercent: usage.photo_limit > 0
-          ? Math.round((usage.total_photos / usage.photo_limit) * 100)
-          : 0,
+        photosPercent: 0,
       } : null,
       subscription: subscription ? {
         planName: subscription.storage_plans?.name,

@@ -57,13 +57,25 @@ function normalizePositiveInt(value: number | null, fallback: number): number {
 export async function resolveDropInCreditRules(): Promise<DropInCreditRules> {
   const supabase = createServiceClient();
   const keys = Object.values(KEY_MAP);
-  const { data } = await supabase
+  let rows: Array<{ setting_key: string; value?: unknown; setting_value?: unknown }> = [];
+  const valueFirst = await supabase
     .from('platform_settings')
-    .select('setting_key, setting_value, value')
+    .select('setting_key, value')
     .in('setting_key', keys);
+  if (!valueFirst.error) {
+    rows = (valueFirst.data || []) as Array<{ setting_key: string; value?: unknown }>;
+  } else {
+    const legacyValue = await supabase
+      .from('platform_settings')
+      .select('setting_key, setting_value')
+      .in('setting_key', keys);
+    if (!legacyValue.error) {
+      rows = (legacyValue.data || []) as Array<{ setting_key: string; setting_value?: unknown }>;
+    }
+  }
 
   const byKey = new Map<string, unknown>();
-  for (const row of data || []) {
+  for (const row of rows) {
     byKey.set(row.setting_key, row.setting_value ?? row.value ?? null);
   }
 
@@ -94,4 +106,3 @@ export async function resolveDropInCreditRules(): Promise<DropInCreditRules> {
     ),
   };
 }
-

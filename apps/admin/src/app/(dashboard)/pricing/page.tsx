@@ -14,7 +14,6 @@ import {
   Settings,
   AlertCircle,
   HardDrive,
-  Users,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
@@ -45,7 +44,8 @@ interface Currency {
   code: string;
   name: string;
   symbol: string;
-  rate_to_usd: number;
+  rate_to_usd?: number | null;
+  rate_updated_at?: string | null;
 }
 
 interface StoragePlan {
@@ -54,7 +54,6 @@ interface StoragePlan {
   slug: string;
   description: string | null;
   storage_limit_mb: number;
-  photo_limit: number;
   price_monthly: number;
   price_yearly: number;
   currency: string;
@@ -64,16 +63,6 @@ interface StoragePlan {
   sort_order: number;
   activeSubscriptions?: number;
 }
-
-const defaultCurrencies: Currency[] = [
-  { code: 'USD', name: 'US Dollar', symbol: '$', rate_to_usd: 1 },
-  { code: 'EUR', name: 'Euro', symbol: '€', rate_to_usd: 0.92 },
-  { code: 'GBP', name: 'British Pound', symbol: '£', rate_to_usd: 0.79 },
-  { code: 'GHS', name: 'Ghana Cedi', symbol: '₵', rate_to_usd: 14.5 },
-  { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', rate_to_usd: 1550 },
-  { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', rate_to_usd: 153 },
-  { code: 'ZAR', name: 'South African Rand', symbol: 'R', rate_to_usd: 18.5 },
-];
 
 function getPlanTypeLabel(planType: string | undefined): string {
   if (planType === 'payg') return 'Pay As You Go';
@@ -736,7 +725,6 @@ function StoragePlansUI() {
       slug: '',
       description: '',
       storage_limit_mb: 1024,
-      photo_limit: 100,
       price_monthly: 0,
       price_yearly: 0,
       currency: 'USD',
@@ -775,7 +763,6 @@ function StoragePlansUI() {
           slug: editingPlan.slug.trim().toLowerCase(),
           description: editingPlan.description?.trim() || null,
           storage_limit_mb: editingPlan.storage_limit_mb,
-          photo_limit: editingPlan.photo_limit,
           price_monthly: editingPlan.price_monthly,
           price_yearly: editingPlan.price_yearly,
           currency: editingPlan.currency || 'USD',
@@ -886,21 +873,24 @@ function StoragePlansUI() {
 
               <p className="text-sm text-muted-foreground mb-3">{plan.description || 'No description'}</p>
               <p className="text-2xl font-bold text-foreground mb-2">
-                ${Number(plan.price_monthly || 0).toFixed(2)}
+                {new Intl.NumberFormat('en-US', {
+                  style: 'currency',
+                  currency: String(plan.currency || 'USD').toUpperCase(),
+                }).format(Number(plan.price_monthly || 0))}
                 <span className="text-sm font-normal text-muted-foreground">/mo</span>
               </p>
               <p className="text-xs text-muted-foreground mb-3">
-                ${Number(plan.price_yearly || 0).toFixed(2)}/year
+                {new Intl.NumberFormat('en-US', {
+                  style: 'currency',
+                  currency: String(plan.currency || 'USD').toUpperCase(),
+                }).format(Number(plan.price_yearly || 0))}
+                /year
               </p>
 
               <div className="space-y-2 mb-4 text-sm">
                 <div className="flex items-center gap-2 text-foreground">
                   <HardDrive className="h-4 w-4 text-primary" />
                   {formatStorageLimit(plan.storage_limit_mb)}
-                </div>
-                <div className="flex items-center gap-2 text-foreground">
-                  <Users className="h-4 w-4 text-primary" />
-                  {plan.photo_limit === -1 ? 'Unlimited photos' : `${plan.photo_limit} photos`}
                 </div>
               </div>
 
@@ -991,35 +981,19 @@ function StoragePlansUI() {
                 />
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">Storage Limit (MB)</label>
-                  <input
-                    type="number"
-                    value={editingPlan.storage_limit_mb}
-                    onChange={(e) =>
-                      setEditingPlan({
-                        ...editingPlan,
-                        storage_limit_mb: Number(e.target.value || 0),
-                      })
-                    }
-                    className="w-full px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">Photo Limit</label>
-                  <input
-                    type="number"
-                    value={editingPlan.photo_limit}
-                    onChange={(e) =>
-                      setEditingPlan({
-                        ...editingPlan,
-                        photo_limit: Number(e.target.value || 0),
-                      })
-                    }
-                    className="w-full px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
-                  />
-                </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">Storage Limit (MB)</label>
+                <input
+                  type="number"
+                  value={editingPlan.storage_limit_mb}
+                  onChange={(e) =>
+                    setEditingPlan({
+                      ...editingPlan,
+                      storage_limit_mb: Number(e.target.value || 0),
+                    })
+                  }
+                  className="w-full px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
+                />
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
@@ -1125,16 +1099,17 @@ export default function PricingPage() {
   const toast = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
   const [plans, setPlans] = useState<Plan[]>([]);
-  const [currencies, setCurrencies] = useState<Currency[]>(defaultCurrencies);
+  const [currencies, setCurrencies] = useState<Currency[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
-  const [activeTab, setActiveTab] = useState<'plans' | 'features' | 'currencies' | 'storage'>('plans');
-  const [platformBaseCurrency, setPlatformBaseCurrency] = useState('USD');
+  const [activeTab, setActiveTab] = useState<'plans' | 'currencies' | 'storage'>('plans');
+  const [refreshingRates, setRefreshingRates] = useState(false);
+  const [platformBaseCurrency, setPlatformBaseCurrency] = useState('');
   const [savingBaseCurrency, setSavingBaseCurrency] = useState(false);
   const [dropInCreditUnitPrice, setDropInCreditUnitPrice] = useState('0.00');
-  const [dropInCreditCurrency, setDropInCreditCurrency] = useState('USD');
+  const [dropInCreditCurrency, setDropInCreditCurrency] = useState('');
   const [savingDropInCreditSettings, setSavingDropInCreditSettings] = useState(false);
   const [dropInCreditsUpload, setDropInCreditsUpload] = useState('1');
   const [dropInCreditsGift, setDropInCreditsGift] = useState('1');
@@ -1206,17 +1181,41 @@ export default function PricingPage() {
     }
   }
 
-  async function loadCurrencies() {
+  async function loadCurrencies(forceRefreshRates = false): Promise<boolean> {
     try {
-      const res = await fetch('/api/admin/pricing/currencies');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.currencies?.length) {
-          setCurrencies(data.currencies);
-        }
+      const endpoint = forceRefreshRates
+        ? '/api/admin/pricing/currencies?include_rates=1&refresh_rates=1'
+        : '/api/admin/pricing/currencies?include_rates=1';
+      const res = await fetch(endpoint);
+      if (!res.ok) {
+        return false;
       }
+      const data = await res.json();
+      if (data.currencies?.length) {
+        setCurrencies(data.currencies);
+        const fallbackCurrency = String(data.currencies[0].code || 'USD').toUpperCase();
+        setPlatformBaseCurrency((current) => current || fallbackCurrency);
+        setDropInCreditCurrency((current) => current || fallbackCurrency);
+        return true;
+      }
+      return false;
     } catch (err) {
       console.error('Failed to load currencies:', err);
+      return false;
+    }
+  }
+
+  async function refreshCurrencyRates() {
+    setRefreshingRates(true);
+    try {
+      const ok = await loadCurrencies(true);
+      if (ok) {
+        toast.success('Currency rates updated', 'Latest exchange rates were loaded.');
+      } else {
+        toast.error('Update failed', 'Failed to refresh exchange rates');
+      }
+    } finally {
+      setRefreshingRates(false);
     }
   }
 
@@ -1334,6 +1333,7 @@ export default function PricingPage() {
 
   async function saveDropInCreditSettings() {
     const creditUnit = Number.parseFloat(dropInCreditUnitPrice);
+    const activeCurrency = (dropInCreditCurrency || platformBaseCurrency || 'USD').toUpperCase();
     if (!Number.isFinite(creditUnit) || creditUnit <= 0) {
       toast.error('Save failed', 'Credit unit price must be greater than 0.');
       return;
@@ -1347,7 +1347,7 @@ export default function PricingPage() {
         body: JSON.stringify({
           settings: {
             drop_in_credit_unit_price_cents: Math.round(creditUnit * 100),
-            drop_in_credit_currency: dropInCreditCurrency.toUpperCase(),
+            drop_in_credit_currency: activeCurrency,
           },
         }),
       });
@@ -1359,7 +1359,7 @@ export default function PricingPage() {
 
       toast.success(
         'Drop-in credit pricing updated',
-        `1 credit = ${dropInCreditCurrency.toUpperCase()} ${creditUnit.toFixed(2)}`
+        `1 credit = ${activeCurrency} ${creditUnit.toFixed(2)}`
       );
     } catch (err: any) {
       toast.error('Save failed', err?.message || 'Could not save drop-in credit settings');
@@ -1617,7 +1617,9 @@ export default function PricingPage() {
 
   function calculateAutoPrice(currency: Currency) {
     const basePrice = formData.base_price_usd;
-    return (basePrice * currency.rate_to_usd).toFixed(2);
+    const rate = Number(currency.rate_to_usd);
+    const safeRate = Number.isFinite(rate) && rate > 0 ? rate : 1;
+    return (basePrice * safeRate).toFixed(2);
   }
 
   if (isLoading) {
@@ -1833,16 +1835,6 @@ export default function PricingPage() {
           Plans
         </button>
         <button
-          onClick={() => setActiveTab('features')}
-          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-            activeTab === 'features'
-              ? 'bg-card text-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          Features
-        </button>
-        <button
           onClick={() => setActiveTab('currencies')}
           className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
             activeTab === 'currencies'
@@ -1961,17 +1953,17 @@ export default function PricingPage() {
         </>
       )}
 
-      {activeTab === 'features' && (
-        <FeatureManagementUI plans={plans} />
-      )}
-
       {activeTab === 'currencies' && (
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           <div className="px-6 py-4 border-b border-border flex items-center justify-between">
             <h2 className="font-semibold text-foreground">Supported Currencies</h2>
-            <button className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm border border-border hover:bg-muted transition-colors">
+            <button
+              onClick={refreshCurrencyRates}
+              disabled={refreshingRates}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm border border-border hover:bg-muted transition-colors disabled:opacity-60"
+            >
               <RefreshCw className="h-4 w-4" />
-              Update Rates
+              {refreshingRates ? 'Updating...' : 'Update Rates'}
             </button>
           </div>
           <table className="w-full">
@@ -1980,7 +1972,8 @@ export default function PricingPage() {
                 <th className="text-left px-6 py-3 text-sm font-medium text-muted-foreground">Currency</th>
                 <th className="text-left px-6 py-3 text-sm font-medium text-muted-foreground">Code</th>
                 <th className="text-left px-6 py-3 text-sm font-medium text-muted-foreground">Symbol</th>
-                <th className="text-left px-6 py-3 text-sm font-medium text-muted-foreground">Rate to USD</th>
+                <th className="text-left px-6 py-3 text-sm font-medium text-muted-foreground">1 USD</th>
+                <th className="text-left px-6 py-3 text-sm font-medium text-muted-foreground">Last Updated</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -1989,7 +1982,14 @@ export default function PricingPage() {
                   <td className="px-6 py-4 text-foreground">{currency.name}</td>
                   <td className="px-6 py-4 font-mono text-foreground">{currency.code}</td>
                   <td className="px-6 py-4 text-foreground">{currency.symbol}</td>
-                  <td className="px-6 py-4 text-foreground">{currency.rate_to_usd}</td>
+                  <td className="px-6 py-4 text-foreground">
+                    {Number.isFinite(Number(currency.rate_to_usd)) ? Number(currency.rate_to_usd).toFixed(6) : '-'}
+                  </td>
+                  <td className="px-6 py-4 text-muted-foreground">
+                    {currency.rate_updated_at
+                      ? new Date(currency.rate_updated_at).toLocaleString()
+                      : 'N/A'}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -2411,7 +2411,7 @@ export default function PricingPage() {
                   {availablePlanFeatures.length === 0 && (
                     <p className="text-sm text-muted-foreground text-center py-4">
                       No features available for {getPlanTypeLabel(formData.plan_type).toLowerCase()} plans.
-                      Create features in the Features tab first.
+                      Create reusable feature definitions from the feature API before assigning them here.
                     </p>
                   )}
                 </div>
@@ -2461,4 +2461,5 @@ export default function PricingPage() {
     </div>
   );
 }
+
 

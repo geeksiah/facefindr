@@ -10,25 +10,6 @@ export interface Currency {
   locale: string;
 }
 
-const CURRENCY_NAMES: Record<string, string> = {
-  USD: 'US Dollar',
-  EUR: 'Euro',
-  GBP: 'British Pound',
-  NGN: 'Nigerian Naira',
-  GHS: 'Ghanaian Cedi',
-  KES: 'Kenyan Shilling',
-  ZAR: 'South African Rand',
-  CAD: 'Canadian Dollar',
-  AUD: 'Australian Dollar',
-  INR: 'Indian Rupee',
-  JPY: 'Japanese Yen',
-  CNY: 'Chinese Yuan',
-  BRL: 'Brazilian Real',
-  MXN: 'Mexican Peso',
-  CHF: 'Swiss Franc',
-  AED: 'UAE Dirham',
-};
-
 const DEFAULT_LOCALE = 'en-US';
 
 function detectSymbol(code: string, locale = DEFAULT_LOCALE): string {
@@ -47,9 +28,16 @@ function detectSymbol(code: string, locale = DEFAULT_LOCALE): string {
 
 export function getCurrency(code: string): Currency {
   const normalized = (code || 'USD').toUpperCase();
+  let name = normalized;
+  try {
+    const display = new Intl.DisplayNames(['en'], { type: 'currency' });
+    name = display.of(normalized) || normalized;
+  } catch {
+    // Keep code fallback.
+  }
   return {
     code: normalized,
-    name: CURRENCY_NAMES[normalized] || normalized,
+    name,
     symbol: detectSymbol(normalized),
     locale: DEFAULT_LOCALE,
   };
@@ -112,4 +100,3 @@ export function convertCurrency(
   const usdAmount = amount / fromRate;
   return usdAmount * toRate;
 }
-

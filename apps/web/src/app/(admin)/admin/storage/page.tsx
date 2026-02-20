@@ -30,7 +30,6 @@ interface StoragePlan {
   slug: string;
   description: string;
   storage_limit_mb: number;
-  photo_limit: number;
   price_monthly: number;
   price_yearly: number;
   currency: string;
@@ -111,7 +110,6 @@ export default function AdminStoragePage() {
           slug: plan.slug,
           description: plan.description,
           storageLimitMb: plan.storage_limit_mb,
-          photoLimit: plan.photo_limit,
           priceMonthly: plan.price_monthly,
           priceYearly: plan.price_yearly,
           currency: plan.currency,
@@ -194,10 +192,9 @@ export default function AdminStoragePage() {
               slug: '',
               description: '',
               storage_limit_mb: 1024,
-              photo_limit: 100,
               price_monthly: 4.99,
               price_yearly: 49.99,
-              currency: 'USD',
+              currency: plans.find((plan) => plan.is_active)?.currency || plans[0]?.currency || 'USD',
               features: [],
               is_popular: false,
               is_active: true,
@@ -306,12 +303,21 @@ export default function AdminStoragePage() {
             <div className="mb-4">
               <div className="flex items-baseline gap-1">
                 <span className="text-3xl font-bold text-foreground">
-                  ${plan.price_monthly}
+                  {new Intl.NumberFormat('en-US', {
+                    style: 'currency',
+                    currency: String(plan.currency || 'USD').toUpperCase(),
+                    maximumFractionDigits: 2,
+                  }).format(Number(plan.price_monthly || 0))}
                 </span>
                 <span className="text-secondary">/mo</span>
               </div>
               <p className="text-sm text-secondary">
-                or ${plan.price_yearly}/year
+                or {new Intl.NumberFormat('en-US', {
+                  style: 'currency',
+                  currency: String(plan.currency || 'USD').toUpperCase(),
+                  maximumFractionDigits: 2,
+                }).format(Number(plan.price_yearly || 0))}
+                /year
               </p>
             </div>
 
@@ -319,12 +325,6 @@ export default function AdminStoragePage() {
               <div className="flex items-center gap-2 text-sm">
                 <HardDrive className="h-4 w-4 text-accent" />
                 <span>{formatStorage(plan.storage_limit_mb)} storage</span>
-              </div>
-              <div className="flex items-center gap-2 text-sm">
-                <ImageIcon className="h-4 w-4 text-accent" />
-                <span>
-                  {plan.photo_limit === -1 ? 'Unlimited' : plan.photo_limit} photos
-                </span>
               </div>
             </div>
 
@@ -396,7 +396,7 @@ export default function AdminStoragePage() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div>
                 <div>
                   <label className="block text-sm font-medium mb-1">
                     Storage (MB, -1 for unlimited)
@@ -407,20 +407,6 @@ export default function AdminStoragePage() {
                     onChange={(e) => setEditingPlan({ 
                       ...editingPlan, 
                       storage_limit_mb: parseInt(e.target.value) 
-                    })}
-                    className="w-full px-3 py-2 rounded-lg border border-border bg-background"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">
-                    Photos (-1 for unlimited)
-                  </label>
-                  <input
-                    type="number"
-                    value={editingPlan.photo_limit}
-                    onChange={(e) => setEditingPlan({ 
-                      ...editingPlan, 
-                      photo_limit: parseInt(e.target.value) 
                     })}
                     className="w-full px-3 py-2 rounded-lg border border-border bg-background"
                   />

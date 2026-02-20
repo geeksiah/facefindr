@@ -16,8 +16,16 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
   apiVersion: '2023-10-16',
 });
 
+function resolveReturnPath(request: NextRequest): string {
+  const candidate = request.nextUrl.searchParams.get('returnTo') || '/dashboard/billing';
+  if (!candidate.startsWith('/')) return '/dashboard/billing';
+  if (candidate.startsWith('//')) return '/dashboard/billing';
+  return candidate;
+}
+
 export async function GET(request: NextRequest) {
   try {
+    const returnPath = resolveReturnPath(request);
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
@@ -27,7 +35,7 @@ export async function GET(request: NextRequest) {
 
     if (!process.env.STRIPE_SECRET_KEY) {
       console.error('Stripe not configured');
-      return NextResponse.redirect(new URL('/dashboard/billing?error=stripe_not_configured', request.url));
+      return NextResponse.redirect(new URL(`${returnPath}?error=stripe_not_configured`, request.url));
     }
 
     // Get or create Stripe customer
@@ -37,7 +45,7 @@ export async function GET(request: NextRequest) {
       .from('photographers')
       .select('stripe_customer_id')
       .eq('id', user.id)
-      .single();
+      .maybeSingle();
 
     if (existingCustomer?.stripe_customer_id) {
       stripeCustomerId = existingCustomer.stripe_customer_id;
@@ -64,8 +72,8 @@ export async function GET(request: NextRequest) {
       customer: stripeCustomerId,
       mode: 'setup',
       payment_method_types: ['card'],
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin}/dashboard/billing?setup=success`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin}/dashboard/billing?setup=cancelled`,
+      success_url: `${process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin}${returnPath}?setup=success`,
+      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin}${returnPath}?setup=cancelled`,
       metadata: {
         user_id: user.id,
       },
@@ -79,7 +87,8 @@ export async function GET(request: NextRequest) {
 
   } catch (error) {
     console.error('Card setup error:', error);
-    return NextResponse.redirect(new URL('/dashboard/billing?error=setup_failed', request.url));
+    const returnPath = resolveReturnPath(request);
+    return NextResponse.redirect(new URL(`${returnPath}?error=setup_failed`, request.url));
   }
 }
 

@@ -116,10 +116,10 @@ export default function EventSettingsPage() {
         setSettings({
           ...eventData,
           pricing_type: eventData.pricing_type || 'free',
-          price_per_photo: eventData.price_per_photo || 0,
-          unlock_all_price: eventData.unlock_all_price || null,
-          bulk_tiers: eventData.bulk_tiers || [],
-          currency_code: eventData.currency_code || 'USD',
+          price_per_photo: eventData.price_per_photo ?? 0,
+          unlock_all_price: eventData.unlock_all_price ?? null,
+          bulk_tiers: eventData.bulk_tiers ?? [],
+          currency_code: eventData.currency_code ?? 'USD',
           include_in_public_profile: eventData.include_in_public_profile ?? true,
         });
       } else {
@@ -153,10 +153,10 @@ export default function EventSettingsPage() {
           setSettings({
             ...eventData,
             pricing_type: eventData.pricing_type || 'free',
-            price_per_photo: eventData.price_per_photo || 0,
-            unlock_all_price: eventData.unlock_all_price || null,
-            bulk_tiers: eventData.bulk_tiers || [],
-            currency_code: eventData.currency_code || 'USD',
+            price_per_photo: eventData.price_per_photo ?? 0,
+            unlock_all_price: eventData.unlock_all_price ?? null,
+            bulk_tiers: eventData.bulk_tiers ?? [],
+            currency_code: eventData.currency_code ?? 'USD',
             include_in_public_profile: eventData.include_in_public_profile ?? true,
           });
         } else {

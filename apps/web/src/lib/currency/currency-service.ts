@@ -311,6 +311,118 @@ export async function getEffectiveCurrency(
 let rateCache: Map<string, number> | null = null;
 let rateCacheTime = 0;
 const RATE_CACHE_TTL = 15 * 60 * 1000; // 15 minutes
+const RATE_REFRESH_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 hours
+const RATE_VALIDITY_MS = 24 * 60 * 60 * 1000; // 24 hours
+const EXCHANGE_BASE_CURRENCY = 'USD';
+let rateRefreshInFlight: Promise<Map<string, number> | null> | null = null;
+
+function parseProviderRates(payload: any, currencyCodes: string[]): Map<string, number> {
+  const parsed = new Map<string, number>();
+  const rates = payload?.rates;
+  if (!rates || typeof rates !== 'object') {
+    return parsed;
+  }
+
+  for (const code of currencyCodes) {
+    if (code === EXCHANGE_BASE_CURRENCY) {
+      parsed.set(code, 1);
+      continue;
+    }
+    const value = Number((rates as Record<string, unknown>)[code]);
+    if (Number.isFinite(value) && value > 0) {
+      parsed.set(code, value);
+    }
+  }
+
+  return parsed;
+}
+
+async function fetchRatesFromProvider(currencyCodes: string[]): Promise<{ rates: Map<string, number>; source: string } | null> {
+  const symbols = currencyCodes.join(',');
+  const configuredUrl = process.env.EXCHANGE_RATE_API_URL;
+  const candidates: Array<{ url: string; source: string }> = [];
+
+  if (configuredUrl) {
+    const url = configuredUrl
+      .replace('{base}', EXCHANGE_BASE_CURRENCY)
+      .replace('{symbols}', encodeURIComponent(symbols));
+    candidates.push({ url, source: 'configured_api' });
+  }
+
+  candidates.push(
+    {
+      url: `https://open.er-api.com/v6/latest/${EXCHANGE_BASE_CURRENCY}`,
+      source: 'open_er_api',
+    },
+    {
+      url: `https://api.exchangerate.host/latest?base=${EXCHANGE_BASE_CURRENCY}&symbols=${encodeURIComponent(symbols)}`,
+      source: 'exchangerate_host',
+    }
+  );
+
+  for (const candidate of candidates) {
+    try {
+      const response = await fetch(candidate.url, {
+        method: 'GET',
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) continue;
+
+      const payload = await response.json();
+      const rates = parseProviderRates(payload, currencyCodes);
+      if (rates.size > 0) {
+        rates.set(EXCHANGE_BASE_CURRENCY, 1);
+        return { rates, source: candidate.source };
+      }
+    } catch {
+      // try next provider candidate
+    }
+  }
+
+  return null;
+}
+
+async function maybeRefreshRates(
+  supabase: ReturnType<typeof createServiceClient>,
+  currencyCodes: string[],
+  force = false
+): Promise<Map<string, number> | null> {
+  if (rateRefreshInFlight && !force) {
+    return rateRefreshInFlight;
+  }
+
+  const refreshPromise = (async () => {
+    const providerResult = await fetchRatesFromProvider(currencyCodes);
+    if (!providerResult) {
+      return null;
+    }
+
+    const validFrom = new Date().toISOString();
+    const validUntil = new Date(Date.now() + RATE_VALIDITY_MS).toISOString();
+    const payload = Array.from(providerResult.rates.entries()).map(([toCurrency, rate]) => ({
+      from_currency: EXCHANGE_BASE_CURRENCY,
+      to_currency: toCurrency,
+      rate,
+      valid_from: validFrom,
+      valid_until: validUntil,
+      source: providerResult.source,
+    }));
+
+    const { error } = await supabase.from('exchange_rates').insert(payload);
+    if (error) {
+      console.error('Exchange rate persist error:', error);
+      return null;
+    }
+
+    return providerResult.rates;
+  })();
+
+  rateRefreshInFlight = refreshPromise;
+  const result = await refreshPromise;
+  rateRefreshInFlight = null;
+  return result;
+}
 
 export async function getExchangeRates(): Promise<Map<string, number>> {
   const now = Date.now();
@@ -320,24 +432,49 @@ export async function getExchangeRates(): Promise<Map<string, number>> {
   }
 
   const supabase = createServiceClient();
-  const { data } = await supabase
-    .from('exchange_rates')
-    .select('*')
-    .eq('from_currency', 'USD')
-    .or('valid_until.is.null,valid_until.gt.now()')
-    .order('valid_from', { ascending: false });
+  const [currencyMap, rateResult] = await Promise.all([
+    getSupportedCurrencies(),
+    supabase
+      .from('exchange_rates')
+      .select('to_currency, rate, valid_from, created_at')
+      .eq('from_currency', EXCHANGE_BASE_CURRENCY)
+      .or('valid_until.is.null,valid_until.gt.now()')
+      .order('valid_from', { ascending: false }),
+  ]);
+
+  const currencyCodes = Array.from(currencyMap.keys()).map((code) => code.toUpperCase());
+  if (!currencyCodes.includes(EXCHANGE_BASE_CURRENCY)) {
+    currencyCodes.push(EXCHANGE_BASE_CURRENCY);
+  }
 
   rateCache = new Map();
-  rateCache.set('USD', 1);
-  
-  if (data) {
-    // Get latest rate for each currency
-    const seen = new Set<string>();
-    for (const row of data) {
-      if (!seen.has(row.to_currency)) {
-        rateCache.set(row.to_currency, Number(row.rate));
-        seen.add(row.to_currency);
-      }
+  rateCache.set(EXCHANGE_BASE_CURRENCY, 1);
+
+  let latestValidAt = 0;
+  const seen = new Set<string>();
+  for (const row of rateResult.data || []) {
+    const code = String(row.to_currency || '').toUpperCase();
+    if (!code || seen.has(code)) continue;
+    const rate = Number(row.rate);
+    if (Number.isFinite(rate) && rate > 0) {
+      rateCache.set(code, rate);
+      seen.add(code);
+    }
+    const ts = Date.parse(String(row.valid_from || row.created_at || ''));
+    if (Number.isFinite(ts) && ts > latestValidAt) {
+      latestValidAt = ts;
+    }
+  }
+
+  const hasMissingRates = currencyCodes.some(
+    (code) => code !== EXCHANGE_BASE_CURRENCY && !rateCache?.has(code)
+  );
+  const stale = !latestValidAt || now - latestValidAt > RATE_REFRESH_INTERVAL_MS;
+  if (hasMissingRates || stale) {
+    const refreshed = await maybeRefreshRates(supabase, currencyCodes);
+    if (refreshed) {
+      rateCache = refreshed;
+      rateCache.set(EXCHANGE_BASE_CURRENCY, 1);
     }
   }
   
@@ -349,13 +486,15 @@ export async function getExchangeRate(
   fromCurrency: string,
   toCurrency: string
 ): Promise<number> {
-  if (fromCurrency === toCurrency) return 1;
+  const from = String(fromCurrency || '').toUpperCase();
+  const to = String(toCurrency || '').toUpperCase();
+  if (!from || !to || from === to) return 1;
   
   const rates = await getExchangeRates();
   
   // Convert through USD
-  const fromRate = rates.get(fromCurrency) || 1;
-  const toRate = rates.get(toCurrency) || 1;
+  const fromRate = rates.get(from) || 1;
+  const toRate = rates.get(to) || 1;
   
   return toRate / fromRate;
 }
