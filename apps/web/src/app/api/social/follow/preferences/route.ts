@@ -10,6 +10,36 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { createClient, createClientWithAccessToken } from '@/lib/supabase/server';
 
+function isMissingColumnError(error: any, columnName: string) {
+  return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
+}
+
+function uniqueStringValues(values: Array<string | null | undefined>) {
+  return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))];
+}
+
+async function resolveCreatorFollowIdentifiers(supabase: any, identifier: string) {
+  const withUserId = await supabase
+    .from('photographers')
+    .select('id, user_id')
+    .or(`id.eq.${identifier},public_profile_slug.eq.${identifier},user_id.eq.${identifier}`)
+    .limit(1)
+    .maybeSingle();
+
+  if (!withUserId.error || !isMissingColumnError(withUserId.error, 'user_id')) {
+    return uniqueStringValues([withUserId.data?.id, (withUserId.data as any)?.user_id, identifier]);
+  }
+
+  const fallback = await supabase
+    .from('photographers')
+    .select('id')
+    .or(`id.eq.${identifier},public_profile_slug.eq.${identifier}`)
+    .limit(1)
+    .maybeSingle();
+
+  return uniqueStringValues([fallback.data?.id, identifier]);
+}
+
 // PUT - Update notification preferences
 export async function PUT(request: NextRequest) {
   try {
@@ -45,11 +75,21 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'No preferences to update' }, { status: 400 });
     }
 
-    const { error } = await supabase
+    const followingIdCandidates = await resolveCreatorFollowIdentifiers(supabase, photographerId);
+
+    let updateQuery = supabase
       .from('follows')
       .update(updateData)
       .eq('follower_id', user.id)
-      .eq('following_id', photographerId);
+      .in('following_type', ['creator', 'photographer']);
+
+    if (followingIdCandidates.length === 1) {
+      updateQuery = updateQuery.eq('following_id', followingIdCandidates[0]);
+    } else {
+      updateQuery = updateQuery.in('following_id', followingIdCandidates);
+    }
+
+    const { error } = await updateQuery;
 
     if (error) {
       throw error;

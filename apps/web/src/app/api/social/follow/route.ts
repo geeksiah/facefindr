@@ -48,6 +48,83 @@ function applyFollowingIdFilter(query: any, followingIds: string[]) {
   return query.in('following_id', followingIds);
 }
 
+function addProfileLookupEntry(map: Map<string, any>, profile: any) {
+  if (!profile?.id) return;
+  map.set(profile.id, profile);
+  const userId = typeof profile.user_id === 'string' ? profile.user_id : null;
+  if (userId) {
+    map.set(userId, profile);
+  }
+}
+
+async function fetchAttendeeProfilesByIdentifiers(supabase: any, identifiers: string[]) {
+  const ids = uniqueStringValues(identifiers);
+  const lookup = new Map<string, any>();
+  if (!ids.length) return lookup;
+
+  const idRows = await supabase
+    .from('attendees')
+    .select('id, user_id, display_name, face_tag, profile_photo_url, public_profile_slug, email')
+    .in('id', ids);
+
+  if (!idRows.error && Array.isArray(idRows.data)) {
+    for (const row of idRows.data) addProfileLookupEntry(lookup, row);
+  } else if (isMissingColumnError(idRows.error, 'user_id')) {
+    const fallbackRows = await supabase
+      .from('attendees')
+      .select('id, display_name, face_tag, profile_photo_url, public_profile_slug, email')
+      .in('id', ids);
+    if (Array.isArray(fallbackRows.data)) {
+      for (const row of fallbackRows.data) addProfileLookupEntry(lookup, { ...row, user_id: row.id });
+    }
+    return lookup;
+  }
+
+  const byUserRows = await supabase
+    .from('attendees')
+    .select('id, user_id, display_name, face_tag, profile_photo_url, public_profile_slug, email')
+    .in('user_id', ids);
+  if (Array.isArray(byUserRows.data)) {
+    for (const row of byUserRows.data) addProfileLookupEntry(lookup, row);
+  }
+
+  return lookup;
+}
+
+async function fetchCreatorProfilesByIdentifiers(supabase: any, identifiers: string[]) {
+  const ids = uniqueStringValues(identifiers);
+  const lookup = new Map<string, any>();
+  if (!ids.length) return lookup;
+
+  const idRows = await supabase
+    .from('photographers')
+    .select('id, user_id, display_name, face_tag, profile_photo_url, bio, public_profile_slug, email')
+    .in('id', ids);
+
+  if (!idRows.error && Array.isArray(idRows.data)) {
+    for (const row of idRows.data) addProfileLookupEntry(lookup, row);
+  } else if (isMissingColumnError(idRows.error, 'user_id')) {
+    const fallbackRows = await supabase
+      .from('photographers')
+      .select('id, display_name, face_tag, profile_photo_url, bio, public_profile_slug, email')
+      .in('id', ids);
+    if (Array.isArray(fallbackRows.data)) {
+      for (const row of fallbackRows.data) addProfileLookupEntry(lookup, { ...row, user_id: row.id });
+    }
+    return lookup;
+  }
+
+  const byUserRows = await supabase
+    .from('photographers')
+    .select('id, user_id, display_name, face_tag, profile_photo_url, bio, public_profile_slug, email')
+    .in('user_id', ids);
+  if (Array.isArray(byUserRows.data)) {
+    for (const row of byUserRows.data) addProfileLookupEntry(lookup, row);
+  }
+
+  return lookup;
+}
+
 async function resolveProfileIdByUser(
   supabase: any,
   table: 'attendees' | 'photographers',
@@ -534,47 +611,95 @@ export async function GET(request: NextRequest) {
 
     if (type === 'following') {
       const includeAttendees = searchParams.get('includeAttendees') === 'true';
-      // Get list of creators user is following
-      const { data, count } = await supabase
+      const { data: followRows, error: followRowsError } = await supabase
         .from('follows')
         .select(`
           id,
           following_id,
+          following_type,
           notify_new_event,
           notify_photo_drop,
-          created_at,
-          photographers!follows_following_id_fkey (
-            id, display_name, face_tag, profile_photo_url, bio, public_profile_slug
-          )
-        `, { count: 'exact' })
+          created_at
+        `)
         .eq('follower_id', user.id)
-        .in('following_type', ['creator', 'photographer'])
         .eq('status', 'active')
         .order('created_at', { ascending: false });
 
-      if (!includeAttendees) {
-        return NextResponse.json({ following: data || [], total: count || 0 });
+      if (followRowsError) {
+        throw followRowsError;
       }
 
-      const { data: attendeeFollowing, count: attendeeCount } = await supabase
-        .from('follows')
-        .select(`
-          id,
-          following_id,
-          created_at,
-          attendees!follows_following_id_fkey (
-            id, display_name, face_tag, profile_photo_url, public_profile_slug
-          )
-        `, { count: 'exact' })
-        .eq('follower_id', user.id)
-        .eq('following_type', 'attendee')
-        .eq('status', 'active')
-        .order('created_at', { ascending: false });
+      const rows = followRows || [];
+      const creatorRows = rows.filter(
+        (row: any) => row.following_type === 'creator' || row.following_type === 'photographer'
+      );
+      const creatorLookup = await fetchCreatorProfilesByIdentifiers(
+        lookupClient,
+        creatorRows.map((row: any) => row.following_id)
+      );
+
+      const following = creatorRows.map((row: any) => {
+        const profile = creatorLookup.get(row.following_id) || {
+          id: row.following_id,
+          display_name: 'Creator',
+          face_tag: null,
+          profile_photo_url: null,
+          bio: null,
+          public_profile_slug: null,
+        };
+        return {
+          id: row.id,
+          following_id: row.following_id,
+          notify_new_event: !!row.notify_new_event,
+          notify_photo_drop: !!row.notify_photo_drop,
+          created_at: row.created_at,
+          photographers: {
+            id: profile.id,
+            display_name: profile.display_name || 'Creator',
+            face_tag: profile.face_tag || '',
+            profile_photo_url: profile.profile_photo_url || null,
+            bio: profile.bio || null,
+            public_profile_slug: profile.public_profile_slug || null,
+          },
+        };
+      });
+
+      if (!includeAttendees) {
+        return NextResponse.json({ following, total: following.length });
+      }
+
+      const attendeeRows = rows.filter((row: any) => row.following_type === 'attendee');
+      const attendeeLookup = await fetchAttendeeProfilesByIdentifiers(
+        lookupClient,
+        attendeeRows.map((row: any) => row.following_id)
+      );
+
+      const followingUsers = attendeeRows.map((row: any) => {
+        const profile = attendeeLookup.get(row.following_id) || {
+          id: row.following_id,
+          display_name: 'Attendee',
+          face_tag: null,
+          profile_photo_url: null,
+          public_profile_slug: null,
+        };
+        return {
+          id: row.id,
+          following_id: row.following_id,
+          created_at: row.created_at,
+          attendees: {
+            id: profile.id,
+            display_name: profile.display_name || 'Attendee',
+            face_tag: profile.face_tag || '',
+            profile_photo_url: profile.profile_photo_url || null,
+            public_profile_slug: profile.public_profile_slug || null,
+          },
+        };
+      });
 
       return NextResponse.json({
-        following: data || [],
-        followingUsers: attendeeFollowing || [],
-        total: (count || 0) + (attendeeCount || 0),
+        following,
+        followingUsers,
+        total: following.length + followingUsers.length,
       });
     }
 
@@ -615,58 +740,73 @@ export async function GET(request: NextRequest) {
           targetAttendeeFollowIds = uniqueStringValues([targetAttendeeId]);
         }
 
-        const [attendeeFollowersRes, creatorFollowersRes] = await Promise.all([
-          applyFollowingIdFilter(
-            supabase
-            .from('follows')
-            .select(`
-              id,
-              follower_id,
-              follower_type,
-              notify_new_event,
-              notify_photo_drop,
-              created_at,
-              attendees!follows_follower_id_fkey (
-                id, display_name, face_tag, profile_photo_url, email
-              )
-            `)
-            ,
-            targetAttendeeFollowIds
-          )
-            .eq('following_type', 'attendee')
-            .eq('follower_type', 'attendee')
-            .eq('status', 'active')
-            .order('created_at', { ascending: false }),
-          applyFollowingIdFilter(
-            supabase
-            .from('follows')
-            .select(`
-              id,
-              follower_id,
-              follower_type,
-              notify_new_event,
-              notify_photo_drop,
-              created_at,
-              photographers!follows_follower_id_fkey (
-                id, display_name, face_tag, profile_photo_url, email, public_profile_slug
-              )
-            `)
-            ,
-            targetAttendeeFollowIds
-          )
-            .eq('following_type', 'attendee')
-            .in('follower_type', ['creator', 'photographer'])
-            .eq('status', 'active')
-            .order('created_at', { ascending: false }),
+        let attendeeFollowersQuery = supabase
+          .from('follows')
+          .select(`
+            id,
+            follower_id,
+            follower_type,
+            notify_new_event,
+            notify_photo_drop,
+            created_at
+          `);
+        attendeeFollowersQuery = applyFollowingIdFilter(attendeeFollowersQuery, targetAttendeeFollowIds)
+          .eq('following_type', 'attendee')
+          .eq('status', 'active')
+          .order('created_at', { ascending: false });
+        const { data: followerRows, error: followerRowsError } = await attendeeFollowersQuery;
+
+        if (followerRowsError) {
+          throw followerRowsError;
+        }
+
+        const rows = followerRows || [];
+        const attendeeFollowerIds = rows
+          .filter((row: any) => row.follower_type === 'attendee')
+          .map((row: any) => row.follower_id);
+        const creatorFollowerIds = rows
+          .filter((row: any) => row.follower_type === 'creator' || row.follower_type === 'photographer')
+          .map((row: any) => row.follower_id);
+
+        const [attendeeLookup, creatorLookup] = await Promise.all([
+          fetchAttendeeProfilesByIdentifiers(lookupClient, attendeeFollowerIds),
+          fetchCreatorProfilesByIdentifiers(lookupClient, creatorFollowerIds),
         ]);
 
-        const combinedFollowers = [
-          ...(attendeeFollowersRes.data || []),
-          ...(creatorFollowersRes.data || []),
-        ].sort(
-          (a: any, b: any) =>
-            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
+        const combinedFollowers = rows.map((row: any) => {
+          const isCreatorFollower =
+            row.follower_type === 'creator' || row.follower_type === 'photographer';
+          const creatorProfile = isCreatorFollower
+            ? creatorLookup.get(row.follower_id) || {
+                id: row.follower_id,
+                display_name: 'Creator',
+                face_tag: null,
+                profile_photo_url: null,
+                email: null,
+                public_profile_slug: null,
+              }
+            : null;
+          const attendeeProfile = !isCreatorFollower
+            ? attendeeLookup.get(row.follower_id) || {
+                id: row.follower_id,
+                display_name: 'Attendee',
+                face_tag: null,
+                profile_photo_url: null,
+                email: null,
+              }
+            : null;
+
+          return {
+            id: row.id,
+            follower_id: row.follower_id,
+            follower_type: isCreatorFollower ? 'creator' : 'attendee',
+            notify_new_event: !!row.notify_new_event,
+            notify_photo_drop: !!row.notify_photo_drop,
+            created_at: row.created_at,
+            attendees: attendeeProfile,
+            photographers: creatorProfile,
+          };
+        });
 
         const now = new Date();
         const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -688,7 +828,7 @@ export async function GET(request: NextRequest) {
       }
 
       // Get followers for a creator (either by ID or current user)
-      let targetCreatorId = photographerId;
+      let targetCreatorId = targetId || photographerId;
       let targetCreatorFollowIds: string[] = [];
 
       // If no photographerId provided, get current user's followers (for creators)
@@ -736,18 +876,66 @@ export async function GET(request: NextRequest) {
           follower_type,
           notify_new_event,
           notify_photo_drop,
-          created_at,
-          attendees!follows_follower_id_fkey (
-            id, display_name, face_tag, profile_photo_url, email
-          ),
-          photographers!follows_follower_id_fkey (
-            id, display_name, face_tag, profile_photo_url, email, public_profile_slug
-          )
-        `, { count: 'exact' });
+          created_at
+        `);
       followersQuery = applyFollowingIdFilter(followersQuery, targetCreatorFollowIds)
+        .in('following_type', ['creator', 'photographer'])
         .eq('status', 'active')
         .order('created_at', { ascending: false });
-      const { data, count } = await followersQuery;
+      const { data: followerRows, error: followerRowsError } = await followersQuery;
+
+      if (followerRowsError) {
+        throw followerRowsError;
+      }
+
+      const rows = followerRows || [];
+      const attendeeFollowerIds = rows
+        .filter((row: any) => row.follower_type === 'attendee')
+        .map((row: any) => row.follower_id);
+      const creatorFollowerIds = rows
+        .filter((row: any) => row.follower_type === 'creator' || row.follower_type === 'photographer')
+        .map((row: any) => row.follower_id);
+
+      const [attendeeLookup, creatorLookup] = await Promise.all([
+        fetchAttendeeProfilesByIdentifiers(lookupClient, attendeeFollowerIds),
+        fetchCreatorProfilesByIdentifiers(lookupClient, creatorFollowerIds),
+      ]);
+
+      const data = rows.map((row: any) => {
+        const isCreatorFollower =
+          row.follower_type === 'creator' || row.follower_type === 'photographer';
+        const creatorProfile = isCreatorFollower
+          ? creatorLookup.get(row.follower_id) || {
+              id: row.follower_id,
+              display_name: 'Creator',
+              face_tag: null,
+              profile_photo_url: null,
+              email: null,
+              public_profile_slug: null,
+            }
+          : null;
+        const attendeeProfile = !isCreatorFollower
+          ? attendeeLookup.get(row.follower_id) || {
+              id: row.follower_id,
+              display_name: 'Attendee',
+              face_tag: null,
+              profile_photo_url: null,
+              email: null,
+            }
+          : null;
+
+        return {
+          id: row.id,
+          follower_id: row.follower_id,
+          follower_type: isCreatorFollower ? 'creator' : 'attendee',
+          notify_new_event: !!row.notify_new_event,
+          notify_photo_drop: !!row.notify_photo_drop,
+          created_at: row.created_at,
+          attendees: attendeeProfile,
+          photographers: creatorProfile,
+        };
+      });
+      const count = data.length;
 
       // Calculate stats for creator's own followers
       const now = new Date();

@@ -15,10 +15,17 @@ function isMissingColumnError(error: any, columnName: string) {
 }
 
 async function resolvePhotographerByIdentifier(supabase: any, identifier: string) {
+  const normalizedIdentifier = typeof identifier === 'string' ? identifier.trim() : '';
+  const faceTag = normalizedIdentifier.startsWith('@')
+    ? normalizedIdentifier
+    : `@${normalizedIdentifier}`;
+
   const withUserId = await supabase
     .from('photographers')
     .select('id')
-    .or(`id.eq.${identifier},user_id.eq.${identifier}`)
+    .or(
+      `id.eq.${normalizedIdentifier},user_id.eq.${normalizedIdentifier},public_profile_slug.eq.${normalizedIdentifier},face_tag.eq.${faceTag}`
+    )
     .limit(1)
     .maybeSingle();
 
@@ -29,7 +36,9 @@ async function resolvePhotographerByIdentifier(supabase: any, identifier: string
   return supabase
     .from('photographers')
     .select('id')
-    .eq('id', identifier)
+    .or(
+      `id.eq.${normalizedIdentifier},public_profile_slug.eq.${normalizedIdentifier},face_tag.eq.${faceTag}`
+    )
     .maybeSingle();
 }
 

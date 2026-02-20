@@ -18,6 +18,83 @@ function uniqueStringValues(values: Array<string | null | undefined>) {
   return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))];
 }
 
+function addProfileLookupEntry(map: Map<string, any>, profile: any) {
+  if (!profile?.id) return;
+  map.set(profile.id, profile);
+  const userId = typeof profile.user_id === 'string' ? profile.user_id : null;
+  if (userId) {
+    map.set(userId, profile);
+  }
+}
+
+async function fetchAttendeeProfilesByIdentifiers(supabase: any, identifiers: string[]) {
+  const ids = uniqueStringValues(identifiers);
+  const lookup = new Map<string, any>();
+  if (!ids.length) return lookup;
+
+  const idRows = await supabase
+    .from('attendees')
+    .select('id, user_id, display_name, face_tag, profile_photo_url, public_profile_slug')
+    .in('id', ids);
+
+  if (!idRows.error && Array.isArray(idRows.data)) {
+    for (const row of idRows.data) addProfileLookupEntry(lookup, row);
+  } else if (isMissingColumnError(idRows.error, 'user_id')) {
+    const fallbackRows = await supabase
+      .from('attendees')
+      .select('id, display_name, face_tag, profile_photo_url, public_profile_slug')
+      .in('id', ids);
+    if (Array.isArray(fallbackRows.data)) {
+      for (const row of fallbackRows.data) addProfileLookupEntry(lookup, { ...row, user_id: row.id });
+    }
+    return lookup;
+  }
+
+  const byUserRows = await supabase
+    .from('attendees')
+    .select('id, user_id, display_name, face_tag, profile_photo_url, public_profile_slug')
+    .in('user_id', ids);
+  if (Array.isArray(byUserRows.data)) {
+    for (const row of byUserRows.data) addProfileLookupEntry(lookup, row);
+  }
+
+  return lookup;
+}
+
+async function fetchCreatorProfilesByIdentifiers(supabase: any, identifiers: string[]) {
+  const ids = uniqueStringValues(identifiers);
+  const lookup = new Map<string, any>();
+  if (!ids.length) return lookup;
+
+  const idRows = await supabase
+    .from('photographers')
+    .select('id, user_id, display_name, face_tag, profile_photo_url, public_profile_slug')
+    .in('id', ids);
+
+  if (!idRows.error && Array.isArray(idRows.data)) {
+    for (const row of idRows.data) addProfileLookupEntry(lookup, row);
+  } else if (isMissingColumnError(idRows.error, 'user_id')) {
+    const fallbackRows = await supabase
+      .from('photographers')
+      .select('id, display_name, face_tag, profile_photo_url, public_profile_slug')
+      .in('id', ids);
+    if (Array.isArray(fallbackRows.data)) {
+      for (const row of fallbackRows.data) addProfileLookupEntry(lookup, { ...row, user_id: row.id });
+    }
+    return lookup;
+  }
+
+  const byUserRows = await supabase
+    .from('photographers')
+    .select('id, user_id, display_name, face_tag, profile_photo_url, public_profile_slug')
+    .in('user_id', ids);
+  if (Array.isArray(byUserRows.data)) {
+    for (const row of byUserRows.data) addProfileLookupEntry(lookup, row);
+  }
+
+  return lookup;
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { slug: string } }
@@ -89,13 +166,7 @@ export async function GET(
         id,
         follower_id,
         follower_type,
-        created_at,
-        attendees!follows_follower_id_fkey (
-          id, display_name, face_tag, profile_photo_url
-        ),
-        photographers!follows_follower_id_fkey (
-          id, display_name, face_tag, profile_photo_url, public_profile_slug
-        )
+        created_at
       `)
       .in('following_type', ['creator', 'photographer'])
       .eq('status', 'active')
@@ -105,11 +176,59 @@ export async function GET(
     } else {
       followersQuery = followersQuery.in('following_id', followTargetIds);
     }
-    const { data: followers } = await followersQuery;
+    const { data: followerRows, error: followerRowsError } = await followersQuery;
+
+    if (followerRowsError) {
+      throw followerRowsError;
+    }
+
+    const rows = followerRows || [];
+    const attendeeFollowerIds = rows
+      .filter((row: any) => row.follower_type === 'attendee')
+      .map((row: any) => row.follower_id);
+    const creatorFollowerIds = rows
+      .filter((row: any) => row.follower_type === 'creator' || row.follower_type === 'photographer')
+      .map((row: any) => row.follower_id);
+
+    const [attendeeLookup, creatorLookup] = await Promise.all([
+      fetchAttendeeProfilesByIdentifiers(supabase, attendeeFollowerIds),
+      fetchCreatorProfilesByIdentifiers(supabase, creatorFollowerIds),
+    ]);
+
+    const followers = rows.map((row: any) => {
+      const isCreatorFollower =
+        row.follower_type === 'creator' || row.follower_type === 'photographer';
+      const creatorProfile = isCreatorFollower
+        ? creatorLookup.get(row.follower_id) || {
+            id: row.follower_id,
+            display_name: 'Creator',
+            face_tag: null,
+            profile_photo_url: null,
+            public_profile_slug: null,
+          }
+        : null;
+      const attendeeProfile = !isCreatorFollower
+        ? attendeeLookup.get(row.follower_id) || {
+            id: row.follower_id,
+            display_name: 'Attendee',
+            face_tag: null,
+            profile_photo_url: null,
+          }
+        : null;
+
+      return {
+        id: row.id,
+        follower_id: row.follower_id,
+        follower_type: isCreatorFollower ? 'creator' : 'attendee',
+        created_at: row.created_at,
+        attendees: attendeeProfile,
+        photographers: creatorProfile,
+      };
+    });
 
     return NextResponse.json({
-      count: count || photographer.follower_count || 0,
-      followers: followers || [],
+      count: followers.length,
+      followers,
     });
 
   } catch (error: any) {

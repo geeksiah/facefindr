@@ -27,16 +27,25 @@ import { useRealtimeSubscription } from '@/hooks/use-realtime';
 interface FollowerItem {
   id: string;
   follower_id: string;
+  follower_type?: 'attendee' | 'creator' | 'photographer';
   notify_new_event: boolean;
   notify_photo_drop: boolean;
   created_at: string;
-  attendees: {
+  attendees?: {
     id: string;
     display_name: string;
     face_tag: string;
     profile_photo_url: string | null;
     email: string;
-  };
+  } | null;
+  photographers?: {
+    id: string;
+    display_name: string;
+    face_tag: string;
+    profile_photo_url: string | null;
+    public_profile_slug?: string | null;
+    email?: string | null;
+  } | null;
 }
 
 interface FollowerStats {
@@ -104,17 +113,21 @@ export default function FollowersPage() {
 
   const filteredFollowers = followers
     .filter((item) => {
+      const profile = item.attendees || item.photographers;
+      if (!profile) return false;
       if (!searchQuery) return true;
       const query = searchQuery.toLowerCase();
       return (
-        item.attendees.display_name.toLowerCase().includes(query) ||
-        item.attendees.face_tag?.toLowerCase().includes(query) ||
-        item.attendees.email?.toLowerCase().includes(query)
+        profile.display_name.toLowerCase().includes(query) ||
+        profile.face_tag?.toLowerCase().includes(query) ||
+        (item.attendees?.email || '').toLowerCase().includes(query)
       );
     })
     .sort((a, b) => {
+      const aProfile = a.attendees || a.photographers;
+      const bProfile = b.attendees || b.photographers;
       if (sortBy === 'name') {
-        return a.attendees.display_name.localeCompare(b.attendees.display_name);
+        return (aProfile?.display_name || '').localeCompare(bProfile?.display_name || '');
       }
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
@@ -272,7 +285,8 @@ export default function FollowersPage() {
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           <div className="divide-y divide-border">
             {filteredFollowers.map((item) => {
-              const attendee = item.attendees;
+              const attendee = item.attendees || item.photographers;
+              if (!attendee) return null;
               const followDate = new Date(item.created_at);
               const isNew =
                 Date.now() - followDate.getTime() < 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -280,7 +294,11 @@ export default function FollowersPage() {
               return (
                 <Link
                   key={item.id}
-                  href={`/dashboard/people/attendee/${attendee.face_tag?.replace('@', '') || attendee.id}`}
+                  href={
+                    item.attendees
+                      ? `/dashboard/people/attendee/${attendee.face_tag?.replace('@', '') || attendee.id}`
+                      : `/dashboard/people/creator/${(item.photographers?.public_profile_slug || attendee.face_tag?.replace('@', '') || attendee.id)}`
+                  }
                   className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
                 >
                   {attendee.profile_photo_url ? (
