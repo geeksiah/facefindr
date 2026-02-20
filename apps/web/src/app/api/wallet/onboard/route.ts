@@ -11,7 +11,13 @@ import {
   createAccountLink,
   isStripeConfigured,
 } from '@/lib/payments/stripe';
-import { resolvePaystackSecretKey } from '@/lib/payments/paystack';
+import {
+  createPaystackSubaccount,
+  normalizePaystackSubaccountCode,
+  resolvePaystackSecretKey,
+  validatePaystackSubaccount,
+  verifyPaystackBankAccount,
+} from '@/lib/payments/paystack';
 import { getPhotographerIdCandidates, resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
@@ -177,7 +183,119 @@ export async function POST(request: Request) {
         );
       }
 
-      walletData.paystack_subaccount_code = paystackSubaccountCode || null;
+      const rawSubaccountCode =
+        typeof paystackSubaccountCode === 'string'
+          ? paystackSubaccountCode.trim()
+          : '';
+      const normalizedSubaccountCode =
+        normalizePaystackSubaccountCode(rawSubaccountCode);
+      const normalizedAccountBank = String(accountBank || '').trim();
+      const normalizedAccountNumber = String(accountNumber || '')
+        .replace(/\s+/g, '')
+        .trim();
+
+      if (rawSubaccountCode && !normalizedSubaccountCode) {
+        return NextResponse.json(
+          {
+            error:
+              'Invalid Paystack subaccount code. Use a code like ACCT_xxxxxxxx or leave it blank.',
+          },
+          { status: 400 }
+        );
+      }
+
+      if (normalizedSubaccountCode) {
+        try {
+          const validation = await validatePaystackSubaccount(
+            normalizedSubaccountCode,
+            paystackSecretKey
+          );
+          if (!validation.valid) {
+            return NextResponse.json(
+              {
+                error:
+                  validation.message ||
+                  'Invalid Paystack subaccount. Please confirm your ACCT code.',
+              },
+              { status: 400 }
+            );
+          }
+        } catch (validationError) {
+          console.error(
+            'Failed to validate Paystack subaccount:',
+            validationError
+          );
+          return NextResponse.json(
+            {
+              error:
+                'Unable to verify Paystack subaccount right now. Leave it blank or try again.',
+            },
+            { status: 502 }
+          );
+        }
+        walletData.paystack_subaccount_code = normalizedSubaccountCode;
+      } else {
+        if (!normalizedAccountBank || !normalizedAccountNumber) {
+          return NextResponse.json(
+            {
+              error:
+                'Bank selection and account number are required for Paystack. Creators should add regular account details, not ACCT code.',
+            },
+            { status: 400 }
+          );
+        }
+
+        const verification = await verifyPaystackBankAccount(
+          normalizedAccountNumber,
+          normalizedAccountBank,
+          paystackSecretKey
+        );
+
+        if (!verification.valid) {
+          return NextResponse.json(
+            {
+              error:
+                verification.message ||
+                'Could not verify account details with Paystack.',
+            },
+            { status: 422 }
+          );
+        }
+
+        try {
+          const subaccount = await createPaystackSubaccount(
+            {
+              businessName:
+                businessName ||
+                (photographerDetails as any)?.business_name ||
+                (photographerDetails as any)?.display_name ||
+                'Creator Wallet',
+              settlementBank: normalizedAccountBank,
+              accountNumber: normalizedAccountNumber,
+              description: `Creator payouts (${photographerId})`,
+              primaryContactEmail:
+                (photographerDetails as any)?.email || user.email || undefined,
+              primaryContactName:
+                (photographerDetails as any)?.display_name || undefined,
+            },
+            paystackSecretKey
+          );
+
+          walletData.paystack_subaccount_code = subaccount.subaccountCode;
+        } catch (paystackError) {
+          console.error('Failed to create Paystack subaccount:', paystackError);
+          return NextResponse.json(
+            {
+              error:
+                paystackError instanceof Error
+                  ? paystackError.message
+                  : 'Failed to create Paystack payout account',
+            },
+            { status: 422 }
+          );
+        }
+      }
+
       walletData.status = 'active';
       walletData.payouts_enabled = true;
       walletData.charges_enabled = true;

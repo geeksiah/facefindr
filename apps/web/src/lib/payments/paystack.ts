@@ -12,6 +12,19 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import { createServiceClient } from '@/lib/supabase/server';
 
 const PAYSTACK_BASE_URL = 'https://api.paystack.co';
+const PAYSTACK_SUBACCOUNT_PATTERN = /^ACCT_[A-Z0-9]+$/i;
+
+export class PaystackApiError extends Error {
+  statusCode: number;
+  payload?: unknown;
+
+  constructor(message: string, statusCode: number, payload?: unknown) {
+    super(message);
+    this.name = 'PaystackApiError';
+    this.statusCode = statusCode;
+    this.payload = payload;
+  }
+}
 
 export interface PaystackInitializeParams {
   reference: string;
@@ -39,6 +52,49 @@ export interface PaystackVerifyResponse {
   gateway_response?: string;
   paid_at?: string;
   metadata?: Record<string, unknown>;
+}
+
+export interface PaystackSubaccountValidationResult {
+  valid: boolean;
+  normalizedCode?: string;
+  message?: string;
+  businessName?: string;
+}
+
+export interface PaystackBankAccountValidationResult {
+  valid: boolean;
+  accountName?: string;
+  accountNumber?: string;
+  bankId?: number;
+  message?: string;
+}
+
+export interface PaystackCreateSubaccountParams {
+  businessName: string;
+  settlementBank: string;
+  accountNumber: string;
+  percentageCharge?: number;
+  description?: string;
+  primaryContactEmail?: string;
+  primaryContactName?: string;
+}
+
+export interface PaystackCreateSubaccountResult {
+  subaccountCode: string;
+  businessName?: string;
+  bankCode?: string;
+  accountNumber?: string;
+  bankName?: string;
+  active?: boolean;
+}
+
+export interface PaystackBank {
+  id?: number;
+  name: string;
+  code: string;
+  active?: boolean;
+  country?: string;
+  currency?: string;
 }
 
 function getSecretKey(explicitSecretKey?: string): string {
@@ -91,12 +147,217 @@ async function paystackRequest<T>(
     },
   });
 
-  const data = await response.json();
+  const rawBody = await response.text();
+  let data: any = null;
+
+  if (rawBody) {
+    try {
+      data = JSON.parse(rawBody);
+    } catch {
+      data = null;
+    }
+  }
+
   if (!response.ok || data?.status === false) {
-    throw new Error(data?.message || 'Paystack API request failed');
+    throw new PaystackApiError(
+      data?.message || `Paystack API request failed (${response.status})`,
+      response.status,
+      data
+    );
   }
 
   return data as T;
+}
+
+function isInvalidSubaccountError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+  if (!message) return false;
+
+  return (
+    message.includes('subaccount') &&
+    (message.includes('invalid') ||
+      message.includes('not found') ||
+      message.includes('does not exist'))
+  );
+}
+
+function normalizeAccountNumber(accountNumber: string): string {
+  return String(accountNumber || '').replace(/\s+/g, '').trim();
+}
+
+function toPaystackCountry(countryCode?: string): string | null {
+  const normalized = String(countryCode || '').trim().toUpperCase();
+  switch (normalized) {
+    case 'GH':
+      return 'ghana';
+    case 'NG':
+      return 'nigeria';
+    case 'KE':
+      return 'kenya';
+    case 'ZA':
+      return 'south africa';
+    default:
+      return null;
+  }
+}
+
+export function normalizePaystackSubaccountCode(
+  code?: string | null
+): string | undefined {
+  if (typeof code !== 'string') return undefined;
+  const normalized = code.trim().toUpperCase();
+  if (!normalized) return undefined;
+  if (!PAYSTACK_SUBACCOUNT_PATTERN.test(normalized)) return undefined;
+  return normalized;
+}
+
+export async function verifyPaystackBankAccount(
+  accountNumber: string,
+  bankCode: string,
+  explicitSecretKey?: string
+): Promise<PaystackBankAccountValidationResult> {
+  const normalizedAccountNumber = normalizeAccountNumber(accountNumber);
+  const normalizedBankCode = String(bankCode || '').trim();
+
+  if (!normalizedAccountNumber || !normalizedBankCode) {
+    return {
+      valid: false,
+      message: 'Bank code and account number are required',
+    };
+  }
+
+  const secretKey = getSecretKey(explicitSecretKey);
+
+  try {
+    const response = await paystackRequest<{
+      status: boolean;
+      message: string;
+      data?: {
+        account_name?: string;
+        account_number?: string;
+        bank_id?: number;
+      };
+    }>(
+      `/bank/resolve?account_number=${encodeURIComponent(normalizedAccountNumber)}&bank_code=${encodeURIComponent(
+        normalizedBankCode
+      )}`,
+      secretKey,
+      { method: 'GET' }
+    );
+
+    return {
+      valid: true,
+      accountName: response.data?.account_name,
+      accountNumber: response.data?.account_number,
+      bankId: response.data?.bank_id,
+    };
+  } catch (error) {
+    return {
+      valid: false,
+      message: error instanceof Error ? error.message : 'Failed to verify account',
+    };
+  }
+}
+
+export async function createPaystackSubaccount(
+  params: PaystackCreateSubaccountParams,
+  explicitSecretKey?: string
+): Promise<PaystackCreateSubaccountResult> {
+  const secretKey = getSecretKey(explicitSecretKey);
+  const normalizedAccountNumber = normalizeAccountNumber(params.accountNumber);
+  const normalizedBankCode = String(params.settlementBank || '').trim();
+
+  if (!normalizedAccountNumber || !normalizedBankCode) {
+    throw new Error('Bank code and account number are required to create Paystack subaccount');
+  }
+
+  const percentageCharge = Number.isFinite(params.percentageCharge)
+    ? Math.min(100, Math.max(0, Number(params.percentageCharge)))
+    : 0;
+
+  const payload: Record<string, unknown> = {
+    business_name: String(params.businessName || '').trim() || 'Creator Wallet',
+    bank_code: normalizedBankCode,
+    account_number: normalizedAccountNumber,
+    percentage_charge: percentageCharge,
+  };
+
+  if (params.description) payload.description = params.description;
+  if (params.primaryContactEmail) payload.primary_contact_email = params.primaryContactEmail;
+  if (params.primaryContactName) payload.primary_contact_name = params.primaryContactName;
+
+  const response = await paystackRequest<{
+    status: boolean;
+    message: string;
+    data?: {
+      subaccount_code?: string;
+      business_name?: string;
+      bank_code?: string;
+      settlement_bank?: string;
+      account_number?: string;
+      bank_name?: string;
+      active?: boolean;
+    };
+  }>('/subaccount', secretKey, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+  const subaccountCode = response.data?.subaccount_code;
+  if (!subaccountCode) {
+    throw new Error('Paystack did not return a subaccount code');
+  }
+
+  return {
+    subaccountCode,
+    businessName: response.data?.business_name,
+    bankCode: response.data?.bank_code || response.data?.settlement_bank,
+    accountNumber: response.data?.account_number,
+    bankName: response.data?.bank_name,
+    active: response.data?.active,
+  };
+}
+
+export async function listPaystackBanks(
+  countryCode: string,
+  explicitSecretKey?: string
+): Promise<PaystackBank[]> {
+  const paystackCountry = toPaystackCountry(countryCode);
+  if (!paystackCountry) {
+    return [];
+  }
+
+  const secretKey = getSecretKey(explicitSecretKey);
+  const response = await paystackRequest<{
+    status: boolean;
+    message: string;
+    data?: Array<{
+      id?: number;
+      name?: string;
+      code?: string;
+      active?: boolean;
+      country?: string;
+      currency?: string;
+    }>;
+  }>(
+    `/bank?country=${encodeURIComponent(
+      paystackCountry
+    )}&use_cursor=false&perPage=100`,
+    secretKey,
+    { method: 'GET' }
+  );
+
+  return (response.data || [])
+    .filter((bank) => Boolean(bank?.name) && Boolean(bank?.code))
+    .map((bank) => ({
+      id: bank.id,
+      name: String(bank.name),
+      code: String(bank.code),
+      active: bank.active,
+      country: bank.country,
+      currency: bank.currency,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function isPaystackConfigured(): boolean {
@@ -108,6 +369,7 @@ export async function initializePaystackPayment(
   explicitSecretKey?: string
 ): Promise<PaystackInitializeResponse> {
   const secretKey = getSecretKey(explicitSecretKey);
+  const normalizedSubaccount = normalizePaystackSubaccountCode(params.subaccount);
   const payload: Record<string, unknown> = {
     reference: params.reference,
     email: params.email,
@@ -117,26 +379,43 @@ export async function initializePaystackPayment(
     metadata: params.metadata || {},
   };
 
-  if (params.subaccount) {
-    payload.subaccount = params.subaccount;
+  if (normalizedSubaccount) {
+    payload.subaccount = normalizedSubaccount;
   }
 
   if (params.plan) {
     payload.plan = params.plan;
   }
 
-  const response = await paystackRequest<{
-    status: boolean;
-    message: string;
-    data: {
-      authorization_url: string;
-      access_code: string;
-      reference: string;
-    };
-  }>('/transaction/initialize', secretKey, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
+  const initialize = async (requestPayload: Record<string, unknown>) =>
+    paystackRequest<{
+      status: boolean;
+      message: string;
+      data: {
+        authorization_url: string;
+        access_code: string;
+        reference: string;
+      };
+    }>('/transaction/initialize', secretKey, {
+      method: 'POST',
+      body: JSON.stringify(requestPayload),
+    });
+
+  let response;
+  try {
+    response = await initialize(payload);
+  } catch (error) {
+    if (normalizedSubaccount && isInvalidSubaccountError(error)) {
+      const fallbackPayload = { ...payload };
+      delete fallbackPayload.subaccount;
+      console.warn(
+        `[paystack] Invalid subaccount ${normalizedSubaccount}; retrying initialize without subaccount.`
+      );
+      response = await initialize(fallbackPayload);
+    } else {
+      throw error;
+    }
+  }
 
   return {
     authorizationUrl: response.data.authorization_url,
@@ -195,6 +474,46 @@ export async function verifyPaystackTransaction(
   });
 
   return response.data;
+}
+
+export async function validatePaystackSubaccount(
+  subaccountCode: string,
+  explicitSecretKey?: string
+): Promise<PaystackSubaccountValidationResult> {
+  const normalizedCode = normalizePaystackSubaccountCode(subaccountCode);
+  if (!normalizedCode) {
+    return {
+      valid: false,
+      message: 'Subaccount code must look like ACCT_xxxxxxxx',
+    };
+  }
+
+  const secretKey = getSecretKey(explicitSecretKey);
+
+  try {
+    const response = await paystackRequest<{
+      status: boolean;
+      message: string;
+      data?: { business_name?: string };
+    }>(`/subaccount/${encodeURIComponent(normalizedCode)}`, secretKey, {
+      method: 'GET',
+    });
+
+    return {
+      valid: true,
+      normalizedCode,
+      businessName: response.data?.business_name,
+    };
+  } catch (error) {
+    if (isInvalidSubaccountError(error)) {
+      return {
+        valid: false,
+        normalizedCode,
+        message: error instanceof Error ? error.message : 'Invalid subaccount',
+      };
+    }
+    throw error;
+  }
 }
 
 export function verifyPaystackWebhookSignature(payload: string, signature: string): boolean {

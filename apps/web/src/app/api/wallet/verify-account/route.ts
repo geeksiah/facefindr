@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { verifyMobileMoneyAccount } from '@/lib/payments/payment-methods';
+import { resolvePaystackSecretKey, verifyPaystackBankAccount } from '@/lib/payments/paystack';
 import { createClient, createClientWithAccessToken } from '@/lib/supabase/server';
 
 type VerificationResult =
@@ -42,32 +43,31 @@ async function resolveWithFlutterwave(accountNumber: string, accountBank: string
   return { success: true, accountName: String(accountName) };
 }
 
-async function resolveWithPaystack(accountNumber: string, accountBank: string): Promise<VerificationResult> {
-  const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
+async function resolveWithPaystack(
+  accountNumber: string,
+  accountBank: string,
+  countryCode: string
+): Promise<VerificationResult> {
+  const paystackSecretKey = await resolvePaystackSecretKey(countryCode);
   if (!paystackSecretKey) {
     return { success: false, error: 'Paystack verification is not configured', status: 503 };
   }
 
-  const response = await fetch(
-    `https://api.paystack.co/bank/resolve?account_number=${encodeURIComponent(accountNumber)}&bank_code=${encodeURIComponent(accountBank)}`,
-    {
-      headers: {
-        Authorization: `Bearer ${paystackSecretKey}`,
-      },
-    }
+  const verification = await verifyPaystackBankAccount(
+    accountNumber,
+    accountBank,
+    paystackSecretKey
   );
 
-  const data = await response.json();
-  const accountName = data?.data?.account_name;
-  if (!response.ok || !data?.status || !accountName) {
+  if (!verification.valid || !verification.accountName) {
     return {
       success: false,
-      error: data?.message || 'Could not verify bank account details via Paystack',
+      error: verification.message || 'Could not verify bank account details via Paystack',
       status: 422,
     };
   }
 
-  return { success: true, accountName: String(accountName) };
+  return { success: true, accountName: String(verification.accountName) };
 }
 
 export async function POST(request: NextRequest) {
@@ -136,14 +136,14 @@ export async function POST(request: NextRequest) {
 
       let result: VerificationResult;
       if (provider === 'paystack') {
-        result = await resolveWithPaystack(accountNumber, accountBank);
+        result = await resolveWithPaystack(accountNumber, accountBank, country);
       } else if (provider === 'flutterwave') {
         result = await resolveWithFlutterwave(accountNumber, accountBank);
       } else {
         const primary = country === 'NG' ? 'paystack' : 'flutterwave';
         const primaryResult =
           primary === 'paystack'
-            ? await resolveWithPaystack(accountNumber, accountBank)
+            ? await resolveWithPaystack(accountNumber, accountBank, country)
             : await resolveWithFlutterwave(accountNumber, accountBank);
 
         if (primaryResult.success) {
@@ -152,7 +152,7 @@ export async function POST(request: NextRequest) {
           const fallbackResult =
             primary === 'paystack'
               ? await resolveWithFlutterwave(accountNumber, accountBank)
-              : await resolveWithPaystack(accountNumber, accountBank);
+              : await resolveWithPaystack(accountNumber, accountBank, country);
           result = fallbackResult.success ? fallbackResult : primaryResult;
         }
       }

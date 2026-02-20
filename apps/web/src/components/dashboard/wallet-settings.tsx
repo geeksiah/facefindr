@@ -48,6 +48,11 @@ interface BalanceData {
   currency: string;
 }
 
+interface PaystackBank {
+  name: string;
+  code: string;
+}
+
 const PROVIDER_INFO = {
   stripe: {
     name: 'Stripe',
@@ -94,13 +99,15 @@ export function WalletSettings() {
     accountBank: '',
     accountNumber: '',
     paypalEmail: '',
-    paystackSubaccountCode: '',
     momoNetwork: 'MTN',
     momoNumber: '',
   });
   const [isVerifyingAccount, setIsVerifyingAccount] = useState(false);
   const [verifiedAccountName, setVerifiedAccountName] = useState<string | null>(null);
   const [verificationError, setVerificationError] = useState<string | null>(null);
+  const [paystackBanks, setPaystackBanks] = useState<PaystackBank[]>([]);
+  const [isLoadingPaystackBanks, setIsLoadingPaystackBanks] = useState(false);
+  const [paystackBanksError, setPaystackBanksError] = useState<string | null>(null);
   
   const toast = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
@@ -108,6 +115,51 @@ export function WalletSettings() {
   useEffect(() => {
     fetchWallets();
   }, []);
+
+  useEffect(() => {
+    if (newWalletProvider !== 'paystack') {
+      return;
+    }
+
+    let cancelled = false;
+    const loadPaystackBanks = async () => {
+      setIsLoadingPaystackBanks(true);
+      setPaystackBanksError(null);
+      try {
+        const response = await fetch(
+          `/api/wallet/paystack-banks?country=${encodeURIComponent(formData.country)}`
+        );
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data?.error || 'Failed to load Paystack banks');
+        }
+
+        if (cancelled) return;
+        const banks: PaystackBank[] = Array.isArray(data?.banks) ? data.banks : [];
+        setPaystackBanks(banks);
+
+        // Keep previous selection only if still present for the selected country
+        if (!banks.some((bank) => bank.code === formData.accountBank)) {
+          setFormData((prev) => ({ ...prev, accountBank: '' }));
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setPaystackBanks([]);
+        setPaystackBanksError(
+          error instanceof Error ? error.message : 'Failed to load Paystack banks'
+        );
+      } finally {
+        if (!cancelled) {
+          setIsLoadingPaystackBanks(false);
+        }
+      }
+    };
+
+    void loadPaystackBanks();
+    return () => {
+      cancelled = true;
+    };
+  }, [newWalletProvider, formData.country]);
 
   const fetchWallets = async () => {
     try {
@@ -139,7 +191,6 @@ export function WalletSettings() {
           accountBank: formData.accountBank,
           accountNumber: formData.accountNumber,
           paypalEmail: formData.paypalEmail,
-          paystackSubaccountCode: formData.paystackSubaccountCode,
           momoNetwork: formData.momoNetwork,
           momoNumber: formData.momoNumber,
         }),
@@ -170,7 +221,7 @@ export function WalletSettings() {
   };
 
   const handleVerifyAccount = async () => {
-    if (!newWalletProvider || (newWalletProvider !== 'flutterwave' && newWalletProvider !== 'momo')) {
+    if (!newWalletProvider || (newWalletProvider !== 'flutterwave' && newWalletProvider !== 'momo' && newWalletProvider !== 'paystack')) {
       return;
     }
 
@@ -405,6 +456,13 @@ export function WalletSettings() {
                 onClick={() => {
                   if (alreadyExists) return;
                   setNewWalletProvider(provider);
+                  if (provider === 'paystack') {
+                    setFormData((prev) => ({
+                      ...prev,
+                      accountBank: '',
+                      accountNumber: '',
+                    }));
+                  }
                   setVerifiedAccountName(null);
                   setVerificationError(null);
                 }}
@@ -483,23 +541,48 @@ export function WalletSettings() {
                   />
                 </div>
 
-                {/* Flutterwave specific fields */}
-                {newWalletProvider === 'flutterwave' && (
+                {/* Flutterwave and Paystack payout account fields */}
+                {(newWalletProvider === 'flutterwave' || newWalletProvider === 'paystack') && (
                   <>
                     <div>
                       <label className="text-sm font-medium text-foreground mb-1 block">
-                        Bank Code
+                        {newWalletProvider === 'paystack' ? 'Bank Name' : 'Bank Code'}
                       </label>
-                      <Input
-                        value={formData.accountBank}
-                        onChange={(e) => {
-                          setFormData({ ...formData, accountBank: e.target.value });
-                          setVerifiedAccountName(null);
-                          setVerificationError(null);
-                        }}
-                        placeholder="e.g., 044 for Access Bank"
-                        required
-                      />
+                      {newWalletProvider === 'paystack' ? (
+                        <select
+                          value={formData.accountBank}
+                          onChange={(e) => {
+                            setFormData({ ...formData, accountBank: e.target.value });
+                            setVerifiedAccountName(null);
+                            setVerificationError(null);
+                          }}
+                          disabled={isLoadingPaystackBanks}
+                          className="w-full rounded-xl border border-input bg-background px-4 py-3 text-sm"
+                        >
+                          <option value="">
+                            {isLoadingPaystackBanks ? 'Loading banks...' : 'Select a bank'}
+                          </option>
+                          {paystackBanks.map((bank) => (
+                            <option key={bank.code} value={bank.code}>
+                              {bank.name}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <Input
+                          value={formData.accountBank}
+                          onChange={(e) => {
+                            setFormData({ ...formData, accountBank: e.target.value });
+                            setVerifiedAccountName(null);
+                            setVerificationError(null);
+                          }}
+                          placeholder="e.g., 044 for Access Bank"
+                          required
+                        />
+                      )}
+                      {newWalletProvider === 'paystack' && paystackBanksError && (
+                        <p className="mt-1 text-xs text-destructive">{paystackBanksError}</p>
+                      )}
                     </div>
                     <div>
                       <label className="text-sm font-medium text-foreground mb-1 block">
@@ -525,6 +608,11 @@ export function WalletSettings() {
                           {isVerifyingAccount ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Verify'}
                         </Button>
                       </div>
+                      {newWalletProvider === 'paystack' && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Select a Paystack-supported bank name. We use its code internally to verify account and create subaccount automatically.
+                        </p>
+                      )}
                     </div>
                   </>
                 )}
@@ -542,23 +630,6 @@ export function WalletSettings() {
                       placeholder="your@email.com"
                       required
                     />
-                  </div>
-                )}
-
-                {/* Paystack specific fields */}
-                {newWalletProvider === 'paystack' && (
-                  <div>
-                    <label className="text-sm font-medium text-foreground mb-1 block">
-                      Subaccount Code (Optional)
-                    </label>
-                    <Input
-                      value={formData.paystackSubaccountCode}
-                      onChange={(e) => setFormData({ ...formData, paystackSubaccountCode: e.target.value })}
-                      placeholder="ACCT_xxxxxxxx"
-                    />
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Add your Paystack subaccount code if you want split settlement.
-                    </p>
                   </div>
                 )}
 
@@ -647,7 +718,14 @@ export function WalletSettings() {
                   variant="primary"
                   className="flex-1"
                   onClick={() => handleOnboard(newWalletProvider)}
-                  disabled={onboarding === newWalletProvider}
+                  disabled={
+                    onboarding === newWalletProvider ||
+                    (newWalletProvider === 'paystack' &&
+                      (isLoadingPaystackBanks ||
+                        !!paystackBanksError ||
+                        !formData.accountBank ||
+                        !formData.accountNumber))
+                  }
                 >
                   {onboarding === newWalletProvider ? (
                     <>
