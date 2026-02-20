@@ -18,26 +18,51 @@ function detectCountryFromRequest(request: NextRequest) {
   );
 }
 
-function isMissingColumnError(error: any, columnName: string) {
-  return error?.code === '42703' && typeof error?.message === 'string' && error.message.includes(columnName);
+function getMissingColumnName(error: any): string | null {
+  if (error?.code !== '42703' || typeof error?.message !== 'string') return null;
+  const quoted = error.message.match(/column\s+"([^"]+)"/i);
+  if (quoted?.[1]) return quoted[1];
+  const bare = error.message.match(/column\s+([a-zA-Z0-9_]+)/i);
+  return bare?.[1] || null;
 }
 
-async function insertWithCountryFallback(db: any, table: 'photographers' | 'attendees', payload: Record<string, any>) {
-  const withCountry = await db.from(table).insert(payload);
-  if (!withCountry.error) return withCountry;
-  if (!isMissingColumnError(withCountry.error, 'country_code')) return withCountry;
+async function insertWithSchemaFallback(
+  db: any,
+  table: 'photographers' | 'attendees',
+  payload: Record<string, any>
+) {
+  let attemptPayload = { ...payload };
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const result = await db.from(table).insert(attemptPayload);
+    if (!result.error) return result;
 
-  const { country_code, ...legacyPayload } = payload;
-  return db.from(table).insert(legacyPayload);
+    const missingColumn = getMissingColumnName(result.error);
+    if (!missingColumn || !(missingColumn in attemptPayload)) {
+      return result;
+    }
+    delete attemptPayload[missingColumn];
+  }
+  return db.from(table).insert(attemptPayload);
 }
 
-async function updateWithCountryFallback(db: any, table: 'photographers' | 'attendees', id: string, payload: Record<string, any>) {
-  const withCountry = await db.from(table).update(payload).eq('id', id);
-  if (!withCountry.error) return withCountry;
-  if (!isMissingColumnError(withCountry.error, 'country_code')) return withCountry;
+async function updateWithSchemaFallback(
+  db: any,
+  table: 'photographers' | 'attendees',
+  id: string,
+  payload: Record<string, any>
+) {
+  let attemptPayload = { ...payload };
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const result = await db.from(table).update(attemptPayload).eq('id', id);
+    if (!result.error) return result;
 
-  const { country_code, ...legacyPayload } = payload;
-  return db.from(table).update(legacyPayload).eq('id', id);
+    const missingColumn = getMissingColumnName(result.error);
+    if (!missingColumn || !(missingColumn in attemptPayload)) {
+      return result;
+    }
+    delete attemptPayload[missingColumn];
+  }
+  return db.from(table).update(attemptPayload).eq('id', id);
 }
 
 export async function GET(request: NextRequest) {
@@ -110,13 +135,12 @@ export async function GET(request: NextRequest) {
             // Generate username from display name
             const username = displayName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15);
             
-            await insertWithCountryFallback(adminDb, 'photographers', {
+            await insertWithSchemaFallback(adminDb, 'photographers', {
               id: user.id,
-              user_id: user.id,
               email: user.email,
               display_name: displayName,
               username: username,
-              avatar_url: user.user_metadata?.avatar_url || user.user_metadata?.picture,
+              profile_photo_url: user.user_metadata?.avatar_url || user.user_metadata?.picture,
               country_code: detectedCountry,
               status: 'active',
               email_verified: true, // OAuth users are verified
@@ -130,10 +154,10 @@ export async function GET(request: NextRequest) {
             });
           } else {
             // Update existing profile
-            await updateWithCountryFallback(userDb, 'photographers', user.id, { 
+            await updateWithSchemaFallback(userDb, 'photographers', user.id, {
                 email_verified: true,
                 status: 'active',
-                avatar_url: user.user_metadata?.avatar_url || user.user_metadata?.picture,
+                profile_photo_url: user.user_metadata?.avatar_url || user.user_metadata?.picture,
                 country_code: detectedCountry,
               });
           }
@@ -153,21 +177,20 @@ export async function GET(request: NextRequest) {
             
             const username = displayName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15);
             
-            await insertWithCountryFallback(adminDb, 'attendees', {
+            await insertWithSchemaFallback(adminDb, 'attendees', {
               id: user.id,
-              user_id: user.id,
               email: user.email,
               display_name: displayName,
               username: username,
-              avatar_url: user.user_metadata?.avatar_url || user.user_metadata?.picture,
+              profile_photo_url: user.user_metadata?.avatar_url || user.user_metadata?.picture,
               country_code: detectedCountry,
               status: 'active',
               email_verified: true,
             });
           } else {
-            await updateWithCountryFallback(userDb, 'attendees', user.id, { 
+            await updateWithSchemaFallback(userDb, 'attendees', user.id, {
                 email_verified: true,
-                avatar_url: user.user_metadata?.avatar_url || user.user_metadata?.picture,
+                profile_photo_url: user.user_metadata?.avatar_url || user.user_metadata?.picture,
                 country_code: detectedCountry,
               });
           }

@@ -18,9 +18,41 @@ interface VaultPhoto {
   expiresAt: string | null;
 }
 
+interface VaultUsage {
+  totalPhotos: number;
+  totalSizeBytes: number;
+  storageLimitBytes: number;
+  photoLimit: number;
+  usagePercent: number;
+  photosPercent: number;
+}
+
+interface VaultSubscription {
+  planName?: string;
+  planSlug?: string;
+  billingCycle?: string;
+}
+
+interface StoragePlan {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string | null;
+  price_monthly?: number | null;
+  price_yearly?: number | null;
+  currency?: string | null;
+  storage_limit_mb?: number | null;
+  photo_limit?: number | null;
+  is_popular?: boolean | null;
+}
+
 export default function VaultPage() {
   const toast = useToast();
   const [photos, setPhotos] = useState<VaultPhoto[]>([]);
+  const [usage, setUsage] = useState<VaultUsage | null>(null);
+  const [subscription, setSubscription] = useState<VaultSubscription | null>(null);
+  const [storagePlans, setStoragePlans] = useState<StoragePlan[]>([]);
+  const [subscribingPlan, setSubscribingPlan] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
@@ -78,6 +110,7 @@ export default function VaultPage() {
         }));
 
       if (rawPhotos.length === 0) {
+        await Promise.all([loadVaultUsageAndSubscription(), loadStoragePlans()]);
         setPhotos([]);
         return;
       }
@@ -133,11 +166,65 @@ export default function VaultPage() {
       }
 
       setPhotos(vaultPhotos);
+      await Promise.all([loadVaultUsageAndSubscription(), loadStoragePlans()]);
     } catch (err) {
       console.error('Failed to load vault:', err);
       setErrorMessage('Failed to load your vault.');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const loadVaultUsageAndSubscription = async () => {
+    try {
+      const response = await fetch('/api/vault?limit=1', { cache: 'no-store' });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data?.usage) setUsage(data.usage);
+      if (data?.subscription) setSubscription(data.subscription);
+    } catch {
+      // non-fatal
+    }
+  };
+
+  const loadStoragePlans = async () => {
+    try {
+      const response = await fetch('/api/storage/plans', { cache: 'no-store' });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (Array.isArray(data?.plans)) {
+        setStoragePlans(data.plans);
+      }
+    } catch {
+      // non-fatal
+    }
+  };
+
+  const formatBytes = (bytes: number) => {
+    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    const value = bytes / Math.pow(1024, exponent);
+    return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[exponent]}`;
+  };
+
+  const handleUpgradeStorage = async (planSlug: string) => {
+    try {
+      setSubscribingPlan(planSlug);
+      const response = await fetch('/api/vault/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planSlug, billingCycle: 'monthly' }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data?.checkoutUrl) {
+        throw new Error(data?.error || 'Unable to start storage checkout');
+      }
+      window.location.href = data.checkoutUrl;
+    } catch (error: any) {
+      toast.error('Upgrade failed', error?.message || 'Unable to upgrade storage right now');
+    } finally {
+      setSubscribingPlan(null);
     }
   };
 
@@ -236,6 +323,72 @@ export default function VaultPage() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Storage Usage + Upgrade */}
+      <div className="rounded-xl border border-border bg-card p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Vault Storage</h2>
+            <p className="text-sm text-secondary">
+              {subscription?.planName || 'Free'} plan
+            </p>
+          </div>
+          {usage && (
+            <p className="text-sm text-secondary">
+              {formatBytes(usage.totalSizeBytes)} /{' '}
+              {usage.storageLimitBytes === -1 ? 'Unlimited' : formatBytes(usage.storageLimitBytes)}
+            </p>
+          )}
+        </div>
+        {usage && usage.storageLimitBytes > 0 && (
+          <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-accent transition-all"
+              style={{ width: `${Math.max(0, Math.min(100, usage.usagePercent || 0))}%` }}
+            />
+          </div>
+        )}
+
+        {storagePlans.length > 0 && (
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {storagePlans
+              .filter((plan) => plan.slug !== 'free')
+              .slice(0, 3)
+              .map((plan) => {
+                const currency = String(plan.currency || 'USD').toUpperCase();
+                const priceMonthly = Math.round(Number(plan.price_monthly || 0) * 100);
+                return (
+                  <div
+                    key={plan.id}
+                    className={`rounded-xl border p-4 ${
+                      plan.is_popular ? 'border-accent bg-accent/5' : 'border-border bg-background'
+                    }`}
+                  >
+                    <p className="font-semibold text-foreground">{plan.name}</p>
+                    <p className="mt-1 text-sm text-secondary">
+                      {plan.storage_limit_mb === -1 ? 'Unlimited' : `${Math.round((plan.storage_limit_mb || 0) / 1024)} GB`} storage
+                    </p>
+                    <p className="mt-2 text-lg font-bold text-foreground">
+                      {new Intl.NumberFormat('en-US', {
+                        style: 'currency',
+                        currency,
+                      }).format((priceMonthly || 0) / 100)}
+                      <span className="ml-1 text-xs font-normal text-secondary">/month</span>
+                    </p>
+                    <Button
+                      className="mt-3 w-full"
+                      variant={plan.is_popular ? 'primary' : 'outline'}
+                      disabled={subscribingPlan === plan.slug}
+                      onClick={() => handleUpgradeStorage(plan.slug)}
+                    >
+                      {subscribingPlan === plan.slug ? 'Starting...' : 'Upgrade'}
+                    </Button>
+                  </div>
+                );
+              })}
+          </div>
+        )}
       </div>
 
       {errorMessage && (

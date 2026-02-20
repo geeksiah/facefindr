@@ -53,6 +53,8 @@ interface PaystackBank {
   code: string;
 }
 
+type WalletProvider = WalletData['provider'];
+
 const PROVIDER_INFO = {
   stripe: {
     name: 'Stripe',
@@ -89,6 +91,9 @@ const PROVIDER_INFO = {
 export function WalletSettings() {
   const [wallets, setWallets] = useState<WalletData[]>([]);
   const [balances, setBalances] = useState<BalanceData[]>([]);
+  const [allowedProviders, setAllowedProviders] = useState<WalletProvider[]>([]);
+  const [isLoadingProviderConfig, setIsLoadingProviderConfig] = useState(false);
+  const [providerConfigError, setProviderConfigError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [onboarding, setOnboarding] = useState<string | null>(null);
   const [showAddWallet, setShowAddWallet] = useState(false);
@@ -114,6 +119,54 @@ export function WalletSettings() {
   useEffect(() => {
     fetchWallets();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadProviderConfig = async () => {
+      setIsLoadingProviderConfig(true);
+      setProviderConfigError(null);
+      try {
+        const response = await fetch(
+          `/api/runtime/gateways/payment?country=${encodeURIComponent(formData.country)}`,
+          { cache: 'no-store' }
+        );
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data?.error || 'Failed to load region payment providers');
+        }
+
+        if (cancelled) return;
+        const gateways = Array.isArray(data?.gateways) ? data.gateways : [];
+        const nextProviders = new Set<WalletProvider>();
+        for (const gateway of gateways) {
+          const normalized = String(gateway || '').toLowerCase();
+          if (normalized === 'stripe') nextProviders.add('stripe');
+          if (normalized === 'paypal') nextProviders.add('paypal');
+          if (normalized === 'paystack') nextProviders.add('paystack');
+          if (normalized === 'flutterwave') {
+            nextProviders.add('flutterwave');
+            nextProviders.add('momo');
+          }
+        }
+        setAllowedProviders(Array.from(nextProviders));
+      } catch (error) {
+        if (cancelled) return;
+        setAllowedProviders([]);
+        setProviderConfigError(
+          error instanceof Error ? error.message : 'Failed to load region payment providers'
+        );
+      } finally {
+        if (!cancelled) {
+          setIsLoadingProviderConfig(false);
+        }
+      }
+    };
+
+    void loadProviderConfig();
+    return () => {
+      cancelled = true;
+    };
+  }, [formData.country]);
 
   useEffect(() => {
     if (newWalletProvider !== 'paystack') {
@@ -177,6 +230,14 @@ export function WalletSettings() {
   };
 
   const handleOnboard = async (provider: 'stripe' | 'flutterwave' | 'paypal' | 'paystack' | 'momo') => {
+    if (!allowedProviders.includes(provider)) {
+      toast.error(
+        'Provider disabled',
+        `${PROVIDER_INFO[provider].name} is not enabled for ${formData.country}.`
+      );
+      return;
+    }
+
     setOnboarding(provider);
 
     try {
@@ -458,50 +519,85 @@ export function WalletSettings() {
       ) : (
         <div className="rounded-xl border border-border bg-card p-5">
           <h3 className="text-lg font-semibold text-foreground mb-4">Add Payment Method</h3>
+          {(isLoadingProviderConfig || providerConfigError) && (
+            <div className="mb-4 rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm">
+              {isLoadingProviderConfig
+                ? 'Loading region provider configuration...'
+                : providerConfigError}
+            </div>
+          )}
 
           {!newWalletProvider ? (
-            <div className="grid gap-3">
-              {(Object.keys(PROVIDER_INFO) as Array<keyof typeof PROVIDER_INFO>).map((provider) => {
-                const info = PROVIDER_INFO[provider];
-                const Icon = info.icon;
-                const alreadyExists = wallets.some((w) => w.provider === provider);
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-foreground mb-1 block">
+                  Country
+                </label>
+                <select
+                  value={formData.country}
+                  onChange={(e) => setFormData({ ...formData, country: e.target.value })}
+                  className="w-full rounded-xl border border-input bg-background px-4 py-3 text-sm"
+                >
+                  <option value="US">United States</option>
+                  <option value="GB">United Kingdom</option>
+                  <option value="CA">Canada</option>
+                  <option value="AU">Australia</option>
+                  <option value="GH">Ghana</option>
+                  <option value="NG">Nigeria</option>
+                  <option value="KE">Kenya</option>
+                  <option value="ZA">South Africa</option>
+                </select>
+              </div>
 
-                return (
-                  <button
-                    key={provider}
-                onClick={() => {
-                  if (alreadyExists) return;
-                  setNewWalletProvider(provider);
-                  if (provider === 'paystack') {
-                    setFormData((prev) => ({
-                      ...prev,
-                      accountBank: '',
-                      accountNumber: '',
-                    }));
-                  }
-                  setVerifiedAccountName(null);
-                  setVerificationError(null);
-                }}
-                    disabled={alreadyExists}
-                    className={`flex items-center gap-4 p-4 rounded-xl border transition-all text-left ${
-                      alreadyExists
-                        ? 'border-border bg-muted opacity-50 cursor-not-allowed'
-                        : 'border-border hover:border-accent hover:bg-accent/5 cursor-pointer'
-                    }`}
-                  >
-                    <div className={`rounded-lg ${info.color} p-2.5`}>
-                      <Icon className="h-5 w-5 text-white" />
-                    </div>
-                    <div className="flex-1">
-                      <h4 className="font-semibold text-foreground">{info.name}</h4>
-                      <p className="text-sm text-secondary">{info.description}</p>
-                    </div>
-                    {alreadyExists && (
-                      <span className="text-xs text-secondary">Already added</span>
-                    )}
-                  </button>
-                );
-              })}
+              <div className="grid gap-3">
+                {(Object.keys(PROVIDER_INFO) as Array<keyof typeof PROVIDER_INFO>).map((provider) => {
+                  const info = PROVIDER_INFO[provider];
+                  const Icon = info.icon;
+                  const alreadyExists = wallets.some((w) => w.provider === provider);
+                  const enabledForRegion = allowedProviders.includes(provider);
+                  const disabled = alreadyExists || !enabledForRegion || isLoadingProviderConfig;
+
+                  return (
+                    <button
+                      key={provider}
+                  onClick={() => {
+                    if (disabled) return;
+                    setNewWalletProvider(provider);
+                    if (provider === 'paystack') {
+                      setFormData((prev) => ({
+                        ...prev,
+                        accountBank: '',
+                        accountNumber: '',
+                      }));
+                    }
+                    setVerifiedAccountName(null);
+                    setVerificationError(null);
+                  }}
+                      disabled={disabled}
+                      className={`flex items-center gap-4 p-4 rounded-xl border transition-all text-left ${
+                        disabled
+                          ? 'border-border bg-muted opacity-50 cursor-not-allowed'
+                          : 'border-border hover:border-accent hover:bg-accent/5 cursor-pointer'
+                      }`}
+                    >
+                      <div className={`rounded-lg ${info.color} p-2.5`}>
+                        <Icon className="h-5 w-5 text-white" />
+                      </div>
+                      <div className="flex-1">
+                        <h4 className="font-semibold text-foreground">{info.name}</h4>
+                        <p className="text-sm text-secondary">{info.description}</p>
+                      </div>
+                      <span className="text-xs text-secondary">
+                        {alreadyExists
+                          ? 'Already added'
+                          : !enabledForRegion
+                          ? `Disabled in ${formData.country}`
+                          : ''}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           ) : (
             <div className="space-y-4">
@@ -726,6 +822,7 @@ export function WalletSettings() {
                   onClick={() => handleOnboard(newWalletProvider)}
                   disabled={
                     onboarding === newWalletProvider ||
+                    !allowedProviders.includes(newWalletProvider) ||
                     (newWalletProvider === 'paystack' &&
                       (isLoadingPaystackBanks ||
                         !!paystackBanksError ||

@@ -22,6 +22,79 @@ import { verifyMtnWalletActive } from '@/lib/payments/mtn-momo';
 import { getPhotographerIdCandidates, resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
+const SUPPORTED_REGION_GATEWAYS = new Set([
+  'stripe',
+  'flutterwave',
+  'paypal',
+  'paystack',
+]);
+
+const REGION_PROVIDER_ALIAS: Record<string, string> = {
+  mtn_momo: 'flutterwave',
+  vodafone_cash: 'flutterwave',
+  airteltigo_money: 'flutterwave',
+  mpesa: 'flutterwave',
+};
+
+function normalizeRegionProviders(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const normalized = input
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean)
+    .map((value) => REGION_PROVIDER_ALIAS[value] || value)
+    .filter((value) => SUPPORTED_REGION_GATEWAYS.has(value));
+  return Array.from(new Set(normalized));
+}
+
+async function ensureProviderEnabledForRegion(
+  serviceClient: ReturnType<typeof createServiceClient>,
+  provider: string,
+  countryCode: string
+) {
+  const gatewayProvider = provider === 'momo' ? 'flutterwave' : provider;
+  const normalizedProvider = String(gatewayProvider || '').trim().toLowerCase();
+  if (!SUPPORTED_REGION_GATEWAYS.has(normalizedProvider)) {
+    return {
+      allowed: false,
+      error: `Unsupported payment provider: ${provider}`,
+      status: 400,
+    };
+  }
+
+  const { data: regionConfig, error } = await serviceClient
+    .from('region_config')
+    .select('is_active, payment_providers')
+    .eq('region_code', countryCode)
+    .maybeSingle();
+
+  if (error || !regionConfig) {
+    return {
+      allowed: false,
+      error: `No active region configuration found for ${countryCode}`,
+      status: 503,
+    };
+  }
+
+  if (!regionConfig.is_active) {
+    return {
+      allowed: false,
+      error: `Region ${countryCode} is disabled`,
+      status: 403,
+    };
+  }
+
+  const enabledProviders = normalizeRegionProviders(regionConfig.payment_providers);
+  if (!enabledProviders.includes(normalizedProvider)) {
+    return {
+      allowed: false,
+      error: `${provider} is not enabled for region ${countryCode}`,
+      status: 403,
+    };
+  }
+
+  return { allowed: true, status: 200 };
+}
+
 export async function POST(request: Request) {
   try {
     const supabase = await createClient();
@@ -45,6 +118,28 @@ export async function POST(request: Request) {
       // Paystack specific
       paystackSubaccountCode,
     } = body;
+    const normalizedCountry = String(country || '')
+      .trim()
+      .toUpperCase();
+
+    if (!/^[A-Z]{2}$/.test(normalizedCountry)) {
+      return NextResponse.json(
+        { error: 'A valid 2-letter country code is required' },
+        { status: 400 }
+      );
+    }
+
+    const providerAccess = await ensureProviderEnabledForRegion(
+      serviceClient,
+      String(provider || '').toLowerCase(),
+      normalizedCountry
+    );
+    if (!providerAccess.allowed) {
+      return NextResponse.json(
+        { error: providerAccess.error },
+        { status: providerAccess.status }
+      );
+    }
 
     // Get photographer profile
     const { data: photographer } = await resolvePhotographerProfileByUser(serviceClient, user.id, user.email);
@@ -96,8 +191,8 @@ export async function POST(request: Request) {
       if (provider === 'paypal' && existingWallet.status === 'pending') {
         return NextResponse.json({
           wallet: existingWallet,
-          onboardingUrl: `${baseUrl}/api/wallet/paypal/connect?country=${encodeURIComponent(
-            String(country || '').toUpperCase() || 'US'
+            onboardingUrl: `${baseUrl}/api/wallet/paypal/connect?country=${encodeURIComponent(
+            normalizedCountry || 'US'
           )}`,
         });
       }
@@ -110,13 +205,13 @@ export async function POST(request: Request) {
     const { data: regionConfig } = await serviceClient
       .from('region_config')
       .select('default_currency')
-      .eq('region_code', String(country || '').toUpperCase())
+      .eq('region_code', normalizedCountry)
       .maybeSingle();
 
     const walletData: Record<string, unknown> = {
       photographer_id: photographerId,
       provider,
-      country_code: country,
+      country_code: normalizedCountry,
       preferred_currency: regionConfig?.default_currency || 'USD',
       status: 'pending',
     };
@@ -134,7 +229,7 @@ export async function POST(request: Request) {
 
       const account = await createConnectAccount({
         email: (photographerDetails as any)?.email || user.email,
-        country,
+        country: normalizedCountry,
         businessName: businessName || (photographerDetails as any)?.business_name,
         photographerId,
       });
@@ -195,14 +290,14 @@ export async function POST(request: Request) {
         'http://localhost:3000';
       return NextResponse.json({
         onboardingUrl: `${baseUrl}/api/wallet/paypal/connect?country=${encodeURIComponent(
-          String(country || '').toUpperCase() || 'US'
+          normalizedCountry || 'US'
         )}`,
       });
     }
 
     // Handle Paystack
     if (provider === 'paystack') {
-      const paystackSecretKey = await resolvePaystackSecretKey(country);
+      const paystackSecretKey = await resolvePaystackSecretKey(normalizedCountry);
       if (!paystackSecretKey) {
         return NextResponse.json(
           { error: 'Paystack is not configured' },
@@ -340,7 +435,7 @@ export async function POST(request: Request) {
       }
 
       if (String(momoNetwork).toUpperCase() === 'MTN') {
-        const verification = await verifyMtnWalletActive(momoNumber, String(country || '').toUpperCase() || 'GH');
+        const verification = await verifyMtnWalletActive(momoNumber, normalizedCountry || 'GH');
         if (!verification.valid) {
           return NextResponse.json(
             { error: verification.message || 'Unable to verify MTN wallet' },

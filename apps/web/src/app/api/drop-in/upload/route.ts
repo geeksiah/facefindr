@@ -77,7 +77,7 @@ async function ensureAttendeeProfile(
   let { data: attendee } = await resolveAttendeeProfileByUser(serviceClient, user.id, user.email);
   if (attendee) return attendee;
 
-  const baseUsername =
+  const usernameSeed =
     String(user.user_metadata?.username || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '') ||
     String(user.user_metadata?.display_name || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '') ||
     String(user.email || '')
@@ -85,30 +85,36 @@ async function ensureAttendeeProfile(
       .toLowerCase()
       .replace(/[^a-z0-9_]/g, '') ||
     `user_${Date.now()}`;
-  const username = baseUsername.slice(0, 24);
+  const username = usernameSeed.slice(0, 8) || 'user0001';
   const displayName = user.user_metadata?.display_name || user.email?.split('@')[0] || 'User';
+  const normalizedCountryCode =
+    typeof user.user_metadata?.country_code === 'string' &&
+    /^[A-Za-z]{2}$/.test(user.user_metadata.country_code.trim())
+      ? user.user_metadata.country_code.trim().toUpperCase()
+      : null;
+
+  const nextFaceTag = (base: string) => {
+    const suffix = Math.floor(1000 + Math.random() * 9000).toString();
+    const tagBase = base.replace(/[^a-z0-9]/g, '').slice(0, 12) || 'user';
+    return {
+      faceTag: `@${tagBase}${suffix}`,
+      suffix,
+    };
+  };
+  const initialTag = nextFaceTag(username);
 
   let payload: Record<string, any> = {
     id: user.id,
     display_name: displayName,
     email: user.email,
     username,
+    country_code: normalizedCountryCode,
+    face_tag: initialTag.faceTag,
+    face_tag_suffix: initialTag.suffix,
   };
 
-  let addFaceTag = false;
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const attemptPayload = addFaceTag
-      ? (() => {
-          const suffix = Math.floor(1000 + Math.random() * 9000).toString();
-          return {
-            ...payload,
-            face_tag: payload.face_tag || `@${username.slice(0, 12)}${suffix}`,
-            face_tag_suffix: payload.face_tag_suffix || suffix,
-          };
-        })()
-      : payload;
-
-    const createResult = await tryInsertAttendeeProfile(serviceClient, attemptPayload);
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const createResult = await tryInsertAttendeeProfile(serviceClient, payload);
     if (!createResult.error && createResult.data) {
       return {
         id: createResult.data.id,
@@ -128,19 +134,33 @@ async function ensureAttendeeProfile(
     }
 
     if (needsFaceTag(error)) {
-      addFaceTag = true;
+      const nextTag = nextFaceTag(username);
+      payload.face_tag = nextTag.faceTag;
+      payload.face_tag_suffix = nextTag.suffix;
       continue;
     }
 
     if (
       error.code === '23505' &&
       typeof error.message === 'string' &&
-      error.message.toLowerCase().includes('username')
+      (error.message.toLowerCase().includes('username') ||
+        error.message.toLowerCase().includes('face_tag') ||
+        error.message.toLowerCase().includes('username_registry'))
     ) {
-      payload.username = `${username}${Math.floor(100 + Math.random() * 900)}`;
+      const nextTag = nextFaceTag(username);
+      payload.username = `${username.slice(0, 6)}${Math.floor(10 + Math.random() * 89)}`;
+      payload.face_tag = nextTag.faceTag;
+      payload.face_tag_suffix = nextTag.suffix;
       continue;
     }
 
+    console.error('Drop-in attendee profile creation failed', {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      attempt: attempt + 1,
+    });
     break;
   }
 

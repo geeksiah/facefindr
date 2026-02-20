@@ -162,6 +162,7 @@ export async function POST(request: NextRequest) {
     if (notifError || !notification || !attendeeIdCandidates.includes(notification.recipient_id)) {
       return NextResponse.json({ error: 'Notification not found' }, { status: 404 });
     }
+    const targetNotificationId = notification.id as string;
     const recipientAttendeeId = notification.recipient_id as string;
 
     const { data: dropInPhoto } = await supabase
@@ -319,7 +320,7 @@ export async function POST(request: NextRequest) {
     const { error: updateError } = await supabase
       .from('drop_in_notifications')
       .update(updates)
-      .eq('id', notificationId);
+      .eq('id', targetNotificationId);
 
     if (updateError) {
       return NextResponse.json({ error: 'Failed to update notification' }, { status: 500 });

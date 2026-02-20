@@ -17,6 +17,7 @@ export function DropInHubPage({ basePath, defaultTab = 'find' }: DropInHubPagePr
   const [tab, setTab] = useState<DropInTab>(defaultTab);
   const [latestStatusHref, setLatestStatusHref] = useState<string | null>(null);
   const [isCheckingLatestUpload, setIsCheckingLatestUpload] = useState(false);
+  const billingHref = basePath.startsWith('/gallery') ? '/gallery/billing' : '/dashboard/billing';
 
   useEffect(() => {
     if (tab !== 'upload') return;
@@ -151,6 +152,9 @@ export function DropInHubPage({ basePath, defaultTab = 'find' }: DropInHubPagePr
               <Camera className="mr-2 h-4 w-4" />
               {tabCopy.primaryLabel}
             </Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href={billingHref}>Buy Credits</Link>
           </Button>
           {tab === 'upload' ? (
             tabCopy.secondaryHref ? (
