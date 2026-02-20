@@ -17,6 +17,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { createServiceClient } from '@/lib/supabase/server';
 
 import { createMomoTransfer, isFlutterwaveConfigured } from './flutterwave';
+import { createMtnDisbursementTransfer, isMtnMomoConfiguredForRegion } from './mtn-momo';
 import {
   getCreatorPayoutSettings,
   areAutoPayoutsEnabled,
@@ -53,6 +54,42 @@ export interface PayoutResult {
   providerReference?: string;
   error?: string;
   deduped?: boolean;
+}
+
+async function applyWalletBalancePayout(
+  supabase: ReturnType<typeof createServiceClient>,
+  wallet: {
+    id: string;
+    photographer_id?: string | null;
+    provider?: string | null;
+    status?: string | null;
+  },
+  request: PayoutRequest
+) {
+  const { data: currentBalance } = await supabase
+    .from('wallet_balances')
+    .select(
+      'wallet_id, photographer_id, provider, status, currency, available_balance, total_earnings, total_paid_out, pending_payout'
+    )
+    .eq('wallet_id', wallet.id)
+    .maybeSingle();
+
+  const currentAvailable = Math.max(0, Number(currentBalance?.available_balance || 0));
+  const currentPaidOut = Math.max(0, Number(currentBalance?.total_paid_out || 0));
+  const currentEarnings = Math.max(0, Number(currentBalance?.total_earnings || 0));
+  const currentPending = Math.max(0, Number(currentBalance?.pending_payout || 0));
+
+  await supabase.from('wallet_balances').upsert({
+    wallet_id: wallet.id,
+    photographer_id: currentBalance?.photographer_id || wallet.photographer_id || null,
+    provider: currentBalance?.provider || wallet.provider || 'stripe',
+    status: currentBalance?.status || wallet.status || 'active',
+    currency: request.currency || currentBalance?.currency || 'USD',
+    available_balance: Math.max(0, currentAvailable - Number(request.amount || 0)),
+    total_earnings: currentEarnings,
+    total_paid_out: currentPaidOut + Number(request.amount || 0),
+    pending_payout: Math.max(0, currentPending - Number(request.amount || 0)),
+  });
 }
 
 // ============================================
@@ -147,6 +184,14 @@ export async function processPayout(request: PayoutRequest): Promise<PayoutResul
         // Stripe Connect handles payouts automatically
         result = { success: true, payoutId: payout.id, providerReference: 'stripe-auto' };
         break;
+      case 'paystack':
+        // Paystack subaccounts settle via provider rails, not manual payout calls from app server.
+        result = { success: true, payoutId: payout.id, providerReference: 'paystack-auto' };
+        break;
+      case 'paypal':
+        // PayPal payouts are provider-managed once wallet is linked.
+        result = { success: true, payoutId: payout.id, providerReference: 'paypal-auto' };
+        break;
       default:
         result = { success: false, error: 'Unsupported provider' };
     }
@@ -156,10 +201,15 @@ export async function processPayout(request: PayoutRequest): Promise<PayoutResul
       .from('payouts')
       .update({
         status: result.success ? 'completed' : 'failed',
+        provider_payout_id: result.providerReference || reference,
         failure_reason: result.error,
         completed_at: result.success ? new Date().toISOString() : null,
       })
       .eq('id', payout.id);
+
+    if (result.success) {
+      await applyWalletBalancePayout(supabase, wallet as any, request);
+    }
 
     return {
       ...result,
@@ -179,12 +229,53 @@ export async function processPayout(request: PayoutRequest): Promise<PayoutResul
 // ============================================
 
 async function processMomoPayout(
-  wallet: { momo_account_number: string; momo_provider: string; photographers: { display_name: string } },
+  wallet: {
+    id: string;
+    country_code?: string;
+    momo_account_number: string;
+    momo_provider: string;
+    photographers: { display_name: string };
+  },
   request: PayoutRequest,
   reference: string
 ): Promise<PayoutResult> {
+  const momoProvider = String(wallet.momo_provider || '').toUpperCase();
+  const countryCode = String(wallet.country_code || '').toUpperCase() || undefined;
+
+  if (momoProvider === 'MTN' && (await isMtnMomoConfiguredForRegion(countryCode))) {
+    try {
+      const mtnTransfer = await createMtnDisbursementTransfer({
+        regionCode: countryCode,
+        referenceId: reference,
+        externalId: wallet.id,
+        msisdn: wallet.momo_account_number,
+        amountMinor: request.amount,
+        currency: request.currency,
+        payerMessage: 'Creator payout',
+        payeeNote: `Payout ${reference}`,
+      });
+
+      if (mtnTransfer.status === 'SUCCESSFUL' || mtnTransfer.status === 'PENDING') {
+        return {
+          success: true,
+          providerReference: mtnTransfer.financialTransactionId || mtnTransfer.referenceId,
+        };
+      }
+
+      return {
+        success: false,
+        error: mtnTransfer.reason || 'MTN transfer failed',
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'MTN transfer failed',
+      };
+    }
+  }
+
   if (!isFlutterwaveConfigured()) {
-    return { success: false, error: 'Flutterwave not configured' };
+    return { success: false, error: 'No configured MoMo payout provider for this wallet' };
   }
 
   try {

@@ -364,7 +364,7 @@ export async function POST(
       const payment = await initializePayment({
         txRef,
         amount: amount,
-        currency: transactionCurrency.toLowerCase(),
+        currency: transactionCurrency,
         redirectUrl: `${baseUrl}/gallery/checkout/success?tip_id=${tip.id}&tx_ref=${txRef}&provider=flutterwave`,
         customerEmail: user.email || '',
         eventId: eventId || photographerId,
@@ -402,7 +402,7 @@ export async function POST(
           amount: amount,
           quantity: 1,
         }],
-        currency: transactionCurrency.toLowerCase(),
+        currency: transactionCurrency,
         photographerPayPalEmail: wallet.paypal_merchant_id,
         returnUrl: `${baseUrl}/gallery/checkout/success?tip_id=${tip.id}&order_id=${txRef}&provider=paypal`,
         cancelUrl: eventId 

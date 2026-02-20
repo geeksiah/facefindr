@@ -9,6 +9,7 @@ import {
   markWebhookFailed,
   markWebhookProcessed,
 } from '@/lib/payments/webhook-ledger';
+import { creditWalletFromTransaction } from '@/lib/payments/wallet-balance';
 import { constructWebhookEvent } from '@/lib/payments/stripe';
 import { createServiceClient } from '@/lib/supabase/server';
 
@@ -134,6 +135,16 @@ async function handleCheckoutComplete(
   session: Stripe.Checkout.Session
 ) {
   const { payment_intent, metadata } = session;
+  if (metadata?.type === 'drop_in_upload') {
+    await handleDropInPaymentSuccess(supabase, {
+      dropInPhotoId: metadata.drop_in_photo_id || '',
+      attendeeId: metadata.attendee_id || '',
+      includeGift: metadata.include_gift === 'true',
+      transactionRef:
+        (typeof payment_intent === 'string' ? payment_intent : null) || session.id,
+    });
+    return;
+  }
 
   if (metadata?.tip_id) {
     await updateTipStatus(supabase, metadata.tip_id, 'completed', {
@@ -170,6 +181,16 @@ async function handlePaymentSuccess(
   supabase: ReturnType<typeof createServiceClient>,
   paymentIntent: Stripe.PaymentIntent
 ) {
+  if (paymentIntent.metadata?.type === 'drop_in_upload') {
+    await handleDropInPaymentSuccess(supabase, {
+      dropInPhotoId: paymentIntent.metadata.drop_in_photo_id || '',
+      attendeeId: paymentIntent.metadata.attendee_id || '',
+      includeGift: paymentIntent.metadata.include_gift === 'true',
+      transactionRef: paymentIntent.id,
+    });
+    return;
+  }
+
   const tipId = paymentIntent.metadata?.tip_id;
   if (tipId) {
     await updateTipStatus(supabase, tipId, 'completed', {
@@ -201,6 +222,15 @@ async function handlePaymentFailed(
   supabase: ReturnType<typeof createServiceClient>,
   paymentIntent: Stripe.PaymentIntent
 ) {
+  if (paymentIntent.metadata?.type === 'drop_in_upload') {
+    await handleDropInPaymentFailure(
+      supabase,
+      paymentIntent.metadata.drop_in_photo_id || '',
+      paymentIntent.metadata.include_gift === 'true'
+    );
+    return;
+  }
+
   const tipId = paymentIntent.metadata?.tip_id;
   if (tipId) {
     await updateTipStatus(supabase, tipId, 'failed', {
@@ -287,7 +317,95 @@ async function updateTipStatus(
 
   if (txError) {
     console.error(`Failed to update tip transaction ledger ${tipId}:`, txError);
+    return;
   }
+
+  const { data: tipTransactions } = await supabase
+    .from('transactions')
+    .select('id')
+    .contains('metadata', { tip_id: tipId });
+
+  for (const transaction of tipTransactions || []) {
+    await creditWalletFromTransaction(supabase, transaction.id);
+  }
+}
+
+async function triggerDropInProcessing(dropInPhotoId: string) {
+  if (!dropInPhotoId) return;
+  const processSecret = process.env.DROP_IN_PROCESS_SECRET;
+  if (!processSecret) return;
+
+  try {
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const response = await fetch(`${baseUrl}/api/drop-in/process`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-drop-in-process-secret': processSecret,
+      },
+      body: JSON.stringify({ dropInPhotoId }),
+    });
+
+    if (!response.ok) {
+      console.error('Stripe drop-in processing trigger failed:', await response.text());
+    }
+  } catch (error) {
+    console.error('Failed to trigger drop-in processing from Stripe webhook:', error);
+  }
+}
+
+async function handleDropInPaymentSuccess(
+  supabase: ReturnType<typeof createServiceClient>,
+  params: {
+    dropInPhotoId: string;
+    attendeeId: string;
+    includeGift: boolean;
+    transactionRef: string;
+  }
+) {
+  if (!params.dropInPhotoId || !params.attendeeId) return;
+
+  const { data: dropInPhoto } = await supabase
+    .from('drop_in_photos')
+    .select('id')
+    .eq('id', params.dropInPhotoId)
+    .eq('uploader_id', params.attendeeId)
+    .eq('upload_payment_status', 'pending')
+    .maybeSingle();
+
+  if (!dropInPhoto) return;
+
+  await supabase
+    .from('drop_in_photos')
+    .update({
+      upload_payment_status: 'paid',
+      upload_payment_transaction_id: params.transactionRef,
+      ...(params.includeGift
+        ? {
+            gift_payment_status: 'paid',
+            gift_payment_transaction_id: params.transactionRef,
+          }
+        : {}),
+    })
+    .eq('id', params.dropInPhotoId);
+
+  await triggerDropInProcessing(params.dropInPhotoId);
+}
+
+async function handleDropInPaymentFailure(
+  supabase: ReturnType<typeof createServiceClient>,
+  dropInPhotoId: string,
+  includeGift: boolean
+) {
+  if (!dropInPhotoId) return;
+
+  await supabase
+    .from('drop_in_photos')
+    .update({
+      upload_payment_status: 'failed',
+      ...(includeGift ? { gift_payment_status: 'failed' } : {}),
+    })
+    .eq('id', dropInPhotoId);
 }
 
 async function handleAccountUpdate(
@@ -325,6 +443,8 @@ async function createEntitlements(
     console.error('Transaction not found for entitlements');
     return;
   }
+
+  await creditWalletFromTransaction(supabase, transaction.id);
 
   const txMetadata = transaction.metadata as {
     media_ids?: string[];

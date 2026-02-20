@@ -146,68 +146,102 @@ export async function createOrder(params: CreateOrderParams): Promise<PayPalOrde
     throw new Error('PayPal is not configured');
   }
 
+  const currencyCode = String(params.currency || 'USD').toUpperCase();
   const totalAmount = params.items.reduce((sum, item) => sum + item.amount * item.quantity, 0);
   const platformFee = Math.round(totalAmount * PLATFORM_FEE_PERCENT);
-  const photographerAmount = totalAmount - platformFee;
+  const shouldSplitToCreator = Boolean(params.photographerPayPalEmail);
 
   // Convert cents to dollars string with 2 decimal places
   const formatAmount = (cents: number) => (cents / 100).toFixed(2);
+  const basePurchaseUnit: Record<string, unknown> = {
+    referenceId: params.eventId || 'drop-in',
+    description: `Photos from ${params.eventName}`,
+    customId: JSON.stringify({
+      event_id: params.eventId || 'drop-in',
+      ...params.metadata,
+    }),
+    amount: {
+      currencyCode,
+      value: formatAmount(totalAmount),
+      breakdown: {
+        itemTotal: {
+          currencyCode,
+          value: formatAmount(totalAmount),
+        },
+      },
+    },
+    items: params.items.map((item) => ({
+      name: item.name,
+      description: item.description,
+      quantity: String(item.quantity),
+      unitAmount: {
+        currencyCode,
+        value: formatAmount(item.amount),
+      },
+    })),
+  };
 
-  const { body } = await ordersController.createOrder({
-    body: {
-      intent: CheckoutPaymentIntent.Capture,
-      purchaseUnits: [
+  // Only include marketplace split fields when a connected creator PayPal account is provided.
+  // Some accounts are not approved for partner fee splitting yet; we fall back to
+  // platform-owned capture if PayPal rejects split fields.
+  let purchaseUnit: Record<string, unknown> = { ...basePurchaseUnit };
+  if (shouldSplitToCreator) {
+    purchaseUnit.payee = {
+      emailAddress: params.photographerPayPalEmail,
+    };
+    purchaseUnit.paymentInstruction = {
+      platformFees: [
         {
-          referenceId: params.eventId || 'drop-in',
-          description: `Photos from ${params.eventName}`,
-          customId: JSON.stringify({
-            event_id: params.eventId || 'drop-in',
-            ...params.metadata,
-          }),
           amount: {
-            currencyCode: params.currency,
-            value: formatAmount(totalAmount),
-            breakdown: {
-              itemTotal: {
-                currencyCode: params.currency,
-                value: formatAmount(totalAmount),
-              },
-            },
-          },
-          items: params.items.map((item) => ({
-            name: item.name,
-            description: item.description,
-            quantity: String(item.quantity),
-            unitAmount: {
-              currencyCode: params.currency,
-              value: formatAmount(item.amount),
-            },
-          })),
-          payee: {
-            emailAddress: params.photographerPayPalEmail || '',
-          },
-          paymentInstruction: {
-            platformFees: [
-              {
-                amount: {
-                  currencyCode: params.currency,
-                  value: formatAmount(platformFee),
-                },
-              },
-            ],
+            currencyCode,
+            value: formatAmount(platformFee),
           },
         },
       ],
-      applicationContext: {
-        brandName: 'Ferchr',
-        landingPage: OrderApplicationContextLandingPage.NoPreference,
-        userAction: OrderApplicationContextUserAction.PayNow,
-        returnUrl: params.returnUrl,
-        cancelUrl: params.cancelUrl,
+    };
+  }
+
+  let body: unknown;
+  try {
+    ({ body } = await ordersController.createOrder({
+      body: {
+        intent: CheckoutPaymentIntent.Capture,
+        purchaseUnits: [purchaseUnit as any],
+        applicationContext: {
+          brandName: 'Ferchr',
+          landingPage: OrderApplicationContextLandingPage.NoPreference,
+          userAction: OrderApplicationContextUserAction.PayNow,
+          returnUrl: params.returnUrl,
+          cancelUrl: params.cancelUrl,
+        },
       },
-    },
-    prefer: 'return=representation',
-  });
+      prefer: 'return=representation',
+    }));
+  } catch (error) {
+    if (!shouldSplitToCreator) {
+      throw error;
+    }
+
+    console.warn(
+      '[paypal] Split order rejected; retrying as platform-owned capture.',
+      error instanceof Error ? error.message : error
+    );
+    purchaseUnit = { ...basePurchaseUnit };
+    ({ body } = await ordersController.createOrder({
+      body: {
+        intent: CheckoutPaymentIntent.Capture,
+        purchaseUnits: [purchaseUnit as any],
+        applicationContext: {
+          brandName: 'Ferchr',
+          landingPage: OrderApplicationContextLandingPage.NoPreference,
+          userAction: OrderApplicationContextUserAction.PayNow,
+          returnUrl: params.returnUrl,
+          cancelUrl: params.cancelUrl,
+        },
+      },
+      prefer: 'return=representation',
+    }));
+  }
 
   // Parse the response body
   const order = typeof body === 'string' ? JSON.parse(body) : body;

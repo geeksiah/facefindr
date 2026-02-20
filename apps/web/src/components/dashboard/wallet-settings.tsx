@@ -98,7 +98,6 @@ export function WalletSettings() {
     businessName: '',
     accountBank: '',
     accountNumber: '',
-    paypalEmail: '',
     momoNetwork: 'MTN',
     momoNumber: '',
   });
@@ -190,7 +189,6 @@ export function WalletSettings() {
           businessName: formData.businessName,
           accountBank: formData.accountBank,
           accountNumber: formData.accountNumber,
-          paypalEmail: formData.paypalEmail,
           momoNetwork: formData.momoNetwork,
           momoNumber: formData.momoNumber,
         }),
@@ -404,20 +402,38 @@ export function WalletSettings() {
                 )}
 
                 {/* Requirements */}
-                {wallet.status === 'pending' && wallet.providerDetails?.requirements?.currently_due?.length && (
+                {wallet.status === 'pending' && (
                   <div className="mt-4 pt-4 border-t border-border">
                     <p className="text-sm text-warning">
                       Complete your account setup to receive payments.
                     </p>
-                    {wallet.dashboardUrl && (
+                    {(wallet.provider === 'stripe' || wallet.provider === 'paypal') && (
                       <Button
                         variant="primary"
                         size="sm"
                         className="mt-2"
+                        onClick={() => handleOnboard(wallet.provider)}
+                        disabled={onboarding === wallet.provider}
+                      >
+                        {onboarding === wallet.provider ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            Loading
+                          </>
+                        ) : (
+                          'Complete Setup'
+                        )}
+                      </Button>
+                    )}
+                    {wallet.dashboardUrl && wallet.provider === 'stripe' && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="mt-2 ml-2"
                         asChild
                       >
                         <a href={wallet.dashboardUrl} target="_blank" rel="noopener noreferrer">
-                          Complete Setup
+                          Dashboard
                         </a>
                       </Button>
                     )}
@@ -617,19 +633,9 @@ export function WalletSettings() {
                   </>
                 )}
 
-                {/* PayPal specific fields */}
                 {newWalletProvider === 'paypal' && (
-                  <div>
-                    <label className="text-sm font-medium text-foreground mb-1 block">
-                      PayPal Email
-                    </label>
-                    <Input
-                      type="email"
-                      value={formData.paypalEmail}
-                      onChange={(e) => setFormData({ ...formData, paypalEmail: e.target.value })}
-                      placeholder="your@email.com"
-                      required
-                    />
+                  <div className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+                    You will securely sign in with PayPal to link this wallet.
                   </div>
                 )}
 

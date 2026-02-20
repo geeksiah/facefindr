@@ -71,10 +71,12 @@ export async function GET(
       .select('rating, review_text, created_at')
       .eq('photographer_id', photographer.id)
       .eq('attendee_id', attendee.id)
-      .single();
+      .order('updated_at', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     if (error && error.code !== 'PGRST116') {
-      // PGRST116 = no rows returned, which is fine
       throw error;
     }
 

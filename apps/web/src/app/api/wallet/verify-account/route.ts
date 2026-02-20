@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { verifyMobileMoneyAccount } from '@/lib/payments/payment-methods';
+import { verifyMtnWalletActive } from '@/lib/payments/mtn-momo';
 import { resolvePaystackSecretKey, verifyPaystackBankAccount } from '@/lib/payments/paystack';
 import { createClient, createClientWithAccessToken } from '@/lib/supabase/server';
 
@@ -110,6 +111,16 @@ export async function POST(request: NextRequest) {
       const providerCode = providerCodeMap[momoNetwork];
       if (!providerCode) {
         return NextResponse.json({ error: 'Unsupported mobile network for verification' }, { status: 400 });
+      }
+
+      if (momoNetwork === 'MTN') {
+        const verification = await verifyMtnWalletActive(momoNumber, country);
+        if (verification.valid) {
+          return NextResponse.json({
+            success: true,
+            accountName: 'MTN MoMo Wallet (active)',
+          });
+        }
       }
 
       const verification = await verifyMobileMoneyAccount(momoNumber, providerCode, country);

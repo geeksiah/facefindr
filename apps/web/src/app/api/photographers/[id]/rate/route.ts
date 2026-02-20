@@ -242,6 +242,19 @@ export async function POST(
       throw ratingError;
     }
 
+    // Keep one authoritative row per attendee->creator pair.
+    // Legacy duplicates can make "my rating" appear to vanish when reads expect a single row.
+    try {
+      await serviceClient
+        .from('photographer_ratings')
+        .delete()
+        .eq('photographer_id', photographerId)
+        .eq('attendee_id', attendee.id)
+        .neq('id', ratingData.id);
+    } catch {
+      // Non-blocking cleanup.
+    }
+
     // Refresh rating stats
     try {
       await serviceClient.rpc('refresh_photographer_rating_stats');

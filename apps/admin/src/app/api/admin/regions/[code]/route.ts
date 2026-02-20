@@ -9,6 +9,10 @@ const SUPPORTED_PAYMENT_PROVIDERS = [
   'flutterwave',
   'paypal',
   'paystack',
+  'mtn_momo',
+  'vodafone_cash',
+  'airteltigo_money',
+  'mpesa',
 ] as const;
 
 type PaymentProvider = (typeof SUPPORTED_PAYMENT_PROVIDERS)[number];

@@ -150,13 +150,17 @@ export function EventCollaborators({ eventId }: EventCollaboratorsProps) {
         <Button
           size="sm"
           onClick={() => setShowInviteModal(true)}
-          disabled={!canInvite}
-          title={canInvite ? 'Invite collaborator' : 'Only event owners or authorized collaborators can invite'}
+          title="Invite collaborator"
         >
           <UserPlus className="h-4 w-4 mr-2" />
           Invite
         </Button>
       </div>
+      {!canInvite && (
+        <p className="text-xs text-muted-foreground -mt-4">
+          Invite permission is restricted by your role. If sending fails, event owner approval is required.
+        </p>
+      )}
 
       {/* Active Collaborators */}
       <div className="space-y-2">

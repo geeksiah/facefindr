@@ -72,8 +72,6 @@ export default function CreateEventScreen() {
 
     try {
       const eventDateIso = eventDate.toISOString().slice(0, 10);
-      const eventTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-      const eventStartAtUtc = new Date(`${eventDateIso}T12:00:00.000Z`).toISOString();
 
       const { data, error } = await supabase
         .from('events')
@@ -82,12 +80,7 @@ export default function CreateEventScreen() {
           name: name.trim(),
           description: description.trim() || null,
           event_date: eventDateIso,
-          event_timezone: eventTimezone,
-          event_start_at_utc: eventStartAtUtc,
           location: location.trim() || null,
-          event_type: eventType || null,
-          expected_guests: estimatedGuests ? parseInt(estimatedGuests, 10) : null,
-          base_price: basePrice ? parseFloat(basePrice) : 0,
           status: 'draft',
         })
         .select()

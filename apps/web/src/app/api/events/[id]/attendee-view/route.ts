@@ -32,7 +32,6 @@ export async function GET(
         description,
         event_date,
         event_start_at_utc,
-        event_timezone,
         location,
         cover_image_url,
         status,
@@ -60,7 +59,6 @@ export async function GET(
         name,
         description,
         event_date,
-        event_timezone,
         location,
         cover_image_url,
         status,
@@ -83,6 +81,15 @@ export async function GET(
         )
       `;
 
+    function getMissingColumnName(error: any): string | null {
+      if (error?.code !== '42703' || typeof error?.message !== 'string') return null;
+      const quotedMatch = error.message.match(/column \"([^\"]+)\"/i);
+      const bareMatch = error.message.match(/column\s+([a-zA-Z0-9_.]+)/i);
+      const rawName = quotedMatch?.[1] || bareMatch?.[1] || null;
+      if (!rawName) return null;
+      return rawName.includes('.') ? rawName.split('.').pop() || rawName : rawName;
+    }
+
     // Get event details
     let { data: event, error: eventError } = await serviceClient
       .from('events')
@@ -90,12 +97,10 @@ export async function GET(
       .eq('id', eventId)
       .single();
 
-    const missingStartAtUtcColumn =
-      eventError?.code === '42703' &&
-      typeof eventError?.message === 'string' &&
-      eventError.message.includes('event_start_at_utc');
+    const missingColumn = getMissingColumnName(eventError);
+    const missingDateColumns = ['event_start_at_utc', 'event_timezone'];
 
-    if (missingStartAtUtcColumn) {
+    if (missingColumn && missingDateColumns.includes(missingColumn)) {
       const legacyResult = await serviceClient
         .from('events')
         .select(legacyEventSelect)
@@ -214,7 +219,7 @@ export async function GET(
         {
           event_date: event.event_date,
           event_start_at_utc: event.event_start_at_utc,
-          event_timezone: event.event_timezone,
+          event_timezone: null,
         },
         'en-US',
         {
@@ -225,7 +230,7 @@ export async function GET(
         }
       ),
       eventDate: event.event_date || null,
-      eventTimezone: event.event_timezone || 'UTC',
+      eventTimezone: 'UTC',
       eventStartAtUtc: event.event_start_at_utc || null,
       location: event.location,
       coverImage,

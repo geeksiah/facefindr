@@ -17,6 +17,7 @@ import {
   markWebhookFailed,
   markWebhookProcessed,
 } from '@/lib/payments/webhook-ledger';
+import { creditWalletFromTransaction } from '@/lib/payments/wallet-balance';
 import { createServiceClient } from '@/lib/supabase/server';
 
 const PAYPAL_WEBHOOK_ID = process.env.PAYPAL_WEBHOOK_ID;
@@ -185,6 +186,12 @@ async function handleCaptureCompleted(
   supabase: ReturnType<typeof createServiceClient>,
   resource: PayPalWebhookPayload['resource']
 ) {
+  const customMetadata = extractCustomMetadata(resource);
+  if (customMetadata.type === 'drop_in_upload') {
+    await handleDropInPaymentSuccess(supabase, customMetadata, resource.id);
+    return;
+  }
+
   const tipMeta = extractTipMetadata(resource);
   if (tipMeta.tipId) {
     await supabase
@@ -201,6 +208,14 @@ async function handleCaptureCompleted(
         paypal_order_id: tipMeta.reference || resource.id,
       })
       .contains('metadata', { tip_id: tipMeta.tipId });
+
+    const { data: tipTransactions } = await supabase
+      .from('transactions')
+      .select('id')
+      .contains('metadata', { tip_id: tipMeta.tipId });
+    for (const transaction of tipTransactions || []) {
+      await creditWalletFromTransaction(supabase, transaction.id);
+    }
     return;
   }
 
@@ -267,6 +282,8 @@ async function processSuccessfulPayment(
     return;
   }
 
+  await creditWalletFromTransaction(supabase, transaction.id);
+
   // Create entitlements
   const metadata = transaction.metadata as {
     media_ids?: string[];
@@ -302,6 +319,23 @@ async function handleCaptureFailed(
   eventType: string
 ) {
   const status = eventType === 'PAYMENT.CAPTURE.REFUNDED' ? 'refunded' : 'failed';
+  const customMetadata = extractCustomMetadata(resource);
+  if (customMetadata.type === 'drop_in_upload') {
+    const dropInPhotoId = readString(customMetadata.drop_in_photo_id);
+    if (dropInPhotoId) {
+      await supabase
+        .from('drop_in_photos')
+        .update({
+          upload_payment_status: 'failed',
+          ...(customMetadata.include_gift === true || customMetadata.include_gift === 'true'
+            ? { gift_payment_status: 'failed' }
+            : {}),
+        })
+        .eq('id', dropInPhotoId);
+    }
+    return;
+  }
+
   const tipMeta = extractTipMetadata(resource);
   if (tipMeta.tipId) {
     await supabase
@@ -426,6 +460,72 @@ async function handleSubscriptionPaymentFailure(
   });
 }
 
+async function triggerDropInProcessing(dropInPhotoId: string) {
+  if (!dropInPhotoId) return;
+  const processSecret = process.env.DROP_IN_PROCESS_SECRET;
+  if (!processSecret) return;
+
+  try {
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const processResponse = await fetch(`${baseUrl}/api/drop-in/process`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-drop-in-process-secret': processSecret,
+      },
+      body: JSON.stringify({ dropInPhotoId }),
+    });
+
+    if (!processResponse.ok) {
+      console.error('PayPal drop-in processing trigger failed:', await processResponse.text());
+    }
+  } catch (error) {
+    console.error('Failed to trigger drop-in processing from PayPal webhook:', error);
+  }
+}
+
+async function handleDropInPaymentSuccess(
+  supabase: ReturnType<typeof createServiceClient>,
+  metadata: Record<string, unknown>,
+  fallbackTransactionRef: string
+) {
+  const attendeeId = readString(metadata.attendee_id);
+  const dropInPhotoId = readString(metadata.drop_in_photo_id);
+  if (!attendeeId || !dropInPhotoId) return;
+
+  const { data: dropInPhoto } = await supabase
+    .from('drop_in_photos')
+    .select('id')
+    .eq('id', dropInPhotoId)
+    .eq('uploader_id', attendeeId)
+    .eq('upload_payment_status', 'pending')
+    .maybeSingle();
+
+  if (!dropInPhoto) return;
+
+  const transactionRef =
+    readString(metadata.tx_ref) ||
+    readString(metadata.order_id) ||
+    fallbackTransactionRef;
+  const includeGift = metadata.include_gift === true || metadata.include_gift === 'true';
+
+  await supabase
+    .from('drop_in_photos')
+    .update({
+      upload_payment_status: 'paid',
+      upload_payment_transaction_id: transactionRef,
+      ...(includeGift
+        ? {
+            gift_payment_status: 'paid',
+            gift_payment_transaction_id: transactionRef,
+          }
+        : {}),
+    })
+    .eq('id', dropInPhotoId);
+
+  await triggerDropInProcessing(dropInPhotoId);
+}
+
 function normalizeScope(value: unknown): SubscriptionScope | null {
   if (value === 'creator_subscription') return 'creator_subscription';
   if (value === 'attendee_subscription') return 'attendee_subscription';
@@ -434,18 +534,21 @@ function normalizeScope(value: unknown): SubscriptionScope | null {
 }
 
 function extractTipMetadata(resource: PayPalWebhookPayload['resource']) {
+  const parsed = extractCustomMetadata(resource);
+  const tipId = readString(parsed.tip_id);
+  const reference = readString(parsed.tx_ref) || readString(parsed.order_id);
+  return { tipId, reference };
+}
+
+function extractCustomMetadata(resource: PayPalWebhookPayload['resource']) {
   const customId = resource.purchase_units?.[0]?.custom_id || resource.custom_id;
-  if (!customId) {
-    return { tipId: null as string | null, reference: null as string | null };
-  }
+  if (!customId) return {} as Record<string, unknown>;
 
   try {
     const parsed = JSON.parse(customId) as Record<string, unknown>;
-    const tipId = readString(parsed.tip_id);
-    const reference = readString(parsed.tx_ref) || readString(parsed.order_id);
-    return { tipId, reference };
+    return parsed && typeof parsed === 'object' ? parsed : {};
   } catch {
-    return { tipId: null as string | null, reference: null as string | null };
+    return {} as Record<string, unknown>;
   }
 }
 

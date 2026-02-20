@@ -106,7 +106,7 @@ export function DashboardHeader() {
       if (trimmedQuery.length >= 2) {
         const { data: events } = await supabaseRef.current
           .from('events')
-          .select('id, name, event_date, event_timezone')
+          .select('id, name, event_date')
           .ilike('name', `%${searchTerm}%`)
           .limit(5);
 

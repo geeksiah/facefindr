@@ -19,6 +19,7 @@ import {
   markWebhookFailed,
   markWebhookProcessed,
 } from '@/lib/payments/webhook-ledger';
+import { creditWalletFromTransaction } from '@/lib/payments/wallet-balance';
 import { createServiceClient } from '@/lib/supabase/server';
 
 interface PaystackWebhookPayload {
@@ -154,6 +155,14 @@ async function handleChargeSuccess(
         paystack_transaction_id: payload.data?.id ? String(payload.data.id) : null,
       })
       .contains('metadata', { tip_id: tipId });
+
+    const { data: tipTransactions } = await (supabase
+      .from('transactions') as any)
+      .select('id')
+      .contains('metadata', { tip_id: tipId });
+    for (const transaction of tipTransactions || []) {
+      await creditWalletFromTransaction(supabase, transaction.id);
+    }
     return;
   }
   if (metadata.subscription_scope) {
@@ -384,6 +393,8 @@ async function createEntitlements(
     metadata: unknown;
   }
 ) {
+  await creditWalletFromTransaction(supabase, transaction.id);
+
   const metadata = transaction.metadata as {
     media_ids?: string[];
     unlock_all?: boolean;

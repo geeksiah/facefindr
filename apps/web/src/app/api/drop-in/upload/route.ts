@@ -54,11 +54,9 @@ function extractMissingColumnName(error: any): string | null {
 }
 
 function needsFaceTag(error: any): boolean {
-  return (
-    error?.code === '23502' &&
-    typeof error?.message === 'string' &&
-    error.message.toLowerCase().includes('face_tag')
-  );
+  if (error?.code !== '23502' || typeof error?.message !== 'string') return false;
+  const message = error.message.toLowerCase();
+  return message.includes('face_tag') || message.includes('face_tag_suffix');
 }
 
 async function tryInsertAttendeeProfile(
@@ -538,8 +536,9 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('Drop-in upload error:', error);
+    const detail = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { error: 'Failed to process upload' },
+      { error: detail ? `Failed to process upload: ${detail}` : 'Failed to process upload' },
       { status: 500 }
     );
   }

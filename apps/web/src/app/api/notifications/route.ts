@@ -26,6 +26,45 @@ async function getAuthClient(request: NextRequest) {
     : createClient();
 }
 
+function deriveNotificationCategory(templateCode: string | null | undefined, body: string | null | undefined) {
+  const key = (templateCode || '').toLowerCase();
+  const text = (body || '').toLowerCase();
+
+  if (
+    key.includes('tip') ||
+    key.includes('payment') ||
+    key.includes('payout') ||
+    key.includes('purchase') ||
+    text.includes('payment') ||
+    text.includes('tip')
+  ) {
+    return 'payments';
+  }
+  if (
+    key.includes('photo') ||
+    key.includes('drop_in') ||
+    key.includes('match') ||
+    text.includes('photo') ||
+    text.includes('match')
+  ) {
+    return 'photos';
+  }
+  if (
+    key.includes('follow') ||
+    key.includes('connection') ||
+    key.includes('collaboration') ||
+    key.includes('rating') ||
+    text.includes('follow') ||
+    text.includes('collaborat')
+  ) {
+    return 'social';
+  }
+  if (key.includes('order') || text.includes('order')) {
+    return 'orders';
+  }
+  return 'general';
+}
+
 // GET - Get user notifications
 export async function GET(request: NextRequest) {
   try {
@@ -57,6 +96,7 @@ export async function GET(request: NextRequest) {
         body: notification.body,
         status: notification.status,
         metadata: notification.metadata,
+        category: deriveNotificationCategory(notification.templateCode, notification.body),
         read_at: notification.readAt ? notification.readAt.toISOString() : null,
         created_at: notification.createdAt.toISOString(),
         template_code: notification.templateCode,
@@ -117,6 +157,47 @@ export async function POST(request: NextRequest) {
     console.error('Notifications POST error:', error);
     return NextResponse.json(
       { error: 'Failed to update notification' },
+      { status: 500 }
+    );
+  }
+}
+
+// DELETE - Delete notification(s)
+export async function DELETE(request: NextRequest) {
+  try {
+    const supabase = await getAuthClient(request);
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const notificationId = typeof body.notificationId === 'string' ? body.notificationId : null;
+    const clearAll = body.clearAll === true;
+
+    if (!notificationId && !clearAll) {
+      return NextResponse.json(
+        { error: 'notificationId or clearAll=true is required' },
+        { status: 400 }
+      );
+    }
+
+    let query = supabase.from('notifications').delete().eq('user_id', user.id);
+    if (notificationId) {
+      query = query.eq('id', notificationId);
+    }
+
+    const { error } = await query;
+    if (error) {
+      throw error;
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error: any) {
+    console.error('Notifications DELETE error:', error);
+    return NextResponse.json(
+      { error: error?.message || 'Failed to delete notification(s)' },
       { status: 500 }
     );
   }

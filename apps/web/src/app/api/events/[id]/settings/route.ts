@@ -60,8 +60,11 @@ async function getEventAccess(supabase: any, eventId: string, photographerIds: s
 
 function getMissingColumnName(error: any): string | null {
   if (error?.code !== '42703' || typeof error?.message !== 'string') return null;
-  const match = error.message.match(/column \"([^\"]+)\"/i);
-  return match?.[1] || null;
+  const quotedMatch = error.message.match(/column \"([^\"]+)\"/i);
+  const bareMatch = error.message.match(/column\s+([a-zA-Z0-9_.]+)/i);
+  const rawName = quotedMatch?.[1] || bareMatch?.[1] || null;
+  if (!rawName) return null;
+  return rawName.includes('.') ? rawName.split('.').pop() || rawName : rawName;
 }
 
 async function resolveEventIdByIdentifier(supabase: any, identifier: string) {
@@ -164,7 +167,7 @@ export async function PUT(
     }
 
     // Verify event and get current currency
-    const eventSelectColumns = ['id', 'currency_code', 'event_date', 'event_timezone'];
+    const eventSelectColumns = ['id', 'currency_code', 'event_date'];
     let eventResult: any = null;
     const selectedColumns = [...eventSelectColumns];
 
@@ -198,7 +201,6 @@ export async function PUT(
       id: eventResult?.data?.id || eventId,
       currency_code: (eventResult?.data as any)?.currency_code || 'USD',
       event_date: (eventResult?.data as any)?.event_date || null,
-      event_timezone: (eventResult?.data as any)?.event_timezone || null,
     } as any;
     if (!event.id) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 });
@@ -217,10 +219,9 @@ export async function PUT(
     const nextEventTimezone =
       body.event_timezone !== undefined
         ? normalizeEventTimezone(body.event_timezone)
-        : normalizeEventTimezone(event.event_timezone);
+        : normalizeEventTimezone(null);
 
     if (body.event_date !== undefined) updates.event_date = nextEventDate;
-    if (body.event_timezone !== undefined) updates.event_timezone = nextEventTimezone;
     if (body.event_start_at_utc !== undefined) {
       updates.event_start_at_utc = normalizeUtcTimestamp(body.event_start_at_utc);
     } else if (body.event_date !== undefined || body.event_timezone !== undefined) {
@@ -287,22 +288,50 @@ export async function PUT(
       }
 
       if (existingPricing) {
-        const { error: pricingError } = await serviceClient
-          .from('event_pricing')
-          .update(pricingData)
-          .eq('event_id', eventId);
+        const pricingUpdatePayload = { ...pricingData };
+        let pricingError: any = null;
+        for (let attempt = 0; attempt < 8; attempt++) {
+          const result = await serviceClient
+            .from('event_pricing')
+            .update(pricingUpdatePayload)
+            .eq('event_id', eventId);
+          pricingError = result.error;
+          if (!pricingError) break;
 
-        if (pricingError) {
-          throw pricingError;
+          const missingColumn = getMissingColumnName(pricingError);
+          if (!missingColumn || !(missingColumn in pricingUpdatePayload)) {
+            break;
+          }
+
+          delete pricingUpdatePayload[missingColumn];
+          if (!Object.keys(pricingUpdatePayload).length) {
+            break;
+          }
         }
+
+        if (pricingError) throw pricingError;
       } else {
-        const { error: pricingError } = await serviceClient
-          .from('event_pricing')
-          .insert(pricingData);
+        const pricingInsertPayload = { ...pricingData };
+        let pricingError: any = null;
+        for (let attempt = 0; attempt < 8; attempt++) {
+          const result = await serviceClient
+            .from('event_pricing')
+            .insert(pricingInsertPayload);
+          pricingError = result.error;
+          if (!pricingError) break;
 
-        if (pricingError) {
-          throw pricingError;
+          const missingColumn = getMissingColumnName(pricingError);
+          if (!missingColumn || !(missingColumn in pricingInsertPayload)) {
+            break;
+          }
+
+          delete pricingInsertPayload[missingColumn];
+          if (!Object.keys(pricingInsertPayload).length) {
+            break;
+          }
         }
+
+        if (pricingError) throw pricingError;
       }
 
       // Prevent currency change if transactions exist (to avoid accounting issues)

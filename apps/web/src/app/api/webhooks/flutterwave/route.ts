@@ -17,6 +17,7 @@ import {
   markWebhookFailed,
   markWebhookProcessed,
 } from '@/lib/payments/webhook-ledger';
+import { creditWalletFromTransaction } from '@/lib/payments/wallet-balance';
 import { createServiceClient } from '@/lib/supabase/server';
 
 const FLUTTERWAVE_WEBHOOK_SECRET = process.env.FLUTTERWAVE_WEBHOOK_SECRET;
@@ -152,13 +153,25 @@ async function handleChargeCompleted(
     return;
   }
 
+  const verifiedMeta = (verifiedTx.meta as Record<string, unknown>) || data.meta || {};
+
+  if (verifiedMeta.type === 'drop_in_upload') {
+    await handleDropInPaymentSuccess(supabase, {
+      dropInPhotoId: readString(verifiedMeta.drop_in_photo_id),
+      attendeeId: readString(verifiedMeta.attendee_id),
+      includeGift: verifiedMeta.include_gift === true || verifiedMeta.include_gift === 'true',
+      transactionRef: data.tx_ref || String(data.id),
+    });
+    return;
+  }
+
   await syncRecurringFromFlutterwaveData(supabase, 'charge.completed', {
     ...data,
     status: verifiedTx.status,
     currency: verifiedTx.currency || data.currency,
     charged_amount: verifiedTx.charged_amount || data.charged_amount,
     amount: verifiedTx.amount || data.amount,
-    meta: (verifiedTx.meta as Record<string, unknown>) || data.meta || {},
+    meta: verifiedMeta,
     subscription_id:
       (verifiedTx.meta as Record<string, unknown> | undefined)?.subscription_id as string | number | undefined,
   });
@@ -180,6 +193,14 @@ async function handleChargeCompleted(
         flutterwave_tx_id: String(data.id),
       })
       .contains('metadata', { tip_id: tipId });
+
+    const { data: tipTransactions } = await supabase
+      .from('transactions')
+      .select('id')
+      .contains('metadata', { tip_id: tipId });
+    for (const transaction of tipTransactions || []) {
+      await creditWalletFromTransaction(supabase, transaction.id);
+    }
     return;
   }
 
@@ -218,6 +239,23 @@ async function handleChargeFailed(
   supabase: ReturnType<typeof createServiceClient>,
   data: FlutterwaveWebhookPayload['data']
 ) {
+  const metadata = parseMetadataRecord(data.meta);
+  if (metadata.type === 'drop_in_upload') {
+    const dropInPhotoId = readString(metadata.drop_in_photo_id);
+    if (dropInPhotoId) {
+      await supabase
+        .from('drop_in_photos')
+        .update({
+          upload_payment_status: 'failed',
+          ...(metadata.include_gift === true || metadata.include_gift === 'true'
+            ? { gift_payment_status: 'failed' }
+            : {}),
+        })
+        .eq('id', dropInPhotoId);
+    }
+    return;
+  }
+
   const tipId = readString((data.meta || {}).tip_id);
   if (tipId) {
     await supabase
@@ -265,6 +303,68 @@ async function handleSubscriptionLifecycle(
   data: FlutterwaveWebhookPayload['data']
 ) {
   await syncRecurringFromFlutterwaveData(supabase, eventType, data);
+}
+
+async function triggerDropInProcessing(dropInPhotoId: string) {
+  if (!dropInPhotoId) return;
+  const processSecret = process.env.DROP_IN_PROCESS_SECRET;
+  if (!processSecret) return;
+
+  try {
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const processResponse = await fetch(`${baseUrl}/api/drop-in/process`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-drop-in-process-secret': processSecret,
+      },
+      body: JSON.stringify({ dropInPhotoId }),
+    });
+
+    if (!processResponse.ok) {
+      console.error('Flutterwave drop-in processing trigger failed:', await processResponse.text());
+    }
+  } catch (error) {
+    console.error('Failed to trigger drop-in processing from Flutterwave webhook:', error);
+  }
+}
+
+async function handleDropInPaymentSuccess(
+  supabase: ReturnType<typeof createServiceClient>,
+  params: {
+    dropInPhotoId: string | null;
+    attendeeId: string | null;
+    includeGift: boolean;
+    transactionRef: string;
+  }
+) {
+  if (!params.dropInPhotoId || !params.attendeeId) return;
+
+  const { data: dropInPhoto } = await supabase
+    .from('drop_in_photos')
+    .select('id')
+    .eq('id', params.dropInPhotoId)
+    .eq('uploader_id', params.attendeeId)
+    .eq('upload_payment_status', 'pending')
+    .maybeSingle();
+
+  if (!dropInPhoto) return;
+
+  await supabase
+    .from('drop_in_photos')
+    .update({
+      upload_payment_status: 'paid',
+      upload_payment_transaction_id: params.transactionRef,
+      ...(params.includeGift
+        ? {
+            gift_payment_status: 'paid',
+            gift_payment_transaction_id: params.transactionRef,
+          }
+        : {}),
+    })
+    .eq('id', params.dropInPhotoId);
+
+  await triggerDropInProcessing(params.dropInPhotoId);
 }
 
 async function syncRecurringFromFlutterwaveData(
@@ -348,6 +448,8 @@ async function createEntitlements(
     metadata: unknown;
   }
 ) {
+  await creditWalletFromTransaction(supabase, transaction.id);
+
   const metadata = transaction.metadata as {
     media_ids?: string[];
     unlock_all?: boolean;

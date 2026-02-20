@@ -20,6 +20,16 @@ export type PaymentProductType =
   | 'vault_subscription';
 export type RuntimeEnvironment = 'development' | 'staging' | 'production';
 const ALL_GATEWAYS: PaymentGateway[] = ['stripe', 'flutterwave', 'paypal', 'paystack'];
+const REGION_PROVIDER_ALIAS: Record<string, PaymentGateway> = {
+  stripe: 'stripe',
+  flutterwave: 'flutterwave',
+  paypal: 'paypal',
+  paystack: 'paystack',
+  mtn_momo: 'flutterwave',
+  vodafone_cash: 'flutterwave',
+  airteltigo_money: 'flutterwave',
+  mpesa: 'flutterwave',
+};
 
 export interface GatewaySelection {
   gateway: PaymentGateway;
@@ -312,7 +322,8 @@ async function getConfiguredGateways(countryCode: string): Promise<PaymentGatewa
     new Set(
       data.payment_providers
         .map((provider: unknown) => String(provider || '').toLowerCase())
-        .filter((provider) => provider === 'stripe' || provider === 'flutterwave' || provider === 'paypal' || provider === 'paystack')
+        .map((provider) => REGION_PROVIDER_ALIAS[provider] || null)
+        .filter((provider): provider is PaymentGateway => !!provider)
     )
   ) as PaymentGateway[];
 }

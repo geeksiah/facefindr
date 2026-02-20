@@ -59,7 +59,6 @@ export async function GET(
         description,
         event_date,
         event_start_at_utc,
-        event_timezone,
         location,
         cover_image_url,
         public_slug,
@@ -267,7 +266,7 @@ export async function GET(
     }
 
     const event = eventBySlug;
-    const eventTimezone = event.event_timezone || 'UTC';
+    const eventTimezone = (event as any).event_timezone || 'UTC';
     const isPublicEvent = event.is_public ?? false;
     const requireAccessCode = event.require_access_code ?? false;
     const allowAnonymousScan = event.allow_anonymous_scan ?? true;
@@ -398,4 +397,3 @@ export async function GET(
     return NextResponse.json({ error: 'Failed to load event' }, { status: 500 });
   }
 }
-

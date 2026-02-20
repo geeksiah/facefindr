@@ -13,6 +13,15 @@ import {
 } from '@/lib/event-time';
 import { supabaseAdmin } from '@/lib/supabase';
 
+function getMissingColumnName(error: any): string | null {
+  if (error?.code !== '42703' || typeof error?.message !== 'string') return null;
+  const quotedMatch = error.message.match(/column \"([^\"]+)\"/i);
+  const bareMatch = error.message.match(/column\s+([a-zA-Z0-9_.]+)/i);
+  const rawName = quotedMatch?.[1] || bareMatch?.[1] || null;
+  if (!rawName) return null;
+  return rawName.includes('.') ? rawName.split('.').pop() || rawName : rawName;
+}
+
 // GET - Get event settings
 export async function GET(
   request: NextRequest,
@@ -91,7 +100,7 @@ export async function PUT(
     // Verify event exists
     const { data: event } = await supabaseAdmin
       .from('events')
-      .select('id, currency_code, event_date, event_timezone')
+      .select('id, currency_code, event_date')
       .eq('id', id)
       .single();
 
@@ -112,10 +121,9 @@ export async function PUT(
     const nextEventTimezone =
       body.event_timezone !== undefined
         ? normalizeEventTimezone(body.event_timezone)
-        : normalizeEventTimezone(event.event_timezone);
+        : normalizeEventTimezone(null);
 
     if (body.event_date !== undefined) updates.event_date = nextEventDate;
-    if (body.event_timezone !== undefined) updates.event_timezone = nextEventTimezone;
     if (body.event_start_at_utc !== undefined) {
       updates.event_start_at_utc = normalizeUtcTimestamp(body.event_start_at_utc);
     } else if (body.event_date !== undefined || body.event_timezone !== undefined) {
@@ -141,15 +149,33 @@ export async function PUT(
 
     // Update event
     if (Object.keys(updates).length > 0) {
-      const { error: updateError } = await supabaseAdmin
-        .from('events')
-        .update(updates)
-        .eq('id', id);
+      const updatePayload = { ...updates };
+      let updateError: any = null;
+
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const result = await supabaseAdmin
+          .from('events')
+          .update(updatePayload)
+          .eq('id', id);
+        updateError = result.error;
+        if (!updateError) break;
+
+        const missingColumn = getMissingColumnName(updateError);
+        if (!missingColumn || !(missingColumn in updatePayload)) {
+          break;
+        }
+
+        delete updatePayload[missingColumn];
+        if (!Object.keys(updatePayload).length) {
+          updateError = null;
+          break;
+        }
+      }
 
       if (updateError) {
         console.error('Update event error:', updateError);
         return NextResponse.json(
-          { error: 'Failed to update event' },
+          { error: updateError.message || 'Failed to update event' },
           { status: 500 }
         );
       }
@@ -197,30 +223,62 @@ export async function PUT(
         .single();
 
       if (existingPricing) {
-        const { error: pricingError } = await supabaseAdmin
-          .from('event_pricing')
-          .update(pricingUpdates)
-          .eq('event_id', id);
+        const pricingUpdatePayload = { ...pricingUpdates };
+        let pricingError: any = null;
+        for (let attempt = 0; attempt < 8; attempt++) {
+          const result = await supabaseAdmin
+            .from('event_pricing')
+            .update(pricingUpdatePayload)
+            .eq('event_id', id);
+          pricingError = result.error;
+          if (!pricingError) break;
+
+          const missingColumn = getMissingColumnName(pricingError);
+          if (!missingColumn || !(missingColumn in pricingUpdatePayload)) {
+            break;
+          }
+
+          delete pricingUpdatePayload[missingColumn];
+          if (!Object.keys(pricingUpdatePayload).length) {
+            break;
+          }
+        }
 
         if (pricingError) {
           console.error('Update pricing error:', pricingError);
           return NextResponse.json(
-            { error: 'Failed to update pricing' },
+            { error: pricingError.message || 'Failed to update pricing' },
             { status: 500 }
           );
         }
       } else {
-        const { error: pricingError } = await supabaseAdmin
-          .from('event_pricing')
-          .insert({
-            event_id: id,
-            ...pricingUpdates,
-          });
+        const pricingInsertPayload: Record<string, any> = {
+          event_id: id,
+          ...pricingUpdates,
+        };
+        let pricingError: any = null;
+        for (let attempt = 0; attempt < 8; attempt++) {
+          const result = await supabaseAdmin
+            .from('event_pricing')
+            .insert(pricingInsertPayload);
+          pricingError = result.error;
+          if (!pricingError) break;
+
+          const missingColumn = getMissingColumnName(pricingError);
+          if (!missingColumn || !(missingColumn in pricingInsertPayload)) {
+            break;
+          }
+
+          delete pricingInsertPayload[missingColumn];
+          if (!Object.keys(pricingInsertPayload).length) {
+            break;
+          }
+        }
 
         if (pricingError) {
           console.error('Create pricing error:', pricingError);
           return NextResponse.json(
-            { error: 'Failed to create pricing' },
+            { error: pricingError.message || 'Failed to create pricing' },
             { status: 500 }
           );
         }

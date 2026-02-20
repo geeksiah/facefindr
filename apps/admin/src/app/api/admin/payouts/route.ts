@@ -3,6 +3,69 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 
+async function applyWalletBalancePayout(walletId: string, amount: number, currency: string) {
+  const { data: walletRow } = await supabaseAdmin
+    .from('wallets')
+    .select('photographer_id, provider, status')
+    .eq('id', walletId)
+    .maybeSingle();
+
+  const { data: balance } = await supabaseAdmin
+    .from('wallet_balances')
+    .select(
+      'wallet_id, photographer_id, provider, status, currency, available_balance, total_earnings, total_paid_out, pending_payout'
+    )
+    .eq('wallet_id', walletId)
+    .maybeSingle();
+
+  const currentAvailable = Math.max(0, Number(balance?.available_balance || 0));
+  const currentEarnings = Math.max(0, Number(balance?.total_earnings || 0));
+  const currentPaidOut = Math.max(0, Number(balance?.total_paid_out || 0));
+  const currentPending = Math.max(0, Number(balance?.pending_payout || 0));
+
+  const { error } = await supabaseAdmin.from('wallet_balances').upsert({
+    wallet_id: walletId,
+    photographer_id: balance?.photographer_id || walletRow?.photographer_id || null,
+    provider: balance?.provider || walletRow?.provider || 'stripe',
+    status: balance?.status || walletRow?.status || 'active',
+    currency: currency || balance?.currency || 'USD',
+    available_balance: Math.max(0, currentAvailable - amount),
+    total_earnings: currentEarnings,
+    total_paid_out: currentPaidOut + amount,
+    pending_payout: Math.max(0, currentPending - amount),
+  });
+
+  if (error) throw error;
+}
+
+async function recordCompletedPayout(
+  walletId: string,
+  provider: string | null | undefined,
+  amount: number,
+  currency: string,
+  payoutMethod: 'manual' | 'threshold'
+) {
+  const timestamp = new Date().toISOString();
+  const { data: payout, error } = await supabaseAdmin
+    .from('payouts')
+    .insert({
+      wallet_id: walletId,
+      payment_provider: provider || null,
+      amount,
+      currency: currency || 'USD',
+      status: 'completed',
+      payout_method: payoutMethod,
+      initiated_at: timestamp,
+      completed_at: timestamp,
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+  await applyWalletBalancePayout(walletId, amount, currency || 'USD');
+  return payout;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const session = await getAdminSession();
@@ -18,6 +81,15 @@ export async function POST(request: NextRequest) {
         if (!(await hasPermission('payouts.process'))) {
           return NextResponse.json({ error: 'Permission denied' }, { status: 403 });
         }
+        if (!walletId || !Number.isFinite(Number(amount)) || Number(amount) <= 0) {
+          return NextResponse.json(
+            { error: 'walletId and a positive amount are required' },
+            { status: 400 }
+          );
+        }
+
+        const normalizedAmount = Math.round(Number(amount));
+        const normalizedCurrency = String(currency || 'USD').toUpperCase();
 
         const { data: wallet } = await supabaseAdmin
           .from('wallets')
@@ -25,32 +97,17 @@ export async function POST(request: NextRequest) {
           .eq('id', walletId)
           .maybeSingle();
 
-        // Create payout record
-        const { data: payout, error } = await supabaseAdmin
-          .from('payouts')
-          .insert({
-            wallet_id: walletId,
-            payment_provider: wallet?.provider || null,
-            amount,
-            currency: currency || 'USD',
-            status: 'pending',
-            payout_method: 'manual',
-            initiated_at: new Date().toISOString(),
-          })
-          .select()
-          .single();
-
-        if (error) throw error;
-
-        // Update wallet balance
-        await supabaseAdmin.rpc('decrement_wallet_balance', {
-          p_wallet_id: walletId,
-          p_amount: amount,
-        });
+        const payout = await recordCompletedPayout(
+          walletId,
+          wallet?.provider,
+          normalizedAmount,
+          normalizedCurrency,
+          'manual'
+        );
 
         await logAction('payout_process', 'payout', payout.id, { 
-          amount, 
-          currency,
+          amount: normalizedAmount,
+          currency: normalizedCurrency,
           walletId,
         });
 
@@ -92,15 +149,13 @@ export async function POST(request: NextRequest) {
           const minimum = minimums[balance.currency] || minimums['USD'] || 5000;
           if (balance.available_balance >= minimum) {
             const wallet = Array.isArray(balance.wallets) ? balance.wallets[0] : balance.wallets;
-            await supabaseAdmin.from('payouts').insert({
-              wallet_id: balance.wallet_id,
-              payment_provider: wallet?.provider || null,
-              amount: balance.available_balance,
-              currency: balance.currency,
-              status: 'pending',
-              payout_method: 'threshold',
-              initiated_at: new Date().toISOString(),
-            });
+            await recordCompletedPayout(
+              balance.wallet_id,
+              wallet?.provider,
+              Math.round(Number(balance.available_balance || 0)),
+              String(balance.currency || 'USD').toUpperCase(),
+              'threshold'
+            );
             processed++;
           }
         }

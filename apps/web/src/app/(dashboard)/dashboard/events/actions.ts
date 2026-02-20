@@ -23,12 +23,13 @@ import {
   normalizeIsoDate,
 } from '@/lib/events/time';
 
-function isMissingEventStartAtUtcColumnError(error: any) {
-  return (
-    error?.code === '42703' &&
-    typeof error?.message === 'string' &&
-    error.message.includes('event_start_at_utc')
-  );
+function getMissingColumnName(error: any): string | null {
+  if (error?.code !== '42703' || typeof error?.message !== 'string') return null;
+  const quotedMatch = error.message.match(/column\s+"([^"]+)"/i);
+  const bareMatch = error.message.match(/column\s+([a-zA-Z0-9_.]+)/i);
+  const rawName = quotedMatch?.[1] || bareMatch?.[1] || null;
+  if (!rawName) return null;
+  return rawName.includes('.') ? rawName.split('.').pop() || rawName : rawName;
 }
 
 async function resolveCreatorContext(supabase: any, user: any) {
@@ -136,25 +137,30 @@ export async function createEvent(formData: CreateEventInput) {
     status: 'draft',
   };
 
-  // Create the event
-  let { data: event, error } = await db
-    .from('events')
-    .insert(insertPayload)
-    .select()
-    .single();
-
-  if (isMissingEventStartAtUtcColumnError(error)) {
-    const legacyPayload = { ...insertPayload };
-    delete legacyPayload.event_start_at_utc;
-
-    const legacyInsert = await db
+  // Create the event with schema-safe retries for partially migrated environments
+  let event: any = null;
+  let error: any = null;
+  const createPayload = { ...insertPayload };
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const result = await db
       .from('events')
-      .insert(legacyPayload)
+      .insert(createPayload)
       .select()
       .single();
 
-    event = legacyInsert.data;
-    error = legacyInsert.error;
+    event = result.data;
+    error = result.error;
+    if (!error) break;
+
+    const missingColumn = getMissingColumnName(error);
+    if (!missingColumn || !(missingColumn in createPayload)) {
+      break;
+    }
+
+    delete createPayload[missingColumn];
+    if (!Object.keys(createPayload).length) {
+      break;
+    }
   }
 
   if (error) {
@@ -258,7 +264,7 @@ export async function updateEvent(eventId: string, formData: UpdateEventInput) {
   // Verify ownership
   const { data: existingEvent } = await db
     .from('events')
-    .select('photographer_id, event_timezone')
+    .select('photographer_id')
     .eq('id', eventId)
     .single();
 
@@ -268,7 +274,7 @@ export async function updateEvent(eventId: string, formData: UpdateEventInput) {
 
   const eventDate = normalizeIsoDate(validated.data.eventDate || null);
   const eventTimezone = normalizeEventTimezone(
-    validated.data.eventTimezone || existingEvent.event_timezone || 'UTC'
+    validated.data.eventTimezone || 'UTC'
   );
   const eventStartAtUtc = deriveEventStartAtUtc(eventDate, eventTimezone);
 
@@ -285,22 +291,27 @@ export async function updateEvent(eventId: string, formData: UpdateEventInput) {
     attendee_access_enabled: validated.data.attendeeAccessEnabled,
   };
 
-  // Update the event
-  let { error } = await db
-    .from('events')
-    .update(updates)
-    .eq('id', eventId);
-
-  if (isMissingEventStartAtUtcColumnError(error)) {
-    const legacyUpdates = { ...updates };
-    delete legacyUpdates.event_start_at_utc;
-
-    const legacyUpdate = await db
+  // Update the event with schema-safe retries for missing columns
+  let error: any = null;
+  const updatePayload = { ...updates };
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const result = await db
       .from('events')
-      .update(legacyUpdates)
+      .update(updatePayload)
       .eq('id', eventId);
+    error = result.error;
+    if (!error) break;
 
-    error = legacyUpdate.error;
+    const missingColumn = getMissingColumnName(error);
+    if (!missingColumn || !(missingColumn in updatePayload)) {
+      break;
+    }
+
+    delete updatePayload[missingColumn];
+    if (!Object.keys(updatePayload).length) {
+      error = null;
+      break;
+    }
   }
 
   if (error) {

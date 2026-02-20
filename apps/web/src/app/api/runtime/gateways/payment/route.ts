@@ -11,11 +11,19 @@ const SUPPORTED_PAYMENT_GATEWAYS = new Set([
   'paystack',
 ]);
 
+const REGION_PROVIDER_ALIAS: Record<string, string> = {
+  mtn_momo: 'flutterwave',
+  vodafone_cash: 'flutterwave',
+  airteltigo_money: 'flutterwave',
+  mpesa: 'flutterwave',
+};
+
 function normalizeGatewayList(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
   const normalized = input
     .map((value) => String(value || '').trim().toLowerCase())
     .filter((value) => value.length > 0)
+    .map((value) => REGION_PROVIDER_ALIAS[value] || value)
     .filter((value) => SUPPORTED_PAYMENT_GATEWAYS.has(value));
   return Array.from(new Set(normalized));
 }

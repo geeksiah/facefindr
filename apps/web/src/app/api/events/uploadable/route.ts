@@ -25,7 +25,7 @@ export async function GET() {
     const [{ data: ownedEvents }, { data: collaboratorRows }] = await Promise.all([
       serviceClient
         .from('events')
-        .select('id, name, event_date, event_timezone, status')
+        .select('id, name, event_date, status')
         .in('photographer_id', photographerIdCandidates)
         .neq('status', 'archived')
         .order('created_at', { ascending: false }),
@@ -44,7 +44,7 @@ export async function GET() {
     if (collaboratorEventIds.length > 0) {
       const { data } = await serviceClient
         .from('events')
-        .select('id, name, event_date, event_timezone, status')
+        .select('id, name, event_date, status')
         .in('id', collaboratorEventIds)
         .neq('status', 'archived')
         .order('created_at', { ascending: false });

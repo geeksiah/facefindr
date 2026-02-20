@@ -18,6 +18,7 @@ import {
   validatePaystackSubaccount,
   verifyPaystackBankAccount,
 } from '@/lib/payments/paystack';
+import { verifyMtnWalletActive } from '@/lib/payments/mtn-momo';
 import { getPhotographerIdCandidates, resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
@@ -64,12 +65,42 @@ export async function POST(request: Request) {
     // Check for existing wallet with this provider
     const { data: existingWallet } = await serviceClient
       .from('wallets')
-      .select('id, status')
+      .select('id, status, stripe_account_id')
       .in('photographer_id', photographerIdCandidates)
       .eq('provider', provider)
       .single();
 
     if (existingWallet) {
+      const baseUrl =
+        process.env.NEXT_PUBLIC_APP_URL ||
+        request.headers.get('origin') ||
+        'http://localhost:3000';
+
+      if (
+        provider === 'stripe' &&
+        existingWallet.status !== 'active' &&
+        existingWallet.stripe_account_id &&
+        isStripeConfigured()
+      ) {
+        const accountLink = await createAccountLink(
+          existingWallet.stripe_account_id,
+          `${baseUrl}/dashboard/settings?tab=payments&refresh=true`,
+          `${baseUrl}/dashboard/settings?tab=payments&success=true`
+        );
+        return NextResponse.json({
+          wallet: existingWallet,
+          onboardingUrl: accountLink.url,
+        });
+      }
+
+      if (provider === 'paypal' && existingWallet.status === 'pending') {
+        return NextResponse.json({
+          wallet: existingWallet,
+          onboardingUrl: `${baseUrl}/api/wallet/paypal/connect?country=${encodeURIComponent(
+            String(country || '').toUpperCase() || 'US'
+          )}`,
+        });
+      }
       return NextResponse.json(
         { error: 'Wallet already exists for this provider', wallet: existingWallet },
         { status: 400 }
@@ -156,21 +187,17 @@ export async function POST(request: Request) {
       walletData.details_submitted = true;
     }
 
-    // Handle PayPal (simple merchant ID storage)
+    // Handle PayPal via OAuth wallet link flow
     if (provider === 'paypal') {
-      const { paypalEmail } = body;
-      if (!paypalEmail) {
-        return NextResponse.json(
-          { error: 'PayPal email required' },
-          { status: 400 }
-        );
-      }
-
-      walletData.paypal_merchant_id = paypalEmail;
-      walletData.status = 'active';
-      walletData.payouts_enabled = true;
-      walletData.charges_enabled = true;
-      walletData.details_submitted = true;
+      const baseUrl =
+        process.env.NEXT_PUBLIC_APP_URL ||
+        request.headers.get('origin') ||
+        'http://localhost:3000';
+      return NextResponse.json({
+        onboardingUrl: `${baseUrl}/api/wallet/paypal/connect?country=${encodeURIComponent(
+          String(country || '').toUpperCase() || 'US'
+        )}`,
+      });
     }
 
     // Handle Paystack
@@ -310,6 +337,16 @@ export async function POST(request: Request) {
           { error: 'Mobile money details required' },
           { status: 400 }
         );
+      }
+
+      if (String(momoNetwork).toUpperCase() === 'MTN') {
+        const verification = await verifyMtnWalletActive(momoNumber, String(country || '').toUpperCase() || 'GH');
+        if (!verification.valid) {
+          return NextResponse.json(
+            { error: verification.message || 'Unable to verify MTN wallet' },
+            { status: 422 }
+          );
+        }
       }
 
       // Store mobile money details for payouts

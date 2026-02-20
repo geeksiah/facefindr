@@ -10,6 +10,10 @@ const PAYMENT_PROVIDERS = [
   { value: 'flutterwave', label: 'Flutterwave' },
   { value: 'paypal', label: 'PayPal' },
   { value: 'paystack', label: 'Paystack' },
+  { value: 'mtn_momo', label: 'MTN MoMo' },
+  { value: 'vodafone_cash', label: 'Vodafone Cash' },
+  { value: 'airteltigo_money', label: 'AirtelTigo Money' },
+  { value: 'mpesa', label: 'M-Pesa' },
 ] as const;
 
 const SMS_PROVIDERS = [
@@ -52,6 +56,43 @@ interface ProviderCredentialForm {
   credentialsText: string;
 }
 
+type ProviderCredentialField = {
+  key: string;
+  label: string;
+  placeholder?: string;
+  type?: 'text' | 'password';
+};
+
+const PROVIDER_CREDENTIAL_FIELDS: Record<string, ProviderCredentialField[]> = {
+  stripe: [
+    { key: 'publishable_key', label: 'Publishable Key', placeholder: 'pk_live_...' },
+    { key: 'secret_key', label: 'Secret Key', placeholder: 'sk_live_...', type: 'password' },
+    { key: 'webhook_secret', label: 'Webhook Secret', placeholder: 'whsec_...', type: 'password' },
+  ],
+  paypal: [
+    { key: 'client_id', label: 'Client ID', placeholder: 'PayPal client id' },
+    { key: 'client_secret', label: 'Client Secret', placeholder: 'PayPal client secret', type: 'password' },
+    { key: 'webhook_id', label: 'Webhook ID', placeholder: 'PayPal webhook id' },
+  ],
+  mtn_momo: [
+    { key: 'api_user', label: 'API User', placeholder: 'MTN API user' },
+    { key: 'api_key', label: 'API Key', placeholder: 'MTN API key', type: 'password' },
+    {
+      key: 'collection_subscription_key',
+      label: 'Collection Subscription Key',
+      placeholder: 'Collection subscription key',
+      type: 'password',
+    },
+    {
+      key: 'disbursement_subscription_key',
+      label: 'Disbursement Subscription Key',
+      placeholder: 'Disbursement subscription key',
+      type: 'password',
+    },
+    { key: 'base_url', label: 'Base URL (Optional)', placeholder: 'https://sandbox.momodeveloper.mtn.com' },
+  ],
+};
+
 function toProviderCredentialMap(rows: any[]): Record<string, ProviderCredentialForm> {
   const next: Record<string, ProviderCredentialForm> = {};
   for (const provider of PAYMENT_PROVIDERS) {
@@ -75,6 +116,15 @@ function toProviderCredentialMap(rows: any[]): Record<string, ProviderCredential
 
 function normalizeCurrency(value: string) {
   return value.trim().toUpperCase().slice(0, 3) || 'USD';
+}
+
+function safeParseCredentials(credentialsText: string): Record<string, any> {
+  try {
+    const parsed = JSON.parse(credentialsText || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 
 export default function RegionConfigPage() {
@@ -152,6 +202,25 @@ export default function RegionConfigPage() {
           (patch.credentialsText ?? prev[provider]?.credentialsText ?? '{}'),
       },
     }));
+  }
+
+  function updateProviderCredentialField(
+    provider: PaymentProvider,
+    key: string,
+    value: string
+  ) {
+    const currentText = providerCredentials[provider]?.credentialsText || '{}';
+    const currentPayload = safeParseCredentials(currentText);
+    const nextPayload = { ...currentPayload };
+    if (value === '' || value === null) {
+      delete nextPayload[key];
+    } else {
+      nextPayload[key] = value;
+    }
+
+    updateProviderCredential(provider, {
+      credentialsText: JSON.stringify(nextPayload, null, 2),
+    });
   }
 
   async function handleSave() {
@@ -532,6 +601,8 @@ export default function RegionConfigPage() {
           is_test_mode: true,
           credentialsText: '{}',
         };
+        const credentialValues = safeParseCredentials(credentialForm.credentialsText);
+        const credentialFields = PROVIDER_CREDENTIAL_FIELDS[provider] || [];
 
         return (
           <div key={provider} className="rounded-xl border border-border bg-card p-6">
@@ -563,18 +634,92 @@ export default function RegionConfigPage() {
               </div>
             </div>
 
-            <label className="space-y-1 text-sm">
-              <span className="text-muted-foreground">Credentials JSON</span>
+            {credentialFields.length > 0 && (
+              <div className="mb-4 grid gap-3 md:grid-cols-2">
+                {credentialFields.map((field) => (
+                  <label key={field.key} className="space-y-1 text-sm">
+                    <span className="text-muted-foreground">{field.label}</span>
+                    <input
+                      type={field.type || 'text'}
+                      value={String(credentialValues[field.key] || '')}
+                      onChange={(event) =>
+                        updateProviderCredentialField(provider, field.key, event.target.value)
+                      }
+                      placeholder={field.placeholder}
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-foreground"
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
+
+            {provider === 'paypal' && (
+              <div className="mb-4 grid gap-3 md:grid-cols-2">
+                <label className="space-y-1 text-sm">
+                  <span className="text-muted-foreground">Mode</span>
+                  <select
+                    value={String(credentialValues.mode || 'sandbox')}
+                    onChange={(event) =>
+                      updateProviderCredentialField(provider, 'mode', event.target.value)
+                    }
+                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-foreground"
+                  >
+                    <option value="sandbox">Sandbox</option>
+                    <option value="live">Live</option>
+                  </select>
+                </label>
+              </div>
+            )}
+
+            {provider === 'mtn_momo' && (
+              <div className="mb-4 grid gap-3 md:grid-cols-2">
+                <label className="space-y-1 text-sm">
+                  <span className="text-muted-foreground">Environment</span>
+                  <select
+                    value={String(credentialValues.environment || 'sandbox')}
+                    onChange={(event) =>
+                      updateProviderCredentialField(provider, 'environment', event.target.value)
+                    }
+                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-foreground"
+                  >
+                    <option value="sandbox">Sandbox</option>
+                    <option value="production">Production</option>
+                  </select>
+                </label>
+                <label className="space-y-1 text-sm">
+                  <span className="text-muted-foreground">Target Environment</span>
+                  <select
+                    value={String(credentialValues.target_environment || 'sandbox')}
+                    onChange={(event) =>
+                      updateProviderCredentialField(
+                        provider,
+                        'target_environment',
+                        event.target.value
+                      )
+                    }
+                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-foreground"
+                  >
+                    <option value="sandbox">Sandbox</option>
+                    <option value="live">Live</option>
+                  </select>
+                </label>
+              </div>
+            )}
+
+            <details className="rounded-lg border border-input bg-background px-3 py-2">
+              <summary className="cursor-pointer text-sm text-muted-foreground">
+                Advanced JSON (optional)
+              </summary>
               <textarea
                 value={credentialForm.credentialsText}
                 onChange={(event) =>
                   updateProviderCredential(provider, { credentialsText: event.target.value })
                 }
                 rows={8}
-                className="w-full rounded-lg border border-input bg-background px-3 py-2 font-mono text-xs text-foreground"
+                className="mt-2 w-full rounded-lg border border-input bg-background px-3 py-2 font-mono text-xs text-foreground"
                 placeholder='{"secret_key":"..."}'
               />
-            </label>
+            </details>
           </div>
         );
       })}

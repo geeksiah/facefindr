@@ -82,7 +82,7 @@ export async function GET(
     }
 
     // Get recent events (with column fallback)
-    const eventFullSelect = 'id, name, cover_image_url, event_date, event_timezone, location, public_slug';
+    const eventFullSelect = 'id, name, cover_image_url, event_date, location, public_slug';
     const eventMinimalSelect = 'id, name, cover_image_url, event_date, location';
 
     let events: any[] | null = null;

@@ -203,7 +203,7 @@ export default function UploadScreen() {
 
         const { error: insertError } = await supabase.from('media').insert({
           event_id: selectedEvent.id,
-          photographer_id: profile?.id,
+          uploader_id: profile?.id,
           storage_path: fileName,
           original_filename: image.fileName,
           media_type: 'photo',
