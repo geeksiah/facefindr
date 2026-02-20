@@ -98,6 +98,41 @@ export async function GET() {
     // Note: To get actual payment method details, you'd need to call Stripe API
 
     // Build response with both new and legacy formats
+    const resolvedPlanCode = currentPlan?.code || subscription?.plan_code || 'free';
+    const resolvedLimits = currentPlan?.limits || {
+      maxActiveEvents: legacyFeatures.maxActiveEvents,
+      maxPhotosPerEvent: legacyFeatures.maxPhotosPerEvent,
+      maxFaceOpsPerEvent: legacyFeatures.maxFaceOpsPerEvent,
+      storageGb: legacyFeatures.storageGb,
+      teamMembers: legacyFeatures.teamMembers,
+    };
+
+    const resolvedLegacyFeatures = currentPlan
+      ? {
+          ...legacyFeatures,
+          planCode: currentPlan.code as any,
+          maxActiveEvents: currentPlan.limits.maxActiveEvents,
+          maxPhotosPerEvent: currentPlan.limits.maxPhotosPerEvent,
+          maxFaceOpsPerEvent: currentPlan.limits.maxFaceOpsPerEvent,
+          storageGb: currentPlan.limits.storageGb,
+          teamMembers: currentPlan.limits.teamMembers,
+          platformFeePercent: currentPlan.platformFeePercent,
+          customWatermark: currentPlan.capabilities.customWatermark,
+          customBranding: currentPlan.capabilities.customBranding,
+          liveEventMode: currentPlan.capabilities.liveEventMode,
+          advancedAnalytics: currentPlan.capabilities.advancedAnalytics,
+          apiAccess: currentPlan.capabilities.apiAccess,
+          prioritySupport: currentPlan.capabilities.prioritySupport,
+          whiteLabel: currentPlan.capabilities.whiteLabel,
+          printProductsEnabled: currentPlan.capabilities.printProducts,
+          printCommissionPercent: currentPlan.printCommissionPercent,
+          monthlyPrice:
+            currentPlan.prices?.USD ??
+            currentPlan.basePriceUsd,
+          annualPrice: Math.round((currentPlan.prices?.USD ?? currentPlan.basePriceUsd) * 10),
+        }
+      : legacyFeatures;
+
     return NextResponse.json({
       // New modular plan details
       plan: currentPlan ? {
@@ -115,17 +150,17 @@ export async function GET() {
       
       // Legacy subscription format for backward compatibility
       subscription: subscription ? {
-        planCode: subscription.plan_code,
+        planCode: resolvedPlanCode,
         status: subscription.status,
         currentPeriodEnd: subscription.current_period_end,
       } : {
-        planCode: currentPlan?.code || 'free',
+        planCode: resolvedPlanCode,
         status: 'active',
         currentPeriodEnd: null,
       },
       
       // Legacy features format for backward compatibility
-      features: legacyFeatures,
+      features: resolvedLegacyFeatures,
       
       // Usage stats
       usage: {
@@ -135,13 +170,7 @@ export async function GET() {
       },
       
       // Limits (from new system if available, else legacy)
-      limits: currentPlan?.limits || {
-        maxActiveEvents: legacyFeatures.maxActiveEvents,
-        maxPhotosPerEvent: legacyFeatures.maxPhotosPerEvent,
-        maxFaceOpsPerEvent: legacyFeatures.maxFaceOpsPerEvent,
-        storageGb: legacyFeatures.storageGb,
-        teamMembers: legacyFeatures.teamMembers,
-      },
+      limits: resolvedLimits,
       
       paymentMethod,
       hasStripeAccount: !!wallet?.stripe_account_id,

@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 
 import { getUsageSummary, checkLimit } from '@/lib/subscription/enforcement';
+import { getUserPlan } from '@/lib/subscription';
 import { resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
@@ -31,6 +32,16 @@ export async function GET() {
       return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
     }
     const creatorId = creatorProfile.id as string;
+    const currentPlan = await getUserPlan(creatorId, 'photographer');
+    const resolvedPlanCode = currentPlan?.code || 'free';
+    const resolvedPlanLimits = {
+      maxEvents: currentPlan?.limits.maxActiveEvents ?? 3,
+      maxPhotosPerEvent: currentPlan?.limits.maxPhotosPerEvent ?? 100,
+      maxStorageGb: currentPlan?.limits.storageGb ?? 5,
+      maxTeamMembers: currentPlan?.limits.teamMembers ?? 1,
+      maxFaceOps: currentPlan?.limits.maxFaceOpsPerEvent ?? 500,
+    };
+    const resolvedPlatformFee = currentPlan?.platformFeePercent ?? 20;
 
     // Get comprehensive usage summary
     const usage = await getUsageSummary(creatorId);
@@ -46,19 +57,15 @@ export async function GET() {
           faceOpsUsed: 0,
         },
         limits: {
-          maxEvents: 3,
-          maxPhotosPerEvent: 100,
-          maxStorageGb: 5,
-          maxTeamMembers: 1,
-          maxFaceOps: 500,
+          ...resolvedPlanLimits,
         },
         percentages: {
           events: 0,
           storage: 0,
           team: 0,
         },
-        planCode: 'free',
-        platformFee: 20,
+        planCode: resolvedPlanCode,
+        platformFee: resolvedPlatformFee,
       });
     }
 
@@ -78,16 +85,28 @@ export async function GET() {
         faceOpsUsed: usage.faceOpsUsed,
       },
       limits: {
-        maxEvents: usage.maxEvents,
-        maxPhotosPerEvent: usage.maxPhotosPerEvent,
-        maxStorageGb: usage.maxStorageGb,
-        maxTeamMembers: usage.maxTeamMembers,
-        maxFaceOps: usage.maxFaceOps,
+        maxEvents: resolvedPlanLimits.maxEvents,
+        maxPhotosPerEvent: resolvedPlanLimits.maxPhotosPerEvent,
+        maxStorageGb: resolvedPlanLimits.maxStorageGb,
+        maxTeamMembers: resolvedPlanLimits.maxTeamMembers,
+        maxFaceOps: resolvedPlanLimits.maxFaceOps,
       },
       percentages: {
-        events: usage.eventsPercent,
-        storage: usage.storagePercent,
-        team: usage.teamPercent,
+        events:
+          resolvedPlanLimits.maxEvents === -1
+            ? 0
+            : Math.min(100, Math.round((usage.activeEvents * 100) / Math.max(1, resolvedPlanLimits.maxEvents))),
+        storage:
+          resolvedPlanLimits.maxStorageGb === -1
+            ? 0
+            : Math.min(
+                100,
+                Math.round((Number(usage.storageUsedGb || 0) * 100) / Math.max(0.01, resolvedPlanLimits.maxStorageGb))
+              ),
+        team:
+          resolvedPlanLimits.maxTeamMembers === -1
+            ? 0
+            : Math.min(100, Math.round((usage.teamMembers * 100) / Math.max(1, resolvedPlanLimits.maxTeamMembers))),
       },
       checks: {
         events: {
@@ -103,8 +122,8 @@ export async function GET() {
           message: teamCheck.message,
         },
       },
-      planCode: usage.planCode,
-      platformFee: usage.platformFee,
+      planCode: resolvedPlanCode,
+      platformFee: resolvedPlatformFee,
     });
 
   } catch (error) {

@@ -83,23 +83,39 @@ export interface FullPlanDetails extends SubscriptionPlan {
 
 const plansCache: Map<string, FullPlanDetails> = new Map();
 let plansCacheTime = 0;
-const PLANS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const PLANS_CACHE_TTL = 60 * 1000; // 1 minute
 
 // ============================================
 // FETCH ALL PLANS
 // ============================================
 
+function isCreatorVisiblePlan(plan: FullPlanDetails): boolean {
+  return plan.planType === 'creator' || plan.planType === 'payg';
+}
+
+function normalizeRequestedPlanType(planType?: PlanType): 'creator' | 'drop_in' | 'payg' | null {
+  if (!planType) return null;
+  if (planType === 'creator' || planType === 'photographer') return 'creator';
+  if (planType === 'drop_in') return 'drop_in';
+  if (planType === 'payg') return 'payg';
+  return null;
+}
+
+function filterPlansByType(plans: FullPlanDetails[], requestedType?: PlanType): FullPlanDetails[] {
+  const normalized = normalizeRequestedPlanType(requestedType);
+  if (!normalized) return plans;
+  if (normalized === 'creator') return plans.filter(isCreatorVisiblePlan);
+  if (normalized === 'payg') return plans.filter((plan) => plan.planType === 'payg');
+  return plans.filter((plan) => plan.planType === normalized);
+}
+
 export async function getAllPlans(planType?: PlanType): Promise<FullPlanDetails[]> {
   const now = Date.now();
-  const cacheKey = planType || 'all';
   
   // Check cache
   if (plansCacheTime && (now - plansCacheTime) < PLANS_CACHE_TTL && plansCache.size > 0) {
     const cached = Array.from(plansCache.values());
-    if (planType) {
-      return cached.filter(p => p.planType === planType);
-    }
-    return cached;
+    return filterPlansByType(cached, planType);
   }
 
   try {
@@ -112,10 +128,14 @@ export async function getAllPlans(planType?: PlanType): Promise<FullPlanDetails[
       .eq('is_active', true)
       .order('base_price_usd', { ascending: true });
     
-    if (planType === 'creator' || planType === 'photographer') {
-      query = query.in('plan_type', ['creator', 'photographer']);
-    } else if (planType) {
-      query = query.eq('plan_type', planType);
+    // Apply DB-level filters only for stable enum values.
+    // For creator plans, fetch active rows and filter in app code so this works
+    // across environments that store either "creator" or "photographer".
+    const normalizedType = normalizeRequestedPlanType(planType);
+    if (normalizedType === 'payg') {
+      query = query.eq('plan_type', 'payg');
+    } else if (normalizedType === 'drop_in') {
+      query = query.eq('plan_type', 'drop_in');
     }
     
     const { data: plans, error: plansError } = await query;
@@ -171,7 +191,10 @@ export async function getAllPlans(planType?: PlanType): Promise<FullPlanDetails[
         code: plan.code,
         name: plan.name,
         description: plan.description || '',
-        planType: (plan.plan_type === 'photographer' ? 'creator' : plan.plan_type) || 'creator',
+        planType:
+          (plan.plan_type === 'photographer'
+            ? 'creator'
+            : (plan.plan_type as 'creator' | 'drop_in' | 'payg')) || 'creator',
         basePriceUsd: plan.base_price_usd || 0,
         prices: plan.prices || {},
         isActive: plan.is_active,
@@ -195,7 +218,7 @@ export async function getAllPlans(planType?: PlanType): Promise<FullPlanDetails[
     fullPlans.forEach(p => plansCache.set(p.id, p));
     plansCacheTime = now;
 
-    return fullPlans;
+    return filterPlansByType(fullPlans, planType);
   } catch (error) {
     console.error('Error in getAllPlans:', error);
     return [];
