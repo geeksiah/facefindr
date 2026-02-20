@@ -43,24 +43,42 @@ export async function PUT(request: NextRequest) {
     }
 
     const { settings } = await request.json();
+    if (!settings || typeof settings !== 'object') {
+      return NextResponse.json({ error: 'Invalid settings payload' }, { status: 400 });
+    }
 
-    // Update each setting
-    const updates = Object.entries(settings).map(async ([key, value]) => {
-      return supabaseAdmin
+    const entries = Object.entries(settings).filter(
+      ([key, value]) => typeof key === 'string' && key.trim().length > 0 && value !== undefined
+    );
+    if (!entries.length) {
+      return NextResponse.json({ error: 'No settings provided' }, { status: 400 });
+    }
+
+    // Upsert each setting so missing keys are created instead of silently skipped.
+    const updates = entries.map(async ([key, value]) => {
+      const normalizedValue = typeof value === 'string' ? value : value;
+
+      const { error } = await supabaseAdmin
         .from('platform_settings')
-        .update({ 
-          value: typeof value === 'string' ? value : JSON.stringify(value),
-          // Keep nullable until all environments have a consistent FK target.
-          updated_by: null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('setting_key', key);
+        .upsert(
+          {
+            setting_key: key,
+            value: normalizedValue,
+            updated_by: null,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'setting_key' }
+        );
+
+      if (error) {
+        throw error;
+      }
     });
 
     await Promise.all(updates);
 
     await logAction('settings_update', 'settings', undefined, { 
-      updatedKeys: Object.keys(settings),
+      updatedKeys: entries.map(([key]) => key),
     });
     await bumpRuntimeConfigVersion('settings', session.adminId);
 

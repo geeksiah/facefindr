@@ -2,17 +2,12 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { resolveDropInCreditRules } from '@/lib/drop-in/credit-rules';
 import { crawlExternalPlatforms, hasExternalCrawlerProviderConfigured } from '@/lib/drop-in/external-crawler';
 import { getAttendeeIdCandidates, resolveAttendeeProfileByUser } from '@/lib/profiles/ids';
 import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
 type SearchType = 'internal' | 'contacts' | 'external';
-
-const SEARCH_CREDIT_COST: Record<SearchType, number> = {
-  internal: 3,
-  contacts: 3,
-  external: 5,
-};
 
 function isSearchType(value: unknown): value is SearchType {
   return value === 'internal' || value === 'contacts' || value === 'external';
@@ -33,6 +28,7 @@ export async function GET(request: NextRequest) {
 
     const serviceClient = createServiceClient();
     const resolvedAttendee = await resolveAttendeeProfileByUser(serviceClient, user.id, user.email);
+    const rules = await resolveDropInCreditRules();
     const attendeeId = resolvedAttendee.data?.id;
     if (!attendeeId) {
       return NextResponse.json({ error: 'Attendee profile not found' }, { status: 404 });
@@ -112,6 +108,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       credits: attendee?.drop_in_credits || 0,
+      creditRules: {
+        internal: rules.internalSearch,
+        contacts: rules.contactsSearch,
+        external: rules.externalSearch,
+      },
       searches: (searches || []).map((search) => ({
         id: search.id,
         searchType: search.search_type,
@@ -145,6 +146,7 @@ export async function POST(request: NextRequest) {
 
     const serviceClient = createServiceClient();
     const resolvedAttendee = await resolveAttendeeProfileByUser(serviceClient, user.id, user.email);
+    const rules = await resolveDropInCreditRules();
     const attendeeId = resolvedAttendee.data?.id;
     if (!attendeeId) {
       return NextResponse.json({ error: 'Attendee profile not found' }, { status: 404 });
@@ -198,7 +200,12 @@ export async function POST(request: NextRequest) {
     };
 
     let creditsUsed = 0;
-    const requiredCredits = SEARCH_CREDIT_COST[searchType];
+    const requiredCredits =
+      searchType === 'external'
+        ? rules.externalSearch
+        : searchType === 'contacts'
+          ? rules.contactsSearch
+          : rules.internalSearch;
 
     const { data: attendeeProfile } = await serviceClient
       .from('attendees')

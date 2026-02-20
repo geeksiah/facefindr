@@ -26,29 +26,11 @@ export function DropInUploadPage({ basePath }: DropInUploadPageProps) {
   const [giftMessage, setGiftMessage] = useState('');
   const [locationName, setLocationName] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [uploadFee, setUploadFee] = useState<number | null>(null);
-  const [giftFee, setGiftFee] = useState<number | null>(null);
+  const [attendeeCredits, setAttendeeCredits] = useState<number>(0);
+  const [uploadCreditsRequired, setUploadCreditsRequired] = useState<number | null>(null);
+  const [giftCreditsRequired, setGiftCreditsRequired] = useState<number | null>(null);
+  const [creditUnit, setCreditUnit] = useState<number | null>(null);
   const [currency, setCurrency] = useState('USD');
-
-  const openCheckoutPopup = useCallback((checkoutUrl: string) => {
-    const popup = window.open(
-      checkoutUrl,
-      'ferchrPayment',
-      'popup=yes,width=520,height=760,menubar=no,toolbar=no,location=yes,status=no'
-    );
-
-    if (!popup) {
-      window.location.href = checkoutUrl;
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      if (popup.closed) {
-        window.clearInterval(timer);
-        void router.refresh();
-      }
-    }, 600);
-  }, [router]);
 
   useEffect(() => {
     const loadPricing = async () => {
@@ -58,8 +40,10 @@ export function DropInUploadPage({ basePath }: DropInUploadPageProps) {
         throw new Error(data.error || 'Pricing unavailable');
       }
 
-      setUploadFee(Number(data.uploadFee));
-      setGiftFee(Number(data.giftFee));
+      setAttendeeCredits(Number(data.attendeeCredits || 0));
+      setUploadCreditsRequired(Number(data.uploadCreditsRequired || 1));
+      setGiftCreditsRequired(Number(data.giftCreditsRequired || 1));
+      setCreditUnit(Number(data.creditUnit || 0));
       setCurrency(String(data.currency || 'USD'));
     };
 
@@ -124,13 +108,9 @@ export function DropInUploadPage({ basePath }: DropInUploadPageProps) {
         throw new Error(data.error || 'Upload failed');
       }
 
-      if (data.checkoutUrl) {
-        openCheckoutPopup(data.checkoutUrl);
-        return;
-      }
-
       toast.success('Upload successful', 'Your drop-in photo has been uploaded');
-      router.push(basePath);
+      const nextPath = `${basePath}/success?photo_id=${encodeURIComponent(String(data.dropInPhotoId || ''))}`;
+      router.push(nextPath);
     } catch (error: any) {
       console.error('Upload error:', error);
       toast.error('Upload failed', error.message || 'Failed to upload photo');
@@ -139,9 +119,11 @@ export function DropInUploadPage({ basePath }: DropInUploadPageProps) {
     }
   };
 
-  const effectiveUploadFee = uploadFee ?? 0;
-  const effectiveGiftFee = giftFee ?? 0;
-  const totalCost = includeGift ? effectiveUploadFee + effectiveGiftFee : effectiveUploadFee;
+  const effectiveUploadCredits = uploadCreditsRequired ?? 0;
+  const effectiveGiftCredits = giftCreditsRequired ?? 0;
+  const totalCredits = includeGift ? effectiveUploadCredits + effectiveGiftCredits : effectiveUploadCredits;
+  const totalEquivalent = creditUnit !== null ? totalCredits * creditUnit : 0;
+  const hasEnoughCredits = attendeeCredits >= totalCredits;
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -256,30 +238,32 @@ export function DropInUploadPage({ basePath }: DropInUploadPageProps) {
       <div className="rounded-2xl border border-border bg-card p-6">
         <h3 className="mb-4 flex items-center gap-2 font-semibold text-foreground">
           <DollarSign className="h-5 w-5 text-accent" />
-          Pricing Summary
+          Credit Summary
         </h3>
         <div className="space-y-2">
           <div className="flex justify-between text-sm">
-            <span className="text-secondary">Upload Fee</span>
-            <span className="text-foreground">
-              {currency} {effectiveUploadFee.toFixed(2)}
-            </span>
+            <span className="text-secondary">Upload</span>
+            <span className="text-foreground">{effectiveUploadCredits} credits</span>
           </div>
           {includeGift && (
             <div className="flex justify-between text-sm">
               <span className="text-secondary">Gift Access + Message</span>
-              <span className="text-foreground">
-                {currency} {effectiveGiftFee.toFixed(2)}
-              </span>
+              <span className="text-foreground">{effectiveGiftCredits} credits</span>
             </div>
           )}
           <div className="mt-2 border-t border-border pt-2">
             <div className="flex justify-between font-semibold">
               <span className="text-foreground">Total</span>
-              <span className="text-accent">
-                {currency} {totalCost.toFixed(2)}
-              </span>
+              <span className="text-accent">{totalCredits} credits</span>
             </div>
+            {creditUnit !== null && (
+              <p className="mt-1 text-right text-xs text-secondary">
+                Approx. {currency} {totalEquivalent.toFixed(2)} at {currency} {creditUnit.toFixed(2)} per credit
+              </p>
+            )}
+            <p className="mt-1 text-right text-xs text-secondary">
+              Available now: {attendeeCredits} credits
+            </p>
           </div>
         </div>
       </div>
@@ -293,16 +277,14 @@ export function DropInUploadPage({ basePath }: DropInUploadPageProps) {
             </p>
             <ul className="ml-2 list-inside list-disc space-y-1">
               <li>Upload a photo of someone (they do not need to be in your contacts)</li>
-              <li>
-                Pay {currency} {effectiveUploadFee.toFixed(2)} to make it discoverable by premium users
-              </li>
+              <li>Spend {effectiveUploadCredits} credit(s) to submit and process the drop-in</li>
               {includeGift && (
                 <li>
-                  Pay an additional {currency} {effectiveGiftFee.toFixed(2)} to cover their access fee and unlock your message
+                  Spend an additional {effectiveGiftCredits} credit(s) to include gift access + message
                 </li>
               )}
               <li>We use face recognition to find them and send a notification</li>
-              <li>If no match is found within 7 days, you get a full refund</li>
+              <li>Credits used per action are controlled by admin settings</li>
             </ul>
           </div>
         </div>
@@ -314,7 +296,7 @@ export function DropInUploadPage({ basePath }: DropInUploadPageProps) {
         </Button>
         <Button
           onClick={handleUpload}
-          disabled={!file || uploading || uploadFee === null || giftFee === null}
+          disabled={!file || uploading || uploadCreditsRequired === null || giftCreditsRequired === null || !hasEnoughCredits}
           className="flex-1"
         >
           {uploading ? (
@@ -323,10 +305,15 @@ export function DropInUploadPage({ basePath }: DropInUploadPageProps) {
               Processing...
             </>
           ) : (
-            <>Continue to Payment ({currency} {totalCost.toFixed(2)})</>
+            <>Upload ({totalCredits} credits)</>
           )}
         </Button>
       </div>
+      {!hasEnoughCredits && (
+        <p className="text-sm text-destructive">
+          You need {totalCredits} credits but only have {attendeeCredits}. Buy more credits from Billing.
+        </p>
+      )}
     </div>
   );
 }

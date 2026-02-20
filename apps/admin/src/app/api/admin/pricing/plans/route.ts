@@ -19,7 +19,8 @@ export async function GET() {
 
     if (error) throw error;
 
-    return NextResponse.json({ plans: data || [] });
+    const plans = (data || []).filter((plan: any) => plan.plan_type !== 'drop_in');
+    return NextResponse.json({ plans });
   } catch (error) {
     console.error('Get plans error:', error);
     return NextResponse.json({ error: 'Failed to get plans' }, { status: 500 });
@@ -46,10 +47,13 @@ export async function POST(request: NextRequest) {
       print_commission_percent, print_commission_fixed, print_commission_type
     } = body;
 
-    const allowedPlanTypes = new Set(['photographer', 'drop_in', 'payg']);
+    const allowedPlanTypes = new Set(['photographer', 'payg']);
     const planType = typeof plan_type === 'string' ? plan_type : 'photographer';
     if (!allowedPlanTypes.has(planType)) {
-      return NextResponse.json({ error: 'Invalid plan type' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Invalid plan type. Drop-In pricing is configured via credit settings.' },
+        { status: 400 }
+      );
     }
 
     // Check if code already exists for this plan type

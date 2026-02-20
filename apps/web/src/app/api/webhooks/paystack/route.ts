@@ -139,6 +139,10 @@ async function handleChargeSuccess(
     await handleDropInPaymentSuccess(supabase, payload, metadata);
     return;
   }
+  if (metadata.type === 'drop_in_credit_purchase') {
+    await handleDropInCreditPurchaseSuccess(supabase, payload, metadata);
+    return;
+  }
   if (metadata.tip_id) {
     const tipId = String(metadata.tip_id);
     await supabase
@@ -220,6 +224,17 @@ async function handleChargeFailure(
           gift_payment_status: 'failed',
         })
         .eq('id', dropInPhotoId);
+    }
+    return;
+  }
+  if (metadata.type === 'drop_in_credit_purchase') {
+    const purchaseId = String(metadata.purchase_id || '');
+    if (purchaseId) {
+      await supabase
+        .from('drop_in_credit_purchases')
+        .update({ status: 'failed' })
+        .eq('id', purchaseId)
+        .eq('status', 'pending');
     }
     return;
   }
@@ -382,6 +397,50 @@ async function handleDropInPaymentSuccess(
   } catch (error) {
     console.error('Failed to trigger drop-in processing from Paystack webhook:', error);
   }
+}
+
+async function handleDropInCreditPurchaseSuccess(
+  supabase: ReturnType<typeof createServiceClient>,
+  payload: PaystackWebhookPayload,
+  metadata: Record<string, unknown>
+) {
+  const purchaseId = String(metadata.purchase_id || '');
+  if (!purchaseId) return;
+
+  const { data: purchase } = await supabase
+    .from('drop_in_credit_purchases')
+    .select('id, attendee_id, credits_purchased, status')
+    .eq('id', purchaseId)
+    .maybeSingle();
+
+  if (!purchase || purchase.status !== 'pending') return;
+
+  const transactionRef = payload.data?.reference || String(payload.data?.id || '');
+  const { data: activated } = await supabase
+    .from('drop_in_credit_purchases')
+    .update({
+      status: 'active',
+      credits_remaining: purchase.credits_purchased,
+      payment_intent_id: transactionRef || null,
+    })
+    .eq('id', purchase.id)
+    .eq('status', 'pending')
+    .select('id')
+    .maybeSingle();
+
+  if (!activated?.id) return;
+
+  const { data: attendee } = await supabase
+    .from('attendees')
+    .select('drop_in_credits')
+    .eq('id', purchase.attendee_id)
+    .maybeSingle();
+  const currentCredits = Number(attendee?.drop_in_credits || 0);
+
+  await supabase
+    .from('attendees')
+    .update({ drop_in_credits: currentCredits + Number(purchase.credits_purchased || 0) })
+    .eq('id', purchase.attendee_id);
 }
 
 async function createEntitlements(

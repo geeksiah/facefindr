@@ -2,46 +2,19 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Drop-In Photo Upload API
- * 
- * Allows users to upload photos of people outside their contacts
- * Requires payment for discoverability and optional gift payment
+ *
+ * Credit-based flow:
+ * - Upload photo
+ * - Deduct configured Drop-In credits
+ * - Mark as paid (credit-backed) and trigger processing
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { v4 as uuidv4 } from 'uuid';
 
-import { convertCurrency, getCountryFromRequest, getEffectiveCurrency } from '@/lib/currency/currency-service';
-import { isFlutterwaveConfigured, initializePayment } from '@/lib/payments/flutterwave';
-import { GatewaySelectionError, selectPaymentGateway } from '@/lib/payments/gateway-selector';
-import { isPayPalConfigured, createOrder, getApprovalUrl } from '@/lib/payments/paypal';
-import { initializePaystackPayment, resolvePaystackSecretKey } from '@/lib/payments/paystack';
-import { resolveAttendeeProfileByUser } from '@/lib/profiles/ids';
-import { stripe } from '@/lib/payments/stripe';
+import { resolveDropInCreditRules } from '@/lib/drop-in/credit-rules';
 import { resolveDropInPricingConfig } from '@/lib/drop-in/pricing';
+import { resolveAttendeeProfileByUser } from '@/lib/profiles/ids';
 import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
-
-async function getDropInPricing(userId: string | undefined, requestHeaders: Headers) {
-  const pricing = await resolveDropInPricingConfig();
-  const detectedCountry = getCountryFromRequest(requestHeaders);
-  const effectiveCurrency = await getEffectiveCurrency(userId, detectedCountry || undefined);
-
-  let uploadFeeCents = pricing.uploadFeeCents;
-  let giftFeeCents = pricing.giftFeeCents;
-  let currencyCode = pricing.currencyCode;
-
-  if (effectiveCurrency && effectiveCurrency !== pricing.currencyCode) {
-    uploadFeeCents = await convertCurrency(pricing.uploadFeeCents, pricing.currencyCode, effectiveCurrency);
-    giftFeeCents = await convertCurrency(pricing.giftFeeCents, pricing.currencyCode, effectiveCurrency);
-    currencyCode = effectiveCurrency;
-  }
-
-  return {
-    uploadFeeCents,
-    giftFeeCents,
-    currencyCode,
-    currencyLower: currencyCode.toLowerCase(),
-  };
-}
 
 function extractMissingColumnName(error: any): string | null {
   if (error?.code !== '42703' || typeof error?.message !== 'string') return null;
@@ -154,17 +127,9 @@ async function ensureAttendeeProfile(
       continue;
     }
 
-    console.error('Drop-in attendee profile creation failed', {
-      code: error.code,
-      message: error.message,
-      details: error.details,
-      hint: error.hint,
-      attempt: attempt + 1,
-    });
     break;
   }
 
-  // Last-chance fallback for existing rows in partially migrated environments.
   const byId = await serviceClient
     .from('attendees')
     .select('id, display_name')
@@ -196,33 +161,59 @@ async function ensureAttendeeProfile(
   return null;
 }
 
+async function triggerDropInProcessing(
+  dropInPhotoId: string,
+  accessToken: string | null,
+  cookieHeader: string | null
+): Promise<boolean> {
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  const processSecret = process.env.DROP_IN_PROCESS_SECRET;
+
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+  };
+
+  if (processSecret) {
+    headers['x-drop-in-process-secret'] = processSecret;
+  } else if (accessToken) {
+    headers.authorization = `Bearer ${accessToken}`;
+  } else if (cookieHeader) {
+    headers.cookie = cookieHeader;
+  } else {
+    return false;
+  }
+
+  try {
+    const response = await fetch(`${baseUrl}/api/drop-in/process`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ dropInPhotoId }),
+      cache: 'no-store',
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization');
-    const accessToken = authHeader?.startsWith('Bearer ')
-      ? authHeader.slice(7)
-      : null;
-    const supabase = accessToken
-      ? createClientWithAccessToken(accessToken)
-      : await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    const supabase = accessToken ? createClientWithAccessToken(accessToken) : await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    let dropInPricing;
-    try {
-      dropInPricing = await getDropInPricing(user.id, request.headers);
-    } catch (pricingError) {
-      const message = pricingError instanceof Error
-        ? pricingError.message
-        : 'Drop-in pricing is not configured by admin';
-      return NextResponse.json({ error: message, failClosed: true }, { status: 503 });
-    }
+    const [pricing, rules] = await Promise.all([
+      resolveDropInPricingConfig(),
+      resolveDropInCreditRules(),
+    ]);
 
-    // Get attendee profile (use service client to bypass RLS).
-    // Drop-in rows are keyed to attendees.uploader_id, so we must have an attendee profile.
     const serviceClient = createServiceClient();
     const attendee = await ensureAttendeeProfile(serviceClient, {
       id: user.id,
@@ -238,7 +229,6 @@ export async function POST(request: NextRequest) {
     const file = formData.get('photo') as File;
     const giftMessage = formData.get('giftMessage') as string | null;
     const includeGift = formData.get('includeGift') === 'true';
-    const returnPath = formData.get('returnPath') === 'dashboard' ? 'dashboard' : 'gallery';
     const locationLat = formData.get('locationLat') ? parseFloat(formData.get('locationLat') as string) : null;
     const locationLng = formData.get('locationLng') ? parseFloat(formData.get('locationLng') as string) : null;
     const locationName = formData.get('locationName') as string | null;
@@ -247,41 +237,46 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Photo is required' }, { status: 400 });
     }
 
-    // Validate file type
     const allowedTypes = ['image/jpeg', 'image/png', 'image/heic', 'image/webp'];
     if (!allowedTypes.includes(file.type)) {
       return NextResponse.json({ error: 'Invalid file type' }, { status: 400 });
     }
 
-    // Validate file size (max 10MB)
     if (file.size > 10 * 1024 * 1024) {
       return NextResponse.json({ error: 'File too large. Maximum size is 10MB.' }, { status: 400 });
     }
 
-    // Validate gift message length
     if (includeGift && giftMessage && giftMessage.length > 200) {
       return NextResponse.json({ error: 'Gift message must be 200 characters or less' }, { status: 400 });
     }
 
-    // Check user's subscription/plan
-    const { data: subscription } = await serviceClient
-      .from('attendee_subscriptions')
-      .select('plan_code, status')
-      .eq('attendee_id', attendee.id)
-      .eq('status', 'active')
-      .single();
+    const uploadCreditsRequired = rules.upload;
+    const giftCreditsRequired = includeGift ? rules.gift : 0;
+    const totalCreditsRequired = uploadCreditsRequired + giftCreditsRequired;
 
-    // Free users cannot upload drop-ins (must pay per upload)
-    // Premium users get 1 free upload per month, then pay per upload
+    const { data: attendeeBalance } = await serviceClient
+      .from('attendees')
+      .select('drop_in_credits')
+      .eq('id', attendee.id)
+      .maybeSingle();
+    const availableCredits = Number(attendeeBalance?.drop_in_credits || 0);
+    if (availableCredits < totalCreditsRequired) {
+      return NextResponse.json(
+        {
+          error: `Insufficient credits (${totalCreditsRequired} required)`,
+          requiredCredits: totalCreditsRequired,
+          availableCredits,
+        },
+        { status: 402 }
+      );
+    }
 
-    // Generate unique filename
     const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
     const timestamp = Date.now();
     const randomStr = Math.random().toString(36).substring(2, 8);
     const filename = `drop-in-${timestamp}-${randomStr}.${ext}`;
     const storagePath = `drop-ins/${attendee.id}/${filename}`;
 
-    // Upload to Supabase Storage
     const arrayBuffer = await file.arrayBuffer();
     const buffer = new Uint8Array(arrayBuffer);
 
@@ -294,14 +289,12 @@ export async function POST(request: NextRequest) {
       });
 
     if (uploadError) {
-      console.error('Storage upload error:', uploadError);
-      return NextResponse.json(
-        { error: 'Failed to upload file' },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: 'Failed to upload file' }, { status: 500 });
     }
 
-    // Create drop-in photo record first (pending payment)
+    const uploadAmountEquivalent = uploadCreditsRequired * pricing.creditUnitCents;
+    const giftAmountEquivalent = includeGift ? giftCreditsRequired * pricing.creditUnitCents : null;
+
     const { data: dropInPhoto, error: dbError } = await serviceClient
       .from('drop_in_photos')
       .insert({
@@ -309,251 +302,83 @@ export async function POST(request: NextRequest) {
         storage_path: storagePath,
         original_filename: file.name,
         file_size: file.size,
-        is_discoverable: false, // Will be set to true after payment
-        discovery_scope: 'app_only', // MVP: app only, expand later
+        is_discoverable: false,
+        discovery_scope: 'app_only',
         upload_payment_status: 'pending',
-        upload_payment_amount: dropInPricing.uploadFeeCents,
+        upload_payment_amount: uploadAmountEquivalent,
         is_gifted: includeGift,
         gift_payment_status: includeGift ? 'pending' : null,
-        gift_payment_amount: includeGift ? dropInPricing.giftFeeCents : null,
+        gift_payment_amount: giftAmountEquivalent,
         gift_message: includeGift && giftMessage ? giftMessage : null,
         location_lat: locationLat,
         location_lng: locationLng,
         location_name: locationName,
         face_processing_status: 'pending',
       })
-      .select()
+      .select('id')
       .single();
 
-    if (dbError || !dropInPhoto) {
-      // Clean up uploaded file
+    if (dbError || !dropInPhoto?.id) {
       await serviceClient.storage.from('media').remove([storagePath]);
-      return NextResponse.json(
-        { error: 'Failed to create drop-in record' },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: 'Failed to create drop-in record' }, { status: 500 });
     }
 
-    // Select payment gateway based on user preference and country
-    let gatewaySelection;
-    try {
-      const detectedCountry = getCountryFromRequest(request.headers);
-      gatewaySelection = await selectPaymentGateway({
-        userId: user.id,
-        currency: dropInPricing.currencyLower,
-        countryCode: detectedCountry || undefined,
-        productType: 'drop_in',
-      });
-    } catch (gatewayError) {
-      if (gatewayError instanceof GatewaySelectionError) {
-        return NextResponse.json(
-          {
-            error: gatewayError.message,
-            failClosed: gatewayError.failClosed,
-            code: gatewayError.code,
-          },
-          { status: 503 }
-        );
-      }
-      throw gatewayError;
-    }
+    const { data: creditsConsumed, error: creditsError } = await serviceClient.rpc('use_drop_in_credits', {
+      p_attendee_id: attendee.id,
+      p_action: includeGift ? 'drop_in_upload_with_gift' : 'drop_in_upload',
+      p_credits_needed: totalCreditsRequired,
+      p_metadata: {
+        drop_in_photo_id: dropInPhoto.id,
+        include_gift: includeGift,
+        upload_credits_required: uploadCreditsRequired,
+        gift_credits_required: giftCreditsRequired,
+      },
+    });
 
-    // Create payment intent/checkout session
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    const successPath =
-      returnPath === 'dashboard' ? '/dashboard/drop-in/success' : '/gallery/drop-in/success';
-    const cancelPath = returnPath === 'dashboard' ? '/dashboard/drop-in' : '/gallery/drop-in';
-    const idempotencyKey = uuidv4();
-    const selectedGateway = gatewaySelection.gateway;
-
-    let checkoutUrl: string;
-    let sessionId: string;
-
-    try {
-      // Handle Stripe
-      if (selectedGateway === 'stripe') {
-        if (!stripe) {
-          throw new Error('Stripe is not configured');
-        }
-
-        const session = await stripe.checkout.sessions.create({
-          customer_email: user.email || undefined,
-          payment_method_types: ['card'],
-          line_items: [
-            {
-              price_data: {
-                currency: dropInPricing.currencyLower,
-                product_data: {
-                  name: 'Drop-In Photo Upload',
-                  description: 'Make your photo discoverable by premium users',
-                },
-                unit_amount: dropInPricing.uploadFeeCents,
-              },
-              quantity: 1,
-            },
-            ...(includeGift ? [{
-              price_data: {
-                currency: dropInPricing.currencyLower,
-                product_data: {
-                  name: 'Gift Access + Message',
-                  description: 'Cover recipient access fee and unlock message',
-                },
-                unit_amount: dropInPricing.giftFeeCents,
-              },
-              quantity: 1,
-            }] : []),
-          ],
-          mode: 'payment',
-          success_url: `${baseUrl}${successPath}?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${baseUrl}${cancelPath}?canceled=true`,
-          metadata: {
-            type: 'drop_in_upload',
-            attendee_id: attendee.id,
-            include_gift: includeGift.toString(),
-            drop_in_photo_id: dropInPhoto.id,
-          },
-        });
-
-        checkoutUrl = session.url!;
-        sessionId = session.id;
-      }
-      // Handle Flutterwave
-      else if (selectedGateway === 'flutterwave') {
-        if (!isFlutterwaveConfigured()) {
-          throw new Error('Flutterwave is not configured');
-        }
-
-        const totalAmount = dropInPricing.uploadFeeCents + (includeGift ? dropInPricing.giftFeeCents : 0);
-        const payment = await initializePayment({
-          txRef: idempotencyKey,
-          amount: totalAmount,
-          currency: dropInPricing.currencyCode,
-          redirectUrl: `${baseUrl}${successPath}?tx_ref=${idempotencyKey}&provider=flutterwave`,
-          customerEmail: user.email || '',
-          eventId: null, // Drop-in not tied to event
-          eventName: 'Drop-In Photo Upload',
-          photographerId: null, // Platform payment
-          metadata: {
-            type: 'drop_in_upload',
-            attendee_id: attendee.id,
-            include_gift: includeGift.toString(),
-            drop_in_photo_id: dropInPhoto.id,
-          },
-        });
-
-        checkoutUrl = payment.link;
-        sessionId = idempotencyKey;
-      }
-      // Handle PayPal
-      else if (selectedGateway === 'paypal') {
-        if (!isPayPalConfigured()) {
-          throw new Error('PayPal is not configured');
-        }
-
-        const order = await createOrder({
-          eventId: null,
-          eventName: 'Drop-In Photo Upload',
-          items: [
-            {
-              name: 'Drop-In Photo Upload',
-              description: 'Make your photo discoverable by premium users',
-              amount: dropInPricing.uploadFeeCents,
-              quantity: 1,
-            },
-            ...(includeGift ? [{
-              name: 'Gift Access + Message',
-              description: 'Cover recipient access fee and unlock message',
-              amount: dropInPricing.giftFeeCents,
-              quantity: 1,
-            }] : []),
-          ],
-          currency: dropInPricing.currencyCode,
-          photographerPayPalEmail: null, // Platform payment
-          returnUrl: `${baseUrl}${successPath}?order_id=${idempotencyKey}&provider=paypal`,
-          cancelUrl: `${baseUrl}${cancelPath}?canceled=true`,
-          metadata: {
-            type: 'drop_in_upload',
-            attendee_id: attendee.id,
-            include_gift: includeGift.toString(),
-            drop_in_photo_id: dropInPhoto.id,
-            tx_ref: idempotencyKey,
-          },
-        });
-
-        const approvalUrl = getApprovalUrl(order);
-        if (!approvalUrl) {
-          throw new Error('Failed to get PayPal approval URL');
-        }
-
-        checkoutUrl = approvalUrl;
-        sessionId = order.id;
-      } else if (selectedGateway === 'paystack') {
-        const paystackSecretKey = await resolvePaystackSecretKey(gatewaySelection.countryCode);
-        if (!paystackSecretKey) {
-          throw new Error('Paystack is not configured');
-        }
-
-        const totalAmount = dropInPricing.uploadFeeCents + (includeGift ? dropInPricing.giftFeeCents : 0);
-        const payment = await initializePaystackPayment({
-          reference: idempotencyKey,
-          email: user.email || '',
-          amount: totalAmount,
-          currency: dropInPricing.currencyCode,
-          callbackUrl: `${baseUrl}${successPath}?reference=${idempotencyKey}&provider=paystack`,
-          metadata: {
-            type: 'drop_in_upload',
-            attendee_id: attendee.id,
-            include_gift: includeGift,
-            drop_in_photo_id: dropInPhoto.id,
-          },
-        }, paystackSecretKey);
-
-        checkoutUrl = payment.authorizationUrl;
-        sessionId = payment.reference;
-      } else {
-        throw new Error(`Unsupported payment gateway: ${selectedGateway}`);
-      }
-    } catch (error) {
-      // Clean up drop-in record if checkout fails
+    if (creditsError || !creditsConsumed) {
       await serviceClient.from('drop_in_photos').delete().eq('id', dropInPhoto.id);
       await serviceClient.storage.from('media').remove([storagePath]);
-      const detail = error instanceof Error ? error.message : String(error);
-      const suggestedGateway = gatewaySelection.availableGateways.find(
-        (gateway) => gateway !== selectedGateway
-      );
-      
-      console.error('Checkout session error:', { selectedGateway, detail, error });
       return NextResponse.json(
-        { 
-          error: detail ? `Failed to create checkout session: ${detail}` : 'Failed to create checkout session',
-          detail,
-          gateway: selectedGateway,
-          suggestedGateway: suggestedGateway || null,
-          availableGateways: gatewaySelection.availableGateways,
+        {
+          error: `Insufficient credits (${totalCreditsRequired} required)`,
+          requiredCredits: totalCreditsRequired,
+          availableCredits,
         },
-        { status: 500 }
+        { status: 402 }
       );
     }
 
-    // Store checkout session ID (we'll use a separate metadata column or JSONB)
-    // For now, we'll store it in a way that the webhook can find it
-    // The webhook will match by attendee_id and pending status
+    await serviceClient
+      .from('drop_in_photos')
+      .update({
+        upload_payment_status: 'paid',
+        gift_payment_status: includeGift ? 'paid' : null,
+        upload_payment_transaction_id: `credits_${Date.now()}_${attendee.id.slice(0, 8)}`,
+      })
+      .eq('id', dropInPhoto.id);
+
+    const processingTriggered = await triggerDropInProcessing(
+      dropInPhoto.id,
+      accessToken,
+      request.headers.get('cookie')
+    );
+
+    const { data: remaining } = await serviceClient
+      .from('attendees')
+      .select('drop_in_credits')
+      .eq('id', attendee.id)
+      .maybeSingle();
 
     return NextResponse.json({
       success: true,
       dropInPhotoId: dropInPhoto.id,
-      checkoutUrl,
-      sessionId,
-      gateway: selectedGateway,
-      gatewaySelection: {
-        reason: gatewaySelection.reason,
-        availableGateways: gatewaySelection.availableGateways,
-      },
-      message: includeGift
-        ? 'Complete payment to upload and gift access to recipient'
-        : 'Complete payment to make your photo discoverable',
+      creditsUsed: totalCreditsRequired,
+      uploadCreditsRequired,
+      giftCreditsRequired,
+      remainingCredits: Number(remaining?.drop_in_credits || 0),
+      processingTriggered,
+      message: 'Drop-In uploaded successfully',
     });
-
   } catch (error) {
     console.error('Drop-in upload error:', error);
     const detail = error instanceof Error ? error.message : String(error);

@@ -167,7 +167,7 @@ export async function PUT(
     }
 
     // Verify event and get current currency
-    const eventSelectColumns = ['id', 'currency_code', 'event_date'];
+    const eventSelectColumns = ['id', 'currency_code', 'currency', 'event_date', 'event_timezone'];
     let eventResult: any = null;
     const selectedColumns = [...eventSelectColumns];
 
@@ -200,7 +200,9 @@ export async function PUT(
     const event = {
       id: eventResult?.data?.id || eventId,
       currency_code: (eventResult?.data as any)?.currency_code || 'USD',
+      currency: (eventResult?.data as any)?.currency || 'USD',
       event_date: (eventResult?.data as any)?.event_date || null,
+      event_timezone: (eventResult?.data as any)?.event_timezone || 'UTC',
     } as any;
     if (!event.id) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 });
@@ -208,6 +210,7 @@ export async function PUT(
 
     // Build update object (only allowed fields)
     const updates: Record<string, any> = {};
+    let pricingTouched = false;
 
     if (body.name !== undefined) updates.name = body.name;
     if (body.description !== undefined) updates.description = body.description;
@@ -219,7 +222,7 @@ export async function PUT(
     const nextEventTimezone =
       body.event_timezone !== undefined
         ? normalizeEventTimezone(body.event_timezone)
-        : normalizeEventTimezone(null);
+        : normalizeEventTimezone(event.event_timezone);
 
     if (body.event_date !== undefined) updates.event_date = nextEventDate;
     if (body.event_start_at_utc !== undefined) {
@@ -230,7 +233,8 @@ export async function PUT(
     if (body.event_end_at_utc !== undefined) {
       updates.event_end_at_utc = normalizeUtcTimestamp(body.event_end_at_utc);
     }
-    if (body.end_date !== undefined) updates.end_date = body.end_date;
+    if (body.event_timezone !== undefined) updates.event_timezone = nextEventTimezone;
+    if (body.end_date !== undefined) updates.end_date = normalizeIsoDate(body.end_date);
     if (body.is_public !== undefined) updates.is_public = body.is_public;
     if (body.is_publicly_listed !== undefined) updates.is_publicly_listed = body.is_publicly_listed;
     if (body.include_in_public_profile !== undefined) updates.include_in_public_profile = body.include_in_public_profile;
@@ -244,6 +248,27 @@ export async function PUT(
 
     // Update or create event_pricing record
     if (body.pricing_type !== undefined || body.price_per_photo !== undefined || body.bulk_tiers !== undefined || body.currency_code !== undefined) {
+      pricingTouched = true;
+
+      const currentCurrency = String(event.currency_code || event.currency || 'USD').toUpperCase();
+      const requestedCurrency = String(body.currency_code || currentCurrency).toUpperCase();
+      if (body.currency_code !== undefined && requestedCurrency !== currentCurrency) {
+        const { count: transactionCount } = await serviceClient
+          .from('transactions')
+          .select('id', { count: 'exact', head: true })
+          .eq('event_id', eventId)
+          .in('status', ['pending', 'succeeded']);
+
+        if (transactionCount && transactionCount > 0) {
+          return NextResponse.json(
+            { error: 'Cannot change event currency after transactions have been made. This ensures accurate accounting and prevents data inconsistencies.' },
+            { status: 400 }
+          );
+        }
+        updates.currency_code = requestedCurrency;
+        updates.currency = requestedCurrency;
+      }
+
       // Validate bulk tiers if provided
       if (body.pricing_type === 'bulk' && body.bulk_tiers) {
         const { validateBulkTiers } = await import('@/lib/payments/fee-calculator');
@@ -258,36 +283,46 @@ export async function PUT(
 
       const { data: existingPricing } = await serviceClient
         .from('event_pricing')
-        .select('id')
+        .select('id, pricing_type, is_free, price_per_media, bulk_tiers, currency, unlock_all_price')
         .eq('event_id', eventId)
-        .single();
+        .maybeSingle();
 
       // Build pricing data
+      const resolvedPricingType = body.pricing_type || existingPricing?.pricing_type || 'per_photo';
+      const resolvedCurrency = body.currency_code || existingPricing?.currency || event.currency_code || event.currency || 'USD';
       const pricingData: Record<string, any> = {
         event_id: eventId,
-        is_free: body.pricing_type === 'free',
-        pricing_type: body.pricing_type || 'per_photo',
-        price_per_media: body.price_per_photo || 0,
-        bulk_tiers: body.bulk_tiers || null,
-        currency: body.currency_code || 'USD',
+        is_free:
+          resolvedPricingType === 'free' ||
+          (body.pricing_type === undefined && existingPricing?.is_free === true),
+        pricing_type: resolvedPricingType,
+        price_per_media:
+          body.price_per_photo !== undefined
+            ? body.price_per_photo
+            : existingPricing?.price_per_media || 0,
+        bulk_tiers:
+          body.bulk_tiers !== undefined ? body.bulk_tiers : existingPricing?.bulk_tiers || null,
+        currency: resolvedCurrency,
       };
 
       // Handle unlock_all_price based on pricing type
-      if (body.pricing_type === 'per_photo') {
+      if (resolvedPricingType === 'per_photo') {
         // Only set unlock_all_price if provided and valid
         if (body.unlock_all_price !== undefined) {
-          // Convert from dollars to cents if needed
-          const unlockPrice = typeof body.unlock_all_price === 'number' && body.unlock_all_price > 1000
-            ? body.unlock_all_price  // Already in cents
-            : Math.round((body.unlock_all_price || 0) * 100);  // Convert from dollars to cents
+          const unlockPrice =
+            typeof body.unlock_all_price === 'number'
+              ? Math.round(body.unlock_all_price)
+              : Number.parseInt(String(body.unlock_all_price || '0'), 10);
           pricingData.unlock_all_price = unlockPrice > 0 ? unlockPrice : null;
+        } else if (existingPricing?.unlock_all_price !== undefined) {
+          pricingData.unlock_all_price = existingPricing.unlock_all_price;
         }
       } else {
         // Clear unlock_all_price for free and bulk pricing
         pricingData.unlock_all_price = null;
       }
 
-      if (existingPricing) {
+      if (existingPricing?.id) {
         const pricingUpdatePayload = { ...pricingData };
         let pricingError: any = null;
         for (let attempt = 0; attempt < 8; attempt++) {
@@ -333,30 +368,16 @@ export async function PUT(
 
         if (pricingError) throw pricingError;
       }
-
-      // Prevent currency change if transactions exist (to avoid accounting issues)
-      if (body.currency_code !== undefined && body.currency_code !== (event.currency_code || 'USD')) {
-        const { count: transactionCount } = await serviceClient
-          .from('transactions')
-          .select('id', { count: 'exact', head: true })
-          .eq('event_id', eventId)
-          .in('status', ['pending', 'succeeded']);
-
-        if (transactionCount && transactionCount > 0) {
-          return NextResponse.json(
-            { error: 'Cannot change event currency after transactions have been made. This ensures accurate accounting and prevents data inconsistencies.' },
-            { status: 400 }
-          );
-        }
-        updates.currency_code = body.currency_code;
-      }
     }
 
+    const requestedEventUpdateKeys = Object.keys(updates);
     const runEventUpdate = (payload: Record<string, any>) =>
       serviceClient
         .from('events')
         .update(payload)
-        .eq('id', eventId);
+        .eq('id', eventId)
+        .select('id')
+        .maybeSingle();
 
     let updateError: any = null;
     const updatePayload = { ...updates };
@@ -364,7 +385,13 @@ export async function PUT(
       for (let attempt = 0; attempt < 6; attempt++) {
         const attemptResult = await runEventUpdate(updatePayload);
         updateError = attemptResult.error;
-        if (!updateError) break;
+        if (!updateError) {
+          if (!attemptResult.data?.id) {
+            updateError = { message: 'Event not found' };
+          } else {
+            break;
+          }
+        }
 
         const missingColumn = getMissingColumnName(updateError);
         if (!missingColumn || !(missingColumn in updatePayload)) {
@@ -382,8 +409,40 @@ export async function PUT(
     if (updateError) {
       throw updateError;
     }
+    if (requestedEventUpdateKeys.length > 0 && Object.keys(updatePayload).length === 0 && !pricingTouched) {
+      return NextResponse.json(
+        { error: 'No compatible event setting columns are available in this environment. Please run latest migrations.' },
+        { status: 400 }
+      );
+    }
 
-    return NextResponse.json({ success: true });
+    const { data: refreshedEvent } = await serviceClient
+      .from('events')
+      .select(`
+        *,
+        event_pricing (*)
+      `)
+      .eq('id', eventId)
+      .maybeSingle();
+
+    const refreshedPricing = (refreshedEvent as any)?.event_pricing?.[0];
+    const eventWithPricing = refreshedEvent
+      ? {
+          ...refreshedEvent,
+          pricing_type:
+            refreshedPricing?.pricing_type || (refreshedPricing?.is_free ? 'free' : 'per_photo'),
+          price_per_photo: refreshedPricing?.price_per_media || 0,
+          bulk_tiers: refreshedPricing?.bulk_tiers || [],
+          unlock_all_price: refreshedPricing?.unlock_all_price || null,
+          currency_code:
+            refreshedPricing?.currency ||
+            (refreshedEvent as any).currency_code ||
+            (refreshedEvent as any).currency ||
+            'USD',
+        }
+      : null;
+
+    return NextResponse.json({ success: true, event: eventWithPricing });
 
   } catch (error: any) {
     console.error('Update event settings error:', error);

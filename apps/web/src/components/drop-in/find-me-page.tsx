@@ -34,22 +34,23 @@ interface DropInFindMePageProps {
   billingPath: string;
 }
 
-const INTERNAL_SEARCH_CREDITS = 3;
-const CONTACTS_SEARCH_CREDITS = 3;
-const EXTERNAL_SEARCH_CREDITS = 5;
-
 export function DropInFindMePage({ basePath, billingPath }: DropInFindMePageProps) {
   const toast = useToast();
   const [credits, setCredits] = useState(0);
+  const [creditRules, setCreditRules] = useState({
+    internal: 3,
+    contacts: 3,
+    external: 5,
+  });
   const [contactQuery, setContactQuery] = useState('');
   const [searches, setSearches] = useState<FindMeSearch[]>([]);
   const [results, setResults] = useState<FindMeResult[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSearching, setIsSearching] = useState(false);
   const [activeType, setActiveType] = useState<'internal' | 'contacts' | 'external' | null>(null);
-  const canRunInternal = useMemo(() => credits >= INTERNAL_SEARCH_CREDITS, [credits]);
-  const canRunContacts = useMemo(() => credits >= CONTACTS_SEARCH_CREDITS, [credits]);
-  const canRunExternal = useMemo(() => credits >= EXTERNAL_SEARCH_CREDITS, [credits]);
+  const canRunInternal = useMemo(() => credits >= creditRules.internal, [credits, creditRules.internal]);
+  const canRunContacts = useMemo(() => credits >= creditRules.contacts, [credits, creditRules.contacts]);
+  const canRunExternal = useMemo(() => credits >= creditRules.external, [credits, creditRules.external]);
 
   const loadData = async () => {
     try {
@@ -62,6 +63,11 @@ export function DropInFindMePage({ basePath, billingPath }: DropInFindMePageProp
       }
 
       setCredits(Number(data.credits || 0));
+      setCreditRules({
+        internal: Number(data?.creditRules?.internal || 3),
+        contacts: Number(data?.creditRules?.contacts || 3),
+        external: Number(data?.creditRules?.external || 5),
+      });
       setSearches(Array.isArray(data.searches) ? data.searches : []);
       setResults(Array.isArray(data.results) ? data.results : []);
     } catch (error: any) {
@@ -78,10 +84,10 @@ export function DropInFindMePage({ basePath, billingPath }: DropInFindMePageProp
   const runSearch = async (searchType: 'internal' | 'contacts' | 'external') => {
     const requiredCredits =
       searchType === 'external'
-        ? EXTERNAL_SEARCH_CREDITS
+        ? creditRules.external
         : searchType === 'contacts'
-          ? CONTACTS_SEARCH_CREDITS
-          : INTERNAL_SEARCH_CREDITS;
+          ? creditRules.contacts
+          : creditRules.internal;
 
     if (credits < requiredCredits) {
       toast.error('Insufficient credits', `${requiredCredits} credits required for this search type`);
@@ -169,7 +175,7 @@ export function DropInFindMePage({ basePath, billingPath }: DropInFindMePageProp
             ) : (
               <Search className="mr-2 h-4 w-4" />
             )}
-            Run Internal Search (3 credits)
+            Run Internal Search ({creditRules.internal} credits)
           </Button>
         </div>
 
@@ -198,7 +204,7 @@ export function DropInFindMePage({ basePath, billingPath }: DropInFindMePageProp
             ) : (
               <Search className="mr-2 h-4 w-4" />
             )}
-            Search Contacts (3 credits)
+            Search Contacts ({creditRules.contacts} credits)
           </Button>
         </div>
 
@@ -216,7 +222,7 @@ export function DropInFindMePage({ basePath, billingPath }: DropInFindMePageProp
             ) : (
               <Zap className="mr-2 h-4 w-4" />
             )}
-            Run External Search (5 credits)
+            Run External Search ({creditRules.external} credits)
           </Button>
           {!canRunExternal && (
             <p className="mt-2 text-xs text-muted-foreground">

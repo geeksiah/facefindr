@@ -1,0 +1,133 @@
+export const dynamic = 'force-dynamic';
+
+import { NextRequest, NextResponse } from 'next/server';
+
+import { verifyPaystackTransaction, resolvePaystackSecretKey } from '@/lib/payments/paystack';
+import { resolveAttendeeProfileByUser } from '@/lib/profiles/ids';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
+
+function asString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const payload = await request.json().catch(() => ({}));
+    const purchaseId = asString(payload.purchaseId);
+    const provider = asString(payload.provider || 'paystack').toLowerCase();
+    const reference = asString(payload.reference);
+
+    if (!purchaseId) {
+      return NextResponse.json({ error: 'purchaseId is required' }, { status: 400 });
+    }
+
+    const serviceClient = createServiceClient();
+    const { data: attendee } = await resolveAttendeeProfileByUser(serviceClient, user.id, user.email);
+    if (!attendee?.id) {
+      return NextResponse.json({ error: 'Attendee profile not found' }, { status: 404 });
+    }
+
+    const { data: purchase, error: purchaseError } = await serviceClient
+      .from('drop_in_credit_purchases')
+      .select('id, attendee_id, credits_purchased, credits_remaining, amount_paid, currency, status, payment_intent_id')
+      .eq('id', purchaseId)
+      .eq('attendee_id', attendee.id)
+      .maybeSingle();
+
+    if (purchaseError || !purchase) {
+      return NextResponse.json({ error: 'Credit purchase not found' }, { status: 404 });
+    }
+
+    if (purchase.status === 'active' || purchase.status === 'exhausted') {
+      return NextResponse.json({
+        success: true,
+        alreadyProcessed: true,
+        creditsAdded: 0,
+      });
+    }
+
+    if (provider !== 'paystack') {
+      return NextResponse.json(
+        { error: `Verification is not supported for provider ${provider}` },
+        { status: 400 }
+      );
+    }
+
+    const verifyReference = reference || asString(purchase.payment_intent_id);
+    if (!verifyReference) {
+      return NextResponse.json({ error: 'Payment reference is required' }, { status: 400 });
+    }
+
+    const secretKey = await resolvePaystackSecretKey(undefined);
+    if (!secretKey) {
+      return NextResponse.json({ error: 'Paystack is not configured' }, { status: 500 });
+    }
+
+    const verified = await verifyPaystackTransaction(verifyReference, secretKey);
+    if (verified.status !== 'success') {
+      return NextResponse.json({ error: 'Payment is not successful yet' }, { status: 400 });
+    }
+
+    if (Number(verified.amount || 0) < Number(purchase.amount_paid || 0)) {
+      return NextResponse.json({ error: 'Paid amount is lower than expected amount' }, { status: 400 });
+    }
+
+    const { data: activated } = await serviceClient
+      .from('drop_in_credit_purchases')
+      .update({
+        status: 'active',
+        credits_remaining: purchase.credits_purchased,
+        payment_intent_id: verifyReference,
+      })
+      .eq('id', purchase.id)
+      .eq('status', 'pending')
+      .select('id')
+      .maybeSingle();
+
+    if (!activated?.id) {
+      return NextResponse.json({
+        success: true,
+        alreadyProcessed: true,
+        creditsAdded: 0,
+      });
+    }
+
+    const { data: currentAttendee } = await serviceClient
+      .from('attendees')
+      .select('drop_in_credits')
+      .eq('id', attendee.id)
+      .maybeSingle();
+    const currentCredits = Number(currentAttendee?.drop_in_credits || 0);
+    await serviceClient
+      .from('attendees')
+      .update({ drop_in_credits: currentCredits + purchase.credits_purchased })
+      .eq('id', attendee.id);
+
+    const { data: updatedAttendee } = await serviceClient
+      .from('attendees')
+      .select('drop_in_credits')
+      .eq('id', attendee.id)
+      .maybeSingle();
+
+    return NextResponse.json({
+      success: true,
+      creditsAdded: purchase.credits_purchased,
+      totalCredits: Number(updatedAttendee?.drop_in_credits || 0),
+    });
+  } catch (error: any) {
+    console.error('Drop-in credit verification error:', error);
+    return NextResponse.json(
+      { error: error?.message || 'Failed to verify drop-in credit purchase' },
+      { status: 500 }
+    );
+  }
+}

@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { resolveDropInCreditRules } from '@/lib/drop-in/credit-rules';
 import { getAttendeeIdCandidates } from '@/lib/profiles/ids';
 import { createClient, createClientWithAccessToken } from '@/lib/supabase/server';
 
@@ -132,6 +133,7 @@ export async function POST(request: NextRequest) {
     if (!attendeeIdCandidates.length) {
       return NextResponse.json({ error: 'Attendee profile not found' }, { status: 404 });
     }
+    const rules = await resolveDropInCreditRules();
 
     const { notificationId, action } = await request.json();
 
@@ -178,10 +180,11 @@ export async function POST(request: NextRequest) {
 
     if (action === 'view') {
       if (notification.requires_premium && !notification.is_gifted && !notification.viewed_at) {
+        const creditsNeeded = rules.recipientUnlock;
         const { data: creditsConsumed, error: creditsError } = await supabase.rpc('use_drop_in_credits', {
           p_attendee_id: recipientAttendeeId,
           p_action: 'drop_in_recipient_unlock',
-          p_credits_needed: 1,
+          p_credits_needed: creditsNeeded,
           p_metadata: {
             notification_id: notification.id,
             drop_in_photo_id: notification.drop_in_photo_id,
@@ -190,7 +193,7 @@ export async function POST(request: NextRequest) {
 
         if (creditsError || !creditsConsumed) {
           return NextResponse.json(
-            { error: 'Drop-In credit required to open this photo' },
+            { error: `Drop-In credit required to open this photo (${creditsNeeded} credits)` },
             { status: 402 }
           );
         }

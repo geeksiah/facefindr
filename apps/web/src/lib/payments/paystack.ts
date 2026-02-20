@@ -112,6 +112,13 @@ function extractSecretKey(credentials: unknown): string | null {
   return typeof candidate === 'string' && candidate.trim().length > 0 ? candidate.trim() : null;
 }
 
+function extractPublicKey(credentials: unknown): string | null {
+  if (!credentials || typeof credentials !== 'object') return null;
+  const payload = credentials as Record<string, unknown>;
+  const candidate = payload.public_key || payload.publicKey || payload.pk;
+  return typeof candidate === 'string' && candidate.trim().length > 0 ? candidate.trim() : null;
+}
+
 export async function resolvePaystackSecretKey(regionCode?: string): Promise<string | null> {
   if (!regionCode) {
     return process.env.PAYSTACK_SECRET_KEY || null;
@@ -131,6 +138,27 @@ export async function resolvePaystackSecretKey(regionCode?: string): Promise<str
   }
 
   return process.env.PAYSTACK_SECRET_KEY || null;
+}
+
+export async function resolvePaystackPublicKey(regionCode?: string): Promise<string | null> {
+  if (!regionCode) {
+    return process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || process.env.PAYSTACK_PUBLIC_KEY || null;
+  }
+
+  const supabase = createServiceClient();
+  const { data } = await (supabase
+    .from('payment_provider_credentials') as any)
+    .select('credentials, is_active')
+    .eq('region_code', regionCode.toUpperCase())
+    .eq('provider', 'paystack')
+    .maybeSingle();
+
+  if (data?.is_active) {
+    const fromDb = extractPublicKey((data as any).credentials);
+    if (fromDb) return fromDb;
+  }
+
+  return process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || process.env.PAYSTACK_PUBLIC_KEY || null;
 }
 
 async function paystackRequest<T>(

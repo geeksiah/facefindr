@@ -104,6 +104,37 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    if (row.upload_payment_status === 'paid' && row.face_processing_status === 'pending') {
+      const processSecret = process.env.DROP_IN_PROCESS_SECRET;
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+      const headers: Record<string, string> = {
+        'content-type': 'application/json',
+      };
+      if (processSecret) {
+        headers['x-drop-in-process-secret'] = processSecret;
+      } else if (accessToken) {
+        headers.authorization = `Bearer ${accessToken}`;
+      } else {
+        const cookieHeader = request.headers.get('cookie');
+        if (cookieHeader) {
+          headers.cookie = cookieHeader;
+        }
+      }
+
+      if (headers['x-drop-in-process-secret'] || headers.authorization) {
+        try {
+          await fetch(`${baseUrl}/api/drop-in/process`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ dropInPhotoId: row.id }),
+            cache: 'no-store',
+          });
+        } catch (triggerError) {
+          console.error('Drop-in verify process trigger failed:', triggerError);
+        }
+      }
+    }
+
     const status = deriveStatus(row);
 
     return NextResponse.json({

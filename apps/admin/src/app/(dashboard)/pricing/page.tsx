@@ -9,11 +9,8 @@ import {
   X,
   DollarSign,
   Package,
-  Star,
-  Globe,
   RefreshCw,
   Camera,
-  Gift,
   Settings,
   AlertCircle,
   HardDrive,
@@ -40,7 +37,7 @@ interface Plan {
   print_commission_percent: number;
   print_commission_fixed: number;
   print_commission_type: 'percent' | 'fixed' | 'both';
-  plan_type?: 'photographer' | 'drop_in' | 'payg';
+  plan_type?: 'photographer' | 'payg';
   created_at: string;
 }
 
@@ -79,7 +76,6 @@ const defaultCurrencies: Currency[] = [
 ];
 
 function getPlanTypeLabel(planType: string | undefined): string {
-  if (planType === 'drop_in') return 'Drop-In';
   if (planType === 'payg') return 'Pay As You Go';
   return 'Creator';
 }
@@ -101,7 +97,7 @@ function FeatureManagementUI({ plans }: { plans: Plan[] }) {
     feature_type: 'boolean' as 'boolean' | 'numeric' | 'limit' | 'text',
     default_value: '',
     category: 'general',
-    applicable_to: ['photographer', 'drop_in', 'payg'] as string[],
+    applicable_to: ['photographer', 'payg'] as string[],
   });
   const [isCreatingFeature, setIsCreatingFeature] = useState(false);
 
@@ -204,7 +200,7 @@ function FeatureManagementUI({ plans }: { plans: Plan[] }) {
           feature_type: 'boolean',
           default_value: '',
           category: 'general',
-          applicable_to: ['photographer', 'drop_in', 'payg'],
+          applicable_to: ['photographer', 'payg'],
         });
         if (selectedPlanId) {
           loadPlanFeatures(selectedPlanId);
@@ -354,7 +350,7 @@ function FeatureManagementUI({ plans }: { plans: Plan[] }) {
         </div>
         <div className="mt-4 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
           <p className="text-sm text-yellow-700 dark:text-yellow-400">
-            <strong>Tip:</strong> Use -1 for unlimited limits. Features marked as &quot;Creator Only&quot; or &quot;Drop-In Only&quot; will only appear for those plan types.
+            <strong>Tip:</strong> Use -1 for unlimited limits. Features are applied by plan type (Creator or Pay As You Go).
           </p>
         </div>
       </div>
@@ -658,20 +654,6 @@ function FeatureManagementUI({ plans }: { plans: Plan[] }) {
                       className="rounded"
                     />
                     <span className="text-sm text-foreground">Creator Plans</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={newFeature.applicable_to.includes('drop_in')}
-                      onChange={(e) => {
-                        const newApplicable = e.target.checked
-                          ? [...newFeature.applicable_to, 'drop_in']
-                          : newFeature.applicable_to.filter(t => t !== 'drop_in');
-                        setNewFeature({ ...newFeature, applicable_to: newApplicable });
-                      }}
-                      className="rounded"
-                    />
-                    <span className="text-sm text-foreground">Drop-In Plans</span>
                   </label>
                   <label className="flex items-center gap-2">
                     <input
@@ -1151,6 +1133,16 @@ export default function PricingPage() {
   const [activeTab, setActiveTab] = useState<'plans' | 'features' | 'currencies' | 'storage'>('plans');
   const [platformBaseCurrency, setPlatformBaseCurrency] = useState('USD');
   const [savingBaseCurrency, setSavingBaseCurrency] = useState(false);
+  const [dropInCreditUnitPrice, setDropInCreditUnitPrice] = useState('0.00');
+  const [dropInCreditCurrency, setDropInCreditCurrency] = useState('USD');
+  const [savingDropInCreditSettings, setSavingDropInCreditSettings] = useState(false);
+  const [dropInCreditsUpload, setDropInCreditsUpload] = useState('1');
+  const [dropInCreditsGift, setDropInCreditsGift] = useState('1');
+  const [dropInCreditsRecipientUnlock, setDropInCreditsRecipientUnlock] = useState('1');
+  const [dropInCreditsInternalSearch, setDropInCreditsInternalSearch] = useState('3');
+  const [dropInCreditsContactsSearch, setDropInCreditsContactsSearch] = useState('3');
+  const [dropInCreditsExternalSearch, setDropInCreditsExternalSearch] = useState('5');
+  const [savingDropInCreditRules, setSavingDropInCreditRules] = useState(false);
   
   // Available features for plan creation
   const [availablePlanFeatures, setAvailablePlanFeatures] = useState<any[]>([]);
@@ -1167,7 +1159,7 @@ export default function PricingPage() {
     is_popular: false,
     use_auto_conversion: true,
     manual_prices: {} as Record<string, string>,
-    plan_type: 'photographer' as 'photographer' | 'drop_in' | 'payg',
+    plan_type: 'photographer' as 'photographer' | 'payg',
     platform_fee_percent: 20.00,
     platform_fee_fixed: 0,
     platform_fee_type: 'percent' as 'percent' | 'fixed' | 'both',
@@ -1180,7 +1172,7 @@ export default function PricingPage() {
     loadPlans();
     loadCurrencies();
     loadAvailableFeatures();
-    loadPlatformBaseCurrency();
+    loadPlatformPricingSettings();
   }, []);
   
   // Load features when plan type changes
@@ -1228,26 +1220,88 @@ export default function PricingPage() {
     }
   }
 
-  async function loadPlatformBaseCurrency() {
+  function parseSettingValue(raw: any): any {
+    if (raw === null || raw === undefined) return null;
+    if (typeof raw !== 'string') return raw;
+
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return trimmed.replace(/^"|"$/g, '');
+    }
+  }
+
+  async function loadPlatformPricingSettings() {
     try {
       const res = await fetch('/api/admin/settings');
       if (!res.ok) return;
       const data = await res.json();
-      const row = (data.settings || []).find(
+      const settings = data.settings || [];
+      const baseCurrencyRow = settings.find(
         (setting: any) => setting.setting_key === 'platform_base_currency'
       );
-      const raw = row?.value;
+      const baseCurrencyValue = parseSettingValue(baseCurrencyRow?.value);
       const normalized =
-        typeof raw === 'string'
-          ? raw
-          : typeof raw?.code === 'string'
-          ? raw.code
+        typeof baseCurrencyValue === 'string'
+          ? baseCurrencyValue
+          : typeof baseCurrencyValue?.code === 'string'
+          ? baseCurrencyValue.code
           : '';
       if (normalized) {
         setPlatformBaseCurrency(normalized.replace(/"/g, '').toUpperCase());
       }
+
+      const creditPriceRow = settings.find(
+        (setting: any) => setting.setting_key === 'drop_in_credit_unit_price_cents'
+      );
+      const creditCurrencyRow = settings.find(
+        (setting: any) => setting.setting_key === 'drop_in_credit_currency'
+      );
+      const uploadCreditsRow = settings.find(
+        (setting: any) => setting.setting_key === 'drop_in_credits_required_upload'
+      );
+      const giftCreditsRow = settings.find(
+        (setting: any) => setting.setting_key === 'drop_in_credits_required_gift'
+      );
+      const recipientUnlockCreditsRow = settings.find(
+        (setting: any) => setting.setting_key === 'drop_in_credits_required_recipient_unlock'
+      );
+      const internalSearchCreditsRow = settings.find(
+        (setting: any) => setting.setting_key === 'drop_in_credits_required_internal_search'
+      );
+      const contactsSearchCreditsRow = settings.find(
+        (setting: any) => setting.setting_key === 'drop_in_credits_required_contacts_search'
+      );
+      const externalSearchCreditsRow = settings.find(
+        (setting: any) => setting.setting_key === 'drop_in_credits_required_external_search'
+      );
+
+      const creditUnitCents = Number(parseSettingValue(creditPriceRow?.value));
+      if (Number.isFinite(creditUnitCents) && creditUnitCents > 0) {
+        setDropInCreditUnitPrice((creditUnitCents / 100).toFixed(2));
+      }
+
+      const normalizedDropInCurrency = String(parseSettingValue(creditCurrencyRow?.value) || '').toUpperCase();
+      if (normalizedDropInCurrency) {
+        setDropInCreditCurrency(normalizedDropInCurrency);
+      }
+
+      const normalizeCredits = (raw: unknown, fallback: string) => {
+        const parsed = Number(parseSettingValue(raw));
+        if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+        return String(Math.round(parsed));
+      };
+      setDropInCreditsUpload(normalizeCredits(uploadCreditsRow?.value, '1'));
+      setDropInCreditsGift(normalizeCredits(giftCreditsRow?.value, '1'));
+      setDropInCreditsRecipientUnlock(normalizeCredits(recipientUnlockCreditsRow?.value, '1'));
+      setDropInCreditsInternalSearch(normalizeCredits(internalSearchCreditsRow?.value, '3'));
+      setDropInCreditsContactsSearch(normalizeCredits(contactsSearchCreditsRow?.value, '3'));
+      setDropInCreditsExternalSearch(normalizeCredits(externalSearchCreditsRow?.value, '5'));
     } catch (err) {
-      console.error('Failed to load base currency:', err);
+      console.error('Failed to load pricing settings:', err);
     }
   }
 
@@ -1275,6 +1329,93 @@ export default function PricingPage() {
       toast.error('Save failed', err?.message || 'Could not save base currency');
     } finally {
       setSavingBaseCurrency(false);
+    }
+  }
+
+  async function saveDropInCreditSettings() {
+    const creditUnit = Number.parseFloat(dropInCreditUnitPrice);
+    if (!Number.isFinite(creditUnit) || creditUnit <= 0) {
+      toast.error('Save failed', 'Credit unit price must be greater than 0.');
+      return;
+    }
+
+    setSavingDropInCreditSettings(true);
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          settings: {
+            drop_in_credit_unit_price_cents: Math.round(creditUnit * 100),
+            drop_in_credit_currency: dropInCreditCurrency.toUpperCase(),
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload?.error || 'Failed to save drop-in credit settings');
+      }
+
+      toast.success(
+        'Drop-in credit pricing updated',
+        `1 credit = ${dropInCreditCurrency.toUpperCase()} ${creditUnit.toFixed(2)}`
+      );
+    } catch (err: any) {
+      toast.error('Save failed', err?.message || 'Could not save drop-in credit settings');
+    } finally {
+      setSavingDropInCreditSettings(false);
+    }
+  }
+
+  async function saveDropInCreditRules() {
+    const uploadCredits = Math.round(Number.parseFloat(dropInCreditsUpload));
+    const giftCredits = Math.round(Number.parseFloat(dropInCreditsGift));
+    const recipientUnlockCredits = Math.round(Number.parseFloat(dropInCreditsRecipientUnlock));
+    const internalSearchCredits = Math.round(Number.parseFloat(dropInCreditsInternalSearch));
+    const contactsSearchCredits = Math.round(Number.parseFloat(dropInCreditsContactsSearch));
+    const externalSearchCredits = Math.round(Number.parseFloat(dropInCreditsExternalSearch));
+
+    const values = [
+      uploadCredits,
+      giftCredits,
+      recipientUnlockCredits,
+      internalSearchCredits,
+      contactsSearchCredits,
+      externalSearchCredits,
+    ];
+    if (values.some((value) => !Number.isFinite(value) || value <= 0)) {
+      toast.error('Save failed', 'All required credit values must be positive integers.');
+      return;
+    }
+
+    setSavingDropInCreditRules(true);
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          settings: {
+            drop_in_credits_required_upload: uploadCredits,
+            drop_in_credits_required_gift: giftCredits,
+            drop_in_credits_required_recipient_unlock: recipientUnlockCredits,
+            drop_in_credits_required_internal_search: internalSearchCredits,
+            drop_in_credits_required_contacts_search: contactsSearchCredits,
+            drop_in_credits_required_external_search: externalSearchCredits,
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload?.error || 'Failed to save drop-in credit rules');
+      }
+
+      toast.success('Drop-in credit rules updated', 'Required credits for all drop-in actions were saved.');
+    } catch (err: any) {
+      toast.error('Save failed', err?.message || 'Could not save drop-in credit rules');
+    } finally {
+      setSavingDropInCreditRules(false);
     }
   }
 
@@ -1548,6 +1689,35 @@ export default function PricingPage() {
                 {savingBaseCurrency ? 'Saving...' : 'Save'}
               </button>
             </div>
+            <div className="flex items-center gap-2 rounded-lg border border-border px-2 py-1.5">
+              <span className="text-xs text-muted-foreground">Drop-In 1 Credit</span>
+              <input
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={dropInCreditUnitPrice}
+                onChange={(e) => setDropInCreditUnitPrice(e.target.value)}
+                className="w-24 rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground"
+              />
+              <select
+                value={dropInCreditCurrency}
+                onChange={(e) => setDropInCreditCurrency(e.target.value.toUpperCase())}
+                className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground"
+              >
+                {currencies.map((currency) => (
+                  <option key={currency.code} value={currency.code}>
+                    {currency.code}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={saveDropInCreditSettings}
+                disabled={savingDropInCreditSettings}
+                className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+              >
+                {savingDropInCreditSettings ? 'Saving...' : 'Save'}
+              </button>
+            </div>
             <Link
               href="/regions"
               className="rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:bg-muted"
@@ -1561,6 +1731,92 @@ export default function PricingPage() {
               Platform Defaults
             </Link>
           </div>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="font-medium text-foreground">Drop-In Required Credits</p>
+            <p className="text-sm text-muted-foreground">
+              Set how many credits each Drop-In action consumes.
+            </p>
+          </div>
+          <button
+            onClick={saveDropInCreditRules}
+            disabled={savingDropInCreditRules}
+            className="rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+          >
+            {savingDropInCreditRules ? 'Saving...' : 'Save Credit Rules'}
+          </button>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+          <label className="flex flex-col gap-1 text-sm text-foreground">
+            Upload Drop-In
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={dropInCreditsUpload}
+              onChange={(e) => setDropInCreditsUpload(e.target.value)}
+              className="rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm text-foreground">
+            Gift Access + Message
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={dropInCreditsGift}
+              onChange={(e) => setDropInCreditsGift(e.target.value)}
+              className="rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm text-foreground">
+            Recipient Unlock
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={dropInCreditsRecipientUnlock}
+              onChange={(e) => setDropInCreditsRecipientUnlock(e.target.value)}
+              className="rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm text-foreground">
+            Internal Search
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={dropInCreditsInternalSearch}
+              onChange={(e) => setDropInCreditsInternalSearch(e.target.value)}
+              className="rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm text-foreground">
+            Contacts Search
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={dropInCreditsContactsSearch}
+              onChange={(e) => setDropInCreditsContactsSearch(e.target.value)}
+              className="rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm text-foreground">
+            External Search
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={dropInCreditsExternalSearch}
+              onChange={(e) => setDropInCreditsExternalSearch(e.target.value)}
+              className="rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
+            />
+          </label>
         </div>
       </div>
 
@@ -1637,12 +1893,7 @@ export default function PricingPage() {
                       <p className="text-xs font-mono text-muted-foreground">{plan.code}</p>
                       {plan.plan_type && (
                         <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                          {plan.plan_type === 'drop_in' ? (
-                            <>
-                              <Gift className="h-3 w-3" />
-                              Drop-In
-                            </>
-                          ) : plan.plan_type === 'payg' ? (
+                          {plan.plan_type === 'payg' ? (
                             <>
                               <DollarSign className="h-3 w-3" />
                               Pay As You Go
@@ -1785,11 +2036,10 @@ export default function PricingPage() {
                   <label className="block text-sm font-medium text-foreground mb-2">Plan Type</label>
                   <select
                     value={formData.plan_type}
-                    onChange={(e) => setFormData({ ...formData, plan_type: e.target.value as 'photographer' | 'drop_in' | 'payg' })}
+                    onChange={(e) => setFormData({ ...formData, plan_type: e.target.value as 'photographer' | 'payg' })}
                     className="w-full px-4 py-2 rounded-lg bg-muted border border-input text-foreground"
                   >
                     <option value="photographer">Creator</option>
-                    <option value="drop_in">Drop-In</option>
                     <option value="payg">Pay As You Go</option>
                   </select>
                 </div>
@@ -1815,7 +2065,7 @@ export default function PricingPage() {
                   className="w-full px-4 py-2 rounded-lg bg-muted border border-input text-foreground font-mono"
                 />
                 <p className="text-xs text-muted-foreground mt-1">
-                  Unique identifier for this plan (e.g., &quot;starter&quot;, &quot;drop_in_premium&quot;)
+                  Unique identifier for this plan (e.g., &quot;starter&quot;, &quot;payg_pro&quot;)
                 </p>
               </div>
 
@@ -1923,9 +2173,8 @@ export default function PricingPage() {
                 </div>
               </div>
 
-              {/* Platform Fee - Creator/PAYG plans */}
-              {formData.plan_type !== 'drop_in' && (
-                <div className="space-y-4 p-4 bg-muted/50 rounded-lg">
+              {/* Platform Fee */}
+              <div className="space-y-4 p-4 bg-muted/50 rounded-lg">
                   <div className="flex items-center justify-between">
                     <h3 className="font-semibold text-foreground">Platform Fee</h3>
                     <span className="text-xs text-muted-foreground bg-accent/10 text-accent px-2 py-1 rounded">Creator/PAYG Plans</span>
@@ -1984,11 +2233,9 @@ export default function PricingPage() {
                     )}
                   </div>
                 </div>
-              )}
 
-              {/* Print Commission - Creator/PAYG plans */}
-              {formData.plan_type !== 'drop_in' && (
-                <div className="space-y-4 p-4 bg-muted/50 rounded-lg">
+              {/* Print Commission */}
+              <div className="space-y-4 p-4 bg-muted/50 rounded-lg">
                   <div className="flex items-center justify-between">
                     <h3 className="font-semibold text-foreground">Print Commission</h3>
                     <span className="text-xs text-muted-foreground bg-accent/10 text-accent px-2 py-1 rounded">Creator/PAYG Plans</span>
@@ -2047,23 +2294,6 @@ export default function PricingPage() {
                     )}
                   </div>
                 </div>
-              )}
-
-              {/* Drop-in Plan Info */}
-              {formData.plan_type === 'drop_in' && (
-                <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-                  <div className="flex items-start gap-3">
-                    <Gift className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <h3 className="font-semibold text-foreground">Drop-In Plan</h3>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Drop-in plans are for attendees who want to access photos without a photographer subscription.
-                        These plans do not include platform fees or print commissions as they are consumer-facing.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
 
               {/* Plan Features Selection */}
               {availablePlanFeatures.length > 0 && (

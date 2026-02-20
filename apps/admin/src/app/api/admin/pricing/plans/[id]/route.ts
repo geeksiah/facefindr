@@ -28,9 +28,12 @@ export async function PUT(
       print_commission_percent, print_commission_fixed, print_commission_type
     } = body;
 
-    const allowedPlanTypes = new Set(['photographer', 'drop_in', 'payg']);
+    const allowedPlanTypes = new Set(['photographer', 'payg']);
     if (plan_type !== undefined && !allowedPlanTypes.has(plan_type)) {
-      return NextResponse.json({ error: 'Invalid plan type' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Invalid plan type. Drop-In pricing is configured via credit settings.' },
+        { status: 400 }
+      );
     }
 
     // Check if code is taken by another plan of the same type

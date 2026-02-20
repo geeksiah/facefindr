@@ -15,6 +15,7 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
+import { openPaystackInlineCheckout } from '@/lib/payments/paystack-inline';
 import { createClient } from '@/lib/supabase/client';
 
 interface PaymentMethod {
@@ -38,6 +39,7 @@ interface DropInPlan {
   code: string;
   name: string;
   description: string;
+  credits: number;
   priceCents: number;
   currency: string;
   features: string[];
@@ -64,6 +66,9 @@ export default function BillingPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [dropInPacks, setDropInPacks] = useState<DropInPlan[]>([]);
+  const [unitPriceCents, setUnitPriceCents] = useState<number | null>(null);
+  const [unitPriceCurrency, setUnitPriceCurrency] = useState('USD');
+  const [customCredits, setCustomCredits] = useState('10');
   const [packsError, setPacksError] = useState<string | null>(null);
   const [purchasingCode, setPurchasingCode] = useState<string | null>(null);
 
@@ -89,12 +94,15 @@ export default function BillingPage() {
           code: pack.code,
           name: pack.name,
           description: pack.description || '',
+          credits: Number(pack.credits || 0),
           priceCents: Number(pack.priceCents || 0),
           currency: String(pack.currency || 'USD').toUpperCase(),
           features: Array.isArray(pack.features) ? pack.features : [],
           popular: Boolean(pack.popular),
         }))
       );
+      setUnitPriceCents(Number(data.unitPriceCents || 0));
+      setUnitPriceCurrency(String(data.currency || 'USD').toUpperCase());
       setPacksError(null);
     } catch (error) {
       setDropInPacks([]);
@@ -176,22 +184,84 @@ export default function BillingPage() {
     }
   };
 
-  const purchaseCredits = async (pack: DropInPlan) => {
+  const openCheckoutPopup = (checkoutUrl: string) => {
+    const popup = window.open(
+      checkoutUrl,
+      'ferchrBillingPayment',
+      'popup=yes,width=520,height=760,menubar=no,toolbar=no,location=yes,status=no'
+    );
+
+    if (!popup) {
+      window.location.href = checkoutUrl;
+      return;
+    }
+  };
+
+  const verifyCreditsPurchase = async (purchaseId: string, reference: string) => {
+    const response = await fetch('/api/drop-in/credits/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        purchaseId,
+        provider: 'paystack',
+        reference,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || 'Payment verification failed');
+    }
+  };
+
+  const purchaseCredits = async (credits: number, buttonKey: string) => {
     try {
-      setPurchasingCode(pack.code);
-      const response = await fetch('/api/attendee/subscription', {
+      setPurchasingCode(buttonKey);
+      const response = await fetch('/api/drop-in/credits/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planCode: pack.code, currency: pack.currency }),
+        body: JSON.stringify({ credits }),
       });
       const data = await response.json();
 
-      if (!response.ok || !data?.checkoutUrl) {
+      if (!response.ok) {
         throw new Error(data?.error || 'Unable to start checkout');
       }
 
-      toast.success('Redirecting...', `Starting ${pack.name} checkout`);
-      window.location.href = data.checkoutUrl;
+      if (data?.provider === 'paystack' && data?.paystack?.publicKey) {
+        await openPaystackInlineCheckout({
+          publicKey: String(data.paystack.publicKey),
+          email: String(data.paystack.email || ''),
+          amount: Number(data.paystack.amount || 0),
+          currency: String(data.paystack.currency || unitPriceCurrency || 'USD'),
+          reference: String(data.paystack.reference || ''),
+          accessCode: data.paystack.accessCode ? String(data.paystack.accessCode) : null,
+          metadata: {
+            purchase_id: data.purchaseId,
+            type: 'drop_in_credit_purchase',
+          },
+          onSuccess: async (reference) => {
+            try {
+              await verifyCreditsPurchase(String(data.purchaseId || ''), reference);
+              toast.success('Credits added', `${credits} credits were added to your account.`);
+              await loadBillingData();
+            } catch (verifyError: any) {
+              toast.error('Verification failed', verifyError?.message || 'Payment verification failed');
+            }
+          },
+          onClose: () => {
+            setPurchasingCode(null);
+          },
+        });
+        return;
+      }
+
+      if (data?.checkoutUrl) {
+        toast.success('Redirecting...', 'Opening secure checkout');
+        openCheckoutPopup(String(data.checkoutUrl));
+        return;
+      }
+
+      throw new Error('Checkout URL was not returned by server');
     } catch (error: any) {
       toast.error('Checkout failed', error?.message || 'Unable to start checkout');
     } finally {
@@ -262,7 +332,12 @@ export default function BillingPage() {
 
       {/* Drop-in Credit Packs */}
       <div>
-        <h2 className="text-lg font-semibold text-foreground mb-4">Buy Drop-in Packs</h2>
+        <h2 className="text-lg font-semibold text-foreground mb-4">Buy Drop-in Credits</h2>
+        {unitPriceCents && unitPriceCents > 0 && (
+          <p className="text-sm text-secondary mb-3">
+            1 credit = {formatCurrency(unitPriceCents, unitPriceCurrency)}
+          </p>
+        )}
         {packsError && dropInPacks.length === 0 ? (
           <div className="rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm text-foreground">
             <div className="flex items-start gap-2">
@@ -274,7 +349,38 @@ export default function BillingPage() {
             </div>
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="space-y-4">
+            <div className="rounded-xl border border-border bg-card p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-foreground mb-2">
+                    Custom credits
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="1000"
+                    value={customCredits}
+                    onChange={(event) => setCustomCredits(event.target.value)}
+                    className="w-full rounded-lg border border-input bg-muted px-3 py-2 text-foreground"
+                  />
+                </div>
+                <Button
+                  onClick={() => {
+                    const parsed = Number.parseInt(customCredits, 10);
+                    if (!Number.isFinite(parsed) || parsed < 1 || parsed > 1000) {
+                      toast.error('Invalid credits', 'Enter a value between 1 and 1000');
+                      return;
+                    }
+                    void purchaseCredits(parsed, 'custom');
+                  }}
+                  disabled={purchasingCode === 'custom'}
+                >
+                  {purchasingCode === 'custom' ? 'Processing...' : 'Buy Custom Amount'}
+                </Button>
+              </div>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {dropInPacks.map((pack) => (
             <div
               key={pack.id}
@@ -292,6 +398,7 @@ export default function BillingPage() {
                 </div>
               )}
               <h3 className="font-semibold text-foreground">{pack.name}</h3>
+              <p className="text-sm text-secondary mt-1">{pack.credits} credits</p>
               <div className="mt-2 mb-4">
                 <span className="text-3xl font-bold text-foreground">{formatCurrency(pack.priceCents, pack.currency)}</span>
               </div>
@@ -308,12 +415,13 @@ export default function BillingPage() {
                 className="w-full" 
                 variant={pack.popular ? 'primary' : 'outline'}
                 disabled={purchasingCode === pack.code}
-                onClick={() => purchaseCredits(pack)}
+                onClick={() => purchaseCredits(pack.credits, pack.code)}
               >
                 {purchasingCode === pack.code ? 'Redirecting...' : 'Buy Now'}
               </Button>
             </div>
             ))}
+          </div>
           </div>
         )}
       </div>

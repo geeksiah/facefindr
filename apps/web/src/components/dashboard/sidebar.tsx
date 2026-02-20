@@ -58,7 +58,6 @@ const mainNavigation: NavItem[] = [
   { name: 'Collaborations', href: '/dashboard/collaborations', icon: Users },
   { name: 'Upload', href: '/dashboard/upload', icon: Upload },
   { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
-  { name: 'Drop-In', href: '/dashboard/drop-in/upload', icon: Sparkles },
   { name: 'Followers', href: '/dashboard/followers', icon: Users },
   { name: 'Connections', href: '/dashboard/connections', icon: UserPlus },
 ];
