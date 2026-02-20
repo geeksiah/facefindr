@@ -67,6 +67,7 @@ export function DropInUploadPage({ basePath }: DropInUploadPageProps) {
     accept: {
       'image/*': ['.jpeg', '.jpg', '.png', '.webp', '.heic'],
     },
+    multiple: false,
     maxFiles: 1,
     maxSize: 10 * 1024 * 1024,
   });
@@ -176,7 +177,7 @@ export function DropInUploadPage({ basePath }: DropInUploadPageProps) {
               <p className="text-lg font-medium text-foreground">
                 {isDragActive ? 'Drop photo here' : 'Drag and drop or click to select'}
               </p>
-              <p className="mt-1 text-sm text-secondary">JPEG, PNG, WebP, or HEIC (max 10MB)</p>
+              <p className="mt-1 text-sm text-secondary">One photo only. JPEG, PNG, WebP, or HEIC (max 10MB)</p>
             </div>
           </div>
         )}

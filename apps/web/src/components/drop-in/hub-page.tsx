@@ -1,6 +1,6 @@
 'use client';
 
-import { Camera, Search, Sparkles, Upload } from 'lucide-react';
+import { Camera, CreditCard, Search, Sparkles, Upload } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -17,7 +17,49 @@ export function DropInHubPage({ basePath, defaultTab = 'find' }: DropInHubPagePr
   const [tab, setTab] = useState<DropInTab>(defaultTab);
   const [latestStatusHref, setLatestStatusHref] = useState<string | null>(null);
   const [isCheckingLatestUpload, setIsCheckingLatestUpload] = useState(false);
+  const [isLoadingCredits, setIsLoadingCredits] = useState(true);
+  const [creditError, setCreditError] = useState<string | null>(null);
+  const [attendeeCredits, setAttendeeCredits] = useState(0);
+  const [creditUnit, setCreditUnit] = useState<number | null>(null);
+  const [currency, setCurrency] = useState('USD');
+  const [uploadCreditsRequired, setUploadCreditsRequired] = useState(1);
+  const [giftCreditsRequired, setGiftCreditsRequired] = useState(1);
   const billingHref = basePath.startsWith('/gallery') ? '/gallery/billing' : '/dashboard/billing';
+
+  useEffect(() => {
+    let isActive = true;
+
+    const loadCreditSummary = async () => {
+      setIsLoadingCredits(true);
+      setCreditError(null);
+      try {
+        const response = await fetch('/api/runtime/drop-in/pricing', { cache: 'no-store' });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data?.error || 'Unable to load Drop-In credits');
+        }
+
+        if (!isActive) return;
+        setAttendeeCredits(Number(data.attendeeCredits || 0));
+        setCreditUnit(Number(data.creditUnit || 0));
+        setCurrency(String(data.currency || 'USD').toUpperCase());
+        setUploadCreditsRequired(Number(data.uploadCreditsRequired || 1));
+        setGiftCreditsRequired(Number(data.giftCreditsRequired || 1));
+      } catch (error: any) {
+        if (!isActive) return;
+        setCreditError(error?.message || 'Unable to load Drop-In credits');
+      } finally {
+        if (isActive) {
+          setIsLoadingCredits(false);
+        }
+      }
+    };
+
+    void loadCreditSummary();
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (tab !== 'upload') return;
@@ -100,6 +142,43 @@ export function DropInHubPage({ basePath, defaultTab = 'find' }: DropInHubPagePr
         <p className="mt-1 text-muted-foreground">
           One place for discovery and upload workflows.
         </p>
+      </div>
+
+      <div className="rounded-2xl border border-border bg-card p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm text-muted-foreground">Remaining Credits</p>
+            <p className="text-2xl font-bold text-foreground">
+              {isLoadingCredits ? '...' : attendeeCredits}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {isLoadingCredits
+                ? 'Loading current credit balance...'
+                : creditError
+                  ? 'Unable to load live pricing details right now.'
+                  : `Upload: ${uploadCreditsRequired} credits, Gift access: ${giftCreditsRequired} credits${
+                      creditUnit !== null ? `, 1 credit ≈ ${currency} ${creditUnit.toFixed(2)}` : ''
+                    }`}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button asChild variant="outline">
+              <Link href={billingHref}>
+                <CreditCard className="mr-2 h-4 w-4" />
+                Add Credits
+              </Link>
+            </Button>
+            <Button asChild>
+              <Link href={`${basePath}/upload`}>
+                <Upload className="mr-2 h-4 w-4" />
+                Upload Now
+              </Link>
+            </Button>
+          </div>
+        </div>
+        {creditError ? (
+          <p className="mt-3 text-xs text-warning">{creditError}</p>
+        ) : null}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">

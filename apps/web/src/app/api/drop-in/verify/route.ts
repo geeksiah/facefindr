@@ -11,12 +11,16 @@ function deriveStatus(row: {
   face_processing_status: string | null;
   matches_found: number | null;
   is_discoverable: boolean | null;
+  upload_payment_transaction_id: string | null;
 }) {
+  const creditBacked = typeof row.upload_payment_transaction_id === 'string'
+    && row.upload_payment_transaction_id.startsWith('credits_');
+
   if (row.upload_payment_status === 'failed' || row.gift_payment_status === 'failed') {
     return 'failed_payment';
   }
 
-  if (row.upload_payment_status !== 'paid') {
+  if (row.upload_payment_status !== 'paid' && !creditBacked) {
     return 'awaiting_payment';
   }
 
@@ -104,7 +108,10 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    if (row.upload_payment_status === 'paid' && row.face_processing_status === 'pending') {
+    const creditBacked =
+      typeof row.upload_payment_transaction_id === 'string' &&
+      row.upload_payment_transaction_id.startsWith('credits_');
+    if ((row.upload_payment_status === 'paid' || creditBacked) && row.face_processing_status === 'pending') {
       const processSecret = process.env.DROP_IN_PROCESS_SECRET;
       const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
       const headers: Record<string, string> = {

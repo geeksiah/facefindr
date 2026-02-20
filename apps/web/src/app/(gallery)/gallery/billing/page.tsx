@@ -55,6 +55,7 @@ interface Transaction {
   description: string;
   status: 'completed' | 'pending' | 'failed';
   createdAt: string;
+  providerReference?: string | null;
 }
 
 export default function BillingPage() {
@@ -157,7 +158,9 @@ export default function BillingPage() {
       // Load recent transactions
       const { data: txs } = await supabase
         .from('transactions')
-        .select('id, gross_amount, currency, status, created_at, metadata')
+        .select(
+          'id, gross_amount, currency, status, created_at, metadata, paystack_reference, stripe_payment_intent_id, flutterwave_tx_ref, paypal_order_id'
+        )
         .eq('attendee_id', user.id)
         .order('created_at', { ascending: false })
         .limit(10);
@@ -179,6 +182,12 @@ export default function BillingPage() {
           description:
             (t.metadata as any)?.description ||
             ((t.metadata as any)?.type === 'tip' ? 'Tip payment' : 'Photo purchase'),
+          providerReference:
+            t.paystack_reference ||
+            t.stripe_payment_intent_id ||
+            t.flutterwave_tx_ref ||
+            t.paypal_order_id ||
+            null,
           status:
             t.status === 'succeeded'
               ? 'completed'
@@ -209,9 +218,20 @@ export default function BillingPage() {
       }
 
       setTransactions(
-        mappedTransactions
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-          .slice(0, 10)
+        Array.from(
+          mappedTransactions
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+            .reduce((deduped, tx) => {
+              const minuteBucket = new Date(tx.createdAt).toISOString().slice(0, 16);
+              const fallbackKey = `${tx.type}:${tx.amount}:${tx.currency}:${tx.description}:${minuteBucket}`;
+              const key = tx.providerReference ? `provider:${tx.providerReference}` : fallbackKey;
+              if (!deduped.has(key)) {
+                deduped.set(key, tx);
+              }
+              return deduped;
+            }, new Map<string, Transaction>())
+            .values()
+        ).slice(0, 10)
       );
     } catch (err) {
       console.error('Failed to load billing data:', err);

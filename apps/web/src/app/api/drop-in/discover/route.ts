@@ -3,8 +3,8 @@ export const dynamic = 'force-dynamic';
 /**
  * Drop-In Discovery API
  * 
- * Allows premium users to discover drop-in photos of themselves
- * from people outside their contacts
+ * Allows attendees to discover drop-in photos matched to their profile.
+ * This route is credit-driven and does not gate discovery by premium plans.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -48,50 +48,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Attendee profile not found' }, { status: 404 });
     }
 
-    // Check premium access OR if user is registered for events (free tier)
-    const { data: subscription } = await supabase
-      .from('attendee_subscriptions')
-      .select('plan_code, status, metadata')
-      .eq('attendee_id', attendee.id)
-      .eq('status', 'active')
-      .single();
-
-    const subscriptionMetadata = (subscription?.metadata as Record<string, any> | null) || null;
-    const hasPremium =
-      Boolean(subscriptionMetadata?.can_discover_non_contacts) ||
-      ['premium', 'premium_plus'].includes(String(subscription?.plan_code || ''));
-
-    // Check if user is registered for any events (free tier allows discovery from registered events)
-    // Check entitlements table which links attendees to events
-    const { count: registeredEventsCount } = await supabase
-      .from('entitlements')
-      .select('*', { count: 'exact', head: true })
-      .eq('attendee_id', attendee.id);
-
-    const isRegisteredForEvents = (registeredEventsCount || 0) > 0;
-
-    if (!hasPremium && !isRegisteredForEvents) {
-      return NextResponse.json(
-        { 
-          error: 'Premium subscription or event registration required to discover non-contact photos',
-          requiresPremium: true,
-        },
-        { status: 403 }
-      );
-    }
-
-    // Get user's contacts
-    const { data: contacts } = await supabase
-      .from('contacts')
-      .select('contact_id')
-      .eq('user_id', attendee.id)
-      .eq('contact_type', 'mutual');
-
-    const contactIds = contacts?.map(c => c.contact_id) || [];
-
     // Get drop-in matches for this user
-    // Free tier: only from contacts or registered events
-    // Premium: all matches
     const { data: matches } = await supabase
       .from('drop_in_matches')
       .select(`
@@ -120,18 +77,7 @@ export async function GET(request: NextRequest) {
       .in('verification_status', ['confirmed', 'pending'])
       .order('created_at', { ascending: false });
 
-    // Filter based on subscription tier
-    let filteredMatches = matches || [];
-    
-    if (!hasPremium) {
-      // Free tier: only from contacts or gifted
-      filteredMatches = matches?.filter(match => {
-        const photo = match.drop_in_photos as any;
-        const uploaderId = photo?.uploader_id;
-        return contactIds.includes(uploaderId) || photo?.is_gifted;
-      }) || [];
-    }
-    // Premium users see all matches (no filtering needed)
+    const filteredMatches = matches || [];
 
     const matchIds = filteredMatches.map((match) => match.id);
     let notificationByMatchId = new Map<string, { id: string; userAction: string | null }>();

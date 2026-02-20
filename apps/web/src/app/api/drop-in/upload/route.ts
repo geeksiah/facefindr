@@ -226,6 +226,7 @@ export async function POST(request: NextRequest) {
     }
 
     const formData = await request.formData();
+    const photoEntries = formData.getAll('photo');
     const file = formData.get('photo') as File;
     const giftMessage = formData.get('giftMessage') as string | null;
     const includeGift = formData.get('includeGift') === 'true';
@@ -235,6 +236,9 @@ export async function POST(request: NextRequest) {
 
     if (!file) {
       return NextResponse.json({ error: 'Photo is required' }, { status: 400 });
+    }
+    if (photoEntries.length > 1) {
+      return NextResponse.json({ error: 'Only one photo can be uploaded per drop-in submission' }, { status: 400 });
     }
 
     const allowedTypes = ['image/jpeg', 'image/png', 'image/heic', 'image/webp'];
@@ -294,6 +298,7 @@ export async function POST(request: NextRequest) {
 
     const uploadAmountEquivalent = uploadCreditsRequired * pricing.creditUnitCents;
     const giftAmountEquivalent = includeGift ? giftCreditsRequired * pricing.creditUnitCents : null;
+    const creditBackedTxRef = `credits_${Date.now()}_${attendee.id.slice(0, 8)}`;
 
     const { data: dropInPhoto, error: dbError } = await serviceClient
       .from('drop_in_photos')
@@ -304,12 +309,13 @@ export async function POST(request: NextRequest) {
         file_size: file.size,
         is_discoverable: false,
         discovery_scope: 'app_only',
-        upload_payment_status: 'pending',
+        upload_payment_status: 'paid',
         upload_payment_amount: uploadAmountEquivalent,
         is_gifted: includeGift,
-        gift_payment_status: includeGift ? 'pending' : null,
+        gift_payment_status: includeGift ? 'paid' : null,
         gift_payment_amount: giftAmountEquivalent,
         gift_message: includeGift && giftMessage ? giftMessage : null,
+        upload_payment_transaction_id: creditBackedTxRef,
         location_lat: locationLat,
         location_lng: locationLng,
         location_name: locationName,
@@ -347,15 +353,6 @@ export async function POST(request: NextRequest) {
         { status: 402 }
       );
     }
-
-    await serviceClient
-      .from('drop_in_photos')
-      .update({
-        upload_payment_status: 'paid',
-        gift_payment_status: includeGift ? 'paid' : null,
-        upload_payment_transaction_id: `credits_${Date.now()}_${attendee.id.slice(0, 8)}`,
-      })
-      .eq('id', dropInPhoto.id);
 
     const processingTriggered = await triggerDropInProcessing(
       dropInPhoto.id,
