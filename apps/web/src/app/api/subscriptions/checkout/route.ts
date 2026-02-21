@@ -307,16 +307,45 @@ export async function POST(request: NextRequest) {
         throw claimError;
       }
 
-      const { data: existingIdempotency } = await serviceClient
+      const { data: existingIdempotency, error: existingIdempotencyError } = await serviceClient
         .from('api_idempotency_keys')
         .select('*')
         .eq('operation_scope', operationScope)
         .eq('actor_id', user.id)
         .eq('idempotency_key', idempotencyKey)
-        .single();
+        .maybeSingle();
+
+      if (
+        existingIdempotencyError &&
+        (isMissingRelationError(existingIdempotencyError, 'api_idempotency_keys') ||
+          isMissingColumnError(existingIdempotencyError) ||
+          isSchemaCacheColumnError(existingIdempotencyError))
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              'Idempotency storage is not available. Run latest billing migrations before retrying checkout.',
+            code: 'idempotency_table_missing',
+            failClosed: true,
+            idempotencyKey,
+            replayed: false,
+          },
+          { status: 503, headers: responseHeaders }
+        );
+      }
+      if (existingIdempotencyError) {
+        throw existingIdempotencyError;
+      }
 
       if (!existingIdempotency) {
-        throw claimError;
+        return NextResponse.json(
+          {
+            error: 'Checkout request is already being processed with this idempotency key',
+            idempotencyKey,
+            replayed: false,
+          },
+          { status: 409, headers: responseHeaders }
+        );
       }
 
       await serviceClient
@@ -358,6 +387,19 @@ export async function POST(request: NextRequest) {
           replayed: false,
         },
         { status: 409, headers: responseHeaders }
+      );
+    }
+
+    if (!claimedIdempotency?.id) {
+      return NextResponse.json(
+        {
+          error: 'Failed to acquire idempotency lock for checkout.',
+          code: 'idempotency_claim_failed',
+          failClosed: true,
+          idempotencyKey,
+          replayed: false,
+        },
+        { status: 503, headers: responseHeaders }
       );
     }
 
@@ -499,6 +541,43 @@ export async function POST(request: NextRequest) {
       });
     };
 
+    let paystackSecretKeyCache: string | null | undefined;
+    const getPaystackSecretForRegion = async () => {
+      if (paystackSecretKeyCache !== undefined) return paystackSecretKeyCache;
+      paystackSecretKeyCache = await resolvePaystackSecretKey(gatewaySelection.countryCode);
+      return paystackSecretKeyCache;
+    };
+
+    const isGatewayRuntimeConfigured = async (
+      candidateGateway: 'stripe' | 'paypal' | 'flutterwave' | 'paystack'
+    ) => {
+      if (candidateGateway === 'stripe') return Boolean(stripe);
+      if (candidateGateway === 'paypal') return isPayPalConfigured();
+      if (candidateGateway === 'flutterwave') return isFlutterwaveConfigured();
+      return Boolean(await getPaystackSecretForRegion());
+    };
+
+    const pickFallbackGateway = async (
+      exclude: 'stripe' | 'paypal' | 'flutterwave' | 'paystack'
+    ) => {
+      for (const candidate of configuredGateways) {
+        if (candidate === exclude) continue;
+        const candidateGateway = candidate as 'stripe' | 'paypal' | 'flutterwave' | 'paystack';
+        const candidateMapping = await loadMappingForGateway(candidateGateway);
+        if (!isGatewayUsable(candidateGateway, candidateMapping)) {
+          continue;
+        }
+        if (!(await isGatewayRuntimeConfigured(candidateGateway))) {
+          continue;
+        }
+        return {
+          gateway: candidateGateway,
+          mapping: candidateMapping,
+        };
+      }
+      return null;
+    };
+
     if (!isGatewayUsable(selectedGateway, mapping)) {
       let resolvedGateway: 'stripe' | 'paypal' | 'flutterwave' | 'paystack' | null = null;
       let resolvedMapping: any = null;
@@ -543,44 +622,22 @@ export async function POST(request: NextRequest) {
       selectedGateway = resolvedGateway;
       mapping = resolvedMapping;
     }
-
-    if (selectedGateway === 'paystack') {
-      const paystackSecretKey = await resolvePaystackSecretKey(gatewaySelection.countryCode);
-      if (!paystackSecretKey) {
-        let fallbackGateway: 'stripe' | 'paypal' | 'flutterwave' | 'paystack' | null = null;
-        let fallbackMapping: any = null;
-        for (const candidate of configuredGateways) {
-          if (candidate === 'paystack') continue;
-          const candidateGateway = candidate as 'stripe' | 'paypal' | 'flutterwave' | 'paystack';
-          const candidateMapping = await loadMappingForGateway(candidateGateway);
-          if (!isGatewayUsable(candidateGateway, candidateMapping)) {
-            continue;
-          }
-          if (candidateGateway === 'stripe' && !stripe) continue;
-          if (candidateGateway === 'paypal' && !isPayPalConfigured()) continue;
-          if (candidateGateway === 'flutterwave' && !isFlutterwaveConfigured()) continue;
-
-          fallbackGateway = candidateGateway;
-          fallbackMapping = candidateMapping;
-          break;
-        }
-
-        if (!fallbackGateway) {
-          return respond(
-            {
-              error:
-                'Paystack is not configured for your region and no fallback subscription gateway is available.',
-              code: 'gateway_not_configured',
-              failClosed: true,
-            },
-            503,
-            'failed'
-          );
-        }
-
-        selectedGateway = fallbackGateway;
-        mapping = fallbackMapping;
+    if (!(await isGatewayRuntimeConfigured(selectedGateway))) {
+      const fallback = await pickFallbackGateway(selectedGateway);
+      if (!fallback) {
+        return respond(
+          {
+            error:
+              `The selected gateway (${selectedGateway}) is not configured and no fallback gateway is available.`,
+            code: 'gateway_not_configured',
+            failClosed: true,
+          },
+          503,
+          'failed'
+        );
       }
+      selectedGateway = fallback.gateway;
+      mapping = fallback.mapping;
     }
 
     const checkoutCurrency = String(mapping?.currency || normalizedCurrency).toUpperCase();
@@ -976,10 +1033,18 @@ export async function POST(request: NextRequest) {
     }
 
     if (selectedGateway === 'paystack') {
-      const paystackSecretKey = await resolvePaystackSecretKey(gatewaySelection.countryCode);
+      const paystackSecretKey = await getPaystackSecretForRegion();
       const paystackPublicKey = await resolvePaystackPublicKey(gatewaySelection.countryCode);
       if (!paystackSecretKey) {
-        return respond({ error: 'Paystack is not configured' }, 500, 'failed');
+        return respond(
+          {
+            error: 'Paystack is not configured for this region',
+            code: 'gateway_not_configured',
+            failClosed: true,
+          },
+          503,
+          'failed'
+        );
       }
 
       const manualRenewalMode = !mapping;

@@ -7,6 +7,7 @@ import { Providers } from '@/components/providers';
 const inter = Inter({
   subsets: ['latin'],
   variable: '--font-inter',
+  preload: false,
 });
 
 export const metadata: Metadata = {

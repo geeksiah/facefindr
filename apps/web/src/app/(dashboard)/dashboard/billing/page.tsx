@@ -380,7 +380,9 @@ export default function BillingPage() {
 
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setCheckoutError(data?.error || 'Failed to start checkout');
+        const normalizedError = String(data?.error || 'Failed to start checkout');
+        const normalizedCode = typeof data?.code === 'string' ? data.code.trim() : '';
+        setCheckoutError(normalizedCode ? `${normalizedError} (${normalizedCode})` : normalizedError);
         return;
       }
 
