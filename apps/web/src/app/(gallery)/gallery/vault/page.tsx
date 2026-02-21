@@ -158,8 +158,12 @@ export default function VaultPage() {
 
     const searchParams = new URLSearchParams(window.location.search);
     const subscriptionStatus = String(searchParams.get('subscription') || '').toLowerCase();
-    const provider = String(searchParams.get('provider') || '').toLowerCase();
+    const providerParam = String(searchParams.get('provider') || '').toLowerCase();
+    const sessionId = String(searchParams.get('session_id') || '').trim();
+    const subscriptionId = String(searchParams.get('subscription_id') || '').trim();
+    const txRef = String(searchParams.get('tx_ref') || '').trim();
     const reference = String(searchParams.get('reference') || '').trim();
+    const provider = providerParam || (sessionId ? 'stripe' : '');
 
     if (subscriptionStatus !== 'success') {
       return;
@@ -169,15 +173,28 @@ export default function VaultPage() {
     window.history.replaceState({}, document.title, cleanUrl);
 
     void (async () => {
-      if (provider === 'paystack' && reference) {
+      if (provider) {
         try {
+          const payload: Record<string, string> = { provider };
+          if (provider === 'stripe' && sessionId) payload.sessionId = sessionId;
+          if (provider === 'paypal' && subscriptionId) payload.subscriptionId = subscriptionId;
+          if (provider === 'flutterwave' && txRef) payload.txRef = txRef;
+          if (provider === 'paystack' && reference) payload.reference = reference;
+
+          const hasProviderReference =
+            (provider === 'stripe' && Boolean(payload.sessionId)) ||
+            (provider === 'paypal' && Boolean(payload.subscriptionId)) ||
+            (provider === 'flutterwave' && Boolean(payload.txRef)) ||
+            (provider === 'paystack' && Boolean(payload.reference));
+
+          if (!hasProviderReference) {
+            throw new Error('Missing provider reference in callback URL');
+          }
+
           const verifyResponse = await fetch('/api/vault/verify', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              provider: 'paystack',
-              reference,
-            }),
+            body: JSON.stringify(payload),
           });
           const verifyPayload = await verifyResponse.json().catch(() => ({}));
           if (!verifyResponse.ok) {

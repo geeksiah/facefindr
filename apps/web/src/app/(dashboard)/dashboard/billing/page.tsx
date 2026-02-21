@@ -302,18 +302,69 @@ export default function BillingPage() {
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
     const isSuccess = searchParams.get('success') === 'true';
-    const provider = String(searchParams.get('provider') || '').toLowerCase();
+    const providerParam = String(searchParams.get('provider') || '').toLowerCase();
+    const sessionId = String(searchParams.get('session_id') || '').trim();
+    const subscriptionId = String(searchParams.get('subscription_id') || '').trim();
+    const txRef = String(searchParams.get('tx_ref') || '').trim();
     const reference = String(searchParams.get('reference') || '').trim();
+    const provider =
+      providerParam ||
+      (sessionId ? 'stripe' : '');
 
-    if (!isSuccess || provider !== 'paystack' || !reference) {
+    if (!isSuccess || !provider) {
       return;
     }
 
-    setCheckoutError(null);
-    requestRefresh(true);
+    let cancelled = false;
+    const verify = async () => {
+      setCheckoutError(null);
+      try {
+        const payload: Record<string, string> = { provider };
+        if (provider === 'stripe' && sessionId) payload.sessionId = sessionId;
+        if (provider === 'paypal' && subscriptionId) payload.subscriptionId = subscriptionId;
+        if (provider === 'flutterwave' && txRef) payload.txRef = txRef;
+        if (provider === 'paystack' && reference) payload.reference = reference;
 
-    const cleanUrl = window.location.pathname;
-    window.history.replaceState({}, document.title, cleanUrl);
+        const hasProviderReference =
+          (provider === 'stripe' && Boolean(payload.sessionId)) ||
+          (provider === 'paypal' && Boolean(payload.subscriptionId)) ||
+          (provider === 'flutterwave' && Boolean(payload.txRef)) ||
+          (provider === 'paystack' && Boolean(payload.reference));
+
+        if (!hasProviderReference) {
+          setCheckoutError('Payment succeeded but callback is missing provider reference.');
+          return;
+        }
+
+        const response = await fetch('/api/subscriptions/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const verifyResponse = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          if (!cancelled) {
+            setCheckoutError(String(verifyResponse?.error || 'Payment succeeded but verification failed.'));
+          }
+        } else if (!cancelled) {
+          requestRefresh(true);
+        }
+      } catch {
+        if (!cancelled) {
+          setCheckoutError('Payment succeeded but verification failed.');
+        }
+      } finally {
+        if (!cancelled) {
+          const cleanUrl = window.location.pathname;
+          window.history.replaceState({}, document.title, cleanUrl);
+        }
+      }
+    };
+
+    void verify();
+    return () => {
+      cancelled = true;
+    };
   }, [requestRefresh]);
 
   useEffect(() => {

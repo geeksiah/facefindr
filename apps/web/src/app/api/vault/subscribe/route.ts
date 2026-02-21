@@ -56,7 +56,6 @@ export async function POST(request: NextRequest) {
       planSlug,
       billingCycle,
       currency: requestedCurrency,
-      paymentChannel: requestedPaymentChannel,
     } = body;
 
     if (!planSlug || !billingCycle) {
@@ -65,19 +64,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    const normalizedPaymentChannelRaw = String(requestedPaymentChannel || 'auto').trim().toLowerCase();
-    const paymentChannel: 'auto' | 'card' | 'mobile_money' =
-      normalizedPaymentChannelRaw === 'card' || normalizedPaymentChannelRaw === 'mobile_money'
-        ? normalizedPaymentChannelRaw
-        : normalizedPaymentChannelRaw === 'auto'
-        ? 'auto'
-        : 'auto';
-    if (
-      normalizedPaymentChannelRaw &&
-      !['auto', 'card', 'mobile_money'].includes(normalizedPaymentChannelRaw)
-    ) {
-      return NextResponse.json({ error: 'Invalid payment channel' }, { status: 400 });
-    }
+    const paymentChannel: 'auto' = 'auto';
 
     // Get the plan
     const { data: plan, error: planError } = await supabase
@@ -275,8 +262,8 @@ export async function POST(request: NextRequest) {
           provider_plan_id: mapping?.provider_plan_id || 'dynamic',
           type: 'storage_subscription',
         },
-        success_url: `${appUrl}/gallery/vault?subscription=success`,
-        cancel_url: `${appUrl}/gallery/vault?subscription=cancelled`,
+        success_url: `${appUrl}/gallery/vault?subscription=success&provider=stripe&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${appUrl}/gallery/vault?subscription=cancelled&provider=stripe`,
       });
 
       return NextResponse.json({
@@ -299,7 +286,7 @@ export async function POST(request: NextRequest) {
 
       const subscription = await createBillingSubscription({
         planId: mapping.provider_plan_id,
-        returnUrl: `${appUrl}/gallery/vault?subscription=success&provider=paypal`,
+        returnUrl: `${appUrl}/gallery/vault?subscription=success&provider=paypal&subscription_id={subscription_id}`,
         cancelUrl: `${appUrl}/gallery/vault?subscription=cancelled&provider=paypal`,
         customId: JSON.stringify({
           subscription_scope: 'vault_subscription',
@@ -373,7 +360,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Paystack is not configured' }, { status: 500 });
       }
 
-      const manualRenewalMode = !mapping || paymentChannel === 'mobile_money';
+      const manualRenewalMode = !mapping;
       const reference = `vault_sub_${user.id}_${Date.now()}`;
       const manualPeriodEndIso = manualRenewalMode ? getManualPeriodEndIso(normalizedBillingCycle) : null;
       const metadata = {

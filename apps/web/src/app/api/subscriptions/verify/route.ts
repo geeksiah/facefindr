@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { verifyTransactionByRef } from '@/lib/payments/flutterwave';
 import { getBillingSubscription } from '@/lib/payments/paypal';
+import { resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import {
   resolvePaystackSecretKey,
   verifyPaystackTransaction,
@@ -23,22 +24,16 @@ import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 function isSuccessfulPaystackStatus(status: string | null | undefined) {
   const normalized = String(status || '').trim().toLowerCase();
-  return normalized === 'success' || normalized === 'successful' || normalized === 'completed';
-}
-
-function isSuccessfulFlutterwaveStatus(status: string | null | undefined) {
-  const normalized = String(status || '').trim().toLowerCase();
-  return normalized === 'success' || normalized === 'successful' || normalized === 'completed';
+  return (
+    normalized === 'success' ||
+    normalized === 'successful' ||
+    normalized === 'completed'
+  );
 }
 
 function normalizeBillingCycle(value: string | null | undefined): 'monthly' | 'annual' {
   const normalized = String(value || '').trim().toLowerCase();
-  if (
-    normalized === 'annual' ||
-    normalized === 'yearly' ||
-    normalized === 'annually' ||
-    normalized === 'year'
-  ) {
+  if (normalized === 'annual' || normalized === 'yearly' || normalized === 'annually' || normalized === 'year') {
     return 'annual';
   }
   return 'monthly';
@@ -70,14 +65,6 @@ function parseMinorAmountFromMajor(value: unknown): number | null {
   return Math.max(0, Math.round(parsed * 100));
 }
 
-function resolveMappedStatus(
-  rawStatus: string | null,
-  scope: RecurringProductScope,
-  fallback: 'active' | 'past_due' = 'active'
-) {
-  return mapProviderSubscriptionStatusToLocal(rawStatus, scope) || fallback;
-}
-
 function resolveCancelAtPeriodEnd(
   metadata: Record<string, unknown>,
   manualRenewalMode: boolean
@@ -87,6 +74,14 @@ function resolveCancelAtPeriodEnd(
   if (explicitCancelAtPeriodEnd !== null) return explicitCancelAtPeriodEnd;
   const autoRenewPreference = readBooleanFlag(metadata.auto_renew_preference);
   return autoRenewPreference === false;
+}
+
+function resolveMappedStatus(
+  rawStatus: string | null,
+  scope: RecurringProductScope,
+  fallback: 'active' | 'past_due' = 'active'
+) {
+  return mapProviderSubscriptionStatusToLocal(rawStatus, scope) || fallback;
 }
 
 export async function POST(request: NextRequest) {
@@ -101,6 +96,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const { data: creatorProfile } = await resolvePhotographerProfileByUser(
+      serviceClient,
+      user.id,
+      user.email
+    );
+    if (!creatorProfile?.id) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
+    const creatorId = String(creatorProfile.id);
+
     const body = await request.json().catch(() => ({}));
     const provider = String(body?.provider || '').trim().toLowerCase();
     const sessionId = String(body?.sessionId || '').trim();
@@ -109,19 +114,19 @@ export async function POST(request: NextRequest) {
     const reference = String(body?.reference || '').trim();
 
     if (!['stripe', 'paypal', 'flutterwave', 'paystack'].includes(provider)) {
-      return NextResponse.json({ error: 'Unsupported provider for vault verification.' }, { status: 400 });
+      return NextResponse.json({ error: 'Unsupported provider for subscription verification.' }, { status: 400 });
     }
 
-    const { data: latestSubscription } = await serviceClient
-      .from('storage_subscriptions')
-      .select('id, plan_id, metadata')
-      .eq('user_id', user.id)
+    const { data: latestLocalSubscription } = await serviceClient
+      .from('subscriptions')
+      .select('metadata')
+      .eq('photographer_id', creatorId)
       .order('updated_at', { ascending: false })
+      .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
-    const latestMetadata = parseMetadataRecord(latestSubscription?.metadata);
+    const latestMetadata = parseMetadataRecord(latestLocalSubscription?.metadata);
     const regionCode = readString(latestMetadata.region_code) || undefined;
-
     if (provider === 'stripe') {
       if (!sessionId) {
         return NextResponse.json({ error: 'Stripe sessionId is required.' }, { status: 400 });
@@ -144,12 +149,12 @@ export async function POST(request: NextRequest) {
       }
 
       const sessionMetadata = parseMetadataRecord(session.metadata);
-      const scope = readString(sessionMetadata.subscription_scope) || 'vault_subscription';
-      if (scope !== 'vault_subscription') {
-        return NextResponse.json({ error: 'Session is not a vault subscription checkout.' }, { status: 400 });
+      const scope = readString(sessionMetadata.subscription_scope) || 'creator_subscription';
+      if (scope !== 'creator_subscription') {
+        return NextResponse.json({ error: 'Session is not a creator subscription checkout.' }, { status: 400 });
       }
-      const metadataUserId = readString(sessionMetadata.user_id);
-      if (metadataUserId && metadataUserId !== user.id) {
+      const metadataCreatorId = readString(sessionMetadata.photographer_id);
+      if (metadataCreatorId && metadataCreatorId !== creatorId) {
         return NextResponse.json({ error: 'Session does not belong to this account.' }, { status: 403 });
       }
 
@@ -162,19 +167,17 @@ export async function POST(request: NextRequest) {
       }
 
       const metadata = parseMetadataRecord(stripeSubscription.metadata || sessionMetadata);
-      const mappedStatus = resolveMappedStatus(
-        String(stripeSubscription.status || 'active'),
-        'vault_subscription'
-      );
+      const mappedStatus = resolveMappedStatus(String(stripeSubscription.status || 'active'), 'creator_subscription');
       const unitAmount = Number(stripeSubscription.items?.data?.[0]?.price?.unit_amount || 0);
       const amountCents =
-        readNumber(metadata.pricing_amount_cents) ??
+        readNumber(metadata.pricing_amount_cents) ||
         (Number.isFinite(unitAmount) ? Math.round(unitAmount) : null);
+      const cancelAtPeriodEnd = Boolean(stripeSubscription.cancel_at_period_end);
 
       await syncRecurringSubscriptionRecord({
         supabase: serviceClient,
         provider: 'stripe',
-        scope: 'vault_subscription',
+        scope: 'creator_subscription',
         status: mappedStatus,
         eventType: 'manual_verify',
         externalSubscriptionId: stripeSubscription.id,
@@ -184,7 +187,8 @@ export async function POST(request: NextRequest) {
             : null,
         externalPlanId:
           readString(metadata.provider_plan_id) ||
-          readString(stripeSubscription.items?.data?.[0]?.price?.id),
+          readString(stripeSubscription.items?.data?.[0]?.price?.id) ||
+          null,
         billingCycle: readString(metadata.billing_cycle) || 'monthly',
         currency:
           readString(stripeSubscription.items?.data?.[0]?.price?.currency)?.toUpperCase() ||
@@ -199,18 +203,17 @@ export async function POST(request: NextRequest) {
           stripeSubscription.current_period_end
             ? new Date(stripeSubscription.current_period_end * 1000).toISOString()
             : null,
-        cancelAtPeriodEnd: Boolean(stripeSubscription.cancel_at_period_end),
+        cancelAtPeriodEnd,
         canceledAt:
           stripeSubscription.canceled_at
             ? new Date(stripeSubscription.canceled_at * 1000).toISOString()
             : null,
-        userId: user.id,
-        planId: readString(metadata.plan_id) || String(latestSubscription?.plan_id || ''),
-        planSlug: readString(metadata.plan_slug) || readString(latestMetadata.plan_slug),
+        photographerId: creatorId,
+        planCode: readString(metadata.plan_code),
+        planId: readString(metadata.plan_id),
         metadata: {
-          ...latestMetadata,
           ...metadata,
-          verification_source: 'vault.verify.api',
+          verification_source: 'subscriptions.verify.api',
           stripe_session_id: session.id,
         },
       });
@@ -222,26 +225,24 @@ export async function POST(request: NextRequest) {
       const latest = await getBillingSubscription(subscriptionId);
       const metadata = parseMetadataRecord(latest?.custom_id);
       const scope = readString(metadata.subscription_scope);
-      if (scope !== 'vault_subscription') {
-        return NextResponse.json({ error: 'Subscription is not a vault subscription.' }, { status: 400 });
+      if (scope !== 'creator_subscription') {
+        return NextResponse.json({ error: 'Subscription is not a creator subscription.' }, { status: 400 });
       }
-      const metadataUserId = readString(metadata.user_id);
-      if (metadataUserId && metadataUserId !== user.id) {
+      const metadataCreatorId = readString(metadata.photographer_id);
+      if (metadataCreatorId && metadataCreatorId !== creatorId) {
         return NextResponse.json({ error: 'Subscription does not belong to this account.' }, { status: 403 });
       }
 
-      const mappedStatus = resolveMappedStatus(
-        readString(latest.status) || 'active',
-        'vault_subscription'
-      );
+      const mappedStatus = resolveMappedStatus(readString(latest.status) || 'active', 'creator_subscription');
       const renewalMode = readString(metadata.renewal_mode) || 'provider_recurring';
       const manualRenewalMode = renewalMode === 'manual_renewal';
+      const cancelAtPeriodEnd = resolveCancelAtPeriodEnd(metadata, manualRenewalMode);
       const billingCycle = normalizeBillingCycle(readString(metadata.billing_cycle));
 
       await syncRecurringSubscriptionRecord({
         supabase: serviceClient,
         provider: 'paypal',
-        scope: 'vault_subscription',
+        scope: 'creator_subscription',
         status: mappedStatus,
         eventType: 'manual_verify',
         externalSubscriptionId: manualRenewalMode ? null : latest.id,
@@ -253,16 +254,17 @@ export async function POST(request: NextRequest) {
         currentPeriodEnd:
           readString(metadata.current_period_end) ||
           (manualRenewalMode ? getManualPeriodEndIso(billingCycle) : null),
-        cancelAtPeriodEnd: resolveCancelAtPeriodEnd(metadata, manualRenewalMode),
+        cancelAtPeriodEnd,
         canceledAt:
-          mappedStatus === 'cancelled' ? new Date().toISOString() : null,
-        userId: user.id,
-        planId: readString(metadata.plan_id) || String(latestSubscription?.plan_id || ''),
-        planSlug: readString(metadata.plan_slug) || readString(latestMetadata.plan_slug),
+          mappedStatus === 'canceled' || mappedStatus === 'cancelled'
+            ? new Date().toISOString()
+            : null,
+        photographerId: creatorId,
+        planCode: readString(metadata.plan_code),
+        planId: readString(metadata.plan_id),
         metadata: {
-          ...latestMetadata,
           ...metadata,
-          verification_source: 'vault.verify.api',
+          verification_source: 'subscriptions.verify.api',
           paypal_subscription_status: latest.status || null,
         },
       });
@@ -272,32 +274,34 @@ export async function POST(request: NextRequest) {
       }
 
       const verified = await verifyTransactionByRef(txRef);
-      if (!isSuccessfulFlutterwaveStatus(verified.status)) {
+      const status = String(verified?.status || '').toLowerCase();
+      if (status !== 'successful' && status !== 'success' && status !== 'completed') {
         return NextResponse.json(
-          { error: `Flutterwave charge is not successful yet (status: ${verified.status || 'unknown'}).` },
+          { error: `Flutterwave charge is not successful yet (status: ${verified?.status || 'unknown'}).` },
           { status: 400 }
         );
       }
 
-      const metadata = parseMetadataRecord((verified as any).meta);
+      const metadata = parseMetadataRecord(verified?.meta);
       const scope = readString(metadata.subscription_scope);
-      if (scope !== 'vault_subscription') {
-        return NextResponse.json({ error: 'Transaction is not a vault subscription payment.' }, { status: 400 });
+      if (scope !== 'creator_subscription') {
+        return NextResponse.json({ error: 'Transaction is not a creator subscription payment.' }, { status: 400 });
       }
-      const metadataUserId = readString(metadata.user_id);
-      if (metadataUserId && metadataUserId !== user.id) {
+      const metadataCreatorId = readString(metadata.photographer_id);
+      if (metadataCreatorId && metadataCreatorId !== creatorId) {
         return NextResponse.json({ error: 'Transaction does not belong to this account.' }, { status: 403 });
       }
 
       const renewalMode = readString(metadata.renewal_mode) || 'provider_recurring';
       const manualRenewalMode = renewalMode === 'manual_renewal';
+      const cancelAtPeriodEnd = resolveCancelAtPeriodEnd(metadata, manualRenewalMode);
       const billingCycle = normalizeBillingCycle(readString(metadata.billing_cycle));
-      const mappedStatus = resolveMappedStatus(readString(verified.status), 'vault_subscription');
+      const mappedStatus = resolveMappedStatus(readString(verified.status), 'creator_subscription');
 
       await syncRecurringSubscriptionRecord({
         supabase: serviceClient,
         provider: 'flutterwave',
-        scope: 'vault_subscription',
+        scope: 'creator_subscription',
         status: mappedStatus,
         eventType: 'manual_verify',
         externalSubscriptionId:
@@ -307,8 +311,8 @@ export async function POST(request: NextRequest) {
               readString(metadata.provider_subscription_id) ||
               txRef,
         externalCustomerId:
-          ((verified as any).customer?.id ? String((verified as any).customer.id) : null) ||
-          readString((verified as any).customer?.email),
+          (verified.customer?.id ? String(verified.customer.id) : null) ||
+          readString(verified.customer?.email),
         externalPlanId:
           readString(metadata.provider_plan_id) ||
           readString((verified as any).payment_plan) ||
@@ -323,16 +327,17 @@ export async function POST(request: NextRequest) {
         currentPeriodEnd:
           readString(metadata.current_period_end) ||
           (manualRenewalMode ? getManualPeriodEndIso(billingCycle) : null),
-        cancelAtPeriodEnd: resolveCancelAtPeriodEnd(metadata, manualRenewalMode),
+        cancelAtPeriodEnd,
         canceledAt:
-          mappedStatus === 'cancelled' ? new Date().toISOString() : null,
-        userId: user.id,
-        planId: readString(metadata.plan_id) || String(latestSubscription?.plan_id || ''),
-        planSlug: readString(metadata.plan_slug) || readString(latestMetadata.plan_slug),
+          mappedStatus === 'canceled' || mappedStatus === 'cancelled'
+            ? new Date().toISOString()
+            : null,
+        photographerId: creatorId,
+        planCode: readString(metadata.plan_code),
+        planId: readString(metadata.plan_id),
         metadata: {
-          ...latestMetadata,
           ...metadata,
-          verification_source: 'vault.verify.api',
+          verification_source: 'subscriptions.verify.api',
           flutterwave_tx_ref: txRef,
         },
       });
@@ -341,8 +346,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Paystack reference is required.' }, { status: 400 });
       }
 
-      const secretKey =
-        (await resolvePaystackSecretKey(regionCode)) || (await resolvePaystackSecretKey());
+      const secretKey = (await resolvePaystackSecretKey(regionCode)) || (await resolvePaystackSecretKey());
       if (!secretKey) {
         return NextResponse.json({ error: 'Paystack is not configured.' }, { status: 500 });
       }
@@ -356,74 +360,100 @@ export async function POST(request: NextRequest) {
       }
 
       const metadata = parseMetadataRecord(verified.metadata);
-      const scope = readString(metadata.subscription_scope) || 'vault_subscription';
-      if (scope !== 'vault_subscription') {
-        return NextResponse.json({ error: 'Reference is not a vault subscription payment.' }, { status: 400 });
+      const scope = readString(metadata.subscription_scope) || 'creator_subscription';
+      if (scope !== 'creator_subscription') {
+        return NextResponse.json(
+          { error: 'Reference is not a creator subscription payment.' },
+          { status: 400 }
+        );
       }
 
-      const metadataUserId = readString(metadata.user_id);
-      if (metadataUserId && metadataUserId !== user.id) {
+      const metadataCreatorId = readString(metadata.photographer_id);
+      const referenceBelongsToCreator = reference.startsWith(`sub_${creatorId}_`);
+      if (metadataCreatorId && metadataCreatorId !== creatorId) {
         return NextResponse.json({ error: 'Payment does not belong to this account.' }, { status: 403 });
       }
+      if (!metadataCreatorId && !referenceBelongsToCreator) {
+        return NextResponse.json({ error: 'Unable to verify payment ownership.' }, { status: 403 });
+      }
 
-      const billingCycle = normalizeBillingCycle(readString(metadata.billing_cycle));
+      const providerPlanId =
+        readString(metadata.provider_plan_id) ||
+        readString((verified as any)?.plan?.plan_code);
+      const billingCycle = normalizeBillingCycle(
+        readString(metadata.billing_cycle) ||
+          readString((verified as any)?.plan?.interval)
+      );
+      const amountCents =
+        readNumber(metadata.pricing_amount_cents) ??
+        (Number.isFinite(Number(verified.amount)) ? Math.round(Number(verified.amount)) : null);
       const renewalMode = readString(metadata.renewal_mode) || 'provider_recurring';
       const manualRenewalMode =
         renewalMode === 'manual_renewal' ||
         readBooleanFlag(metadata.manual_renewal) === true;
-      const amountCents =
-        readNumber(metadata.pricing_amount_cents) ??
-        (Number.isFinite(Number(verified.amount)) ? Math.round(Number(verified.amount)) : null);
+      const cancelAtPeriodEnd = resolveCancelAtPeriodEnd(metadata, manualRenewalMode);
+      const currentPeriodEnd =
+        readString(metadata.current_period_end) ||
+        (manualRenewalMode ? getManualPeriodEndIso(billingCycle) : null);
+      const externalSubscriptionId =
+        manualRenewalMode
+          ? null
+          : readString((verified as any)?.subscription?.subscription_code) ||
+            readString(metadata.subscription_id) ||
+            reference;
 
       await syncRecurringSubscriptionRecord({
         supabase: serviceClient,
         provider: 'paystack',
-        scope: 'vault_subscription',
+        scope: 'creator_subscription',
         status: 'active',
         eventType: 'manual_verify',
-        externalSubscriptionId:
-          manualRenewalMode ? null : readString(metadata.subscription_id) || reference,
-        externalPlanId: readString(metadata.provider_plan_id),
+        externalSubscriptionId,
+        externalPlanId: providerPlanId,
         billingCycle,
         currency: readString(verified.currency) || readString(metadata.pricing_currency) || 'USD',
         amountCents,
-        currentPeriodStart: new Date().toISOString(),
-        currentPeriodEnd:
-          readString(metadata.current_period_end) ||
-          (manualRenewalMode ? getManualPeriodEndIso(billingCycle) : null),
-        cancelAtPeriodEnd: resolveCancelAtPeriodEnd(metadata, manualRenewalMode),
-        userId: user.id,
-        planId: readString(metadata.plan_id) || String(latestSubscription?.plan_id || ''),
-        planSlug: readString(metadata.plan_slug) || readString(latestMetadata.plan_slug),
+        currentPeriodStart: readString(verified.paid_at) || new Date().toISOString(),
+        currentPeriodEnd,
+        cancelAtPeriodEnd,
+        photographerId: creatorId,
+        planCode: readString(metadata.plan_code),
+        planId: readString(metadata.plan_id),
         metadata: {
-          ...latestMetadata,
           ...metadata,
           paystack_reference: reference,
-          verification_source: 'vault.verify.api',
+          verification_source: 'subscriptions.verify.api',
           renewal_mode: manualRenewalMode ? 'manual_renewal' : 'provider_recurring',
         },
       });
     }
 
-    const { data: subscription } = await serviceClient
-      .from('storage_subscriptions')
-      .select('status, plan_id, billing_cycle, current_period_end, payment_provider')
-      .eq('user_id', user.id)
+    const nowIso = new Date().toISOString();
+    const { data: subscriptions } = await serviceClient
+      .from('subscriptions')
+      .select('id, plan_id, plan_code, status, current_period_end, cancel_at_period_end, payment_provider')
+      .eq('photographer_id', creatorId)
+      .in('status', ['active', 'trialing'])
+      .or(`current_period_end.is.null,current_period_end.gte.${nowIso}`)
       .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .order('created_at', { ascending: false })
+      .limit(20);
+    const subscription =
+      subscriptions?.find((row: any) => String(row.plan_code || '').toLowerCase() !== 'free') ||
+      subscriptions?.[0] ||
+      null;
 
     return NextResponse.json({
       success: true,
       subscription: subscription || null,
+      reference: reference || null,
       provider,
     });
   } catch (error: any) {
-    console.error('Vault payment verification error:', error);
+    console.error('Creator subscription verification error:', error);
     return NextResponse.json(
-      { error: error?.message || 'Failed to verify vault payment.' },
+      { error: error?.message || 'Failed to verify creator subscription payment.' },
       { status: 500 }
     );
   }
 }
-

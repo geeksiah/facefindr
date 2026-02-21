@@ -39,6 +39,21 @@ interface CreatorSubscriptionRow {
   created_at: string | null;
 }
 
+function isMissingRelationError(error: unknown, relationName: string): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = String((error as any).code || '');
+  const message = String((error as any).message || '').toLowerCase();
+  const normalizedRelation = relationName.toLowerCase();
+  return (
+    code === '42P01' ||
+    (code === 'PGRST205' &&
+      message.includes('schema cache') &&
+      message.includes('could not find the table')) ||
+    message.includes(`relation "${normalizedRelation}" does not exist`) ||
+    message.includes(normalizedRelation)
+  );
+}
+
 function normalizeBillingCycle(value?: string | null) {
   const normalized = String(value || 'monthly').toLowerCase();
   if (normalized === 'annual' || normalized === 'yearly') {
@@ -170,6 +185,50 @@ async function writeCreatorSubscription(
     .throwOnError();
 }
 
+async function resolveCreatorPlanCodeFromProviderPlanId(
+  input: RecurringSyncInput
+): Promise<{ planCode: string; planId: string | null } | null> {
+  const providerPlanId = String(input.externalPlanId || '').trim();
+  if (!providerPlanId) return null;
+
+  const { data: mapping, error: mappingError } = await input.supabase
+    .from('provider_plan_mappings')
+    .select('internal_plan_code')
+    .eq('product_scope', 'creator_subscription')
+    .eq('provider', input.provider)
+    .eq('provider_plan_id', providerPlanId)
+    .eq('is_active', true)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (mappingError) {
+    if (isMissingRelationError(mappingError, 'provider_plan_mappings')) {
+      return null;
+    }
+    throw mappingError;
+  }
+
+  const planCode = String((mapping as any)?.internal_plan_code || '')
+    .trim()
+    .toLowerCase();
+  if (!planCode || planCode === 'free') return null;
+
+  const { data: planRow } = await input.supabase
+    .from('subscription_plans')
+    .select('id')
+    .eq('code', planCode)
+    .in('plan_type', ['creator', 'photographer'])
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return {
+    planCode,
+    planId: String((planRow as any)?.id || '').trim() || null,
+  };
+}
+
 export async function syncRecurringSubscriptionRecord(input: RecurringSyncInput) {
   const nowIso = new Date().toISOString();
   const status = normalizeStatus(input.scope, input.status);
@@ -288,10 +347,35 @@ export async function syncRecurringSubscriptionRecord(input: RecurringSyncInput)
     return;
   }
 
+  let creatorPlanCode = String(input.planCode || 'free').trim().toLowerCase() || 'free';
+  let creatorPlanId = String(input.planId || '').trim() || null;
+
+  if (creatorPlanCode === 'free' && input.externalPlanId) {
+    const resolvedFromMapping = await resolveCreatorPlanCodeFromProviderPlanId(input);
+    if (resolvedFromMapping?.planCode) {
+      creatorPlanCode = resolvedFromMapping.planCode;
+      if (!creatorPlanId) {
+        creatorPlanId = resolvedFromMapping.planId;
+      }
+    }
+  }
+
+  if (!creatorPlanId && creatorPlanCode !== 'free') {
+    const { data: planByCode } = await input.supabase
+      .from('subscription_plans')
+      .select('id')
+      .eq('code', creatorPlanCode)
+      .in('plan_type', ['creator', 'photographer'])
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    creatorPlanId = String((planByCode as any)?.id || '').trim() || null;
+  }
+
   const payload = {
     ...(input.photographerId ? { photographer_id: input.photographerId } : {}),
-    plan_code: input.planCode || 'free',
-    plan_id: input.planId || null,
+    plan_code: creatorPlanCode,
+    plan_id: creatorPlanId,
     status,
     payment_provider: input.provider,
     external_subscription_id: input.externalSubscriptionId || null,
@@ -307,7 +391,7 @@ export async function syncRecurringSubscriptionRecord(input: RecurringSyncInput)
     last_webhook_event_at: nowIso,
     metadata: {
       ...providerMetadata,
-      plan_id: input.planId || null,
+      plan_id: creatorPlanId,
     },
     ...(input.provider === 'stripe'
       ? {

@@ -42,7 +42,6 @@ export default function VaultPricingPage() {
   const [subscription, setSubscription] = useState<SubscriptionSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [subscribingPlan, setSubscribingPlan] = useState<string | null>(null);
-  const [paymentChannel, setPaymentChannel] = useState<'auto' | 'card' | 'mobile_money'>('auto');
 
   const activePlans = useMemo(
     () =>
@@ -91,7 +90,7 @@ export default function VaultPricingPage() {
       const response = await fetch('/api/vault/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planSlug, billingCycle: 'monthly', paymentChannel }),
+        body: JSON.stringify({ planSlug, billingCycle: 'monthly' }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data?.checkoutUrl) {
@@ -148,24 +147,6 @@ export default function VaultPricingPage() {
         <h1 className="text-2xl font-bold text-foreground">Vault Pricing</h1>
         <p className="mt-1 text-sm text-secondary">
           Upgrade your vault plan. Current: {subscription?.planSlug || 'free'} ({subscription?.billingCycle || 'monthly'})
-        </p>
-      </div>
-
-      <div className="rounded-xl border border-border bg-card p-4">
-        <label className="mb-2 block text-sm font-medium text-foreground">Payment Channel</label>
-        <select
-          value={paymentChannel}
-          onChange={(event) =>
-            setPaymentChannel(event.target.value as 'auto' | 'card' | 'mobile_money')
-          }
-          className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground"
-        >
-          <option value="auto">Auto (recommended)</option>
-          <option value="card">Card</option>
-          <option value="mobile_money">Mobile Money (force manual renewal)</option>
-        </select>
-        <p className="mt-2 text-xs text-muted-foreground">
-          For Paystack vault subscriptions, Mobile Money forces manual renewal.
         </p>
       </div>
 

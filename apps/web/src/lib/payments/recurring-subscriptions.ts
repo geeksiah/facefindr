@@ -56,6 +56,7 @@ export async function resolveProviderPlanMapping(params: {
   billingCycle?: string;
   currency?: string;
   regionCode?: string;
+  allowCurrencyFallback?: boolean;
 }): Promise<ProviderPlanMapping | null> {
   const supabase = createServiceClient();
   const billingCycle = normalizeBillingCycle(params.billingCycle);
@@ -99,6 +100,52 @@ export async function resolveProviderPlanMapping(params: {
         if (data) {
           return data as ProviderPlanMapping;
         }
+      }
+    }
+  }
+
+  if (!params.allowCurrencyFallback) {
+    return null;
+  }
+
+  for (const planCode of planCodeCandidates) {
+    for (const cycleCandidate of billingCycleCandidates) {
+      const { data } = await supabase
+        .from('provider_plan_mappings')
+        .select('*')
+        .eq('product_scope', params.productScope)
+        .eq('internal_plan_code', planCode)
+        .eq('provider', params.provider)
+        .eq('billing_cycle', cycleCandidate)
+        .eq('region_code', regionCode)
+        .eq('is_active', true)
+        .order('currency', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (data) {
+        return data as ProviderPlanMapping;
+      }
+    }
+  }
+
+  for (const planCode of planCodeCandidates) {
+    for (const cycleCandidate of billingCycleCandidates) {
+      const { data } = await supabase
+        .from('provider_plan_mappings')
+        .select('*')
+        .eq('product_scope', params.productScope)
+        .eq('internal_plan_code', planCode)
+        .eq('provider', params.provider)
+        .eq('billing_cycle', cycleCandidate)
+        .eq('region_code', 'GLOBAL')
+        .eq('is_active', true)
+        .order('currency', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (data) {
+        return data as ProviderPlanMapping;
       }
     }
   }

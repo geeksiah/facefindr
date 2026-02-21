@@ -522,6 +522,7 @@ export async function POST(request: NextRequest) {
         billingCycle,
         currency: normalizedCurrency,
         regionCode: gatewaySelection.countryCode,
+        allowCurrencyFallback: true,
       });
       mappingCache.set(cacheKey, resolved);
       return resolved;
@@ -813,8 +814,8 @@ export async function POST(request: NextRequest) {
                 quantity: 1,
               },
             ] as any),
-        success_url: `${appUrl}/dashboard/billing?success=true&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${appUrl}/dashboard/billing?canceled=true`,
+        success_url: `${appUrl}/dashboard/billing?success=true&provider=stripe&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${appUrl}/dashboard/billing?canceled=true&provider=stripe`,
         subscription_data: {
           ...(trialApplied ? { trial_period_days: trialDurationDays } : {}),
           ...(trialCancelAtUnix ? { cancel_at: trialCancelAtUnix } : {}),
