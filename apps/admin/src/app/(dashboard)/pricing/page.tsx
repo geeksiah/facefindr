@@ -1616,9 +1616,21 @@ export default function PricingPage() {
           ? savedPlan.provisioning.warnings
           : [];
         if (provisioningWarnings.length > 0) {
+          const providerIssues = Array.isArray(savedPlan?.provisioning?.providers)
+            ? savedPlan.provisioning.providers
+                .filter(
+                  (provider: any) =>
+                    provider?.configured === false ||
+                    (Array.isArray(provider?.errors) && provider.errors.length > 0)
+                )
+                .map((provider: any) => String(provider?.provider || '').toLowerCase())
+                .filter((name: string) => name.length > 0)
+            : [];
+          const providerSummary =
+            providerIssues.length > 0 ? ` Providers: ${Array.from(new Set(providerIssues)).join(', ')}.` : '';
           toast.warning(
             'Provider Plan Sync Warnings',
-            `Saved, but ${provisioningWarnings.length} provider sync warning(s) occurred.`
+            `Saved, but ${provisioningWarnings.length} provider sync warning(s) occurred.${providerSummary}`
           );
         }
 

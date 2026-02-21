@@ -80,6 +80,23 @@ function asObject(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function asCredentialObject(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
 function asBoolean(value: unknown, fallback = false): boolean {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'number') return value === 1;
@@ -97,6 +114,91 @@ function normalizeCurrency(value: unknown): string | null {
   const code = String(value || '').trim().toUpperCase();
   if (!/^[A-Z]{3}$/.test(code)) return null;
   return code;
+}
+
+function normalizeCredentialKey(value: string): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+type FlattenedCredential = {
+  normalizedPathParts: string[];
+  value: string;
+};
+
+function flattenCredentialStrings(
+  value: unknown,
+  normalizedPathParts: string[] = [],
+  depth = 0,
+  acc: FlattenedCredential[] = []
+): FlattenedCredential[] {
+  if (depth > 4 || value === null || value === undefined) {
+    return acc;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.length > 0) {
+      acc.push({
+        normalizedPathParts,
+        value: trimmed,
+      });
+    }
+    return acc;
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    acc.push({
+      normalizedPathParts,
+      value: String(value),
+    });
+    return acc;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      flattenCredentialStrings(item, normalizedPathParts, depth + 1, acc);
+    }
+    return acc;
+  }
+
+  if (typeof value === 'object') {
+    for (const [rawKey, rawValue] of Object.entries(value as Record<string, unknown>)) {
+      const normalized = normalizeCredentialKey(rawKey);
+      flattenCredentialStrings(rawValue, [...normalizedPathParts, normalized], depth + 1, acc);
+    }
+  }
+
+  return acc;
+}
+
+function findCredentialValue(credentials: unknown, keys: string[]): string | null {
+  const keySet = new Set(
+    keys.map((key) => normalizeCredentialKey(key)).filter((key) => key.length > 0)
+  );
+  if (!keySet.size) return null;
+
+  const flattened = flattenCredentialStrings(asCredentialObject(credentials));
+  for (const entry of flattened) {
+    const parts = entry.normalizedPathParts;
+    const lastIndex = parts.length - 1;
+    const lastPart = lastIndex >= 0 ? parts[lastIndex] : '';
+    if (lastPart && keySet.has(lastPart)) {
+      return entry.value;
+    }
+  }
+
+  for (const entry of flattened) {
+    for (const part of entry.normalizedPathParts) {
+      if (part && keySet.has(part)) {
+        return entry.value;
+      }
+    }
+  }
+
+  return null;
 }
 
 function formatMajorAmount(amountCents: number): string {
@@ -162,6 +264,17 @@ function buildPriceTargets(prices: Record<string, unknown> | null | undefined): 
   return targets;
 }
 
+function orderPriceTargets(targets: PriceTarget[]): PriceTarget[] {
+  const billingWeight = (billingCycle: BillingCycle) => (billingCycle === 'monthly' ? 0 : 1);
+  return [...targets].sort((a, b) => {
+    const aUsd = a.currency === 'USD' ? 0 : 1;
+    const bUsd = b.currency === 'USD' ? 0 : 1;
+    if (aUsd !== bUsd) return aUsd - bUsd;
+    if (a.currency !== b.currency) return a.currency.localeCompare(b.currency);
+    return billingWeight(a.billingCycle) - billingWeight(b.billingCycle);
+  });
+}
+
 function findBestCredentialValue(
   rows: ProviderCredentialRow[],
   provider: Provider,
@@ -174,12 +287,9 @@ function findBestCredentialValue(
   ];
 
   for (const row of preferredRows) {
-    const credentials = asObject(row.credentials);
-    for (const key of keys) {
-      const candidate = credentials[key];
-      if (typeof candidate === 'string' && candidate.trim().length > 0) {
-        return candidate.trim();
-      }
+    const candidate = findCredentialValue(row.credentials, keys);
+    if (candidate) {
+      return candidate;
     }
   }
 
@@ -208,16 +318,36 @@ async function resolveCredentials(): Promise<ProviderCredentials> {
 
   const stripeSecretKey =
     process.env.STRIPE_SECRET_KEY ||
-    findBestCredentialValue(rows, 'stripe', ['secret_key', 'secretKey', 'sk']) ||
+    findBestCredentialValue(rows, 'stripe', [
+      'secret_key',
+      'secretKey',
+      'sk',
+      'private_key',
+      'live_secret_key',
+      'test_secret_key',
+    ]) ||
     null;
 
   const paypalClientId =
     process.env.PAYPAL_CLIENT_ID ||
-    findBestCredentialValue(rows, 'paypal', ['client_id', 'clientId']) ||
+    findBestCredentialValue(rows, 'paypal', [
+      'client_id',
+      'clientId',
+      'paypal_client_id',
+      'live_client_id',
+      'test_client_id',
+    ]) ||
     null;
   const paypalClientSecret =
     process.env.PAYPAL_CLIENT_SECRET ||
-    findBestCredentialValue(rows, 'paypal', ['client_secret', 'clientSecret']) ||
+    findBestCredentialValue(rows, 'paypal', [
+      'client_secret',
+      'clientSecret',
+      'paypal_client_secret',
+      'live_client_secret',
+      'test_client_secret',
+      'secret_key',
+    ]) ||
     null;
   const paypalModeRaw =
     process.env.PAYPAL_MODE ||
@@ -227,12 +357,29 @@ async function resolveCredentials(): Promise<ProviderCredentials> {
 
   const flutterwaveSecretKey =
     process.env.FLUTTERWAVE_SECRET_KEY ||
-    findBestCredentialValue(rows, 'flutterwave', ['secret_key', 'secretKey', 'sk']) ||
+    findBestCredentialValue(rows, 'flutterwave', [
+      'secret_key',
+      'secretKey',
+      'sk',
+      'live_secret_key',
+      'test_secret_key',
+      'private_key',
+      'api_key',
+    ]) ||
     null;
 
   const paystackSecretKey =
     process.env.PAYSTACK_SECRET_KEY ||
-    findBestCredentialValue(rows, 'paystack', ['secret_key', 'secretKey', 'sk']) ||
+    findBestCredentialValue(rows, 'paystack', [
+      'secret_key',
+      'secretKey',
+      'sk',
+      'live_secret_key',
+      'test_secret_key',
+      'private_key',
+      'api_key',
+      'secret',
+    ]) ||
     null;
 
   return {
@@ -622,7 +769,7 @@ export async function provisionCreatorPlanProviderMappings(
     };
   }
 
-  const targets = buildPriceTargets(input.prices);
+  const targets = orderPriceTargets(buildPriceTargets(input.prices));
   if (!targets.length) {
     return {
       ...baseSummary,
@@ -645,23 +792,23 @@ export async function provisionCreatorPlanProviderMappings(
 
   for (const providerSummary of baseSummary.providers) {
     const provider = providerSummary.provider;
-    try {
-      const providerConfigured =
-        (provider === 'stripe' && Boolean(credentials.stripeSecretKey)) ||
-        (provider === 'paypal' &&
-          Boolean(credentials.paypalClientId) &&
-          Boolean(credentials.paypalClientSecret)) ||
-        (provider === 'flutterwave' && Boolean(credentials.flutterwaveSecretKey)) ||
-        (provider === 'paystack' && Boolean(credentials.paystackSecretKey));
+    const providerConfigured =
+      (provider === 'stripe' && Boolean(credentials.stripeSecretKey)) ||
+      (provider === 'paypal' &&
+        Boolean(credentials.paypalClientId) &&
+        Boolean(credentials.paypalClientSecret)) ||
+      (provider === 'flutterwave' && Boolean(credentials.flutterwaveSecretKey)) ||
+      (provider === 'paystack' && Boolean(credentials.paystackSecretKey));
 
-      providerSummary.configured = providerConfigured;
-      if (!providerConfigured) {
-        providerSummary.skipped += targets.length;
-        baseSummary.warnings.push(`${provider}: credentials missing, skipped provider plan provisioning`);
-        continue;
-      }
+    providerSummary.configured = providerConfigured;
+    if (!providerConfigured) {
+      providerSummary.skipped += targets.length;
+      baseSummary.warnings.push(`${provider}: credentials missing, skipped provider plan provisioning`);
+      continue;
+    }
 
-      for (const target of targets) {
+    for (const target of targets) {
+      try {
         const existing = resolveExistingMapping(
           existingMappings,
           provider,
@@ -775,11 +922,16 @@ export async function provisionCreatorPlanProviderMappings(
         } else {
           providerSummary.created += 1;
         }
+      } catch (error: any) {
+        const message = String(error?.message || error || 'Unknown provisioning error');
+        providerSummary.errors.push(
+          `${target.currency}/${target.billingCycle}: ${message}`
+        );
+        providerSummary.skipped += 1;
+        baseSummary.warnings.push(
+          `${provider}/${target.billingCycle}/${target.currency}: ${message}`
+        );
       }
-    } catch (error: any) {
-      const message = String(error?.message || error || 'Unknown provisioning error');
-      providerSummary.errors.push(message);
-      baseSummary.warnings.push(`${provider}: ${message}`);
     }
   }
 
