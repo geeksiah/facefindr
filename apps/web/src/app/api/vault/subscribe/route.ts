@@ -21,6 +21,7 @@ import {
   getApprovalUrl,
 } from '@/lib/payments/paypal';
 import {
+  initializePaystackPayment,
   initializePaystackSubscription,
   resolvePaystackSecretKey,
 } from '@/lib/payments/paystack';
@@ -30,6 +31,15 @@ import { createClient } from '@/lib/supabase/server';
 const stripe = process.env.STRIPE_SECRET_KEY 
   ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' })
   : null;
+
+function getManualPeriodEndIso(billingCycle: 'monthly' | 'annual'): string {
+  const now = Date.now();
+  const durationMs =
+    billingCycle === 'annual'
+      ? 365 * 24 * 60 * 60 * 1000
+      : 30 * 24 * 60 * 60 * 1000;
+  return new Date(now + durationMs).toISOString();
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -168,7 +178,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (!mapping && !(selectedGateway === 'stripe' && stripe)) {
+    if (!mapping && !(selectedGateway === 'stripe' && stripe) && selectedGateway !== 'paystack') {
       return NextResponse.json(
         {
           error: `Recurring mapping missing for available gateways (${configuredGateways.join(', ')}) on ${plan.slug}/${normalizedBillingCycle}/${normalizedCurrency}`,
@@ -334,43 +344,61 @@ export async function POST(request: NextRequest) {
     }
 
     if (selectedGateway === 'paystack') {
-      if (!mapping) {
-        return NextResponse.json(
-          { error: 'Recurring mapping missing for Paystack vault plan', code: 'missing_provider_plan_mapping' },
-          { status: 503 }
-        );
-      }
       const paystackSecretKey = await resolvePaystackSecretKey(gatewaySelection.countryCode);
       if (!paystackSecretKey) {
         return NextResponse.json({ error: 'Paystack is not configured' }, { status: 500 });
       }
 
+      const manualRenewalMode = !mapping;
       const reference = `vault_sub_${user.id}_${Date.now()}`;
-      const payment = await initializePaystackSubscription(
-        {
-          reference,
-          email: user.email || '',
-          amount: priceCents,
-          currency: normalizedCurrency,
-          callbackUrl: `${appUrl}/gallery/vault?subscription=success&provider=paystack&reference=${encodeURIComponent(reference)}`,
-          plan: mapping.provider_plan_id,
-          metadata: {
-            subscription_scope: 'vault_subscription',
-            user_id: user.id,
-            plan_id: plan.id,
-            plan_slug: plan.slug,
-            billing_cycle: normalizedBillingCycle,
-            pricing_currency: normalizedCurrency,
-            pricing_amount_cents: priceCents,
-          },
-        },
-        paystackSecretKey
-      );
+      const manualPeriodEndIso = manualRenewalMode ? getManualPeriodEndIso(normalizedBillingCycle) : null;
+      const metadata = {
+        subscription_scope: 'vault_subscription',
+        user_id: user.id,
+        plan_id: plan.id,
+        plan_slug: plan.slug,
+        billing_cycle: normalizedBillingCycle,
+        pricing_currency: normalizedCurrency,
+        pricing_amount_cents: priceCents,
+        renewal_mode: manualRenewalMode ? 'manual_renewal' : 'provider_recurring',
+        current_period_end: manualPeriodEndIso,
+        auto_renew_preference: manualRenewalMode ? 'false' : 'true',
+        cancel_at_period_end: manualRenewalMode ? 'true' : 'false',
+        region_code: gatewaySelection.countryCode || null,
+      };
+
+      const payment = manualRenewalMode
+        ? await initializePaystackPayment(
+            {
+              reference,
+              email: user.email || '',
+              amount: priceCents,
+              currency: normalizedCurrency,
+              callbackUrl: `${appUrl}/gallery/vault?subscription=success&provider=paystack&reference=${encodeURIComponent(reference)}`,
+              metadata,
+            },
+            paystackSecretKey
+          )
+        : await initializePaystackSubscription(
+            {
+              reference,
+              email: user.email || '',
+              amount: priceCents,
+              currency: normalizedCurrency,
+              callbackUrl: `${appUrl}/gallery/vault?subscription=success&provider=paystack&reference=${encodeURIComponent(reference)}`,
+              plan: mapping!.provider_plan_id,
+              metadata,
+            },
+            paystackSecretKey
+          );
 
       return NextResponse.json({
         checkoutUrl: payment.authorizationUrl,
         sessionId: payment.reference,
         gateway: selectedGateway,
+        renewalMode: manualRenewalMode ? 'manual_renewal' : 'provider_recurring',
+        currentPeriodEnd: manualPeriodEndIso,
+        autoRenewSupported: !manualRenewalMode,
       });
     }
 

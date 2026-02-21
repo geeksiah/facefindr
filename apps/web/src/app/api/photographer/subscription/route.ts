@@ -111,6 +111,12 @@ export async function GET() {
     const resolvedPlan = currentPlan || freePlan || null;
     const resolvedPlanCode = resolvedPlan?.code || subscription?.plan_code || 'free';
     const resolvedPlanId = resolvedPlan?.id || (subscription?.plan_id as string | null) || null;
+    const provider = String(subscription?.payment_provider || '').toLowerCase();
+    const externalSubscriptionId = String(
+      subscription?.external_subscription_id || subscription?.stripe_subscription_id || ''
+    ).trim();
+    const providerAutoRenewSupported =
+      provider === 'stripe' && Boolean(externalSubscriptionId) && Boolean(stripe);
     const resolvedLimits = resolvedPlan?.limits || {
       maxActiveEvents: 1,
       maxPhotosPerEvent: 50,
@@ -191,7 +197,9 @@ export async function GET() {
         subscriptionSettings?.auto_renew === undefined || subscriptionSettings?.auto_renew === null
           ? !(subscription?.cancel_at_period_end === true)
           : Boolean(subscriptionSettings.auto_renew),
-      canToggleAutoRenew: String(resolvedPlanCode || 'free').toLowerCase() !== 'free',
+      canToggleAutoRenew:
+        String(resolvedPlanCode || 'free').toLowerCase() !== 'free' &&
+        providerAutoRenewSupported,
     });
 
   } catch (error) {
@@ -259,14 +267,22 @@ export async function PATCH(request: NextRequest) {
     const externalSubscriptionId =
       String(subscription.external_subscription_id || subscription.stripe_subscription_id || '').trim() || null;
 
-    if (provider === 'stripe' && externalSubscriptionId) {
-      if (!stripe) {
-        return NextResponse.json({ error: 'Stripe is not configured' }, { status: 500 });
-      }
-      await stripe.subscriptions.update(externalSubscriptionId, {
-        cancel_at_period_end: !autoRenew,
-      });
+    if (provider !== 'stripe' || !externalSubscriptionId) {
+      return NextResponse.json(
+        {
+          error:
+            'Auto-renew toggle is only supported for Stripe-managed creator subscriptions.',
+        },
+        { status: 400 }
+      );
     }
+
+    if (!stripe) {
+      return NextResponse.json({ error: 'Stripe is not configured' }, { status: 500 });
+    }
+    await stripe.subscriptions.update(externalSubscriptionId, {
+      cancel_at_period_end: !autoRenew,
+    });
 
     await serviceClient
       .from('subscriptions')
@@ -293,7 +309,7 @@ export async function PATCH(request: NextRequest) {
       autoRenew,
       cancelAtPeriodEnd: !autoRenew,
       paymentProvider: provider,
-      providerSyncApplied: provider === 'stripe' && Boolean(externalSubscriptionId),
+      providerSyncApplied: true,
     });
   } catch (error) {
     console.error('Subscription PATCH error:', error);

@@ -13,7 +13,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 
 import { Button } from '@/components/ui/button';
@@ -35,9 +35,19 @@ interface ToggleSwitchRowProps {
   label: string;
   description: string;
   icon: React.ElementType;
+  disabled?: boolean;
+  disabledMessage?: string;
 }
 
-function ToggleSwitchRow({ enabled, onChange, label, description, icon: Icon }: ToggleSwitchRowProps) {
+function ToggleSwitchRow({
+  enabled,
+  onChange,
+  label,
+  description,
+  icon: Icon,
+  disabled = false,
+  disabledMessage,
+}: ToggleSwitchRowProps) {
   return (
     <div className="flex items-start gap-4">
       <div className={cn(
@@ -55,9 +65,12 @@ function ToggleSwitchRow({ enabled, onChange, label, description, icon: Icon }: 
           <Switch
             checked={enabled}
             onCheckedChange={onChange}
+            disabled={disabled}
           />
         </div>
-        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {disabled && disabledMessage ? disabledMessage : description}
+        </p>
       </div>
     </div>
   );
@@ -71,6 +84,10 @@ export default function CreateEventPage() {
   const toast = useToast();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [featureAccess, setFeatureAccess] = useState({
+    faceRecognition: true,
+    liveEventMode: true,
+  });
 
   const {
     register,
@@ -96,6 +113,31 @@ export default function CreateEventPage() {
   const faceRecognitionEnabled = watch('faceRecognitionEnabled');
   const liveModeEnabled = watch('liveModeEnabled');
   const attendeeAccessEnabled = watch('attendeeAccessEnabled');
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const response = await fetch('/api/creator/subscription', { cache: 'no-store' });
+        if (!response.ok) return;
+        const payload = await response.json().catch(() => ({}));
+        const capabilities = payload?.plan?.capabilities || {};
+        const canUseFaceRecognition = capabilities.faceRecognition !== false;
+        const canUseLiveMode = capabilities.liveEventMode !== false;
+        setFeatureAccess({
+          faceRecognition: canUseFaceRecognition,
+          liveEventMode: canUseLiveMode,
+        });
+        if (!canUseFaceRecognition) {
+          setValue('faceRecognitionEnabled', false);
+        }
+        if (!canUseLiveMode) {
+          setValue('liveModeEnabled', false);
+        }
+      } catch {
+        // Keep optimistic defaults if capability lookup fails.
+      }
+    })();
+  }, [setValue]);
 
   const onSubmit = async (data: CreateEventInput) => {
     setIsLoading(true);
@@ -281,6 +323,8 @@ export default function CreateEventPage() {
               label="Face Recognition"
               description="Enable AI face matching for attendees to find their photos"
               icon={Scan}
+              disabled={!featureAccess.faceRecognition}
+              disabledMessage="Unavailable on your current plan. Upgrade to enable face matching."
             />
 
             <ToggleSwitchRow
@@ -289,6 +333,8 @@ export default function CreateEventPage() {
               label="Live Mode"
               description="Allow real-time photo uploads during the event"
               icon={Radio}
+              disabled={!featureAccess.liveEventMode}
+              disabledMessage="Unavailable on your current plan. Upgrade to enable live mode."
             />
           </div>
         </div>

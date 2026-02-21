@@ -20,12 +20,22 @@ import {
   getApprovalUrl,
 } from '@/lib/payments/paypal';
 import {
+  initializePaystackPayment,
   initializePaystackSubscription,
   resolvePaystackSecretKey,
 } from '@/lib/payments/paystack';
 import { resolveProviderPlanMapping } from '@/lib/payments/recurring-subscriptions';
 import { stripe } from '@/lib/payments/stripe';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
+
+function getManualPeriodEndIso(billingCycle: 'monthly' | 'annual'): string {
+  const now = Date.now();
+  const durationMs =
+    billingCycle === 'annual'
+      ? 365 * 24 * 60 * 60 * 1000
+      : 30 * 24 * 60 * 60 * 1000;
+  return new Date(now + durationMs).toISOString();
+}
 
 // GET - Get current subscription
 export async function GET(request: NextRequest) {
@@ -151,7 +161,7 @@ export async function POST(request: NextRequest) {
       regionCode: gatewaySelection.countryCode,
     });
 
-    if (!mapping) {
+    if (!mapping && selectedGateway !== 'paystack') {
       return NextResponse.json(
         {
           error: `Recurring mapping missing for ${selectedGateway} (${planCode}/${billingCycle}/${normalizedCurrency})`,
@@ -169,7 +179,7 @@ export async function POST(request: NextRequest) {
       }
 
       const lineItems: any[] = [];
-      if (mapping.provider_plan_id?.startsWith('price_')) {
+      if (mapping?.provider_plan_id?.startsWith('price_')) {
         lineItems.push({
           price: mapping.provider_plan_id,
           quantity: 1,
@@ -206,7 +216,7 @@ export async function POST(request: NextRequest) {
             billing_cycle: billingCycle,
             pricing_currency: normalizedCurrency,
             pricing_amount_cents: String(unitAmount),
-            provider_plan_id: mapping.provider_plan_id,
+            provider_plan_id: mapping?.provider_plan_id || 'dynamic',
           },
         },
         metadata: {
@@ -217,7 +227,7 @@ export async function POST(request: NextRequest) {
           billing_cycle: billingCycle,
           pricing_currency: normalizedCurrency,
           pricing_amount_cents: String(unitAmount),
-          provider_plan_id: mapping.provider_plan_id,
+          provider_plan_id: mapping?.provider_plan_id || 'dynamic',
         },
       });
 
@@ -234,6 +244,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (selectedGateway === 'paypal') {
+      if (!mapping) {
+        return NextResponse.json(
+          { error: 'Recurring mapping missing for PayPal attendee plan', code: 'missing_provider_plan_mapping' },
+          { status: 503 }
+        );
+      }
       if (!isPayPalConfigured()) {
         return NextResponse.json({ error: 'PayPal is not configured' }, { status: 500 });
       }
@@ -273,6 +289,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (selectedGateway === 'flutterwave') {
+      if (!mapping) {
+        return NextResponse.json(
+          { error: 'Recurring mapping missing for Flutterwave attendee plan', code: 'missing_provider_plan_mapping' },
+          { status: 503 }
+        );
+      }
       if (!isFlutterwaveConfigured()) {
         return NextResponse.json({ error: 'Flutterwave is not configured' }, { status: 500 });
       }
@@ -313,32 +335,56 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Paystack is not configured' }, { status: 500 });
       }
 
+      const manualRenewalMode = !mapping;
       const reference = `att_sub_${user.id}_${Date.now()}`;
-      const payment = await initializePaystackSubscription(
-        {
-          reference,
-          email: user.email || '',
-          amount: unitAmount,
-          currency: normalizedCurrency,
-          callbackUrl: `${baseUrl}/gallery/billing?subscription=success&provider=paystack&reference=${encodeURIComponent(reference)}`,
-          plan: mapping.provider_plan_id,
-          metadata: {
-            subscription_scope: 'attendee_subscription',
-            attendee_id: user.id,
-            plan_code: planCode,
-            billing_cycle: billingCycle,
-            pricing_currency: normalizedCurrency,
-            pricing_amount_cents: unitAmount,
-          },
-        },
-        paystackSecretKey
-      );
+      const manualPeriodEndIso = manualRenewalMode ? getManualPeriodEndIso(billingCycle) : null;
+      const metadata = {
+        subscription_scope: 'attendee_subscription',
+        attendee_id: user.id,
+        plan_code: planCode,
+        billing_cycle: billingCycle,
+        pricing_currency: normalizedCurrency,
+        pricing_amount_cents: unitAmount,
+        renewal_mode: manualRenewalMode ? 'manual_renewal' : 'provider_recurring',
+        current_period_end: manualPeriodEndIso,
+        auto_renew_preference: manualRenewalMode ? 'false' : 'true',
+        cancel_at_period_end: manualRenewalMode ? 'true' : 'false',
+        region_code: gatewaySelection.countryCode || null,
+      };
+
+      const payment = manualRenewalMode
+        ? await initializePaystackPayment(
+            {
+              reference,
+              email: user.email || '',
+              amount: unitAmount,
+              currency: normalizedCurrency,
+              callbackUrl: `${baseUrl}/gallery/billing?subscription=success&provider=paystack&reference=${encodeURIComponent(reference)}`,
+              metadata,
+            },
+            paystackSecretKey
+          )
+        : await initializePaystackSubscription(
+            {
+              reference,
+              email: user.email || '',
+              amount: unitAmount,
+              currency: normalizedCurrency,
+              callbackUrl: `${baseUrl}/gallery/billing?subscription=success&provider=paystack&reference=${encodeURIComponent(reference)}`,
+              plan: mapping!.provider_plan_id,
+              metadata,
+            },
+            paystackSecretKey
+          );
 
       return NextResponse.json({
         success: true,
         checkoutUrl: payment.authorizationUrl,
         sessionId: payment.reference,
         gateway: selectedGateway,
+        renewalMode: manualRenewalMode ? 'manual_renewal' : 'provider_recurring',
+        currentPeriodEnd: manualPeriodEndIso,
+        autoRenewSupported: !manualRenewalMode,
         gatewaySelection: {
           reason: gatewaySelection.reason,
           availableGateways: gatewaySelection.availableGateways,

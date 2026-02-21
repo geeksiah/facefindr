@@ -102,6 +102,37 @@ export default function MyEventsPage() {
     }
   }, [refreshEvents]);
 
+  const joinByEventIdentifier = useCallback(async (rawIdentifier: string) => {
+    const normalizedIdentifier = rawIdentifier.trim();
+    if (!normalizedIdentifier) return false;
+
+    setIsJoining(true);
+    setJoinError(null);
+
+    try {
+      const response = await fetch('/api/events/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventSlug: normalizedIdentifier }),
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result?.error || 'Failed to join event');
+      }
+
+      await refreshEvents();
+      setAccessCode('');
+      setShowCodeInput(false);
+      return true;
+    } catch (error) {
+      setJoinError(error instanceof Error ? error.message : 'Failed to join event');
+      return false;
+    } finally {
+      setIsJoining(false);
+    }
+  }, [refreshEvents]);
+
   const handleJoinEvent = async () => {
     if (!accessCode.trim()) return;
     await joinByCode(accessCode.trim());
@@ -150,7 +181,11 @@ export default function MyEventsPage() {
 
         const pathParts = parsed.pathname.split('/').filter(Boolean);
         if (pathParts[0] === 'e' && pathParts[1]) {
-          const eventToken = pathParts[1].replace(/[^A-Z0-9]/gi, '').toUpperCase();
+          const eventIdentifier = decodeURIComponent(pathParts[1]).trim();
+          const joinedByIdentifier = await joinByEventIdentifier(eventIdentifier);
+          if (joinedByIdentifier) return;
+
+          const eventToken = eventIdentifier.replace(/[^A-Z0-9]/gi, '').toUpperCase();
           if (/^[A-Z0-9]{6,64}$/.test(eventToken)) {
             const joined = await joinByCode(eventToken);
             if (joined) return;
@@ -172,6 +207,8 @@ export default function MyEventsPage() {
           const host = appUrl.hostname.toLowerCase();
 
           if (host === 'event' && path) {
+            const joinedByIdentifier = await joinByEventIdentifier(path);
+            if (joinedByIdentifier) return;
             const eventToken = path.replace(/[^A-Z0-9]/gi, '').toUpperCase();
             if (/^[A-Z0-9]{6,64}$/.test(eventToken)) {
               const joined = await joinByCode(eventToken);
@@ -197,7 +234,7 @@ export default function MyEventsPage() {
       setShowCodeInput(true);
       setAccessCode(directCode);
     },
-    [joinByCode, stopQrScanner]
+    [joinByCode, joinByEventIdentifier, stopQrScanner]
   );
 
   useEffect(() => {
@@ -239,6 +276,8 @@ export default function MyEventsPage() {
         const BarcodeDetectorCtor = (window as any).BarcodeDetector;
         let nativeDetector: any = null;
         let jsQRModule: any = null;
+        const videoTrack = stream.getVideoTracks()[0] || null;
+        let imageCapture: any = null;
 
         if (BarcodeDetectorCtor) {
           try {
@@ -259,6 +298,14 @@ export default function MyEventsPage() {
           jsQRModule = (await import('jsqr')).default;
         } catch (error) {
           console.warn('jsQR failed to load.', error);
+        }
+
+        if (videoTrack && typeof (window as any).ImageCapture === 'function') {
+          try {
+            imageCapture = new (window as any).ImageCapture(videoTrack);
+          } catch (error) {
+            console.warn('ImageCapture unavailable, continuing with video frame scanning.', error);
+          }
         }
 
         if (!nativeDetector && !jsQRModule) {
@@ -285,7 +332,7 @@ export default function MyEventsPage() {
           const fullFrame = tryDecode(0, 0, width, height);
           if (fullFrame) return fullFrame;
 
-          const cropRatios = [0.8, 0.6, 0.45];
+          const cropRatios = [0.92, 0.8, 0.68, 0.55, 0.42];
           for (const ratio of cropRatios) {
             const cropWidth = Math.floor(width * ratio);
             const cropHeight = Math.floor(height * ratio);
@@ -305,29 +352,39 @@ export default function MyEventsPage() {
           const canvas = canvasRef.current;
           if (!scanInFlightRef.current && video.readyState >= 2) {
             const now = Date.now();
-            if (now - lastScanAtRef.current < 120) {
+            if (now - lastScanAtRef.current < 80) {
               frameRequestRef.current = requestAnimationFrame(scanFrame);
               return;
             }
 
             scanInFlightRef.current = true;
             try {
-              const sourceWidth = video.videoWidth || 1280;
-              const sourceHeight = video.videoHeight || 720;
-              const maxDimension = 960;
+              let frameBitmap: ImageBitmap | null = null;
+              if (imageCapture && typeof imageCapture.grabFrame === 'function') {
+                try {
+                  frameBitmap = await imageCapture.grabFrame();
+                } catch {
+                  frameBitmap = null;
+                }
+              }
+
+              const sourceWidth = frameBitmap?.width || video.videoWidth || 1280;
+              const sourceHeight = frameBitmap?.height || video.videoHeight || 720;
+              const source = frameBitmap || video;
+              const maxDimension = 1600;
               const scale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight));
               canvas.width = Math.max(320, Math.round(sourceWidth * scale));
               canvas.height = Math.max(240, Math.round(sourceHeight * scale));
 
               const context = canvas.getContext('2d', { willReadFrequently: true });
               if (context) {
-                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                context.drawImage(source as CanvasImageSource, 0, 0, canvas.width, canvas.height);
 
                 let qrValue: string | null = null;
 
                 if (nativeDetector) {
                   try {
-                    const barcodes = await nativeDetector.detect(video);
+                    const barcodes = await nativeDetector.detect(source);
                     if (barcodes.length > 0 && barcodes[0]?.rawValue) {
                       qrValue = barcodes[0].rawValue;
                     }
@@ -350,8 +407,15 @@ export default function MyEventsPage() {
 
                 if (qrValue) {
                   await handleQrPayload(qrValue);
+                  if (frameBitmap && typeof frameBitmap.close === 'function') {
+                    frameBitmap.close();
+                  }
                   return;
                 }
+              }
+
+              if (frameBitmap && typeof frameBitmap.close === 'function') {
+                frameBitmap.close();
               }
             } finally {
               lastScanAtRef.current = Date.now();
@@ -388,7 +452,10 @@ export default function MyEventsPage() {
   const qrScannerOverlay =
     showQrScanner && typeof document !== 'undefined'
       ? createPortal(
-          <div className="fixed inset-0 z-[120] bg-black/85">
+          <div
+            className="fixed inset-0 z-[120] bg-black/85"
+            style={{ position: 'fixed', inset: 0, top: 0, left: 0, width: '100vw', height: '100vh', margin: 0 }}
+          >
             <div className="mx-auto flex h-full w-full items-center justify-center p-3 sm:p-4">
               <div className="max-h-full w-full max-w-3xl overflow-hidden rounded-2xl border border-border bg-card">
                 <div className="flex items-center justify-between border-b border-border px-4 py-3">

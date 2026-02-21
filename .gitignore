@@ -90,3 +90,4 @@ supabase/migrations/069_free_creator_plan_guardrails.sql
 .gitignore
 .gitignore
 .gitignore
+supabase/migrations/074_creator_trial_controls.sql

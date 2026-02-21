@@ -272,6 +272,28 @@ export async function updateEvent(eventId: string, formData: UpdateEventInput) {
     return { error: 'Event not found' };
   }
 
+  if (validated.data.faceRecognitionEnabled === true) {
+    const canUseFaceRecognition = await checkFeature(creatorContext.creatorId, 'face_recognition');
+    if (!canUseFaceRecognition) {
+      return {
+        error: 'Face recognition is not available on your current plan. Please upgrade to enable this feature.',
+        code: 'FEATURE_NOT_ENABLED',
+        feature: 'face_recognition',
+      };
+    }
+  }
+
+  if (validated.data.liveModeEnabled === true) {
+    const canUseLiveMode = await checkFeature(creatorContext.creatorId, 'live_event_mode');
+    if (!canUseLiveMode) {
+      return {
+        error: 'Live Event Mode is not available on your current plan. Please upgrade to enable this feature.',
+        code: 'FEATURE_NOT_ENABLED',
+        feature: 'live_event_mode',
+      };
+    }
+  }
+
   const eventDate = normalizeIsoDate(validated.data.eventDate || null);
   const eventTimezone = normalizeEventTimezone(
     validated.data.eventTimezone || 'UTC'
@@ -356,6 +378,21 @@ export async function updateEventStatus(
 
   if (!existingEvent || !creatorContext.ownerIdCandidates.includes(existingEvent.photographer_id)) {
     return { error: 'Event not found' };
+  }
+
+  if (status === 'active' && existingEvent.status !== 'active') {
+    const eventLimit = await checkLimit(creatorContext.creatorId, 'events');
+    if (!eventLimit.allowed) {
+      return {
+        error:
+          eventLimit.message ||
+          `You've reached your event limit (${eventLimit.limit} active events). Please upgrade your plan or archive another event first.`,
+        code: 'LIMIT_EXCEEDED',
+        limitType: 'events',
+        current: eventLimit.current,
+        limit: eventLimit.limit,
+      };
+    }
   }
 
   // Update status

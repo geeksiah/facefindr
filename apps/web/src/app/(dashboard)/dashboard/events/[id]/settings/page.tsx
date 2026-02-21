@@ -81,6 +81,11 @@ export default function EventSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [settings, setSettings] = useState<EventSettings | null>(null);
+  const [featureAccess, setFeatureAccess] = useState({
+    faceRecognition: true,
+    liveEventMode: true,
+    customWatermark: true,
+  });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -108,8 +113,22 @@ export default function EventSettingsPage() {
 
   async function loadSettings() {
     try {
-      const res = await fetch(`/api/events/${eventId}/settings`);
-      const data = await res.json();
+      const [res, subscriptionRes] = await Promise.all([
+        fetch(`/api/events/${eventId}/settings`, { cache: 'no-store' }),
+        fetch('/api/creator/subscription', { cache: 'no-store' }),
+      ]);
+      const data = await res.json().catch(() => ({}));
+      const subscriptionPayload = await subscriptionRes.json().catch(() => ({}));
+      const capabilities = subscriptionPayload?.plan?.capabilities || {};
+      const canUseFaceRecognition = capabilities.faceRecognition !== false;
+      const canUseLiveMode = capabilities.liveEventMode !== false;
+      const canUseCustomWatermark = capabilities.customWatermark !== false;
+      setFeatureAccess({
+        faceRecognition: canUseFaceRecognition,
+        liveEventMode: canUseLiveMode,
+        customWatermark: canUseCustomWatermark,
+      });
+
       if (res.ok) {
         const eventData = data.event;
         // Initialize pricing fields with defaults if not present
@@ -121,6 +140,15 @@ export default function EventSettingsPage() {
           bulk_tiers: eventData.bulk_tiers ?? [],
           currency_code: eventData.currency_code ?? 'USD',
           include_in_public_profile: eventData.include_in_public_profile ?? true,
+          face_recognition_enabled: canUseFaceRecognition
+            ? Boolean(eventData.face_recognition_enabled)
+            : false,
+          live_mode_enabled: canUseLiveMode
+            ? Boolean(eventData.live_mode_enabled)
+            : false,
+          watermark_enabled: canUseCustomWatermark
+            ? Boolean(eventData.watermark_enabled)
+            : false,
         });
       } else {
         setError(data.error || 'Failed to load settings');
@@ -723,7 +751,13 @@ export default function EventSettingsPage() {
             <Switch
               checked={settings.face_recognition_enabled}
               onCheckedChange={(checked) => setSettings({ ...settings, face_recognition_enabled: checked })}
+              disabled={!featureAccess.faceRecognition}
             />
+            {!featureAccess.faceRecognition && (
+              <p className="text-xs text-warning sm:text-right">
+                Not available on current plan
+              </p>
+            )}
           </div>
 
           <div className="flex flex-col gap-3 border-b border-border py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -736,7 +770,13 @@ export default function EventSettingsPage() {
             <Switch
               checked={settings.live_mode_enabled}
               onCheckedChange={(checked) => setSettings({ ...settings, live_mode_enabled: checked })}
+              disabled={!featureAccess.liveEventMode}
             />
+            {!featureAccess.liveEventMode && (
+              <p className="text-xs text-warning sm:text-right">
+                Not available on current plan
+              </p>
+            )}
           </div>
 
           <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -749,7 +789,13 @@ export default function EventSettingsPage() {
             <Switch
               checked={settings.watermark_enabled}
               onCheckedChange={(checked) => setSettings({ ...settings, watermark_enabled: checked })}
+              disabled={!featureAccess.customWatermark}
             />
+            {!featureAccess.customWatermark && (
+              <p className="text-xs text-warning sm:text-right">
+                Not available on current plan
+              </p>
+            )}
           </div>
         </div>
       </div>

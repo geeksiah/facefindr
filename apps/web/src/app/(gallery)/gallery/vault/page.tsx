@@ -15,6 +15,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui';
 import { useToast } from '@/components/ui/toast';
 
 interface VaultPhoto {
@@ -46,6 +47,9 @@ interface VaultSubscription {
   planName?: string;
   planSlug?: string;
   billingCycle?: string;
+  paymentProvider?: string | null;
+  autoRenew?: boolean;
+  canToggleAutoRenew?: boolean;
 }
 
 interface StoragePlan {
@@ -74,6 +78,7 @@ export default function VaultPage() {
   const [activeAlbumFilter, setActiveAlbumFilter] = useState<string>('all');
   const [isLoading, setIsLoading] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
+  const [isUpdatingAutoRenew, setIsUpdatingAutoRenew] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const filteredPhotos = useMemo(() => {
@@ -275,6 +280,41 @@ export default function VaultPage() {
     toast.success('Download started', `${selectedCount} photo(s) download queued.`);
   };
 
+  const handleAutoRenewToggle = async (enabled: boolean) => {
+    if (!subscription?.canToggleAutoRenew || isUpdatingAutoRenew) return;
+    const previous = Boolean(subscription?.autoRenew);
+    setSubscription((prev) => (prev ? { ...prev, autoRenew: enabled } : prev));
+    setIsUpdatingAutoRenew(true);
+    try {
+      const response = await fetch('/api/vault', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'toggle_auto_renew',
+          autoRenew: enabled,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || 'Failed to update auto-renew');
+      }
+      setSubscription((prev) =>
+        prev
+          ? {
+              ...prev,
+              autoRenew: Boolean(payload?.autoRenew),
+            }
+          : prev
+      );
+      toast.success('Auto-renew updated', enabled ? 'Vault auto-renew enabled.' : 'Vault auto-renew disabled.');
+    } catch (error: any) {
+      setSubscription((prev) => (prev ? { ...prev, autoRenew: previous } : prev));
+      toast.error('Auto-renew update failed', error?.message || 'Unable to update auto-renew');
+    } finally {
+      setIsUpdatingAutoRenew(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex min-h-[360px] items-center justify-center">
@@ -330,6 +370,26 @@ export default function VaultPage() {
               className="h-full rounded-full bg-accent transition-all"
               style={{ width: `${Math.max(0, Math.min(100, usage.usagePercent || 0))}%` }}
             />
+          </div>
+        )}
+        {subscription && String(subscription.planSlug || 'free').toLowerCase() !== 'free' && (
+          <div className="mt-4 rounded-lg border border-border/70 bg-muted/30 px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">Auto-renew</p>
+                <p className="text-xs text-secondary">
+                  {subscription.canToggleAutoRenew
+                    ? `Managed by ${String(subscription.paymentProvider || 'stripe').toUpperCase()}`
+                    : 'Not supported for this payment provider'}
+                </p>
+              </div>
+              <Switch
+                checked={Boolean(subscription.autoRenew)}
+                onCheckedChange={handleAutoRenewToggle}
+                disabled={!subscription.canToggleAutoRenew || isUpdatingAutoRenew}
+                aria-label="Toggle vault auto-renew"
+              />
+            </div>
           </div>
         )}
       </div>

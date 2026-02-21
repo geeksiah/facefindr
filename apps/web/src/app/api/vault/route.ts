@@ -10,7 +10,20 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { stripe } from '@/lib/payments/stripe';
 import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
+
+function readMetadataFlag(record: Record<string, unknown>, key: string): boolean | null {
+  const value = record[key];
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+  }
+  return null;
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -85,6 +98,10 @@ export async function GET(request: NextRequest) {
         status,
         billing_cycle,
         current_period_end,
+        payment_provider,
+        external_subscription_id,
+        metadata,
+        cancelled_at,
         storage_plans(name, slug, storage_limit_mb, features)
       `)
       .eq('user_id', user.id)
@@ -121,6 +138,15 @@ export async function GET(request: NextRequest) {
       })
     );
 
+    const subscriptionMetadata =
+      subscription?.metadata && typeof subscription.metadata === 'object'
+        ? (subscription.metadata as Record<string, unknown>)
+        : {};
+    const cancelAtPeriodEnd = readMetadataFlag(subscriptionMetadata, 'cancel_at_period_end');
+    const autoRenewPreference = readMetadataFlag(subscriptionMetadata, 'auto_renew_preference');
+    const resolvedAutoRenew =
+      autoRenewPreference !== null ? autoRenewPreference : !(cancelAtPeriodEnd === true);
+
     return NextResponse.json({
       photos: photosWithUrls,
       totalPhotos: count || 0,
@@ -142,6 +168,12 @@ export async function GET(request: NextRequest) {
         billingCycle: subscription.billing_cycle,
         currentPeriodEnd: subscription.current_period_end,
         features: subscription.storage_plans?.features,
+        paymentProvider: subscription.payment_provider || null,
+        autoRenew: resolvedAutoRenew,
+        canToggleAutoRenew:
+          String(subscription.storage_plans?.slug || 'free').toLowerCase() !== 'free' &&
+          String(subscription.payment_provider || '').toLowerCase() === 'stripe' &&
+          Boolean(subscription.external_subscription_id),
       } : null,
       albums: albums || [],
     });
@@ -417,8 +449,83 @@ export async function PATCH(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const action = String(body?.action || '').trim();
 
-    if (action !== 'assign_album' && action !== 'favorite') {
+    if (action !== 'assign_album' && action !== 'favorite' && action !== 'toggle_auto_renew') {
       return NextResponse.json({ error: 'Unsupported action' }, { status: 400 });
+    }
+
+    if (action === 'toggle_auto_renew') {
+      if (typeof body?.autoRenew !== 'boolean') {
+        return NextResponse.json({ error: 'autoRenew must be boolean' }, { status: 400 });
+      }
+
+      const autoRenew = Boolean(body.autoRenew);
+      const serviceClient = createServiceClient();
+      const { data: subscription } = await serviceClient
+        .from('storage_subscriptions')
+        .select('id, plan_id, payment_provider, external_subscription_id, metadata')
+        .eq('user_id', user.id)
+        .eq('status', 'active')
+        .maybeSingle();
+
+      if (!subscription?.id) {
+        return NextResponse.json({ error: 'No active vault subscription found' }, { status: 404 });
+      }
+
+      const { data: plan } = await serviceClient
+        .from('storage_plans')
+        .select('slug')
+        .eq('id', subscription.plan_id)
+        .maybeSingle();
+      if (String(plan?.slug || 'free').toLowerCase() === 'free') {
+        return NextResponse.json(
+          { error: 'Auto-renew is not available on free vault plan' },
+          { status: 400 }
+        );
+      }
+
+      const provider = String(subscription.payment_provider || '').toLowerCase();
+      const externalSubscriptionId = String(subscription.external_subscription_id || '').trim();
+      if (provider !== 'stripe' || !externalSubscriptionId) {
+        return NextResponse.json(
+          { error: 'Auto-renew toggle is only supported for Stripe-managed vault subscriptions' },
+          { status: 400 }
+        );
+      }
+      if (!stripe) {
+        return NextResponse.json({ error: 'Stripe is not configured' }, { status: 500 });
+      }
+
+      await stripe.subscriptions.update(externalSubscriptionId, {
+        cancel_at_period_end: !autoRenew,
+      });
+
+      const existingMetadata =
+        subscription.metadata && typeof subscription.metadata === 'object'
+          ? (subscription.metadata as Record<string, unknown>)
+          : {};
+      const nextMetadata = {
+        ...existingMetadata,
+        auto_renew_preference: autoRenew,
+        cancel_at_period_end: !autoRenew,
+      };
+
+      const { error: updateError } = await serviceClient
+        .from('storage_subscriptions')
+        .update({
+          metadata: nextMetadata,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', subscription.id);
+
+      if (updateError) {
+        return NextResponse.json({ error: 'Failed to update vault subscription' }, { status: 500 });
+      }
+
+      return NextResponse.json({
+        success: true,
+        autoRenew,
+        cancelAtPeriodEnd: !autoRenew,
+      });
     }
 
     if (action === 'favorite') {

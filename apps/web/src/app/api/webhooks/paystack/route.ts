@@ -380,6 +380,9 @@ async function syncRecurringFromPaystackPayload(
   const metadata = parseMetadataRecord(rawMetadata);
   const scope = normalizeScope(metadata.subscription_scope);
   if (!scope) return;
+  const renewalMode = readString(metadata.renewal_mode) || 'provider_recurring';
+  const manualRenewalMode =
+    renewalMode === 'manual_renewal' || metadata.manual_renewal === true;
 
   const providerStatus = statusOverride || readString(data.status) || eventType;
   const mappedStatus = mapProviderSubscriptionStatusToLocal(providerStatus, scope) || 'past_due';
@@ -388,11 +391,22 @@ async function syncRecurringFromPaystackPayload(
     (readNumber(data.amount) !== null ? Math.round(Number(data.amount)) : null);
   const isCancelled = mappedStatus === 'canceled' || mappedStatus === 'cancelled';
   const externalSubscriptionId =
-    readString(data.subscription_code) ||
-    readString(metadata.subscription_id) ||
-    readString(metadata.external_subscription_id) ||
-    readString(data.reference) ||
-    (data.id ? String(data.id) : null);
+    manualRenewalMode
+      ? null
+      : readString(data.subscription_code) ||
+        readString(metadata.subscription_id) ||
+        readString(metadata.external_subscription_id) ||
+        readString(data.reference) ||
+        (data.id ? String(data.id) : null);
+  const cancelAtPeriodEnd =
+    manualRenewalMode ||
+    isCancelled ||
+    readString(metadata.cancel_at_period_end) === 'true' ||
+    metadata.cancel_at_period_end === true;
+  const autoRenewPreference =
+    manualRenewalMode
+      ? false
+      : !cancelAtPeriodEnd;
 
   await syncRecurringSubscriptionRecord({
     supabase,
@@ -417,7 +431,7 @@ async function syncRecurringFromPaystackPayload(
     amountCents: derivedAmountCents,
     currentPeriodStart: readString(data.created_at),
     currentPeriodEnd: readString(data.next_payment_date) || readString(metadata.current_period_end),
-    cancelAtPeriodEnd: isCancelled,
+    cancelAtPeriodEnd,
     canceledAt: isCancelled ? new Date().toISOString() : null,
     photographerId: readString(metadata.photographer_id),
     attendeeId: readString(metadata.attendee_id),
@@ -427,6 +441,9 @@ async function syncRecurringFromPaystackPayload(
     planSlug: readString(metadata.plan_slug) || readString(data.plan?.name),
     metadata: {
       ...metadata,
+      renewal_mode: manualRenewalMode ? 'manual_renewal' : 'provider_recurring',
+      auto_renew_preference: autoRenewPreference,
+      cancel_at_period_end: cancelAtPeriodEnd,
       paystack_reference: data.reference || null,
     },
   });

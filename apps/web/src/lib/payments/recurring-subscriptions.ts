@@ -41,6 +41,13 @@ function normalizeBillingCycle(cycle?: string): BillingCycle {
   return 'monthly';
 }
 
+function getBillingCycleCandidates(cycle: BillingCycle): BillingCycle[] {
+  if (cycle === 'annual' || cycle === 'yearly') {
+    return ['annual', 'yearly'];
+  }
+  return ['monthly'];
+}
+
 export async function resolveProviderPlanMapping(params: {
   productScope: RecurringProductScope;
   internalPlanCode: string;
@@ -52,6 +59,7 @@ export async function resolveProviderPlanMapping(params: {
 }): Promise<ProviderPlanMapping | null> {
   const supabase = createServiceClient();
   const billingCycle = normalizeBillingCycle(params.billingCycle);
+  const billingCycleCandidates = getBillingCycleCandidates(billingCycle);
   const currency = normalizeCurrency(params.currency);
   const regionCode = normalizeRegion(params.regionCode);
   const planCodeCandidates = Array.from(
@@ -73,22 +81,24 @@ export async function resolveProviderPlanMapping(params: {
   ];
 
   for (const planCode of planCodeCandidates) {
-    for (const candidate of candidates) {
-      const { data } = await supabase
-        .from('provider_plan_mappings')
-        .select('*')
-        .eq('product_scope', params.productScope)
-        .eq('internal_plan_code', planCode)
-        .eq('provider', params.provider)
-        .eq('billing_cycle', billingCycle)
-        .eq('currency', candidate.currency)
-        .eq('region_code', candidate.region)
-        .eq('is_active', true)
-        .limit(1)
-        .maybeSingle();
+    for (const cycleCandidate of billingCycleCandidates) {
+      for (const candidate of candidates) {
+        const { data } = await supabase
+          .from('provider_plan_mappings')
+          .select('*')
+          .eq('product_scope', params.productScope)
+          .eq('internal_plan_code', planCode)
+          .eq('provider', params.provider)
+          .eq('billing_cycle', cycleCandidate)
+          .eq('currency', candidate.currency)
+          .eq('region_code', candidate.region)
+          .eq('is_active', true)
+          .limit(1)
+          .maybeSingle();
 
-      if (data) {
-        return data as ProviderPlanMapping;
+        if (data) {
+          return data as ProviderPlanMapping;
+        }
       }
     }
   }

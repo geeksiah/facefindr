@@ -12,10 +12,11 @@ import {
   Shield,
   ChevronRight,
   AlertTriangle,
+  Loader2,
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -43,6 +44,9 @@ export default function ProfilePage() {
   const [displayName, setDisplayName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -109,6 +113,36 @@ export default function ProfilePage() {
     }
   };
 
+  const handleProfilePhotoUpload = async (file: File | null) => {
+    if (!file) return;
+    setPhotoError(null);
+    setIsUploadingPhoto(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await fetch('/api/user/profile-photo', {
+        method: 'POST',
+        body: formData,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.photoUrl) {
+        throw new Error(payload?.error || 'Failed to upload profile photo');
+      }
+      setProfile((prev) =>
+        prev
+          ? {
+              ...prev,
+              profilePhotoUrl: payload.photoUrl,
+            }
+          : prev
+      );
+    } catch (error: any) {
+      setPhotoError(error?.message || 'Failed to upload profile photo');
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
@@ -155,9 +189,25 @@ export default function ProfilePage() {
                   {profile.displayName.charAt(0).toUpperCase()}
                 </div>
               )}
-              <button className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full bg-card border border-border text-secondary hover:text-foreground transition-colors">
-                <Camera className="h-4 w-4" />
+              <button
+                className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full bg-card border border-border text-secondary hover:text-foreground transition-colors disabled:opacity-60"
+                onClick={() => photoInputRef.current?.click()}
+                disabled={isUploadingPhoto}
+                title="Upload profile photo"
+              >
+                {isUploadingPhoto ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
               </button>
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  void handleProfilePhotoUpload(file);
+                  e.currentTarget.value = '';
+                }}
+              />
             </div>
           </div>
         </div>
@@ -200,6 +250,7 @@ export default function ProfilePage() {
               </div>
             )}
             <p className="text-sm text-secondary mt-1">{profile.email}</p>
+            {photoError && <p className="text-xs text-destructive mt-2">{photoError}</p>}
           </div>
 
           {/* FaceTag */}

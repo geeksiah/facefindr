@@ -23,6 +23,7 @@ import {
   getApprovalUrl,
 } from '@/lib/payments/paypal';
 import {
+  initializePaystackPayment,
   initializePaystackSubscription,
   resolvePaystackSecretKey,
 } from '@/lib/payments/paystack';
@@ -37,6 +38,8 @@ import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 const IDEMPOTENCY_DEPRECATION_WARNING =
   '299 - "idempotencyKey in request body is deprecated; send Idempotency-Key header instead."';
+const PAYSTACK_MANUAL_RENEWAL_FALLBACK_ENABLED =
+  process.env.ENABLE_PAYSTACK_MANUAL_RENEWAL_FALLBACK !== 'false';
 
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') {
@@ -101,6 +104,24 @@ function isTrialCompatibleMapping(params: {
   return true;
 }
 
+function isMissingRelationError(error: unknown, relationName?: string): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = String((error as any).code || '');
+  const message = String((error as any).message || '').toLowerCase();
+  if (code !== '42P01') return false;
+  if (!relationName) return true;
+  return message.includes(relationName.toLowerCase());
+}
+
+function getManualPeriodEndIso(billingCycle: 'monthly' | 'annual'): string {
+  const now = Date.now();
+  const durationMs =
+    billingCycle === 'annual'
+      ? 365 * 24 * 60 * 60 * 1000
+      : 30 * 24 * 60 * 60 * 1000;
+  return new Date(now + durationMs).toISOString();
+}
+
 export async function POST(request: NextRequest) {
   let idempotencyFinalizeRef:
     | ((
@@ -134,7 +155,13 @@ export async function POST(request: NextRequest) {
     const creatorId = creatorProfile.id as string;
     const normalizedEmail = String(user.email || '').trim().toLowerCase();
 
-    const body = await request.json();
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json(
+        { error: 'Invalid JSON payload' },
+        { status: 400 }
+      );
+    }
     const {
       planCode,
       billingCycle = 'monthly',
@@ -241,6 +268,19 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (claimError) {
+      if (isMissingRelationError(claimError, 'api_idempotency_keys')) {
+        return NextResponse.json(
+          {
+            error:
+              'Idempotency storage is not available. Run latest billing migrations before retrying checkout.',
+            code: 'idempotency_table_missing',
+            failClosed: true,
+            idempotencyKey,
+            replayed: false,
+          },
+          { status: 503, headers: responseHeaders }
+        );
+      }
       if (claimError.code !== '23505') {
         throw claimError;
       }
@@ -335,11 +375,26 @@ export async function POST(request: NextRequest) {
           'failed'
         );
       }
-      const { data: existingTrialByEmail } = await serviceClient
+      const { data: existingTrialByEmail, error: existingTrialLookupError } = await serviceClient
         .from('subscription_trial_redemptions')
         .select('id')
         .eq('email_normalized', normalizedEmail)
         .maybeSingle();
+      if (
+        existingTrialLookupError &&
+        isMissingRelationError(existingTrialLookupError, 'subscription_trial_redemptions')
+      ) {
+        return respond(
+          {
+            error:
+              'Trial controls are enabled but trial storage is missing. Apply latest migrations and retry.',
+            code: 'trial_table_missing',
+            failClosed: true,
+          },
+          503,
+          'failed'
+        );
+      }
       trialAlreadyRedeemed = Boolean(existingTrialByEmail?.id);
     }
 
@@ -400,7 +455,11 @@ export async function POST(request: NextRequest) {
     const isGatewayUsable = (candidateGateway: 'stripe' | 'paypal' | 'flutterwave' | 'paystack', candidateMapping: any) => {
       if (!trialRequested) {
         if (candidateGateway === 'stripe') {
-          return Boolean(stripe) || Boolean(candidateMapping);
+          return Boolean(stripe);
+        }
+        if (candidateGateway === 'paystack') {
+          if (candidateMapping) return true;
+          return PAYSTACK_MANUAL_RENEWAL_FALLBACK_ENABLED;
         }
         return Boolean(candidateMapping);
       }
@@ -501,6 +560,17 @@ export async function POST(request: NextRequest) {
         if (trialInsertError.code === '23505') {
           trialAlreadyRedeemed = true;
           trialApplied = false;
+        } else if (isMissingRelationError(trialInsertError, 'subscription_trial_redemptions')) {
+          return respond(
+            {
+              error:
+                'Trial controls are enabled but trial storage is missing. Apply latest migrations and retry.',
+              code: 'trial_table_missing',
+              failClosed: true,
+            },
+            503,
+            'failed'
+          );
         } else {
           throw trialInsertError;
         }
@@ -808,54 +878,82 @@ export async function POST(request: NextRequest) {
     }
 
     if (selectedGateway === 'paystack') {
-      if (!mapping) {
-        return respond(
-          { error: 'Recurring mapping missing for Paystack plan', code: 'missing_provider_plan_mapping' },
-          503,
-          'failed'
-        );
-      }
       const paystackSecretKey = await resolvePaystackSecretKey(gatewaySelection.countryCode);
       if (!paystackSecretKey) {
         return respond({ error: 'Paystack is not configured' }, 500, 'failed');
       }
 
-      const reference = `sub_${creatorId}_${Date.now()}`;
-      const payment = await initializePaystackSubscription(
-        {
-          reference,
-          email: user.email || '',
-          amount: Math.round(checkoutAmountInCents),
-          currency: checkoutCurrency,
-          callbackUrl: `${appUrl}/dashboard/billing?success=true&provider=paystack&reference=${encodeURIComponent(reference)}`,
-          plan: mapping.provider_plan_id,
-          metadata: {
-            subscription_scope: 'creator_subscription',
-            photographer_id: creatorId,
-            plan_code: plan.code,
-            plan_id: plan.id,
-            billing_cycle: billingCycle,
-            pricing_currency: checkoutCurrency,
-            pricing_amount_cents: Math.round(checkoutAmountInCents),
-            auto_renew_preference: autoRenewPreference ? 'true' : 'false',
-            trial_applied: trialApplied ? 'true' : 'false',
-            ...(trialApplied
-              ? {
-                  trial_duration_days: String(trialDurationDays),
-                  trial_feature_policy: trialFeaturePolicy,
-                  trial_auto_bill_enabled: trialAutoBillEnabled ? 'true' : 'false',
-                }
-              : {}),
+      const manualRenewalMode = !mapping;
+      if (manualRenewalMode && trialApplied) {
+        return respond(
+          {
+            error: 'Trial checkout requires provider-recurring mapping for Paystack.',
+            code: 'trial_gateway_unsupported',
+            failClosed: true,
           },
-        },
-        paystackSecretKey
-      );
+          503,
+          'failed'
+        );
+      }
+
+      const reference = `sub_${creatorId}_${Date.now()}`;
+      const manualPeriodEndIso = manualRenewalMode ? getManualPeriodEndIso(billingCycle) : null;
+      const paystackMetadata = {
+        subscription_scope: 'creator_subscription',
+        photographer_id: creatorId,
+        plan_code: plan.code,
+        plan_id: plan.id,
+        billing_cycle: billingCycle,
+        pricing_currency: checkoutCurrency,
+        pricing_amount_cents: Math.round(checkoutAmountInCents),
+        auto_renew_preference: manualRenewalMode ? 'false' : autoRenewPreference ? 'true' : 'false',
+        renewal_mode: manualRenewalMode ? 'manual_renewal' : 'provider_recurring',
+        cancel_at_period_end: manualRenewalMode ? 'true' : !autoRenewPreference ? 'true' : 'false',
+        region_code: gatewaySelection.countryCode || null,
+        trial_applied: trialApplied ? 'true' : 'false',
+        current_period_end: manualPeriodEndIso,
+        ...(trialApplied
+          ? {
+              trial_duration_days: String(trialDurationDays),
+              trial_feature_policy: trialFeaturePolicy,
+              trial_auto_bill_enabled: trialAutoBillEnabled ? 'true' : 'false',
+            }
+          : {}),
+      };
+
+      const payment = manualRenewalMode
+        ? await initializePaystackPayment(
+            {
+              reference,
+              email: user.email || '',
+              amount: Math.round(checkoutAmountInCents),
+              currency: checkoutCurrency,
+              callbackUrl: `${appUrl}/dashboard/billing?success=true&provider=paystack&reference=${encodeURIComponent(reference)}`,
+              metadata: paystackMetadata,
+            },
+            paystackSecretKey
+          )
+        : await initializePaystackSubscription(
+            {
+              reference,
+              email: user.email || '',
+              amount: Math.round(checkoutAmountInCents),
+              currency: checkoutCurrency,
+              callbackUrl: `${appUrl}/dashboard/billing?success=true&provider=paystack&reference=${encodeURIComponent(reference)}`,
+              plan: mapping!.provider_plan_id,
+              metadata: paystackMetadata,
+            },
+            paystackSecretKey
+          );
       trialCheckoutSessionCreated = true;
 
       return respond({
         checkoutUrl: payment.authorizationUrl,
         sessionId: payment.reference,
         gateway: selectedGateway,
+        renewalMode: manualRenewalMode ? 'manual_renewal' : 'provider_recurring',
+        currentPeriodEnd: manualPeriodEndIso,
+        autoRenewSupported: !manualRenewalMode,
         trialApplied,
         trialAlreadyRedeemed,
         trialDurationDays: trialApplied ? trialDurationDays : 0,

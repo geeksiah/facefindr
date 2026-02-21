@@ -473,6 +473,16 @@ export async function PUT(
       }
     }
 
+    if (canEditEvent && body.watermark_enabled === true && event.photographer_id) {
+      const canUseCustomWatermark = await checkFeature(event.photographer_id, 'custom_watermark');
+      if (!canUseCustomWatermark) {
+        return NextResponse.json(
+          { error: 'Custom watermark is not available on this plan. Please upgrade first.' },
+          { status: 403 }
+        );
+      }
+    }
+
     const requestedEventUpdateKeys = Object.keys(updates);
     const runEventUpdate = (payload: Record<string, any>) =>
       serviceClient

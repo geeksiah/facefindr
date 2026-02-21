@@ -137,6 +137,53 @@ async function findEventByShareLinkToken(serviceClient: any, accessCode: string)
   return null;
 }
 
+async function findEventByIdentifier(
+  serviceClient: any,
+  identifier: string
+): Promise<EventSummary | null> {
+  const token = String(identifier || '').trim();
+  if (!token) return null;
+
+  const byId = await serviceClient
+    .from('events')
+    .select('id, name, status, attendee_access_enabled')
+    .eq('id', token)
+    .eq('status', 'active')
+    .maybeSingle();
+  if (isActiveEvent(byId.data) && hasAttendeeAccess(byId.data)) {
+    return byId.data as EventSummary;
+  }
+
+  const variants = buildCodeVariants(token);
+  const bySlug = await serviceClient
+    .from('events')
+    .select('id, name, status, attendee_access_enabled')
+    .in('public_slug', variants)
+    .eq('status', 'active')
+    .limit(1)
+    .maybeSingle();
+  if (isActiveEvent(bySlug.data) && hasAttendeeAccess(bySlug.data)) {
+    return bySlug.data as EventSummary;
+  }
+
+  try {
+    const byShortLink = await serviceClient
+      .from('events')
+      .select('id, name, status, attendee_access_enabled')
+      .in('short_link', variants)
+      .eq('status', 'active')
+      .limit(1)
+      .maybeSingle();
+    if (isActiveEvent(byShortLink.data) && hasAttendeeAccess(byShortLink.data)) {
+      return byShortLink.data as EventSummary;
+    }
+  } catch {
+    // Legacy environments may not have short_link column.
+  }
+
+  return null;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const supabase = createClient();
@@ -147,18 +194,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { accessCode: rawAccessCode } = await request.json();
+    const body = await request.json().catch(() => ({}));
+    const rawAccessCode = body?.accessCode;
+    const rawEventSlug = body?.eventSlug;
+    const rawEventId = body?.eventId;
     const accessCode = typeof rawAccessCode === 'string' ? rawAccessCode.trim() : '';
+    const eventSlug = typeof rawEventSlug === 'string' ? rawEventSlug.trim() : '';
+    const eventId = typeof rawEventId === 'string' ? rawEventId.trim() : '';
 
-    if (!accessCode) {
-      return NextResponse.json({ error: 'Access code is required' }, { status: 400 });
+    if (!accessCode && !eventSlug && !eventId) {
+      return NextResponse.json(
+        { error: 'Access code or event identifier is required' },
+        { status: 400 }
+      );
     }
 
-    // Resolve against supported code sources (token links, event access code, share links).
-    let event =
-      (await findEventByAccessToken(serviceClient, accessCode)) ||
-      (await findEventByPublicAccessCode(serviceClient, accessCode)) ||
-      (await findEventByShareLinkToken(serviceClient, accessCode));
+    let event: EventSummary | null = null;
+    if (accessCode) {
+      // Resolve against supported code sources (token links, event access code, share links).
+      event =
+        (await findEventByAccessToken(serviceClient, accessCode)) ||
+        (await findEventByPublicAccessCode(serviceClient, accessCode)) ||
+        (await findEventByShareLinkToken(serviceClient, accessCode));
+    } else {
+      event = await findEventByIdentifier(serviceClient, eventSlug || eventId);
+    }
 
     if (!event) {
       return NextResponse.json({ error: 'Invalid access code' }, { status: 404 });

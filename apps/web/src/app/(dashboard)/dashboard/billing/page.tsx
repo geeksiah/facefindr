@@ -105,6 +105,7 @@ export default function BillingPage() {
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
   const [autoRenew, setAutoRenew] = useState(true);
+  const [providerAutoRenewSupported, setProviderAutoRenewSupported] = useState(false);
   const lastSubscriptionVersionRef = useRef(0);
   const loadInFlightRef = useRef(false);
   const loadQueuedRef = useRef(false);
@@ -234,6 +235,7 @@ export default function BillingPage() {
                   ? data.autoRenew
                   : !(data?.subscription?.cancelAtPeriodEnd === true);
               setAutoRenew(Boolean(resolvedAutoRenew));
+              setProviderAutoRenewSupported(Boolean(data?.canToggleAutoRenew));
             }
           }
 
@@ -428,7 +430,8 @@ export default function BillingPage() {
   }
   const stableCurrentPlanCode = resolvedCurrentPlanRef.current.planCode || currentPlanCode;
   const stableCurrentPlanId = resolvedCurrentPlanRef.current.planId || currentPlanId;
-  const canToggleAutoRenew = stableCurrentPlanCode !== 'free';
+  const canToggleAutoRenew =
+    stableCurrentPlanCode !== 'free' && providerAutoRenewSupported;
   const cancelAtPeriodEnd = subscription?.cancelAtPeriodEnd === true || !autoRenew;
   const currentPlanData =
     plans.find((plan) => (stableCurrentPlanId ? plan.planId === stableCurrentPlanId : false)) ||
@@ -624,7 +627,7 @@ export default function BillingPage() {
                 ? cancelAtPeriodEnd
                   ? 'Auto-renew is off. Your current plan stays active until the period ends.'
                   : 'Auto-renew is on. Your plan will renew automatically each billing cycle.'
-                : 'Auto-renew is not applicable while you are on the free plan.'}
+                : 'Auto-renew is unavailable for this subscription provider.'}
             </p>
             {subscription?.currentPeriodEnd && (
               <p className="mt-1 text-xs text-muted-foreground">

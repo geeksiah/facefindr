@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getPhotographerIdCandidates } from '@/lib/profiles/ids';
+import { checkFeature } from '@/lib/subscription/enforcement';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // ============================================
@@ -105,6 +106,16 @@ export async function POST(
       return NextResponse.json({ 
         error: 'Live mode can only be enabled for active events' 
       }, { status: 400 });
+    }
+
+    if (enabled) {
+      const canUseLiveMode = await checkFeature(event.photographer_id, 'live_event_mode');
+      if (!canUseLiveMode) {
+        return NextResponse.json(
+          { error: 'Live mode is not available on your current plan. Please upgrade first.' },
+          { status: 403 }
+        );
+      }
     }
 
     // Update live mode
