@@ -12,6 +12,15 @@ function normalizePlanTypeInput(planType: unknown): 'creator' | 'payg' | null {
   return null;
 }
 
+function isPlanTypeEnumError(error: any): boolean {
+  const message = String(error?.message || '').toLowerCase();
+  return error?.code === '22P02' && message.includes('plan_type');
+}
+
+function toLegacyPlanType(planType: 'creator' | 'payg'): 'photographer' | 'payg' {
+  return planType === 'creator' ? 'photographer' : 'payg';
+}
+
 // PUT - Update a plan
 export async function PUT(
   request: NextRequest,
@@ -46,15 +55,33 @@ export async function PUT(
 
     // Check if code is taken by another plan of the same type
     if (code && normalizedPlanType) {
-      const { data: existing } = await supabaseAdmin
+      let duplicateCheck = await supabaseAdmin
         .from('subscription_plans')
         .select('id')
         .eq('code', code)
         .eq('plan_type', normalizedPlanType)
         .neq('id', id)
-        .single();
+        .maybeSingle();
 
-      if (existing) {
+      if (
+        duplicateCheck.error &&
+        isPlanTypeEnumError(duplicateCheck.error) &&
+        normalizedPlanType === 'creator'
+      ) {
+        duplicateCheck = await supabaseAdmin
+          .from('subscription_plans')
+          .select('id')
+          .eq('code', code)
+          .eq('plan_type', toLegacyPlanType(normalizedPlanType))
+          .neq('id', id)
+          .maybeSingle();
+      }
+
+      if (duplicateCheck.error) {
+        throw duplicateCheck.error;
+      }
+
+      if (duplicateCheck.data) {
         return NextResponse.json({ error: 'Plan code already exists for this plan type' }, { status: 400 });
       }
     }
@@ -82,19 +109,37 @@ export async function PUT(
       updateData.plan_type = normalizedPlanType;
     }
 
-    const { data, error } = await supabaseAdmin
+    let { data, error } = await supabaseAdmin
       .from('subscription_plans')
       .update(updateData)
       .eq('id', id)
       .select()
       .single();
 
+    if (error && isPlanTypeEnumError(error) && normalizedPlanType === 'creator') {
+      const retry = await supabaseAdmin
+        .from('subscription_plans')
+        .update({
+          ...updateData,
+          plan_type: toLegacyPlanType(normalizedPlanType),
+        })
+        .eq('id', id)
+        .select()
+        .single();
+      data = retry.data as any;
+      error = retry.error as any;
+    }
+
     if (error) throw error;
 
     await logAction('plan_update', 'subscription_plan', id, { name, code });
     await bumpRuntimeConfigVersion('plans', session.adminId);
 
-    return NextResponse.json({ success: true, plan: data });
+    const normalizedData = {
+      ...data,
+      plan_type: data?.plan_type === 'photographer' ? 'creator' : data?.plan_type,
+    };
+    return NextResponse.json({ success: true, plan: normalizedData });
   } catch (error) {
     console.error('Update plan error:', error);
     return NextResponse.json({ error: 'Failed to update plan' }, { status: 500 });

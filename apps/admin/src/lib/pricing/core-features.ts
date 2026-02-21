@@ -10,6 +10,15 @@ type PlanFeatureInsert = {
   is_active: boolean;
 };
 
+function isPlanTypeEnumError(error: any): boolean {
+  const message = String(error?.message || '').toLowerCase();
+  return error?.code === '22P02' && message.includes('plan_type');
+}
+
+function toLegacyApplicableTo(values: string[] | undefined): string[] {
+  return (values || []).map((value) => (value === 'creator' ? 'photographer' : value));
+}
+
 const CORE_CREATOR_FEATURES: PlanFeatureInsert[] = [
   {
     code: 'max_active_events',
@@ -142,7 +151,18 @@ export async function ensureCoreCreatorPlanFeatures(supabase: any): Promise<void
     );
     const missing = CORE_CREATOR_FEATURES.filter((feature) => !existingByCode.has(feature.code));
     if (missing.length) {
-      const { error: insertError } = await supabase.from('plan_features').insert(missing);
+      let { error: insertError } = await supabase.from('plan_features').insert(missing);
+      if (insertError && isPlanTypeEnumError(insertError)) {
+        const retry = await supabase
+          .from('plan_features')
+          .insert(
+            missing.map((feature) => ({
+              ...feature,
+              applicable_to: toLegacyApplicableTo(feature.applicable_to),
+            }))
+          );
+        insertError = retry.error;
+      }
       if (insertError) {
         console.error('Failed to seed core creator plan features:', insertError);
       }
@@ -150,12 +170,22 @@ export async function ensureCoreCreatorPlanFeatures(supabase: any): Promise<void
 
     for (const row of existingRows || []) {
       const applicableTo = Array.isArray(row.applicable_to) ? row.applicable_to : [];
-      if (applicableTo.includes('creator')) continue;
+      if (applicableTo.includes('creator') || applicableTo.includes('photographer')) continue;
+
       const merged = Array.from(new Set([...applicableTo, 'creator']));
-      const { error: updateError } = await supabase
+      let { error: updateError } = await supabase
         .from('plan_features')
         .update({ applicable_to: merged, is_active: true })
         .eq('id', row.id);
+
+      if (updateError && isPlanTypeEnumError(updateError)) {
+        const retry = await supabase
+          .from('plan_features')
+          .update({ applicable_to: toLegacyApplicableTo(merged), is_active: true })
+          .eq('id', row.id);
+        updateError = retry.error;
+      }
+
       if (updateError) {
         console.error(`Failed to normalize feature applicability for ${row.code}:`, updateError);
       }

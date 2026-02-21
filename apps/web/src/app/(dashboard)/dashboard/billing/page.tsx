@@ -192,19 +192,20 @@ export default function BillingPage() {
   
   // Use real usage data from the enforcement system
   const usage = usageData?.usage || { activeEvents: 0, totalPhotos: 0, storageUsedGb: 0, teamMembers: 1, faceOpsUsed: 0 };
-  const limitsRaw: any = usageData?.limits || currentPlanData?.features || {
-    maxActiveEvents: 3,
-    maxPhotosPerEvent: 100,
-    storageGb: 5,
+  // Keep current-plan meters aligned with the same plan source used by cards.
+  const limitsRaw: any = currentPlanData?.features || usageData?.limits || {
+    maxActiveEvents: 1,
+    maxPhotosPerEvent: 50,
+    storageGb: 1,
     teamMembers: 1,
-    maxFaceOpsPerEvent: 500,
+    maxFaceOpsPerEvent: 0,
   };
   const limits = {
-    maxActiveEvents: limitsRaw.maxActiveEvents ?? limitsRaw.maxEvents ?? 3,
-    maxPhotosPerEvent: limitsRaw.maxPhotosPerEvent ?? 100,
-    maxStorageGb: limitsRaw.maxStorageGb ?? limitsRaw.storageGb ?? 5,
+    maxActiveEvents: limitsRaw.maxActiveEvents ?? limitsRaw.maxEvents ?? 1,
+    maxPhotosPerEvent: limitsRaw.maxPhotosPerEvent ?? 50,
+    maxStorageGb: limitsRaw.maxStorageGb ?? limitsRaw.storageGb ?? 1,
     maxTeamMembers: limitsRaw.maxTeamMembers ?? limitsRaw.teamMembers ?? 1,
-    maxFaceOps: limitsRaw.maxFaceOps ?? limitsRaw.maxFaceOpsPerEvent ?? 500,
+    maxFaceOps: limitsRaw.maxFaceOps ?? limitsRaw.maxFaceOpsPerEvent ?? 0,
   };
   const percentages = usageData?.percentages || { events: 0, storage: 0, team: 0 };
 
@@ -293,12 +294,12 @@ export default function BillingPage() {
           <div>
             <p className="text-sm text-secondary">Storage Used</p>
             <p className="text-lg font-semibold text-foreground">
-              {usage.storageUsedGb.toFixed(2)} GB / {limits.maxStorageGb} GB
+              {usage.storageUsedGb.toFixed(2)} GB / {limits.maxStorageGb === -1 ? 'Unlimited' : `${limits.maxStorageGb} GB`}
             </p>
             <div className="mt-2 h-2 rounded-full bg-muted overflow-hidden">
               <div 
                 className={`h-full rounded-full transition-all ${percentages.storage >= 90 ? 'bg-destructive' : percentages.storage >= 70 ? 'bg-warning' : 'bg-accent'}`}
-                style={{ width: `${Math.min(percentages.storage, 100)}%` }}
+                style={{ width: limits.maxStorageGb === -1 ? '10%' : `${Math.min(percentages.storage, 100)}%` }}
               />
             </div>
             {percentages.storage >= 80 && (
@@ -308,12 +309,12 @@ export default function BillingPage() {
           <div>
             <p className="text-sm text-secondary">Team Members</p>
             <p className="text-lg font-semibold text-foreground">
-              {usage.teamMembers} / {limits.maxTeamMembers}
+              {usage.teamMembers} / {limits.maxTeamMembers === -1 ? 'Unlimited' : limits.maxTeamMembers}
             </p>
             <div className="mt-2 h-2 rounded-full bg-muted overflow-hidden">
               <div 
                 className={`h-full rounded-full transition-all ${percentages.team >= 90 ? 'bg-destructive' : percentages.team >= 70 ? 'bg-warning' : 'bg-accent'}`}
-                style={{ width: `${Math.min(percentages.team, 100)}%` }}
+                style={{ width: limits.maxTeamMembers === -1 ? '10%' : `${Math.min(percentages.team, 100)}%` }}
               />
             </div>
           </div>

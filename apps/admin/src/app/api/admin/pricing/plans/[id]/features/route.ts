@@ -40,18 +40,25 @@ export async function GET(
       await ensureCoreCreatorPlanFeatures(supabaseAdmin);
     }
 
-    let availableFeaturesQuery = supabaseAdmin
+    const { data: allAvailableFeatures, error: availableFeaturesError } = await supabaseAdmin
       .from('plan_features')
       .select('*')
       .eq('is_active', true)
       .order('category', { ascending: true })
       .order('display_order', { ascending: true });
 
-    if (normalizedPlanType) {
-      availableFeaturesQuery = availableFeaturesQuery.contains('applicable_to', [normalizedPlanType]);
+    if (availableFeaturesError) {
+      throw availableFeaturesError;
     }
 
-    const { data: availableFeatures } = await availableFeaturesQuery;
+    const availableFeatures = (allAvailableFeatures || []).filter((feature: any) => {
+      if (!normalizedPlanType) return true;
+      const applicable = Array.isArray(feature.applicable_to) ? feature.applicable_to : [];
+      if (normalizedPlanType === 'creator') {
+        return applicable.includes('creator') || applicable.includes('photographer');
+      }
+      return applicable.includes(normalizedPlanType);
+    });
 
     return NextResponse.json({
       assignedFeatures: data || [],

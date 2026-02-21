@@ -12,6 +12,15 @@ function normalizePlanTypeInput(planType: unknown): 'creator' | 'payg' | null {
   return null;
 }
 
+function isPlanTypeEnumError(error: any): boolean {
+  const message = String(error?.message || '').toLowerCase();
+  return error?.code === '22P02' && message.includes('plan_type');
+}
+
+function toLegacyPlanType(planType: 'creator' | 'payg'): 'photographer' | 'payg' {
+  return planType === 'creator' ? 'photographer' : 'payg';
+}
+
 // GET - List all plans
 export async function GET() {
   try {
@@ -69,45 +78,77 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if code already exists for this plan type
-    const { data: existing } = await supabaseAdmin
+    let duplicateCheck = await supabaseAdmin
       .from('subscription_plans')
       .select('id')
       .eq('code', code)
       .eq('plan_type', planType)
-      .single();
+      .maybeSingle();
 
-    if (existing) {
+    if (duplicateCheck.error && isPlanTypeEnumError(duplicateCheck.error) && planType === 'creator') {
+      duplicateCheck = await supabaseAdmin
+        .from('subscription_plans')
+        .select('id')
+        .eq('code', code)
+        .eq('plan_type', toLegacyPlanType(planType))
+        .maybeSingle();
+    }
+
+    if (duplicateCheck.error) {
+      throw duplicateCheck.error;
+    }
+
+    if (duplicateCheck.data) {
       return NextResponse.json({ error: 'Plan code already exists' }, { status: 400 });
     }
 
-    const { data, error } = await supabaseAdmin
+    const insertPayload = {
+      name,
+      code,
+      description,
+      features,
+      base_price_usd,
+      is_active: is_active ?? true,
+      is_popular: is_popular ?? false,
+      prices: prices || {},
+      plan_type: planType,
+      platform_fee_percent: platform_fee_percent ?? 20.0,
+      platform_fee_fixed: platform_fee_fixed ?? 0,
+      platform_fee_type: platform_fee_type ?? 'percent',
+      print_commission_percent: print_commission_percent ?? 15.0,
+      print_commission_fixed: print_commission_fixed ?? 0,
+      print_commission_type: print_commission_type ?? 'percent',
+    };
+
+    let { data, error } = await supabaseAdmin
       .from('subscription_plans')
-      .insert({
-        name,
-        code,
-        description,
-        features,
-        base_price_usd,
-        is_active: is_active ?? true,
-        is_popular: is_popular ?? false,
-        prices: prices || {},
-        plan_type: planType,
-        platform_fee_percent: platform_fee_percent ?? 20.00,
-        platform_fee_fixed: platform_fee_fixed ?? 0,
-        platform_fee_type: platform_fee_type ?? 'percent',
-        print_commission_percent: print_commission_percent ?? 15.00,
-        print_commission_fixed: print_commission_fixed ?? 0,
-        print_commission_type: print_commission_type ?? 'percent',
-      })
+      .insert(insertPayload)
       .select()
       .single();
+
+    if (error && isPlanTypeEnumError(error) && planType === 'creator') {
+      const retry = await supabaseAdmin
+        .from('subscription_plans')
+        .insert({
+          ...insertPayload,
+          plan_type: toLegacyPlanType(planType),
+        })
+        .select()
+        .single();
+      data = retry.data as any;
+      error = retry.error as any;
+    }
 
     if (error) throw error;
 
     await logAction('plan_create', 'subscription_plan', data.id, { name, code });
     await bumpRuntimeConfigVersion('plans', session.adminId);
 
-    return NextResponse.json({ success: true, plan: data });
+    const normalizedData = {
+      ...data,
+      plan_type: data?.plan_type === 'photographer' ? 'creator' : data?.plan_type,
+    };
+    return NextResponse.json({ success: true, plan: normalizedData });
   } catch (error) {
     console.error('Create plan error:', error);
     return NextResponse.json({ error: 'Failed to create plan' }, { status: 500 });

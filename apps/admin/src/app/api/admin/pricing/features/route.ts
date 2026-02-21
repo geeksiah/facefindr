@@ -8,6 +8,15 @@ import {
 import { bumpRuntimeConfigVersion } from '@/lib/runtime-config-version';
 import { supabaseAdmin } from '@/lib/supabase';
 
+function isLegacyPlanTypeEnumError(error: any): boolean {
+  const message = String(error?.message || '').toLowerCase();
+  return error?.code === '22P02' && message.includes('plan_type');
+}
+
+function toLegacyApplicableTo(values: string[] | undefined): string[] {
+  return (values || []).map((value) => (value === 'creator' ? 'photographer' : value));
+}
+
 // GET - List all features
 export async function GET(request: NextRequest) {
   try {
@@ -25,22 +34,31 @@ export async function GET(request: NextRequest) {
       await ensureCoreCreatorPlanFeatures(supabaseAdmin);
     }
 
-    let query = supabaseAdmin
+    const query = supabaseAdmin
       .from('plan_features')
       .select('*')
       .eq('is_active', true)
       .order('category', { ascending: true })
       .order('display_order', { ascending: true });
 
-    if (normalizedPlanType) {
-      query = query.contains('applicable_to', [normalizedPlanType]);
-    }
-
     const { data, error } = await query;
 
     if (error) throw error;
 
-    return NextResponse.json({ features: data || [] });
+    const allFeatures = data || [];
+    const filtered = !normalizedPlanType
+      ? allFeatures
+      : normalizedPlanType === 'creator'
+      ? allFeatures.filter((feature: any) => {
+          const applicable = Array.isArray(feature.applicable_to) ? feature.applicable_to : [];
+          return applicable.includes('creator') || applicable.includes('photographer');
+        })
+      : allFeatures.filter((feature: any) => {
+          const applicable = Array.isArray(feature.applicable_to) ? feature.applicable_to : [];
+          return applicable.includes(normalizedPlanType);
+        });
+
+    return NextResponse.json({ features: filtered });
   } catch (error) {
     console.error('Get features error:', error);
     return NextResponse.json({ error: 'Failed to get features' }, { status: 500 });
@@ -82,20 +100,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Feature code already exists' }, { status: 400 });
     }
 
-    const { data, error } = await supabaseAdmin
+    const basePayload = {
+      code,
+      name,
+      description,
+      feature_type,
+      default_value: default_value ? JSON.parse(JSON.stringify(default_value)) : null,
+      applicable_to: applicable_to || ['creator', 'drop_in'],
+      category,
+      display_order: display_order || 0,
+    };
+
+    let { data, error } = await supabaseAdmin
       .from('plan_features')
-      .insert({
-        code,
-        name,
-        description,
-        feature_type,
-        default_value: default_value ? JSON.parse(JSON.stringify(default_value)) : null,
-        applicable_to: applicable_to || ['creator', 'drop_in'],
-        category,
-        display_order: display_order || 0,
-      })
+      .insert(basePayload)
       .select()
       .single();
+
+    if (error && isLegacyPlanTypeEnumError(error)) {
+      const retry = await supabaseAdmin
+        .from('plan_features')
+        .insert({
+          ...basePayload,
+          applicable_to: toLegacyApplicableTo(basePayload.applicable_to),
+        })
+        .select()
+        .single();
+      data = retry.data as any;
+      error = retry.error as any;
+    }
 
     if (error) throw error;
 

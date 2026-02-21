@@ -8,6 +8,16 @@ interface RouteParams {
   params: { id: string };
 }
 
+function isPlanTypeEnumError(error: any): boolean {
+  const message = String(error?.message || '').toLowerCase();
+  return error?.code === '22P02' && message.includes('plan_type');
+}
+
+function toLegacyApplicableTo(values: string[] | undefined): string[] | undefined {
+  if (!values) return values;
+  return values.map((value) => (value === 'creator' ? 'photographer' : value));
+}
+
 // GET - Get a specific feature
 export async function GET(
   request: NextRequest,
@@ -68,22 +78,38 @@ export async function PUT(
       is_active,
     } = body;
 
-    const { data, error } = await supabaseAdmin
+    const basePayload = {
+      name,
+      description,
+      feature_type,
+      default_value: default_value !== undefined ? JSON.parse(JSON.stringify(default_value)) : undefined,
+      applicable_to,
+      category,
+      display_order,
+      is_active,
+      updated_at: new Date().toISOString(),
+    };
+
+    let { data, error } = await supabaseAdmin
       .from('plan_features')
-      .update({
-        name,
-        description,
-        feature_type,
-        default_value: default_value !== undefined ? JSON.parse(JSON.stringify(default_value)) : undefined,
-        applicable_to,
-        category,
-        display_order,
-        is_active,
-        updated_at: new Date().toISOString(),
-      })
+      .update(basePayload)
       .eq('id', id)
       .select()
       .single();
+
+    if (error && isPlanTypeEnumError(error)) {
+      const retry = await supabaseAdmin
+        .from('plan_features')
+        .update({
+          ...basePayload,
+          applicable_to: toLegacyApplicableTo(applicable_to),
+        })
+        .eq('id', id)
+        .select()
+        .single();
+      data = retry.data as any;
+      error = retry.error as any;
+    }
 
     if (error) throw error;
 
