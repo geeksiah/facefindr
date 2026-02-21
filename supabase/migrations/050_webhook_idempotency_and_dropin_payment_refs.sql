@@ -56,13 +56,38 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_transactions_paypal_order_id
 -- ENTITLEMENT DEDUPLICATION
 -- ============================================
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_entitlements_single_per_tx_media
-    ON entitlements(transaction_id, media_id)
-    WHERE media_id IS NOT NULL;
-
-CREATE UNIQUE INDEX IF NOT EXISTS uq_entitlements_bulk_per_tx
-    ON entitlements(transaction_id)
-    WHERE entitlement_type = 'bulk' AND media_id IS NULL;
+DO $$
+BEGIN
+    -- Some deployments use entitlements.transaction_id (older schema),
+    -- while others use entitlements.purchase_id (current schema).
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'entitlements'
+          AND column_name = 'transaction_id'
+    ) THEN
+        EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS uq_entitlements_single_per_tx_media
+                 ON entitlements(transaction_id, media_id)
+                 WHERE media_id IS NOT NULL';
+        EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS uq_entitlements_bulk_per_tx
+                 ON entitlements(transaction_id)
+                 WHERE entitlement_type = ''bulk'' AND media_id IS NULL';
+    ELSIF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'entitlements'
+          AND column_name = 'purchase_id'
+    ) THEN
+        EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS uq_entitlements_single_per_tx_media
+                 ON entitlements(purchase_id, media_id)
+                 WHERE media_id IS NOT NULL';
+        EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS uq_entitlements_bulk_per_tx
+                 ON entitlements(purchase_id)
+                 WHERE entitlement_type = ''bulk'' AND media_id IS NULL';
+    END IF;
+END $$;
 
 -- ============================================
 -- DROP-IN MATCH DEDUPLICATION

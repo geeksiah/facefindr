@@ -194,7 +194,6 @@ export async function POST(request: NextRequest) {
       planCode,
       billingCycle = 'monthly',
       currency: requestedCurrency,
-      paymentChannel: requestedPaymentChannel,
       idempotencyKey: bodyIdempotencyKey,
     } = body;
     const headerIdempotencyKey =
@@ -236,22 +235,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const normalizedPaymentChannelRaw = String(requestedPaymentChannel || 'auto').trim().toLowerCase();
-    const paymentChannel: 'auto' | 'card' | 'mobile_money' =
-      normalizedPaymentChannelRaw === 'card' || normalizedPaymentChannelRaw === 'mobile_money'
-        ? normalizedPaymentChannelRaw
-        : normalizedPaymentChannelRaw === 'auto'
-        ? 'auto'
-        : 'auto';
-    if (
-      normalizedPaymentChannelRaw &&
-      !['auto', 'card', 'mobile_money'].includes(normalizedPaymentChannelRaw)
-    ) {
-      return NextResponse.json(
-        { error: 'Invalid payment channel' },
-        { status: 400 }
-      );
-    }
+    const paymentChannel: 'auto' = 'auto';
 
     const operationScope = 'subscription.checkout.create';
     const requestHash = buildRequestHash({
@@ -1076,8 +1060,7 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const manualRenewalMode =
-        !mapping || !autoRenewPreference || paymentChannel === 'mobile_money';
+      const manualRenewalMode = !mapping || !autoRenewPreference;
       if (manualRenewalMode && trialApplied) {
         return respond(
           {
