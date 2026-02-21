@@ -7,6 +7,75 @@ import { getPhotographerIdCandidates, resolvePhotographerProfileByUser } from '@
 import { checkLimit } from '@/lib/subscription/enforcement';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
+async function notifyEventSubscribersAboutNewPhotos(
+  serviceClient: any,
+  event: { id: string; name?: string | null; public_slug?: string | null; status?: string | null },
+  mediaId: string
+) {
+  if (!event?.id || event.status !== 'active') return;
+
+  const { data: consentRows, error: consentError } = await serviceClient
+    .from('attendee_consents')
+    .select('attendee_id')
+    .eq('event_id', event.id)
+    .eq('consent_type', 'biometric')
+    .is('withdrawn_at', null);
+
+  if (consentError) {
+    console.error('Subscriber lookup failed:', consentError);
+    return;
+  }
+
+  const attendeeIds = Array.from(
+    new Set((consentRows || []).map((row: any) => row.attendee_id).filter(Boolean))
+  ) as string[];
+
+  if (!attendeeIds.length) return;
+
+  // Deduplicate per event per hour to prevent notification storms during batch uploads.
+  const hourBucket = new Date().toISOString().slice(0, 13);
+  const dedupeKey = `event_new_photos:${event.id}:${hourBucket}`;
+
+  const { data: existingNotification } = await serviceClient
+    .from('notifications')
+    .select('id')
+    .eq('template_code', 'event_new_photos')
+    .eq('channel', 'in_app')
+    .eq('metadata->>dedupeKey', dedupeKey)
+    .limit(1)
+    .maybeSingle();
+
+  if (existingNotification?.id) return;
+
+  const now = new Date().toISOString();
+  const eventName = event.name || 'Your event';
+  const eventPath = event.public_slug ? `/e/${event.public_slug}` : `/e/${event.id}`;
+
+  const payload = attendeeIds.map((attendeeId) => ({
+    user_id: attendeeId,
+    template_code: 'event_new_photos',
+    channel: 'in_app',
+    subject: `${eventName}: new photos added`,
+    body: `New photos were posted for ${eventName}.`,
+    status: 'delivered',
+    sent_at: now,
+    delivered_at: now,
+    metadata: {
+      type: 'event_new_photos',
+      dedupeKey,
+      eventId: event.id,
+      eventName,
+      eventPath,
+      mediaId,
+    },
+  }));
+
+  const { error: notificationError } = await serviceClient.from('notifications').insert(payload);
+  if (notificationError) {
+    console.error('Failed to create attendee notifications:', notificationError);
+  }
+}
+
 // ============================================
 // UPLOAD PHOTOS
 // ============================================
@@ -40,7 +109,7 @@ export async function uploadPhotos(formData: FormData) {
   // Verify event access - either owner or collaborator with upload permission
   const { data: event } = await supabase
     .from('events')
-    .select('photographer_id, face_recognition_enabled')
+    .select('id, name, public_slug, status, photographer_id, face_recognition_enabled')
     .eq('id', eventId)
     .single();
 
@@ -184,6 +253,10 @@ export async function uploadPhotos(formData: FormData) {
         console.error('Background face processing error:', err);
       });
     }
+
+    notifyEventSubscribersAboutNewPhotos(serviceClient, event as any, media.id).catch((err) => {
+      console.error('Background attendee notification error:', err);
+    });
 
     // Revalidate the event page
     revalidatePath(`/dashboard/events/${eventId}`);

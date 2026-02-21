@@ -75,3 +75,18 @@ expo-env.d.ts
 
 # React Native
 *.hprof
+supabase/manual_sql/GO_SAFE_DB_BUNDLE_057_061.sql
+supabase/manual_sql/GO_SAFE_DB_BUNDLE_057_061.sql
+supabase/migrations/062_user_country_association.sql
+.gitignore
+.gitignore
+.gitignore
+.gitignore
+.gitignore
+.gitignore
+.gitignore
+supabase/migrations/069_free_creator_plan_guardrails.sql
+.gitignore
+.gitignore
+.gitignore
+.gitignore

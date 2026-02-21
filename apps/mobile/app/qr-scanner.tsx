@@ -4,7 +4,7 @@
  * Scans event QR codes for quick access.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -21,8 +21,10 @@ import { X, Flashlight, FlashlightOff, AlertCircle } from 'lucide-react-native';
 
 import { isSupportedAppScheme } from '@/lib/deep-link';
 import { getApiBaseUrl } from '@/lib/api-base';
+import { joinEventByCode } from '@/lib/events/join';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 import { buttonPress, matchFound, error as hapticError } from '@/lib/haptics';
+import { useAuthStore } from '@/stores/auth-store';
 
 const { width, height } = Dimensions.get('window');
 const SCAN_AREA_SIZE = width * 0.7;
@@ -30,13 +32,16 @@ const API_URL = getApiBaseUrl();
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const ACCESS_CODE_PATTERN = /^[A-Z0-9]{6,64}$/i;
 
 export default function ScanScreen() {
   const router = useRouter();
+  const { session } = useAuthStore();
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [scanned, setScanned] = useState(false);
   const [flashEnabled, setFlashEnabled] = useState(false);
   const [showError, setShowError] = useState(false);
+  const isHandlingScanRef = useRef(false);
 
   useEffect(() => {
     (async () => {
@@ -110,6 +115,23 @@ export default function ScanScreen() {
     }
   }, []);
 
+  const joinAndNavigate = useCallback(
+    async (accessCode: string) => {
+      try {
+        const joinResult = await joinEventByCode({
+          accessCode,
+          accessToken: session?.access_token,
+        });
+        await matchFound();
+        router.replace(`/event/${joinResult.eventId}` as any);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [router, session?.access_token]
+  );
+
   const navigateFromEventKey = useCallback(
     async (eventKey: string, accessCode?: string) => {
       const resolvedId = await resolveEventId(eventKey, accessCode);
@@ -119,22 +141,33 @@ export default function ScanScreen() {
         return true;
       }
 
-      if (/^\d{6}$/.test(eventKey)) {
+      if (accessCode && ACCESS_CODE_PATTERN.test(accessCode)) {
+        const joined = await joinAndNavigate(accessCode);
+        if (joined) return true;
+      }
+
+      if (ACCESS_CODE_PATTERN.test(eventKey)) {
+        const joined = await joinAndNavigate(eventKey);
+        if (joined) return true;
+      }
+
+      if (/^[A-Z0-9]{6}$/i.test(eventKey)) {
         await matchFound();
         router.replace({
           pathname: '/enter-code',
-          params: { code: eventKey },
+          params: { code: eventKey.toUpperCase() },
         } as any);
         return true;
       }
 
       return false;
     },
-    [resolveEventId, router]
+    [joinAndNavigate, resolveEventId, router]
   );
 
-  const handleBarCodeScanned = async ({ type, data }: { type: string; data: string }) => {
-    if (scanned) return;
+  const handleBarCodeScanned = async ({ data }: { type: string; data: string }) => {
+    if (scanned || isHandlingScanRef.current) return;
+    isHandlingScanRef.current = true;
     setScanned(true);
 
     // Parse the QR code data
@@ -150,14 +183,50 @@ export default function ScanScreen() {
         throw new Error('Empty QR payload');
       }
 
-      // Allow direct six-digit event codes.
-      if (/^\d{6}$/.test(payload)) {
-        await matchFound();
-        router.replace({
-          pathname: '/enter-code',
-          params: { code: payload },
-        } as any);
-        return;
+      // Handle JSON payloads from third-party QR generators.
+      try {
+        const parsedJson = JSON.parse(payload);
+        const jsonCode = typeof parsedJson?.accessCode === 'string'
+          ? parsedJson.accessCode
+          : typeof parsedJson?.code === 'string'
+          ? parsedJson.code
+          : typeof parsedJson?.token === 'string'
+          ? parsedJson.token
+          : null;
+        if (jsonCode && ACCESS_CODE_PATTERN.test(jsonCode)) {
+          const joined = await joinAndNavigate(jsonCode);
+          if (joined) return;
+        }
+
+        const jsonEventKey = typeof parsedJson?.eventId === 'string'
+          ? parsedJson.eventId
+          : typeof parsedJson?.eventSlug === 'string'
+          ? parsedJson.eventSlug
+          : typeof parsedJson?.slug === 'string'
+          ? parsedJson.slug
+          : null;
+        if (jsonEventKey) {
+          const ok = await navigateFromEventKey(jsonEventKey, jsonCode || undefined);
+          if (ok) return;
+        }
+
+        const jsonUrl = typeof parsedJson?.url === 'string'
+          ? parsedJson.url
+          : typeof parsedJson?.link === 'string'
+          ? parsedJson.link
+          : null;
+        if (jsonUrl) {
+          const ok = await navigateFromEventKey(jsonUrl, jsonCode || undefined);
+          if (ok) return;
+        }
+      } catch {
+        // Not JSON - continue with URL/code parsing.
+      }
+
+      // Direct access code payload.
+      if (ACCESS_CODE_PATTERN.test(payload)) {
+        const joined = await joinAndNavigate(payload);
+        if (joined) return;
       }
 
       const url = new URL(payload);
@@ -165,9 +234,18 @@ export default function ScanScreen() {
       const isCustomScheme = isSupportedAppScheme(url.protocol);
       const host = url.hostname.toLowerCase();
       const code = url.searchParams.get('code') || undefined;
+
+      if (code && ACCESS_CODE_PATTERN.test(code)) {
+        const joined = await joinAndNavigate(code);
+        if (joined) return;
+      }
       
       // Event slug link - /e/[slug]
       if (pathParts[0] === 'e' && pathParts[1]) {
+        if (ACCESS_CODE_PATTERN.test(pathParts[1])) {
+          const joined = await joinAndNavigate(pathParts[1]);
+          if (joined) return;
+        }
         const ok = await navigateFromEventKey(pathParts[1], code);
         if (ok) return;
       }
@@ -229,6 +307,8 @@ export default function ScanScreen() {
 
       await hapticError(); // Haptic feedback for error
       setShowError(true);
+    } finally {
+      isHandlingScanRef.current = false;
     }
   };
 
@@ -261,6 +341,7 @@ export default function ScanScreen() {
       <CameraView
         style={StyleSheet.absoluteFill}
         facing="back"
+        autofocus="on"
         enableTorch={flashEnabled}
         barcodeScannerSettings={{
           barcodeTypes: ['qr'],

@@ -22,6 +22,10 @@ function getUuidPrefixBounds(prefix: string) {
   };
 }
 
+function buildTokenVariants(value: string): string[] {
+  return Array.from(new Set([value, value.toLowerCase(), value.toUpperCase()]));
+}
+
 // GET - Get public event by slug
 export async function GET(
   request: NextRequest,
@@ -108,13 +112,16 @@ export async function GET(
         allowPublicSlug?: boolean;
         allowShortLink?: boolean;
         allowUuidPrefix?: boolean;
+        allowAccessToken?: boolean;
       }
     ) => {
       const allowPublicSlug = options?.allowPublicSlug ?? true;
       const allowShortLink = options?.allowShortLink ?? true;
       const allowUuidPrefix = options?.allowUuidPrefix ?? true;
+      const allowAccessToken = options?.allowAccessToken ?? true;
       let eventBySlug: any = null;
       let slugError: any = null;
+      let matchedByAccessToken = false;
 
       if (isUuid) {
         const uuidResult = await serviceClient
@@ -193,12 +200,45 @@ export async function GET(
               null;
           }
         }
+
+        if (!eventBySlug && !slugError && allowAccessToken) {
+          const tokenCandidates = buildTokenVariants(slug);
+          const tokenLookup = await serviceClient
+            .from('event_access_tokens')
+            .select('event_id, expires_at, revoked_at')
+            .in('token', tokenCandidates)
+            .limit(5);
+
+          if (tokenLookup.error) {
+            slugError = tokenLookup.error;
+          } else {
+            const now = new Date();
+            const validToken =
+              (tokenLookup.data || []).find((token: any) => {
+                if (token.revoked_at) return false;
+                if (token.expires_at && new Date(token.expires_at) < now) return false;
+                return Boolean(token.event_id);
+              }) || null;
+
+            if (validToken?.event_id) {
+              const tokenEventResult = await serviceClient
+                .from('events')
+                .select(selectClause)
+                .eq('id', validToken.event_id)
+                .maybeSingle();
+
+              eventBySlug = tokenEventResult.data;
+              slugError = tokenEventResult.error;
+              matchedByAccessToken = Boolean(tokenEventResult.data);
+            }
+          }
+        }
       }
 
-      return { eventBySlug, slugError };
+      return { eventBySlug, slugError, matchedByAccessToken };
     };
 
-    let { eventBySlug, slugError } = await lookupEventBySlug(eventSelect);
+    let { eventBySlug, slugError, matchedByAccessToken } = await lookupEventBySlug(eventSelect);
 
     // Backward compatibility: cascade through progressively simpler SELECT clauses
     // when columns are missing (migration not yet applied).
@@ -206,6 +246,7 @@ export async function GET(
       const legacyLookup = await lookupEventBySlug(legacyEventSelect);
       eventBySlug = legacyLookup.eventBySlug;
       slugError = legacyLookup.slugError;
+      matchedByAccessToken = legacyLookup.matchedByAccessToken;
     }
 
     if (isMissingColumnError(slugError)) {
@@ -213,9 +254,11 @@ export async function GET(
         allowPublicSlug: false,
         allowShortLink: false,
         allowUuidPrefix: true,
+        allowAccessToken: true,
       });
       eventBySlug = compatibilityLookup.eventBySlug;
       slugError = compatibilityLookup.slugError;
+      matchedByAccessToken = compatibilityLookup.matchedByAccessToken;
     }
 
     // If event doesn't exist, return 404
@@ -266,6 +309,7 @@ export async function GET(
     }
 
     const event = eventBySlug;
+    const tokenAuthorized = matchedByAccessToken;
     const eventTimezone = (event as any).event_timezone || 'UTC';
     const isPublicEvent = event.is_public ?? false;
     const requireAccessCode = event.require_access_code ?? false;
@@ -309,7 +353,7 @@ export async function GET(
     // 3. If event is public OR has valid code OR allows anonymous scan, grant access
     
     // Check access code if required
-    if (!previewAuthorized && requireAccessCode) {
+    if (!previewAuthorized && requireAccessCode && !tokenAuthorized) {
       if (!code) {
         // Show access code entry form
         const coverPath = event.cover_image_url?.startsWith('/')
@@ -342,7 +386,7 @@ export async function GET(
 
     // For private events without code, check if anonymous scan is allowed
     // (This allows face scanning even for private events if photographer enabled it)
-    if (!previewAuthorized && !isPublicEvent && !requireAccessCode && !allowAnonymousScan) {
+    if (!previewAuthorized && !isPublicEvent && !requireAccessCode && !allowAnonymousScan && !tokenAuthorized) {
       return NextResponse.json(
         { error: 'Event is private', message: 'This event is not publicly accessible.' },
         { status: 403 }

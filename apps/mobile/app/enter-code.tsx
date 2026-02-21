@@ -14,20 +14,21 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
-  Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, Hash, Loader2 } from 'lucide-react-native';
 
 import { Button } from '@/components/ui';
-import { supabase } from '@/lib/supabase';
+import { joinEventByCode } from '@/lib/events/join';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
+import { useAuthStore } from '@/stores/auth-store';
 
 const CODE_LENGTH = 6;
 
 export default function EnterCodeScreen() {
   const router = useRouter();
   const { code: prefillCode } = useLocalSearchParams<{ code?: string }>();
+  const { session } = useAuthStore();
   const [code, setCode] = useState<string[]>(Array(CODE_LENGTH).fill(''));
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +37,7 @@ export default function EnterCodeScreen() {
   useEffect(() => {
     if (!prefillCode) return;
 
-    const cleaned = String(prefillCode).replace(/[^0-9]/g, '').slice(0, CODE_LENGTH);
+    const cleaned = String(prefillCode).replace(/[^A-Z0-9]/gi, '').toUpperCase().slice(0, CODE_LENGTH);
     if (!cleaned) return;
 
     const newCode = Array(CODE_LENGTH).fill('');
@@ -47,8 +48,8 @@ export default function EnterCodeScreen() {
   }, [prefillCode]);
 
   const handleCodeChange = (value: string, index: number) => {
-    // Allow only digits
-    const sanitized = value.replace(/[^0-9]/g, '');
+    // Allow only alphanumeric characters
+    const sanitized = value.replace(/[^A-Z0-9]/gi, '').toUpperCase();
     
     if (sanitized.length > 1) {
       // Handle paste
@@ -95,33 +96,14 @@ export default function EnterCodeScreen() {
     setError(null);
 
     try {
-      // Check if code exists
-      const { data: shareLink, error: linkError } = await supabase
-        .from('event_share_links')
-        .select('event_id, is_active, expires_at')
-        .eq('short_code', fullCode)
-        .single();
-
-      if (linkError || !shareLink) {
-        setError('Invalid event code. Please check and try again.');
-        return;
-      }
-
-      if (!shareLink.is_active) {
-        setError('This event code is no longer active.');
-        return;
-      }
-
-      if (shareLink.expires_at && new Date(shareLink.expires_at) < new Date()) {
-        setError('This event code has expired.');
-        return;
-      }
-
-      // Navigate to event
-      router.replace(`/event/${shareLink.event_id}`);
+      const joinResult = await joinEventByCode({
+        accessCode: fullCode,
+        accessToken: session?.access_token,
+      });
+      router.replace(`/event/${joinResult.eventId}`);
     } catch (err) {
-      console.error('Code lookup error:', err);
-      setError('Something went wrong. Please try again.');
+      console.error('Code join error:', err);
+      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -150,7 +132,7 @@ export default function EnterCodeScreen() {
 
           <Text style={styles.title}>Enter Event Code</Text>
           <Text style={styles.subtitle}>
-            Enter the 6-digit code from your event invitation
+            Enter the 6-character code from your event invitation
           </Text>
 
           {/* Code Input */}
@@ -169,7 +151,7 @@ export default function EnterCodeScreen() {
                 onKeyPress={({ nativeEvent }) => handleKeyPress(nativeEvent.key, index)}
                 maxLength={CODE_LENGTH}
                 autoCapitalize="characters"
-                keyboardType="number-pad"
+                keyboardType="default"
                 textContentType="oneTimeCode"
                 autoFocus={index === 0}
               />

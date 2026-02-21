@@ -47,28 +47,29 @@ export default function MyEventsPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const frameRequestRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    const fetchEvents = async () => {
-      try {
-        const response = await fetch('/api/attendee/events');
-        if (response.ok) {
-          const data = await response.json();
-          setEvents(data.events || []);
-        }
-      } catch (error) {
-        console.error('Failed to fetch events:', error);
-      } finally {
-        setIsLoading(false);
+  const refreshEvents = useCallback(async () => {
+    try {
+      const response = await fetch('/api/attendee/events');
+      if (response.ok) {
+        const data = await response.json();
+        setEvents(data.events || []);
       }
-    };
-
-    fetchEvents();
+    } catch (error) {
+      console.error('Failed to fetch events:', error);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    refreshEvents();
+  }, [refreshEvents]);
 
   // Keep "My Events" registration-gated: search only within events the attendee already joined.
 
-  const handleJoinEvent = async () => {
-    if (!accessCode.trim()) return;
+  const joinByCode = useCallback(async (rawCode: string) => {
+    const normalizedCode = rawCode.trim().toUpperCase();
+    if (!normalizedCode) return false;
 
     setIsJoining(true);
     setJoinError(null);
@@ -77,7 +78,7 @@ export default function MyEventsPage() {
       const response = await fetch('/api/events/join', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accessCode: accessCode.trim() }),
+        body: JSON.stringify({ accessCode: normalizedCode }),
       });
 
       const result = await response.json();
@@ -86,20 +87,21 @@ export default function MyEventsPage() {
         throw new Error(result.error || 'Invalid access code');
       }
 
-      // Refresh events list
-      const eventsResponse = await fetch('/api/attendee/events');
-      if (eventsResponse.ok) {
-        const data = await eventsResponse.json();
-        setEvents(data.events || []);
-      }
-
+      await refreshEvents();
       setAccessCode('');
       setShowCodeInput(false);
+      return true;
     } catch (error) {
       setJoinError(error instanceof Error ? error.message : 'Failed to join event');
+      return false;
     } finally {
       setIsJoining(false);
     }
+  }, [refreshEvents]);
+
+  const handleJoinEvent = async () => {
+    if (!accessCode.trim()) return;
+    await joinByCode(accessCode.trim());
   };
 
   const stopQrScanner = useCallback(() => {
@@ -115,7 +117,7 @@ export default function MyEventsPage() {
   }, []);
 
   const handleQrPayload = useCallback(
-    (rawValue: string) => {
+    async (rawValue: string) => {
       const trimmed = rawValue.trim();
       if (!trimmed) return;
 
@@ -125,6 +127,8 @@ export default function MyEventsPage() {
 
       const directCode = trimmed.replace(/[^A-Z0-9]/gi, '').toUpperCase();
       if (/^[A-Z0-9]{4,12}$/.test(directCode)) {
+        const joined = await joinByCode(directCode);
+        if (joined) return;
         setShowCodeInput(true);
         setAccessCode(directCode);
         return;
@@ -132,6 +136,21 @@ export default function MyEventsPage() {
 
       try {
         const parsed = new URL(trimmed);
+        const queryCode = (parsed.searchParams.get('code') || '').trim();
+        if (/^[A-Z0-9]{4,64}$/i.test(queryCode)) {
+          const joined = await joinByCode(queryCode);
+          if (joined) return;
+        }
+
+        const pathParts = parsed.pathname.split('/').filter(Boolean);
+        if (pathParts[0] === 'e' && pathParts[1]) {
+          const eventToken = pathParts[1].replace(/[^A-Z0-9]/gi, '').toUpperCase();
+          if (/^[A-Z0-9]{6,64}$/.test(eventToken)) {
+            const joined = await joinByCode(eventToken);
+            if (joined) return;
+          }
+        }
+
         if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
           window.location.assign(trimmed);
           return;
@@ -147,6 +166,11 @@ export default function MyEventsPage() {
           const host = appUrl.hostname.toLowerCase();
 
           if (host === 'event' && path) {
+            const eventToken = path.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+            if (/^[A-Z0-9]{6,64}$/.test(eventToken)) {
+              const joined = await joinByCode(eventToken);
+              if (joined) return;
+            }
             window.location.assign(`/e/${path}`);
             return;
           }
@@ -167,7 +191,7 @@ export default function MyEventsPage() {
       setShowCodeInput(true);
       setAccessCode(directCode);
     },
-    [stopQrScanner]
+    [joinByCode, stopQrScanner]
   );
 
   useEffect(() => {
@@ -492,4 +516,3 @@ export default function MyEventsPage() {
     </div>
   );
 }
-
