@@ -2,9 +2,11 @@ import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 
 import { getRecurringSubscriptionStatus } from '@/lib/payments/flutterwave';
+import { emitFinancialInAppNotification } from '@/lib/payments/financial-notifications';
 import { getBillingSubscription } from '@/lib/payments/paypal';
 import { getPaystackSubscriptionStatus, resolvePaystackSecretKey } from '@/lib/payments/paystack';
 import {
+  parseMetadataRecord,
   readNumber,
   readString,
   syncRecurringSubscriptionRecord,
@@ -14,6 +16,11 @@ import { mapProviderSubscriptionStatusToLocal } from '@/lib/payments/recurring-s
 import { createServiceClient } from '@/lib/supabase/server';
 
 const CRON_SECRET = process.env.CRON_SECRET;
+const MANUAL_RENEWAL_GRACE_HOURS = Math.max(
+  0,
+  Number(process.env.SUBSCRIPTION_MANUAL_RENEWAL_GRACE_HOURS || '0')
+);
+const MANUAL_RENEWAL_GRACE_MS = MANUAL_RENEWAL_GRACE_HOURS * 60 * 60 * 1000;
 
 interface ReconcileRowBase {
   id: string;
@@ -49,6 +56,302 @@ interface VaultRow extends ReconcileRowBase {
   plan_id: string | null;
   price_paid?: number | null;
   cancelled_at?: string | null;
+}
+
+interface ManualLifecycleResult {
+  handled: boolean;
+  changed: boolean;
+  action: string;
+  note?: string;
+}
+
+function readBoolean(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
+    if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
+  }
+  return null;
+}
+
+function parseReminderWindowsHours(rawValue: string | undefined): number[] {
+  const fallback = [72, 24];
+  const source = String(rawValue || '')
+    .split(',')
+    .map((value) => Number(value.trim()))
+    .filter((value) => Number.isFinite(value) && value > 0 && value <= 24 * 30)
+    .map((value) => Math.round(value));
+  if (!source.length) return fallback;
+  return Array.from(new Set(source)).sort((a, b) => a - b);
+}
+
+const MANUAL_RENEWAL_REMINDER_WINDOWS_HOURS = parseReminderWindowsHours(
+  process.env.SUBSCRIPTION_MANUAL_RENEWAL_REMINDER_HOURS
+);
+
+function getRowMetadata(row: CreatorRow | AttendeeRow | VaultRow): Record<string, unknown> {
+  return parseMetadataRecord(row.metadata);
+}
+
+function isManualRenewalRow(
+  row: CreatorRow | AttendeeRow | VaultRow,
+  metadata: Record<string, unknown>
+): boolean {
+  const renewalMode = readString(metadata.renewal_mode);
+  if (renewalMode === 'manual_renewal') return true;
+  if (metadata.manual_renewal === true) return true;
+
+  // Legacy fallback shape for paystack manual-renew rows.
+  const provider = String(row.payment_provider || '').toLowerCase();
+  return (
+    provider === 'paystack' &&
+    !readString(row.external_subscription_id) &&
+    readBoolean(metadata.cancel_at_period_end) === true
+  );
+}
+
+function resolvePeriodEndIso(row: CreatorRow | AttendeeRow | VaultRow, metadata: Record<string, unknown>): string | null {
+  return readString(row.current_period_end) || readString(metadata.current_period_end);
+}
+
+function resolveTargetUserId(scope: SubscriptionScope, row: CreatorRow | AttendeeRow | VaultRow): string | null {
+  if (scope === 'creator_subscription') return readString((row as CreatorRow).photographer_id);
+  if (scope === 'attendee_subscription') return readString((row as AttendeeRow).attendee_id);
+  return readString((row as VaultRow).user_id);
+}
+
+function resolvePlanLabel(
+  scope: SubscriptionScope,
+  row: CreatorRow | AttendeeRow | VaultRow,
+  metadata: Record<string, unknown>
+): string {
+  if (scope === 'vault_subscription') {
+    return readString(metadata.plan_slug) || 'vault plan';
+  }
+  return readString((row as CreatorRow | AttendeeRow).plan_code) || readString(metadata.plan_code) || 'paid plan';
+}
+
+function formatUtcDateTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toISOString().replace('T', ' ').replace('.000Z', ' UTC');
+}
+
+async function notifyManualRenewalReminder(params: {
+  supabase: ReturnType<typeof createServiceClient>;
+  userId: string;
+  scope: SubscriptionScope;
+  rowId: string;
+  planLabel: string;
+  periodEndIso: string;
+  reminderWindowHours: number;
+}) {
+  const { supabase, userId, scope, rowId, planLabel, periodEndIso, reminderWindowHours } = params;
+  const dedupeKey = `manual_renewal_reminder:${scope}:${rowId}:${reminderWindowHours}`;
+  return emitFinancialInAppNotification(supabase, {
+    userId,
+    templateCode: 'subscription_renewal_reminder',
+    subject: 'Subscription renewal reminder',
+    body: `Your ${planLabel} subscription expires on ${formatUtcDateTime(periodEndIso)}. Renew to keep access.`,
+    dedupeKey,
+    metadata: {
+      scope,
+      row_id: rowId,
+      reminder_window_hours: reminderWindowHours,
+      period_end: periodEndIso,
+      renewal_mode: 'manual_renewal',
+    },
+  });
+}
+
+async function notifyManualRenewalExpired(params: {
+  supabase: ReturnType<typeof createServiceClient>;
+  userId: string;
+  scope: SubscriptionScope;
+  rowId: string;
+  planLabel: string;
+  periodEndIso: string;
+}) {
+  const { supabase, userId, scope, rowId, planLabel, periodEndIso } = params;
+  const dedupeKey = `manual_renewal_expired:${scope}:${rowId}:${periodEndIso.slice(0, 10)}`;
+  return emitFinancialInAppNotification(supabase, {
+    userId,
+    templateCode: 'subscription_expired',
+    subject: 'Subscription expired',
+    body: `Your ${planLabel} subscription expired on ${formatUtcDateTime(periodEndIso)}. Renew to restore paid access.`,
+    dedupeKey,
+    metadata: {
+      scope,
+      row_id: rowId,
+      period_end: periodEndIso,
+      renewal_mode: 'manual_renewal',
+    },
+  });
+}
+
+async function expireManualRenewalRow(params: {
+  supabase: ReturnType<typeof createServiceClient>;
+  scope: SubscriptionScope;
+  row: CreatorRow | AttendeeRow | VaultRow;
+  metadata: Record<string, unknown>;
+}): Promise<void> {
+  const { supabase, scope, row, metadata } = params;
+  const nowIso = new Date().toISOString();
+  const nextMetadata = {
+    ...metadata,
+    renewal_mode: 'manual_renewal',
+    cancel_at_period_end: true,
+    auto_renew_preference: false,
+    manual_renewal_expired_at: nowIso,
+  };
+
+  if (scope === 'creator_subscription') {
+    await supabase
+      .from('subscriptions')
+      .update({
+        status: 'expired',
+        cancel_at_period_end: true,
+        canceled_at: nowIso,
+        metadata: nextMetadata,
+        updated_at: nowIso,
+      })
+      .eq('id', row.id)
+      .throwOnError();
+    return;
+  }
+
+  if (scope === 'attendee_subscription') {
+    await supabase
+      .from('attendee_subscriptions')
+      .update({
+        status: 'expired',
+        canceled_at: nowIso,
+        metadata: nextMetadata,
+        can_discover_non_contacts: false,
+        can_upload_drop_ins: false,
+        can_receive_all_drop_ins: false,
+        can_search_social_media: false,
+        can_search_web: false,
+        updated_at: nowIso,
+      })
+      .eq('id', row.id)
+      .throwOnError();
+    return;
+  }
+
+  const vaultRow = row as VaultRow;
+  await supabase
+    .from('storage_subscriptions')
+    .update({
+      status: 'expired',
+      cancelled_at: nowIso,
+      metadata: nextMetadata,
+      updated_at: nowIso,
+    })
+    .eq('id', row.id)
+    .throwOnError();
+
+  if (vaultRow.user_id) {
+    await supabase.rpc('sync_subscription_limits', { p_user_id: vaultRow.user_id }).catch(() => {});
+  }
+}
+
+async function processManualRenewalLifecycle(params: {
+  supabase: ReturnType<typeof createServiceClient>;
+  scope: SubscriptionScope;
+  row: CreatorRow | AttendeeRow | VaultRow;
+}): Promise<ManualLifecycleResult> {
+  const { supabase, scope, row } = params;
+  const metadata = getRowMetadata(row);
+  if (!isManualRenewalRow(row, metadata)) {
+    return { handled: false, changed: false, action: 'not_manual_renewal' };
+  }
+
+  const periodEndIso = resolvePeriodEndIso(row, metadata);
+  if (!periodEndIso) {
+    return {
+      handled: true,
+      changed: false,
+      action: 'manual_renewal_skipped',
+      note: 'Missing current period end',
+    };
+  }
+
+  const periodEndMs = Date.parse(periodEndIso);
+  if (!Number.isFinite(periodEndMs)) {
+    return {
+      handled: true,
+      changed: false,
+      action: 'manual_renewal_skipped',
+      note: 'Invalid current period end',
+    };
+  }
+
+  const status = String(row.status || '').toLowerCase();
+  if (['expired', 'canceled', 'cancelled'].includes(status)) {
+    return {
+      handled: true,
+      changed: false,
+      action: 'manual_renewal_skipped',
+      note: `Status already ${status}`,
+    };
+  }
+
+  const nowMs = Date.now();
+  const msUntilExpiry = periodEndMs - nowMs;
+  const userId = resolveTargetUserId(scope, row);
+  const planLabel = resolvePlanLabel(scope, row, metadata);
+
+  if (msUntilExpiry <= -MANUAL_RENEWAL_GRACE_MS) {
+    await expireManualRenewalRow({ supabase, scope, row, metadata });
+
+    if (userId) {
+      await notifyManualRenewalExpired({
+        supabase,
+        userId,
+        scope,
+        rowId: row.id,
+        planLabel,
+        periodEndIso,
+      }).catch(() => {
+        // Best-effort notification.
+      });
+    }
+
+    return {
+      handled: true,
+      changed: true,
+      action: 'manual_renewal_expired',
+      note: `Expired at ${periodEndIso}`,
+    };
+  }
+
+  if (msUntilExpiry > 0 && userId) {
+    const matchedReminderWindow = MANUAL_RENEWAL_REMINDER_WINDOWS_HOURS.find(
+      (windowHours) => msUntilExpiry <= windowHours * 60 * 60 * 1000
+    );
+    if (matchedReminderWindow) {
+      const reminderResult = await notifyManualRenewalReminder({
+        supabase,
+        userId,
+        scope,
+        rowId: row.id,
+        planLabel,
+        periodEndIso,
+        reminderWindowHours: matchedReminderWindow,
+      });
+      return {
+        handled: true,
+        changed: Boolean(reminderResult.sent),
+        action: `manual_renewal_reminder_${matchedReminderWindow}h`,
+        note: reminderResult.sent ? 'Reminder sent' : 'Reminder already sent',
+      };
+    }
+  }
+
+  return { handled: true, changed: false, action: 'manual_renewal_noop' };
 }
 
 export async function POST(request: Request) {
@@ -144,7 +447,7 @@ async function fetchCreatorRows(
     .select(
       'id, photographer_id, plan_code, plan_id, status, payment_provider, external_subscription_id, external_customer_id, external_plan_id, billing_cycle, currency, amount_cents, current_period_start, current_period_end, cancel_at_period_end, canceled_at, metadata'
     )
-    .not('external_subscription_id', 'is', null)
+    .in('status', ['active', 'trialing', 'past_due'])
     .limit(limit);
 
   if (provider) {
@@ -167,7 +470,7 @@ async function fetchAttendeeRows(
     .select(
       'id, attendee_id, plan_code, status, payment_provider, external_subscription_id, external_customer_id, external_plan_id, billing_cycle, currency, amount_cents, current_period_start, current_period_end, canceled_at, metadata'
     )
-    .not('external_subscription_id', 'is', null)
+    .in('status', ['active', 'trialing', 'past_due'])
     .limit(limit);
 
   if (provider) {
@@ -190,7 +493,7 @@ async function fetchVaultRows(
     .select(
       'id, user_id, plan_id, status, payment_provider, external_subscription_id, external_customer_id, external_plan_id, billing_cycle, currency, amount_cents, price_paid, current_period_start, current_period_end, cancelled_at, metadata'
     )
-    .not('external_subscription_id', 'is', null)
+    .in('status', ['active', 'past_due'])
     .limit(limit);
 
   if (provider) {
@@ -220,6 +523,27 @@ async function reconcileSubscriptionRow(params: {
   const externalSubscriptionId = readString(row.external_subscription_id);
 
   result.processed += 1;
+
+  const manualLifecycle = await processManualRenewalLifecycle({
+    supabase,
+    scope,
+    row,
+  });
+  if (manualLifecycle.handled) {
+    if (manualLifecycle.changed) {
+      result.updated += 1;
+    } else {
+      result.skipped += 1;
+    }
+    result.details.push({
+      scope,
+      id: row.id,
+      provider,
+      action: manualLifecycle.action,
+      note: manualLifecycle.note,
+    });
+    return;
+  }
 
   if (!externalSubscriptionId || !['paypal', 'flutterwave', 'paystack'].includes(provider)) {
     result.skipped += 1;
