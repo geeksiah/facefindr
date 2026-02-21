@@ -131,6 +131,22 @@ function isMissingColumnError(error: unknown, columnName: string): boolean {
   return full.includes(column) && (full.includes('does not exist') || full.includes('schema cache'));
 }
 
+function isUniqueViolationError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = String((error as any).code || '');
+  return code === '23505';
+}
+
+function extractMissingColumnName(error: unknown): string | null {
+  if (!error || typeof error !== 'object') return null;
+  const message = String((error as any).message || '');
+  const details = String((error as any).details || '');
+  const hint = String((error as any).hint || '');
+  const full = `${message} ${details} ${hint}`;
+  const match = full.match(/column\s+"?([a-zA-Z0-9_]+)"?\s+(?:of\s+relation\s+"?[a-zA-Z0-9_]+"?\s+)?does\s+not\s+exist/i);
+  return match?.[1] ? String(match[1]).toLowerCase() : null;
+}
+
 async function writeCreatorSubscription(
   input: RecurringSyncInput,
   payload: Record<string, unknown>
@@ -179,10 +195,38 @@ async function writeCreatorSubscription(
     return;
   }
 
-  await input.supabase
-    .from('subscriptions')
-    .insert(payload)
-    .throwOnError();
+  try {
+    await input.supabase
+      .from('subscriptions')
+      .insert(payload)
+      .throwOnError();
+  } catch (error) {
+    if (!isUniqueViolationError(error)) {
+      throw error;
+    }
+
+    if (!input.photographerId) {
+      throw error;
+    }
+
+    const { data: retryRows } = await input.supabase
+      .from('subscriptions')
+      .select('id, plan_code, status, current_period_end, updated_at, created_at')
+      .eq('photographer_id', input.photographerId)
+      .order('updated_at', { ascending: false })
+      .order('created_at', { ascending: false });
+
+    const retryPrimary = pickPrimaryCreatorSubscription((retryRows || []) as CreatorSubscriptionRow[]);
+    if (!retryPrimary?.id) {
+      throw error;
+    }
+
+    await input.supabase
+      .from('subscriptions')
+      .update(payload)
+      .eq('id', retryPrimary.id)
+      .throwOnError();
+  }
 }
 
 async function resolveCreatorPlanCodeFromProviderPlanId(
@@ -401,18 +445,33 @@ export async function syncRecurringSubscriptionRecord(input: RecurringSyncInput)
       : {}),
   };
 
-  try {
-    await writeCreatorSubscription(input, payload);
-  } catch (error) {
-    if (isMissingColumnError(error, 'plan_id')) {
-      const fallbackPayload = { ...payload } as Record<string, unknown>;
-      delete fallbackPayload.plan_id;
-      const metadata = { ...(fallbackPayload.metadata as Record<string, unknown>), plan_id: input.planId || null };
-      fallbackPayload.metadata = metadata;
-      await writeCreatorSubscription(input, fallbackPayload);
+  let writablePayload = { ...payload } as Record<string, unknown>;
+  const removedColumns = new Set<string>();
+
+  while (true) {
+    try {
+      await writeCreatorSubscription(input, writablePayload);
       return;
+    } catch (error) {
+      const missingColumn =
+        (isMissingColumnError(error, 'plan_id') ? 'plan_id' : null) || extractMissingColumnName(error);
+
+      if (!missingColumn || removedColumns.has(missingColumn) || !(missingColumn in writablePayload)) {
+        throw error;
+      }
+
+      removedColumns.add(missingColumn);
+      const fallbackPayload = { ...writablePayload };
+      delete fallbackPayload[missingColumn];
+      if (missingColumn === 'plan_id') {
+        const metadata = {
+          ...(fallbackPayload.metadata as Record<string, unknown>),
+          plan_id: input.planId || null,
+        };
+        fallbackPayload.metadata = metadata;
+      }
+      writablePayload = fallbackPayload;
     }
-    throw error;
   }
 }
 

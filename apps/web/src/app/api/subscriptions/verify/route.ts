@@ -6,6 +6,7 @@ import { verifyTransactionByRef } from '@/lib/payments/flutterwave';
 import { getBillingSubscription } from '@/lib/payments/paypal';
 import { resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import {
+  PaystackApiError,
   resolvePaystackSecretKey,
   verifyPaystackTransaction,
 } from '@/lib/payments/paystack';
@@ -82,6 +83,28 @@ function resolveMappedStatus(
   fallback: 'active' | 'past_due' = 'active'
 ) {
   return mapProviderSubscriptionStatusToLocal(rawStatus, scope) || fallback;
+}
+
+function isMissingRelationError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = String((error as any).code || '');
+  const message = String((error as any).message || '').toLowerCase();
+  return (
+    code === '42P01' ||
+    (code === 'PGRST205' &&
+      message.includes('schema cache') &&
+      message.includes('could not find the table'))
+  );
+}
+
+function isMissingColumnError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = String((error as any).code || '');
+  const message = String((error as any).message || '').toLowerCase();
+  return (
+    code === '42703' ||
+    (code.startsWith('PGRST') && message.includes('schema cache') && message.includes('column'))
+  );
 }
 
 export async function POST(request: NextRequest) {
@@ -360,7 +383,11 @@ export async function POST(request: NextRequest) {
       }
 
       const metadata = parseMetadataRecord(verified.metadata);
-      const scope = readString(metadata.subscription_scope) || 'creator_subscription';
+      const mergedMetadata = {
+        ...latestMetadata,
+        ...metadata,
+      };
+      const scope = readString(mergedMetadata.subscription_scope) || 'creator_subscription';
       if (scope !== 'creator_subscription') {
         return NextResponse.json(
           { error: 'Reference is not a creator subscription payment.' },
@@ -368,7 +395,7 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const metadataCreatorId = readString(metadata.photographer_id);
+      const metadataCreatorId = readString(mergedMetadata.photographer_id);
       const referenceBelongsToCreator = reference.startsWith(`sub_${creatorId}_`);
       if (metadataCreatorId && metadataCreatorId !== creatorId) {
         return NextResponse.json({ error: 'Payment does not belong to this account.' }, { status: 403 });
@@ -378,28 +405,28 @@ export async function POST(request: NextRequest) {
       }
 
       const providerPlanId =
-        readString(metadata.provider_plan_id) ||
+        readString(mergedMetadata.provider_plan_id) ||
         readString((verified as any)?.plan?.plan_code);
       const billingCycle = normalizeBillingCycle(
-        readString(metadata.billing_cycle) ||
+        readString(mergedMetadata.billing_cycle) ||
           readString((verified as any)?.plan?.interval)
       );
       const amountCents =
-        readNumber(metadata.pricing_amount_cents) ??
+        readNumber(mergedMetadata.pricing_amount_cents) ??
         (Number.isFinite(Number(verified.amount)) ? Math.round(Number(verified.amount)) : null);
-      const renewalMode = readString(metadata.renewal_mode) || 'provider_recurring';
+      const renewalMode = readString(mergedMetadata.renewal_mode) || 'provider_recurring';
       const manualRenewalMode =
         renewalMode === 'manual_renewal' ||
-        readBooleanFlag(metadata.manual_renewal) === true;
-      const cancelAtPeriodEnd = resolveCancelAtPeriodEnd(metadata, manualRenewalMode);
+        readBooleanFlag(mergedMetadata.manual_renewal) === true;
+      const cancelAtPeriodEnd = resolveCancelAtPeriodEnd(mergedMetadata, manualRenewalMode);
       const currentPeriodEnd =
-        readString(metadata.current_period_end) ||
+        readString(mergedMetadata.current_period_end) ||
         (manualRenewalMode ? getManualPeriodEndIso(billingCycle) : null);
       const externalSubscriptionId =
         manualRenewalMode
           ? null
           : readString((verified as any)?.subscription?.subscription_code) ||
-            readString(metadata.subscription_id) ||
+            readString(mergedMetadata.subscription_id) ||
             reference;
 
       await syncRecurringSubscriptionRecord({
@@ -411,16 +438,16 @@ export async function POST(request: NextRequest) {
         externalSubscriptionId,
         externalPlanId: providerPlanId,
         billingCycle,
-        currency: readString(verified.currency) || readString(metadata.pricing_currency) || 'USD',
+        currency: readString(verified.currency) || readString(mergedMetadata.pricing_currency) || 'USD',
         amountCents,
-        currentPeriodStart: readString(verified.paid_at) || new Date().toISOString(),
+        currentPeriodStart: readString(verified.paid_at) || readString((verified as any)?.created_at) || new Date().toISOString(),
         currentPeriodEnd,
         cancelAtPeriodEnd,
         photographerId: creatorId,
-        planCode: readString(metadata.plan_code),
-        planId: readString(metadata.plan_id),
+        planCode: readString(mergedMetadata.plan_code),
+        planId: readString(mergedMetadata.plan_id),
         metadata: {
-          ...metadata,
+          ...mergedMetadata,
           paystack_reference: reference,
           verification_source: 'subscriptions.verify.api',
           renewal_mode: manualRenewalMode ? 'manual_renewal' : 'provider_recurring',
@@ -451,6 +478,28 @@ export async function POST(request: NextRequest) {
     });
   } catch (error: any) {
     console.error('Creator subscription verification error:', error);
+    if (error instanceof PaystackApiError) {
+      const statusCode = error.statusCode >= 400 && error.statusCode < 500 ? 400 : 502;
+      return NextResponse.json(
+        {
+          error: error.message || 'Paystack verification failed.',
+          code: 'paystack_verify_failed',
+          failClosed: statusCode >= 500,
+        },
+        { status: statusCode }
+      );
+    }
+    if (isMissingRelationError(error) || isMissingColumnError(error)) {
+      return NextResponse.json(
+        {
+          error:
+            'Billing schema is not aligned with this release. Apply latest migrations and retry verification.',
+          code: 'billing_schema_mismatch',
+          failClosed: true,
+        },
+        { status: 503 }
+      );
+    }
     return NextResponse.json(
       { error: error?.message || 'Failed to verify creator subscription payment.' },
       { status: 500 }
