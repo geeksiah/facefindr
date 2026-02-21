@@ -31,6 +31,7 @@ import {
 } from '@/lib/payments/recurring-subscriptions';
 import { stripe } from '@/lib/payments/stripe';
 import { getPlanByCode } from '@/lib/subscription';
+import { resolvePlanPriceForCurrency } from '@/lib/subscription/price-resolution';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 const IDEMPOTENCY_DEPRECATION_WARNING =
@@ -255,18 +256,6 @@ export async function POST(request: NextRequest) {
     const detectedCountry = getCountryFromRequest(request.headers) || undefined;
     const fallbackCurrency = await getEffectiveCurrency(user.id, detectedCountry);
     const normalizedCurrency = String(requestedCurrency || fallbackCurrency || 'USD').toUpperCase();
-    const amountInCents =
-      plan.prices?.[normalizedCurrency] ??
-      plan.prices?.USD ??
-      plan.basePriceUsd;
-
-    if (!Number.isFinite(amountInCents) || amountInCents <= 0) {
-      return respond(
-        { error: 'Plan pricing is not configured', failClosed: true },
-        503,
-        'failed'
-      );
-    }
 
     // Select payment gateway based on user preference
     let gatewaySelection;
@@ -305,15 +294,11 @@ export async function POST(request: NextRequest) {
     });
 
     // Mapping fallback strategy:
-    // - Stripe can operate without a provider-plan mapping (dynamic price_data recurring).
-    // - Other gateways require mapping, so try alternative configured gateways first.
-    if (!mapping && selectedGateway !== 'stripe') {
+    // - If selected gateway has no mapping, try alternative configured gateways.
+    // - Stripe can operate without a provider-plan mapping using dynamic recurring price_data.
+    if (!mapping) {
       for (const candidate of configuredGateways) {
         if (candidate === selectedGateway) continue;
-        if (candidate === 'stripe' && stripe) {
-          selectedGateway = 'stripe';
-          break;
-        }
 
         const candidateMapping = await resolveProviderPlanMapping({
           productScope: 'creator_subscription',
@@ -328,6 +313,10 @@ export async function POST(request: NextRequest) {
           selectedGateway = candidate;
           break;
         }
+
+        if (candidate === 'stripe' && stripe) {
+          selectedGateway = 'stripe';
+        }
       }
     }
 
@@ -337,6 +326,20 @@ export async function POST(request: NextRequest) {
           error: `Recurring mapping missing for available gateways (${configuredGateways.join(', ')}) on ${plan.code}/${billingCycle}/${normalizedCurrency}`,
           failClosed: true,
           code: 'missing_provider_plan_mapping',
+        },
+        503,
+        'failed'
+      );
+    }
+
+    const checkoutCurrency = String(mapping?.currency || normalizedCurrency).toUpperCase();
+    const resolvedPrice = await resolvePlanPriceForCurrency(plan, checkoutCurrency);
+    const checkoutAmountInCents = Number(resolvedPrice?.amountCents || 0);
+    if (!Number.isFinite(checkoutAmountInCents) || checkoutAmountInCents <= 0) {
+      return respond(
+        {
+          error: `Plan pricing is not configured for ${checkoutCurrency}`,
+          failClosed: true,
         },
         503,
         'failed'
@@ -387,8 +390,8 @@ export async function POST(request: NextRequest) {
       } else {
         lineItems.push({
           price_data: {
-            currency: normalizedCurrency.toLowerCase(),
-            unit_amount: Math.round(amountInCents),
+            currency: checkoutCurrency.toLowerCase(),
+            unit_amount: Math.round(checkoutAmountInCents),
             recurring: {
               interval: billingCycle === 'annual' ? 'year' : 'month',
             },
@@ -405,11 +408,32 @@ export async function POST(request: NextRequest) {
           quantity: 1,
         });
       }
-
-      const session = await stripe.checkout.sessions.create({
+      const buildSessionPayload = (pricingCurrency: string, amountCents: number) => ({
         customer: customerId,
-        mode: 'subscription',
-        line_items: lineItems as any,
+        mode: 'subscription' as const,
+        line_items: mapping?.provider_plan_id?.startsWith('price_')
+          ? (lineItems as any)
+          : ([
+              {
+                price_data: {
+                  currency: pricingCurrency.toLowerCase(),
+                  unit_amount: Math.round(amountCents),
+                  recurring: {
+                    interval: billingCycle === 'annual' ? 'year' : 'month',
+                  },
+                  product_data: {
+                    name: plan.name,
+                    description: plan.description || `${plan.name} subscription`,
+                    metadata: {
+                      plan_id: plan.id,
+                      plan_code: plan.code,
+                      plan_type: plan.planType,
+                    },
+                  },
+                },
+                quantity: 1,
+              },
+            ] as any),
         success_url: `${appUrl}/dashboard/billing?success=true&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${appUrl}/dashboard/billing?canceled=true`,
         subscription_data: {
@@ -419,8 +443,8 @@ export async function POST(request: NextRequest) {
             plan_code: plan.code,
             plan_id: plan.id,
             billing_cycle: billingCycle,
-            pricing_currency: normalizedCurrency,
-            pricing_amount_cents: String(Math.round(amountInCents)),
+            pricing_currency: pricingCurrency,
+            pricing_amount_cents: String(Math.round(amountCents)),
             provider_plan_id: mapping?.provider_plan_id || 'dynamic',
           },
         },
@@ -430,16 +454,44 @@ export async function POST(request: NextRequest) {
           plan_code: plan.code,
           plan_id: plan.id,
           billing_cycle: billingCycle,
-          pricing_currency: normalizedCurrency,
-          pricing_amount_cents: String(Math.round(amountInCents)),
+          pricing_currency: pricingCurrency,
+          pricing_amount_cents: String(Math.round(amountCents)),
           provider_plan_id: mapping?.provider_plan_id || 'dynamic',
         },
       });
+
+      let session;
+      let effectiveStripeCurrency = checkoutCurrency;
+      let effectiveStripeAmount = Math.round(checkoutAmountInCents);
+
+      try {
+        session = await stripe.checkout.sessions.create(
+          buildSessionPayload(checkoutCurrency, checkoutAmountInCents)
+        );
+      } catch (stripeError) {
+        const resolvedUsd = await resolvePlanPriceForCurrency(plan, 'USD');
+        const usdAmount = Number(resolvedUsd?.amountCents || 0);
+        const shouldRetryInUsd =
+          !mapping &&
+          checkoutCurrency !== 'USD' &&
+          Number.isFinite(usdAmount) &&
+          usdAmount > 0;
+
+        if (!shouldRetryInUsd) {
+          throw stripeError;
+        }
+
+        session = await stripe.checkout.sessions.create(buildSessionPayload('USD', usdAmount));
+        effectiveStripeCurrency = 'USD';
+        effectiveStripeAmount = Math.round(usdAmount);
+      }
 
       return respond({
         checkoutUrl: session.url,
         sessionId: session.id,
         gateway: selectedGateway,
+        pricingCurrency: effectiveStripeCurrency,
+        pricingAmountCents: effectiveStripeAmount,
         gatewaySelection: {
           reason: gatewaySelection.reason,
           availableGateways: gatewaySelection.availableGateways,
@@ -465,8 +517,8 @@ export async function POST(request: NextRequest) {
         plan_code: plan.code,
         plan_id: plan.id,
         billing_cycle: billingCycle,
-        pricing_currency: normalizedCurrency,
-        pricing_amount_cents: Math.round(amountInCents),
+        pricing_currency: checkoutCurrency,
+        pricing_amount_cents: Math.round(checkoutAmountInCents),
       });
 
       const subscription = await createBillingSubscription({
@@ -514,8 +566,8 @@ export async function POST(request: NextRequest) {
       const txRef = `sub_${user.id}_${Date.now()}`;
       const payment = await initializeRecurringPayment({
         txRef,
-        amount: Math.round(amountInCents),
-        currency: normalizedCurrency,
+        amount: Math.round(checkoutAmountInCents),
+        currency: checkoutCurrency,
         redirectUrl: `${appUrl}/dashboard/billing?success=true&provider=flutterwave&tx_ref=${encodeURIComponent(txRef)}`,
         customerEmail: user.email || '',
         paymentPlanId: mapping.provider_plan_id,
@@ -525,8 +577,8 @@ export async function POST(request: NextRequest) {
           plan_code: plan.code,
           plan_id: plan.id,
           billing_cycle: billingCycle,
-          pricing_currency: normalizedCurrency,
-          pricing_amount_cents: String(Math.round(amountInCents)),
+          pricing_currency: checkoutCurrency,
+          pricing_amount_cents: String(Math.round(checkoutAmountInCents)),
         },
       });
 
@@ -559,8 +611,8 @@ export async function POST(request: NextRequest) {
         {
           reference,
           email: user.email || '',
-          amount: Math.round(amountInCents),
-          currency: normalizedCurrency,
+          amount: Math.round(checkoutAmountInCents),
+          currency: checkoutCurrency,
           callbackUrl: `${appUrl}/dashboard/billing?success=true&provider=paystack&reference=${encodeURIComponent(reference)}`,
           plan: mapping.provider_plan_id,
           metadata: {
@@ -569,8 +621,8 @@ export async function POST(request: NextRequest) {
             plan_code: plan.code,
             plan_id: plan.id,
             billing_cycle: billingCycle,
-            pricing_currency: normalizedCurrency,
-            pricing_amount_cents: Math.round(amountInCents),
+            pricing_currency: checkoutCurrency,
+            pricing_amount_cents: Math.round(checkoutAmountInCents),
           },
         },
         paystackSecretKey
@@ -598,7 +650,12 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('Subscription checkout error:', error);
-    const errorPayload = { error: 'Failed to create checkout session' };
+    const errorPayload = {
+      error:
+        error instanceof Error && error.message
+          ? error.message
+          : 'Failed to create checkout session',
+    };
     if (idempotencyFinalizeRef) {
       await idempotencyFinalizeRef('failed', 500, errorPayload);
     }

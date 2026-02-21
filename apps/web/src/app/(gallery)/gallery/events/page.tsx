@@ -15,6 +15,7 @@ import {
 import Image from 'next/image';
 import Link from 'next/link';
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -46,6 +47,8 @@ export default function MyEventsPage() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const frameRequestRef = useRef<number | null>(null);
+  const scanInFlightRef = useRef(false);
+  const lastScanAtRef = useRef(0);
 
   const refreshEvents = useCallback(async () => {
     try {
@@ -109,6 +112,9 @@ export default function MyEventsPage() {
       cancelAnimationFrame(frameRequestRef.current);
       frameRequestRef.current = null;
     }
+
+    scanInFlightRef.current = false;
+    lastScanAtRef.current = 0;
 
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
@@ -211,7 +217,11 @@ export default function MyEventsPage() {
         }
 
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' },
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
         });
         if (isCancelled) {
           stream.getTracks().forEach((track) => track.stop());
@@ -225,17 +235,34 @@ export default function MyEventsPage() {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
 
-        // Try native BarcodeDetector first, fall back to jsQR
+        // Prefer native detector when available, with jsQR fallback for reliability.
         const BarcodeDetectorCtor = (window as any).BarcodeDetector;
-        const useNative = !!BarcodeDetectorCtor;
         let nativeDetector: any = null;
         let jsQRModule: any = null;
 
-        if (useNative) {
-          nativeDetector = new BarcodeDetectorCtor({ formats: ['qr_code'] });
-        } else {
-          // Load jsQR as fallback for browsers without BarcodeDetector
+        if (BarcodeDetectorCtor) {
+          try {
+            if (typeof BarcodeDetectorCtor.getSupportedFormats === 'function') {
+              const supportedFormats = await BarcodeDetectorCtor.getSupportedFormats();
+              if (Array.isArray(supportedFormats) && supportedFormats.includes('qr_code')) {
+                nativeDetector = new BarcodeDetectorCtor({ formats: ['qr_code'] });
+              }
+            } else {
+              nativeDetector = new BarcodeDetectorCtor({ formats: ['qr_code'] });
+            }
+          } catch (error) {
+            console.warn('Native BarcodeDetector unavailable, falling back to jsQR.', error);
+          }
+        }
+
+        try {
           jsQRModule = (await import('jsqr')).default;
+        } catch (error) {
+          console.warn('jsQR failed to load.', error);
+        }
+
+        if (!nativeDetector && !jsQRModule) {
+          throw new Error('QR scanning is not supported in this browser.');
         }
 
         const scanFrame = async () => {
@@ -243,32 +270,58 @@ export default function MyEventsPage() {
 
           const video = videoRef.current;
           const canvas = canvasRef.current;
-          if (video.readyState >= 2) {
-            canvas.width = video.videoWidth || 1280;
-            canvas.height = video.videoHeight || 720;
-            const context = canvas.getContext('2d');
-            if (context) {
-              context.drawImage(video, 0, 0, canvas.width, canvas.height);
+          if (!scanInFlightRef.current && video.readyState >= 2) {
+            const now = Date.now();
+            if (now - lastScanAtRef.current < 120) {
+              frameRequestRef.current = requestAnimationFrame(scanFrame);
+              return;
+            }
 
-              let qrValue: string | null = null;
+            scanInFlightRef.current = true;
+            try {
+              const sourceWidth = video.videoWidth || 1280;
+              const sourceHeight = video.videoHeight || 720;
+              const maxDimension = 960;
+              const scale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight));
+              canvas.width = Math.max(320, Math.round(sourceWidth * scale));
+              canvas.height = Math.max(240, Math.round(sourceHeight * scale));
 
-              if (useNative && nativeDetector) {
-                const barcodes = await nativeDetector.detect(canvas);
-                if (barcodes.length > 0 && barcodes[0]?.rawValue) {
-                  qrValue = barcodes[0].rawValue;
+              const context = canvas.getContext('2d', { willReadFrequently: true });
+              if (context) {
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                let qrValue: string | null = null;
+
+                if (nativeDetector) {
+                  try {
+                    const barcodes = await nativeDetector.detect(canvas);
+                    if (barcodes.length > 0 && barcodes[0]?.rawValue) {
+                      qrValue = barcodes[0].rawValue;
+                    }
+                  } catch (error) {
+                    console.warn('Native BarcodeDetector failed for current frame.', error);
+                    nativeDetector = null;
+                  }
                 }
-              } else if (jsQRModule) {
-                const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-                const code = jsQRModule(imageData.data, canvas.width, canvas.height);
-                if (code?.data) {
-                  qrValue = code.data;
+
+                if (!qrValue && jsQRModule) {
+                  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                  const code = jsQRModule(imageData.data, canvas.width, canvas.height, {
+                    inversionAttempts: 'attemptBoth',
+                  });
+                  if (code?.data) {
+                    qrValue = code.data;
+                  }
+                }
+
+                if (qrValue) {
+                  await handleQrPayload(qrValue);
+                  return;
                 }
               }
-
-              if (qrValue) {
-                handleQrPayload(qrValue);
-                return;
-              }
+            } finally {
+              lastScanAtRef.current = Date.now();
+              scanInFlightRef.current = false;
             }
           }
 
@@ -297,6 +350,57 @@ export default function MyEventsPage() {
       event.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       event.location?.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const qrScannerOverlay =
+    showQrScanner && typeof document !== 'undefined'
+      ? createPortal(
+          <div className="fixed left-0 top-0 z-[120] h-[100dvh] w-screen bg-black/85 p-3 sm:p-4">
+            <div className="mx-auto flex h-full w-full items-center justify-center">
+              <div className="max-h-full w-full max-w-3xl overflow-hidden rounded-2xl border border-border bg-card">
+                <div className="flex items-center justify-between border-b border-border px-4 py-3">
+                  <div>
+                    <h3 className="font-semibold text-foreground">Scan Event QR Code</h3>
+                    <p className="text-xs text-secondary">Point your camera at a Ferchr QR code.</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      stopQrScanner();
+                      setShowQrScanner(false);
+                    }}
+                    className="rounded-lg p-2 hover:bg-muted"
+                  >
+                    <X className="h-4 w-4 text-foreground" />
+                  </button>
+                </div>
+
+                <div className="relative bg-black">
+                  <video
+                    ref={videoRef}
+                    className="h-[52vh] min-h-[260px] max-h-[420px] w-full object-cover"
+                    autoPlay
+                    playsInline
+                    muted
+                  />
+                  <canvas ref={canvasRef} className="hidden" />
+                  {isInitializingScanner && (
+                    <div className="absolute inset-0 flex items-center justify-center text-white">
+                      <div className="h-8 w-8 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    </div>
+                  )}
+                </div>
+
+                {qrScannerError && (
+                  <div className="flex items-center gap-2 border-t border-border px-4 py-3 text-sm text-destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <span>{qrScannerError}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
 
   const statusStyles = {
     active: 'bg-success/10 text-success',
@@ -340,51 +444,7 @@ export default function MyEventsPage() {
         </div>
       </div>
 
-      {showQrScanner && (
-        <div className="fixed inset-0 z-50 bg-black/85 p-3 sm:p-4">
-          <div className="mx-auto flex h-full w-full items-center justify-center">
-            <div className="max-h-full w-full max-w-3xl overflow-hidden rounded-2xl border border-border bg-card">
-              <div className="flex items-center justify-between border-b border-border px-4 py-3">
-                <div>
-                  <h3 className="font-semibold text-foreground">Scan Event QR Code</h3>
-                  <p className="text-xs text-secondary">Point your camera at a Ferchr QR code.</p>
-                </div>
-                <button
-                  onClick={() => {
-                    stopQrScanner();
-                    setShowQrScanner(false);
-                  }}
-                  className="rounded-lg p-2 hover:bg-muted"
-                >
-                  <X className="h-4 w-4 text-foreground" />
-                </button>
-              </div>
-
-              <div className="relative bg-black">
-                <video
-                  ref={videoRef}
-                  className="h-[52vh] min-h-[260px] max-h-[420px] w-full object-cover"
-                  playsInline
-                  muted
-                />
-                <canvas ref={canvasRef} className="hidden" />
-                {isInitializingScanner && (
-                  <div className="absolute inset-0 flex items-center justify-center text-white">
-                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  </div>
-                )}
-              </div>
-
-              {qrScannerError && (
-                <div className="flex items-center gap-2 border-t border-border px-4 py-3 text-sm text-destructive">
-                  <AlertCircle className="h-4 w-4" />
-                  <span>{qrScannerError}</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {qrScannerOverlay}
 
       {/* Join Event by Code */}
       {showCodeInput && (

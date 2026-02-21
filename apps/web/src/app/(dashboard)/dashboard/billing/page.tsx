@@ -103,6 +103,10 @@ export default function BillingPage() {
   const loadAbortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
   const upgradeInFlightRef = useRef(false);
+  const resolvedCurrentPlanRef = useRef<{ planId: string | null; planCode: string }>({
+    planId: null,
+    planCode: 'free',
+  });
 
   const createIdempotencyKey = useCallback((scope: string) => {
     const randomPart =
@@ -143,40 +147,55 @@ export default function BillingPage() {
         loadAbortRef.current = controller;
 
         try {
-          const pricingRes = await fetch(`/api/subscriptions/pricing?currency=${currencyCode}`, {
-            signal: controller.signal,
-            cache: 'no-store',
-          });
-          if (pricingRes.ok && !controller.signal.aborted && mountedRef.current) {
-            const data = await pricingRes.json();
-            setPlans(data.plans || []);
+          const [pricingResult, subscriptionResult, usageResult, historyResult] = await Promise.allSettled([
+            fetch(`/api/subscriptions/pricing?currency=${currencyCode}`, {
+              signal: controller.signal,
+              cache: 'no-store',
+            }),
+            fetch('/api/creator/subscription', {
+              signal: controller.signal,
+              cache: 'no-store',
+            }),
+            fetch('/api/creator/usage', {
+              signal: controller.signal,
+              cache: 'no-store',
+            }),
+            fetch('/api/creator/billing/history?limit=25', {
+              signal: controller.signal,
+              cache: 'no-store',
+            }),
+          ]);
+
+          if (controller.signal.aborted || !mountedRef.current) {
+            continue;
           }
 
-          const subRes = await fetch('/api/creator/subscription', {
-            signal: controller.signal,
-            cache: 'no-store',
-          });
-          if (subRes.ok && !controller.signal.aborted && mountedRef.current) {
-            const data = await subRes.json();
-            setSubscription(data.subscription);
+          if (pricingResult.status === 'fulfilled' && pricingResult.value.ok) {
+            const data = await pricingResult.value.json().catch(() => ({}));
+            if (!controller.signal.aborted && mountedRef.current) {
+              setPlans(Array.isArray(data?.plans) ? data.plans : []);
+            }
           }
 
-          const usageRes = await fetch('/api/creator/usage', {
-            signal: controller.signal,
-            cache: 'no-store',
-          });
-          if (usageRes.ok && !controller.signal.aborted && mountedRef.current) {
-            const data = await usageRes.json();
-            setUsageData(data);
+          if (subscriptionResult.status === 'fulfilled' && subscriptionResult.value.ok) {
+            const data = await subscriptionResult.value.json().catch(() => ({}));
+            if (!controller.signal.aborted && mountedRef.current) {
+              setSubscription((data?.subscription || null) as Subscription | null);
+            }
           }
 
-          const historyRes = await fetch('/api/creator/billing/history?limit=25', {
-            signal: controller.signal,
-            cache: 'no-store',
-          });
-          if (historyRes.ok && !controller.signal.aborted && mountedRef.current) {
-            const data = await historyRes.json();
-            setBillingHistory((data.history || []) as BillingHistoryRow[]);
+          if (usageResult.status === 'fulfilled' && usageResult.value.ok) {
+            const data = await usageResult.value.json().catch(() => ({}));
+            if (!controller.signal.aborted && mountedRef.current) {
+              setUsageData((data || null) as UsageData | null);
+            }
+          }
+
+          if (historyResult.status === 'fulfilled' && historyResult.value.ok) {
+            const data = await historyResult.value.json().catch(() => ({}));
+            if (!controller.signal.aborted && mountedRef.current) {
+              setBillingHistory((data?.history || []) as BillingHistoryRow[]);
+            }
           }
         } catch (error: any) {
           if (error?.name !== 'AbortError') {
@@ -282,9 +301,17 @@ export default function BillingPage() {
 
   const currentPlanCode = usageData?.planCode || subscription?.planCode || 'free';
   const currentPlanId = usageData?.planId || subscription?.planId || null;
+  if (subscription?.planCode || usageData?.planCode) {
+    resolvedCurrentPlanRef.current = {
+      planId: subscription?.planId || usageData?.planId || resolvedCurrentPlanRef.current.planId,
+      planCode: subscription?.planCode || usageData?.planCode || resolvedCurrentPlanRef.current.planCode,
+    };
+  }
+  const stableCurrentPlanCode = resolvedCurrentPlanRef.current.planCode || currentPlanCode;
+  const stableCurrentPlanId = resolvedCurrentPlanRef.current.planId || currentPlanId;
   const currentPlanData =
-    plans.find((plan) => (currentPlanId ? plan.planId === currentPlanId : false)) ||
-    plans.find((plan) => plan.planCode === currentPlanCode);
+    plans.find((plan) => (stableCurrentPlanId ? plan.planId === stableCurrentPlanId : false)) ||
+    plans.find((plan) => plan.planCode === stableCurrentPlanCode);
   
   // Use real usage data from the enforcement system
   const usage = usageData?.usage || { activeEvents: 0, totalPhotos: 0, storageUsedGb: 0, teamMembers: 1, faceOpsUsed: 0 };
@@ -378,18 +405,18 @@ export default function BillingPage() {
           <div>
             <div className="flex items-center gap-2">
               <h2 className="font-semibold text-foreground">Current Plan</h2>
-              <span className="rounded-full bg-accent/10 text-accent px-2.5 py-0.5 text-xs font-medium capitalize">
-                {currentPlanData?.name || currentPlanCode}
+                <span className="rounded-full bg-accent/10 text-accent px-2.5 py-0.5 text-xs font-medium capitalize">
+                {currentPlanData?.name || stableCurrentPlanCode}
               </span>
             </div>
             <p className="mt-1 text-sm text-secondary">
-              {currentPlanCode === 'free'
+              {stableCurrentPlanCode === 'free'
                 ? "You're on the free plan. Upgrade to unlock more features."
                 : `Platform fee: ${currentPlanData?.features?.platformFeePercent ?? usageData?.platformFee ?? 20}%`
               }
             </p>
           </div>
-          {currentPlanCode === 'free' && (
+          {stableCurrentPlanCode === 'free' && (
             <Button variant="primary" size="sm" onClick={() => document.getElementById('plans')?.scrollIntoView({ behavior: 'smooth' })}>
               <Sparkles className="h-4 w-4" />
               Upgrade
@@ -500,9 +527,9 @@ export default function BillingPage() {
       {/* Plans */}
       <div className={`grid gap-6 ${plans.length <= 3 ? 'md:grid-cols-3' : 'md:grid-cols-4'}`}>
         {plans.map((plan) => {
-          const isCurrentPlan = currentPlanId
-            ? plan.planId === currentPlanId
-            : plan.planCode === currentPlanCode;
+          const isCurrentPlan = stableCurrentPlanId
+            ? plan.planId === stableCurrentPlanId
+            : plan.planCode === stableCurrentPlanCode;
           const isPopular = Boolean(plan.isPopular);
           const price = billingCycle === 'monthly' ? plan.formattedMonthly : plan.formattedAnnual;
           const features = plan.features;

@@ -92,7 +92,7 @@ interface SubscriptionLookupRow {
 
 const plansCache: Map<string, FullPlanDetails> = new Map();
 let plansCacheTime = 0;
-const PLANS_CACHE_TTL = 60 * 1000; // 1 minute
+const PLANS_CACHE_TTL = 5 * 1000; // Keep runtime/admin edits visible almost immediately.
 
 function isPlanTypeEnumError(error: any): boolean {
   const message = String(error?.message || '').toLowerCase();

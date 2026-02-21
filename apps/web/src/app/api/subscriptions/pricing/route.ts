@@ -15,6 +15,7 @@ import {
   formatPrice,
 } from '@/lib/currency';
 import { getAllPlans } from '@/lib/subscription';
+import { resolvePlanPriceForCurrency } from '@/lib/subscription/price-resolution';
 import { createClient } from '@/lib/supabase/server';
 
 // GET - Get subscription pricing
@@ -45,9 +46,11 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const normalizedCurrency = String(currency || 'USD').toUpperCase();
     const plans = await Promise.all(
       plansFromConfig.map(async (plan) => {
-        const priceInCurrency = plan.prices[currency!] ?? plan.basePriceUsd;
+        const resolvedPrice = await resolvePlanPriceForCurrency(plan, normalizedCurrency);
+        const priceInCurrency = resolvedPrice?.amountCents ?? 0;
         const annualPrice = Math.round(priceInCurrency * 10);
 
         return {
@@ -58,8 +61,8 @@ export async function GET(request: NextRequest) {
           description: plan.description,
           monthlyPrice: priceInCurrency,
           annualPrice,
-          formattedMonthly: await formatPrice(priceInCurrency, currency!),
-          formattedAnnual: await formatPrice(annualPrice, currency!),
+          formattedMonthly: await formatPrice(priceInCurrency, normalizedCurrency),
+          formattedAnnual: await formatPrice(annualPrice, normalizedCurrency),
           isPopular: plan.isPopular,
           displayFeatures: plan.features, // Optional marketing highlights only
           features: {
@@ -87,7 +90,7 @@ export async function GET(request: NextRequest) {
     );
 
     return NextResponse.json({
-      currency,
+      currency: normalizedCurrency,
       plans,
       source: 'admin-config',
     });

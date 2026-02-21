@@ -2,11 +2,102 @@
 
 import { ArrowRight, Scan, Camera, Shield, Zap, Check, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
-import { Logo, LogoIcon } from '@/components/ui/logo';
+import { Logo } from '@/components/ui/logo';
+
+interface CreatorPlanCard {
+  planId: string;
+  planCode: string;
+  name: string;
+  description: string;
+  monthlyPrice: number;
+  formattedMonthly: string;
+  isPopular?: boolean;
+  displayFeatures?: string[];
+  features?: {
+    maxActiveEvents?: number;
+    maxPhotosPerEvent?: number;
+    platformFeePercent?: number;
+    teamMembers?: number;
+  };
+}
 
 export default function HomePage() {
+  const [pricingCurrency, setPricingCurrency] = useState('USD');
+  const [pricingPlans, setPricingPlans] = useState<CreatorPlanCard[]>([]);
+  const [pricingLoading, setPricingLoading] = useState(true);
+  const [pricingError, setPricingError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPricing = async () => {
+      setPricingLoading(true);
+      try {
+        const response = await fetch('/api/subscriptions/pricing?type=creator', {
+          cache: 'no-store',
+        });
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(payload?.error || 'Unable to load pricing');
+        }
+
+        if (cancelled) return;
+        setPricingCurrency(String(payload?.currency || 'USD').toUpperCase());
+        setPricingPlans(
+          Array.isArray(payload?.plans)
+            ? [...payload.plans].sort((a: CreatorPlanCard, b: CreatorPlanCard) => a.monthlyPrice - b.monthlyPrice)
+            : []
+        );
+        setPricingError(null);
+      } catch (error: any) {
+        if (cancelled) return;
+        setPricingPlans([]);
+        setPricingError(error?.message || 'Unable to load pricing');
+      } finally {
+        if (!cancelled) {
+          setPricingLoading(false);
+        }
+      }
+    };
+
+    void loadPricing();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const renderedPricingPlans = useMemo(() => {
+    return pricingPlans.map((plan) => {
+      const fallbackFeatures: string[] = [];
+      if (Number.isFinite(Number(plan.features?.maxPhotosPerEvent))) {
+        fallbackFeatures.push(`${Number(plan.features?.maxPhotosPerEvent).toLocaleString()} photos/event`);
+      }
+      if (Number.isFinite(Number(plan.features?.maxActiveEvents))) {
+        const maxEvents = Number(plan.features?.maxActiveEvents);
+        fallbackFeatures.push(maxEvents === -1 ? 'Unlimited events' : `${maxEvents} active events`);
+      }
+      if (Number.isFinite(Number(plan.features?.platformFeePercent))) {
+        fallbackFeatures.push(`${Number(plan.features?.platformFeePercent)}% platform fee`);
+      }
+      if (Number.isFinite(Number(plan.features?.teamMembers)) && Number(plan.features?.teamMembers) > 1) {
+        fallbackFeatures.push(`${Number(plan.features?.teamMembers)} team members`);
+      }
+
+      return {
+        ...plan,
+        renderedFeatures:
+          Array.isArray(plan.displayFeatures) && plan.displayFeatures.length > 0
+            ? plan.displayFeatures.slice(0, 6)
+            : fallbackFeatures.slice(0, 6),
+      };
+    });
+  }, [pricingPlans]);
+
   return (
     <div className="min-h-screen bg-background">
       {/* Navigation */}
@@ -242,95 +333,76 @@ export default function HomePage() {
         </p>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-6 lg:gap-8 max-w-5xl mx-auto">
-          {[
-            {
-              name: 'Starter',
-              price: '$15',
-                description: 'Perfect for hobbyists and small events',
-              features: [
-                '1,000 photos per event',
-                '5 active events',
-                '2,000 face operations',
-                '30-day retention',
-                'Email support',
-              ],
-            },
-            {
-              name: 'Pro',
-              price: '$39',
-              popular: true,
-                description: 'For professional photographers',
-              features: [
-                '5,000 photos per event',
-                '20 active events',
-                '10,000 face operations',
-                '90-day retention',
-                'Priority support',
-                'Photo Passport',
-              ],
-            },
-            {
-              name: 'Studio',
-              price: '$99',
-                description: 'For studios and agencies',
-              features: [
-                '20,000 photos per event',
-                'Unlimited events',
-                '50,000 face operations',
-                '365-day retention',
-                'Dedicated support',
-                'API access',
-              ],
-            },
-          ].map((plan) => (
-            <div
-              key={plan.name}
-                className={`relative rounded-2xl p-8 transition-all duration-300 ${
-                plan.popular
-                    ? 'bg-foreground text-background ring-1 ring-foreground'
-                    : 'bg-card border border-border hover:shadow-soft-lg'
-              }`}
-            >
-              {plan.popular && (
-                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-accent px-4 py-1 text-xs font-semibold text-white">
-                  Most Popular
-                </span>
-              )}
-                <h3 className={`text-lg font-semibold ${plan.popular ? 'text-background' : 'text-foreground'}`}>
-                  {plan.name}
-                </h3>
-                <p className={`mt-1 text-sm ${plan.popular ? 'text-background/70' : 'text-secondary'}`}>
-                  {plan.description}
-                </p>
-                <div className="mt-6">
-                  <span className={`text-4xl font-bold ${plan.popular ? 'text-background' : 'text-foreground'}`}>
-                  {plan.price}
-                </span>
-                  <span className={plan.popular ? 'text-background/70' : 'text-secondary'}>
-                    /month
-                  </span>
-              </div>
-                <ul className="mt-8 space-y-3">
-                {plan.features.map((feature) => (
-                    <li key={feature} className="flex items-start gap-3">
-                      <Check className={`h-4 w-4 mt-0.5 flex-shrink-0 ${plan.popular ? 'text-accent' : 'text-success'}`} />
-                      <span className={`text-sm ${plan.popular ? 'text-background/90' : 'text-foreground'}`}>
-                        {feature}
+          {pricingLoading ? (
+            <div className="grid md:grid-cols-3 gap-6 lg:gap-8 max-w-5xl mx-auto">
+              {[0, 1, 2].map((placeholder) => (
+                <div key={placeholder} className="rounded-2xl border border-border bg-card p-8">
+                  <div className="h-5 w-24 rounded bg-muted animate-pulse" />
+                  <div className="mt-3 h-4 w-48 rounded bg-muted animate-pulse" />
+                  <div className="mt-6 h-10 w-32 rounded bg-muted animate-pulse" />
+                  <div className="mt-8 space-y-3">
+                    <div className="h-4 w-full rounded bg-muted animate-pulse" />
+                    <div className="h-4 w-full rounded bg-muted animate-pulse" />
+                    <div className="h-4 w-2/3 rounded bg-muted animate-pulse" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : pricingError ? (
+            <div className="mx-auto max-w-3xl rounded-2xl border border-border bg-card p-6 text-center">
+              <p className="text-foreground font-medium">Pricing is temporarily unavailable</p>
+              <p className="mt-1 text-sm text-secondary">{pricingError}</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <p className="text-center text-sm text-muted-foreground">
+                Showing live creator pricing in {pricingCurrency}.
+              </p>
+              <div className={`grid gap-6 lg:gap-8 max-w-5xl mx-auto ${renderedPricingPlans.length <= 3 ? 'md:grid-cols-3' : 'md:grid-cols-4'}`}>
+                {renderedPricingPlans.map((plan) => (
+                  <div
+                    key={plan.planId || plan.planCode}
+                    className={`relative rounded-2xl p-8 transition-all duration-300 ${
+                      plan.isPopular
+                        ? 'bg-foreground text-background ring-1 ring-foreground'
+                        : 'bg-card border border-border hover:shadow-soft-lg'
+                    }`}
+                  >
+                    {plan.isPopular && (
+                      <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-accent px-4 py-1 text-xs font-semibold text-white">
+                        Most Popular
                       </span>
-                  </li>
+                    )}
+                    <h3 className={`text-lg font-semibold ${plan.isPopular ? 'text-background' : 'text-foreground'}`}>
+                      {plan.name}
+                    </h3>
+                    <p className={`mt-1 text-sm ${plan.isPopular ? 'text-background/70' : 'text-secondary'}`}>
+                      {plan.description}
+                    </p>
+                    <div className="mt-6">
+                      <span className={`text-4xl font-bold ${plan.isPopular ? 'text-background' : 'text-foreground'}`}>
+                        {plan.formattedMonthly}
+                      </span>
+                      <span className={plan.isPopular ? 'text-background/70' : 'text-secondary'}>/month</span>
+                    </div>
+                    <ul className="mt-8 space-y-3">
+                      {(plan.renderedFeatures || []).map((feature) => (
+                        <li key={`${plan.planCode}-${feature}`} className="flex items-start gap-3">
+                          <Check className={`h-4 w-4 mt-0.5 flex-shrink-0 ${plan.isPopular ? 'text-accent' : 'text-success'}`} />
+                          <span className={`text-sm ${plan.isPopular ? 'text-background/90' : 'text-foreground'}`}>
+                            {feature}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    <Button className="w-full mt-8" variant={plan.isPopular ? 'primary' : 'outline'} asChild>
+                      <Link href="/register">Get Started</Link>
+                    </Button>
+                  </div>
                 ))}
-              </ul>
-                <Button
-                  className="w-full mt-8"
-                  variant={plan.popular ? 'primary' : 'outline'}
-                  asChild
-                >
-                  <Link href="/register">Get Started</Link>
-                </Button>
               </div>
-            ))}
-          </div>
+            </div>
+          )}
         </div>
       </section>
 

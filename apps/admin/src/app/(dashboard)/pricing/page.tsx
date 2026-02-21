@@ -1473,12 +1473,20 @@ export default function PricingPage() {
   }
 
   function openEditModal(plan: Plan) {
+    const baseCurrency = (platformBaseCurrency || 'USD').toUpperCase();
+    const explicitBasePrice = Number(plan.prices?.[baseCurrency]);
+    const fallbackUsdPrice = Number(plan.base_price_usd || 0);
+    const initialBaseMinor =
+      Number.isFinite(explicitBasePrice) && explicitBasePrice >= 0
+        ? Math.round(explicitBasePrice)
+        : convertMinorAmount(fallbackUsdPrice, 'USD', baseCurrency);
+
     setFormData({
       name: plan.name,
       code: plan.code,
       description: plan.description,
       features: plan.features.length ? plan.features : [''],
-      base_price_usd: plan.base_price_usd / 100,
+      base_price_usd: initialBaseMinor / 100,
       is_active: plan.is_active,
       is_popular: plan.is_popular,
       use_auto_conversion: !plan.prices || Object.keys(plan.prices).length === 0,
@@ -1504,21 +1512,38 @@ export default function PricingPage() {
     setIsSaving(true);
     try {
       const prices: Record<string, number> = {};
-      
-      if (!formData.use_auto_conversion) {
+      const baseCurrency = (platformBaseCurrency || 'USD').toUpperCase();
+      const baseAmountMajor = Number(formData.base_price_usd || 0);
+      const baseAmountMinor = Math.max(0, Math.round(baseAmountMajor * 100));
+
+      if (formData.use_auto_conversion) {
+        currencies.forEach((currency) => {
+          const targetCurrency = String(currency.code || '').toUpperCase();
+          if (!targetCurrency) return;
+          prices[targetCurrency] = convertMinorAmount(baseAmountMinor, baseCurrency, targetCurrency);
+        });
+      } else {
         Object.entries(formData.manual_prices).forEach(([code, value]) => {
-          if (value) {
-            prices[code] = Math.round(parseFloat(value) * 100);
-          }
+          if (value === null || value === undefined || String(value).trim() === '') return;
+          const normalizedCode = String(code || '').toUpperCase();
+          const parsedMajor = Number.parseFloat(String(value));
+          if (!normalizedCode || !Number.isFinite(parsedMajor) || parsedMajor < 0) return;
+          prices[normalizedCode] = Math.round(parsedMajor * 100);
         });
       }
+
+      prices[baseCurrency] = baseAmountMinor;
+      if (!Number.isFinite(Number(prices.USD)) || Number(prices.USD) < 0) {
+        prices.USD = convertMinorAmount(baseAmountMinor, baseCurrency, 'USD');
+      }
+      const basePriceUsd = Math.max(0, Math.round(Number(prices.USD || 0)));
 
       const payload = {
         name: formData.name,
         code: formData.code.toLowerCase().replace(/\s+/g, '_'),
         description: formData.description,
         features: formData.features.filter(f => f.trim()),
-        base_price_usd: Math.round(formData.base_price_usd * 100),
+        base_price_usd: basePriceUsd,
         is_active: formData.is_active,
         is_popular: formData.is_popular,
         prices,
@@ -1622,11 +1647,59 @@ export default function PricingPage() {
     setFormData({ ...formData, features });
   }
 
+  function getRateToCurrency(code: string): number | null {
+    const normalized = String(code || '').toUpperCase();
+    if (normalized === 'USD') return 1;
+    const row = currencies.find((currency) => String(currency.code || '').toUpperCase() === normalized);
+    const rate = Number(row?.rate_to_usd);
+    if (Number.isFinite(rate) && rate > 0) {
+      return rate;
+    }
+    return null;
+  }
+
+  function convertMinorAmount(amountMinor: number, fromCurrency: string, toCurrency: string): number {
+    const from = String(fromCurrency || 'USD').toUpperCase();
+    const to = String(toCurrency || 'USD').toUpperCase();
+    const normalizedAmount = Math.max(0, Math.round(Number(amountMinor || 0)));
+    if (from === to) return normalizedAmount;
+
+    const fromRate = getRateToCurrency(from);
+    const toRate = getRateToCurrency(to);
+    if (!fromRate || !toRate) {
+      return normalizedAmount;
+    }
+
+    const amountInUsd = normalizedAmount / fromRate;
+    return Math.max(0, Math.round(amountInUsd * toRate));
+  }
+
+  function getCurrencySymbol(code: string): string {
+    const normalized = String(code || '').toUpperCase();
+    const row = currencies.find((currency) => String(currency.code || '').toUpperCase() === normalized);
+    if (row?.symbol) {
+      return row.symbol;
+    }
+    if (normalized === 'USD') return '$';
+    return normalized;
+  }
+
+  function formatPlanCardPrice(plan: Plan): string {
+    const displayCurrency = (platformBaseCurrency || 'USD').toUpperCase();
+    const explicitAmount = Number(plan.prices?.[displayCurrency]);
+    const amountMinor =
+      Number.isFinite(explicitAmount) && explicitAmount >= 0
+        ? Math.round(explicitAmount)
+        : convertMinorAmount(Number(plan.base_price_usd || 0), 'USD', displayCurrency);
+    return `${getCurrencySymbol(displayCurrency)}${(amountMinor / 100).toFixed(2)}`;
+  }
+
   function calculateAutoPrice(currency: Currency) {
-    const basePrice = formData.base_price_usd;
-    const rate = Number(currency.rate_to_usd);
-    const safeRate = Number.isFinite(rate) && rate > 0 ? rate : 1;
-    return (basePrice * safeRate).toFixed(2);
+    const baseCurrency = (platformBaseCurrency || 'USD').toUpperCase();
+    const targetCurrency = String(currency.code || '').toUpperCase();
+    const baseAmountMinor = Math.max(0, Math.round(Number(formData.base_price_usd || 0) * 100));
+    const convertedMinor = convertMinorAmount(baseAmountMinor, baseCurrency, targetCurrency);
+    return (convertedMinor / 100).toFixed(2);
   }
 
   if (isLoading) {
@@ -1916,7 +1989,7 @@ export default function PricingPage() {
                   </div>
 
                   <p className="text-2xl font-bold text-foreground mb-2">
-                    ${(plan.base_price_usd / 100).toFixed(2)}
+                    {formatPlanCardPrice(plan)}
                     <span className="text-sm font-normal text-muted-foreground">/month</span>
                   </p>
 
@@ -2122,10 +2195,12 @@ export default function PricingPage() {
               {/* Pricing */}
               <div>
                 <label className="block text-sm font-medium text-foreground mb-2">
-                  Base Price (USD)
+                  Base Price ({(platformBaseCurrency || 'USD').toUpperCase()})
                 </label>
                 <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground">
+                    {getCurrencySymbol((platformBaseCurrency || 'USD').toUpperCase())}
+                  </span>
                   <input
                     type="number"
                     step="0.01"
@@ -2153,7 +2228,11 @@ export default function PricingPage() {
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2">
-                  {currencies.filter(c => c.code !== 'USD').map((currency) => (
+                  {currencies
+                    .filter(
+                      (c) => String(c.code || '').toUpperCase() !== (platformBaseCurrency || 'USD').toUpperCase()
+                    )
+                    .map((currency) => (
                     <div key={currency.code} className="flex items-center gap-2">
                       <span className="w-12 text-sm font-mono text-muted-foreground">{currency.code}</span>
                       <div className="relative flex-1">
