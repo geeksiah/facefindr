@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { DashboardBanner } from '@/components/notifications';
 import { PaymentMethodsManager } from '@/components/payments';
 import { useCurrency } from '@/components/providers';
-import { Button, CurrencySwitcher } from '@/components/ui';
+import { Button, CurrencySwitcher, Switch } from '@/components/ui';
 import { useRealtimeSubscription } from '@/hooks/use-realtime';
 import { useSSEWithPolling } from '@/hooks/use-sse-fallback';
 
@@ -21,7 +21,10 @@ interface PlanPricing {
   formattedMonthly: string;
   formattedAnnual: string;
   isPopular?: boolean;
-  displayFeatures?: string[]; // Text features from admin
+  trialEnabled?: boolean;
+  trialDurationDays?: number;
+  trialFeaturePolicy?: 'full_plan_access' | 'free_plan_limits';
+  trialAutoBillEnabled?: boolean;
   features?: {
     maxActiveEvents: number;
     maxPhotosPerEvent: number;
@@ -44,7 +47,9 @@ interface Subscription {
   planId?: string | null;
   planCode: string;
   status: string;
-  currentPeriodEnd: string;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd?: boolean;
+  paymentProvider?: string | null;
 }
 
 interface UsageData {
@@ -94,15 +99,22 @@ export default function BillingPage() {
   const [usageData, setUsageData] = useState<UsageData | null>(null);
   const [billingHistory, setBillingHistory] = useState<BillingHistoryRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(true);
   const [isUpgrading, setIsUpgrading] = useState<string | null>(null);
+  const [isUpdatingAutoRenew, setIsUpdatingAutoRenew] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
+  const [autoRenew, setAutoRenew] = useState(true);
   const lastSubscriptionVersionRef = useRef(0);
   const loadInFlightRef = useRef(false);
   const loadQueuedRef = useRef(false);
   const loadAbortRef = useRef<AbortController | null>(null);
+  const historyAbortRef = useRef<AbortController | null>(null);
+  const historyInFlightRef = useRef(false);
   const mountedRef = useRef(true);
   const upgradeInFlightRef = useRef(false);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastLoadAtRef = useRef(0);
   const resolvedCurrentPlanRef = useRef<{ planId: string | null; planCode: string }>({
     planId: null,
     planCode: 'free',
@@ -127,8 +139,48 @@ export default function BillingPage() {
     }
   }, []);
 
+  const loadBillingHistory = useCallback(async () => {
+    if (historyInFlightRef.current) {
+      historyAbortRef.current?.abort();
+      return;
+    }
+
+    historyInFlightRef.current = true;
+    setIsHistoryLoading(true);
+    historyAbortRef.current?.abort();
+    const controller = new AbortController();
+    historyAbortRef.current = controller;
+
+    try {
+      const response = await fetch('/api/creator/billing/history?limit=25', {
+        signal: controller.signal,
+        cache: 'no-store',
+      });
+      if (!response.ok || controller.signal.aborted || !mountedRef.current) {
+        return;
+      }
+      const data = await response.json().catch(() => ({}));
+      if (!controller.signal.aborted && mountedRef.current) {
+        setBillingHistory((data?.history || []) as BillingHistoryRow[]);
+      }
+    } catch (error: any) {
+      if (error?.name !== 'AbortError') {
+        console.error('Failed to load billing history:', error);
+      }
+    } finally {
+      if (historyAbortRef.current === controller) {
+        historyAbortRef.current = null;
+      }
+      historyInFlightRef.current = false;
+      if (mountedRef.current) {
+        setIsHistoryLoading(false);
+      }
+    }
+  }, []);
+
   // Load subscription and usage data
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (options?: { includeHistory?: boolean }) => {
+    const includeHistory = options?.includeHistory === true;
     if (loadInFlightRef.current) {
       loadQueuedRef.current = true;
       loadAbortRef.current?.abort();
@@ -147,7 +199,7 @@ export default function BillingPage() {
         loadAbortRef.current = controller;
 
         try {
-          const [pricingResult, subscriptionResult, usageResult, historyResult] = await Promise.allSettled([
+          const [pricingResult, subscriptionResult, usageResult] = await Promise.allSettled([
             fetch(`/api/subscriptions/pricing?currency=${currencyCode}`, {
               signal: controller.signal,
               cache: 'no-store',
@@ -157,10 +209,6 @@ export default function BillingPage() {
               cache: 'no-store',
             }),
             fetch('/api/creator/usage', {
-              signal: controller.signal,
-              cache: 'no-store',
-            }),
-            fetch('/api/creator/billing/history?limit=25', {
               signal: controller.signal,
               cache: 'no-store',
             }),
@@ -181,6 +229,11 @@ export default function BillingPage() {
             const data = await subscriptionResult.value.json().catch(() => ({}));
             if (!controller.signal.aborted && mountedRef.current) {
               setSubscription((data?.subscription || null) as Subscription | null);
+              const resolvedAutoRenew =
+                typeof data?.autoRenew === 'boolean'
+                  ? data.autoRenew
+                  : !(data?.subscription?.cancelAtPeriodEnd === true);
+              setAutoRenew(Boolean(resolvedAutoRenew));
             }
           }
 
@@ -191,12 +244,6 @@ export default function BillingPage() {
             }
           }
 
-          if (historyResult.status === 'fulfilled' && historyResult.value.ok) {
-            const data = await historyResult.value.json().catch(() => ({}));
-            if (!controller.signal.aborted && mountedRef.current) {
-              setBillingHistory((data?.history || []) as BillingHistoryRow[]);
-            }
-          }
         } catch (error: any) {
           if (error?.name !== 'AbortError') {
             console.error('Failed to load billing data:', error);
@@ -216,43 +263,75 @@ export default function BillingPage() {
       if (mountedRef.current) {
         setIsLoading(false);
       }
+      if (includeHistory) {
+        void loadBillingHistory();
+      }
     }
-  }, [currencyCode]);
+  }, [currencyCode, loadBillingHistory]);
+
+  const requestRefresh = useCallback(
+    (includeHistory = false) => {
+      const minRefreshGapMs = 1200;
+      const trigger = () => {
+        lastLoadAtRef.current = Date.now();
+        void loadData({ includeHistory });
+      };
+
+      const elapsed = Date.now() - lastLoadAtRef.current;
+      if (elapsed >= minRefreshGapMs) {
+        trigger();
+        return;
+      }
+
+      if (refreshTimerRef.current) return;
+      refreshTimerRef.current = setTimeout(() => {
+        refreshTimerRef.current = null;
+        trigger();
+      }, minRefreshGapMs - elapsed);
+    },
+    [loadData]
+  );
 
   useEffect(() => {
-    void loadData();
-  }, [loadData]);
+    requestRefresh(true);
+  }, [requestRefresh]);
 
   useEffect(() => {
     return () => {
       mountedRef.current = false;
       loadAbortRef.current?.abort();
       loadAbortRef.current = null;
+      historyAbortRef.current?.abort();
+      historyAbortRef.current = null;
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
     };
   }, []);
 
   // Subscribe to realtime updates for usage changes
   useRealtimeSubscription({
     table: 'events',
-    onChange: () => loadData(),
+    onChange: () => requestRefresh(false),
   });
 
   useRealtimeSubscription({
     table: 'media',
-    onChange: () => loadData(),
+    onChange: () => requestRefresh(false),
   });
 
   useSSEWithPolling<{ version?: string }>({
     url: '/api/stream/subscriptions',
     eventName: 'subscriptions',
-    onPoll: loadData,
+    onPoll: async () => requestRefresh(false),
     pollIntervalMs: 20000,
     heartbeatTimeoutMs: 35000,
     onMessage: (payload) => {
       const version = Number(payload.version || 0);
       if (!version || version > lastSubscriptionVersionRef.current) {
         lastSubscriptionVersionRef.current = version || Date.now();
-        void loadData();
+        requestRefresh(false);
       }
     },
   });
@@ -299,6 +378,46 @@ export default function BillingPage() {
     }
   };
 
+  const handleAutoRenewToggle = async (enabled: boolean) => {
+    const activePlanCode = (usageData?.planCode || subscription?.planCode || 'free').toLowerCase();
+    if (activePlanCode === 'free') return;
+    if (isUpdatingAutoRenew) return;
+
+    const previous = autoRenew;
+    setAutoRenew(enabled);
+    setIsUpdatingAutoRenew(true);
+    setCheckoutError(null);
+    try {
+      const response = await fetch('/api/creator/subscription', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ autoRenew: enabled }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error || 'Failed to update auto-renew setting');
+      }
+
+      const resolvedAutoRenew = Boolean(data?.autoRenew);
+      setAutoRenew(resolvedAutoRenew);
+      setSubscription((prev) =>
+        prev
+          ? {
+              ...prev,
+              cancelAtPeriodEnd: !resolvedAutoRenew,
+            }
+          : prev
+      );
+      requestRefresh(false);
+    } catch (error: any) {
+      console.error('Failed to update auto-renew:', error);
+      setAutoRenew(previous);
+      setCheckoutError(error?.message || 'Failed to update auto-renew setting');
+    } finally {
+      setIsUpdatingAutoRenew(false);
+    }
+  };
+
   const currentPlanCode = usageData?.planCode || subscription?.planCode || 'free';
   const currentPlanId = usageData?.planId || subscription?.planId || null;
   if (subscription?.planCode || usageData?.planCode) {
@@ -309,6 +428,8 @@ export default function BillingPage() {
   }
   const stableCurrentPlanCode = resolvedCurrentPlanRef.current.planCode || currentPlanCode;
   const stableCurrentPlanId = resolvedCurrentPlanRef.current.planId || currentPlanId;
+  const canToggleAutoRenew = stableCurrentPlanCode !== 'free';
+  const cancelAtPeriodEnd = subscription?.cancelAtPeriodEnd === true || !autoRenew;
   const currentPlanData =
     plans.find((plan) => (stableCurrentPlanId ? plan.planId === stableCurrentPlanId : false)) ||
     plans.find((plan) => plan.planCode === stableCurrentPlanCode);
@@ -493,6 +614,32 @@ export default function BillingPage() {
         )}
       </div>
 
+      {/* Subscription Renewal */}
+      <div className="rounded-2xl border border-border bg-card p-6">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h2 className="font-semibold text-foreground">Subscription Auto-Renew</h2>
+            <p className="mt-1 text-sm text-secondary">
+              {canToggleAutoRenew
+                ? cancelAtPeriodEnd
+                  ? 'Auto-renew is off. Your current plan stays active until the period ends.'
+                  : 'Auto-renew is on. Your plan will renew automatically each billing cycle.'
+                : 'Auto-renew is not applicable while you are on the free plan.'}
+            </p>
+            {subscription?.currentPeriodEnd && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Current period ends on {new Date(subscription.currentPeriodEnd).toLocaleDateString()}.
+              </p>
+            )}
+          </div>
+          <Switch
+            checked={canToggleAutoRenew ? autoRenew : false}
+            onChange={handleAutoRenewToggle}
+            disabled={!canToggleAutoRenew || isUpdatingAutoRenew}
+          />
+        </div>
+      </div>
+
       {/* Billing Cycle Toggle */}
       <div id="plans" className="flex items-center justify-center gap-4">
         <button
@@ -650,21 +797,6 @@ export default function BillingPage() {
                   )}
                 </ul>
               )}
-
-              {/* Optional marketing highlights from admin; non-authoritative */}
-              {plan.displayFeatures && plan.displayFeatures.length > 0 && (
-                <ul className="mt-4 space-y-1.5">
-                  {plan.displayFeatures.slice(0, 3).map((feature, idx) => (
-                    <li key={`${plan.planId}-highlight-${idx}`} className="flex items-start gap-2">
-                      <Check className={`h-3.5 w-3.5 mt-0.5 flex-shrink-0 ${isPopular ? 'text-background/70' : 'text-muted-foreground'}`} />
-                      <span className={`text-xs ${isPopular ? 'text-background/70' : 'text-muted-foreground'}`}>
-                        {feature}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              
               <Button
                 className="w-full mt-6"
                 variant={isPopular ? 'primary' : 'outline'}
@@ -692,7 +824,7 @@ export default function BillingPage() {
         <p className="text-sm text-secondary mb-6">
           Add payment methods for subscriptions. You can use cards, mobile money, or PayPal.
         </p>
-        <PaymentMethodsManager />
+        <PaymentMethodsManager showAutoRenewToggle={false} />
       </div>
 
       {/* Payout Settings Link */}
@@ -718,7 +850,12 @@ export default function BillingPage() {
         <div className="border-b border-border px-6 py-4">
           <h2 className="font-semibold text-foreground">Billing History</h2>
         </div>
-        {billingHistory.length === 0 ? (
+        {isHistoryLoading ? (
+          <div className="p-12 text-center">
+            <Loader2 className="mx-auto mb-3 h-8 w-8 animate-spin text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">Loading billing history...</p>
+          </div>
+        ) : billingHistory.length === 0 ? (
           <div className="p-12 text-center">
             <Download className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
             <p className="text-sm text-muted-foreground">No billing history yet.</p>

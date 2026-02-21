@@ -21,6 +21,23 @@ function toLegacyPlanType(planType: 'creator' | 'payg'): 'photographer' | 'payg'
   return planType === 'creator' ? 'photographer' : 'payg';
 }
 
+function normalizeTrialFeaturePolicyInput(
+  value: unknown
+): 'full_plan_access' | 'free_plan_limits' | null {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return 'full_plan_access';
+  if (normalized === 'full_plan_access') return 'full_plan_access';
+  if (normalized === 'free_plan_limits') return 'free_plan_limits';
+  return null;
+}
+
+function parseTrialDurationDaysInput(value: unknown): number | null {
+  if (value === undefined || value === null || value === '') return 14;
+  const parsed = Math.round(Number(value));
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 30) return null;
+  return parsed;
+}
+
 // GET - List all plans
 export async function GET() {
   try {
@@ -66,13 +83,28 @@ export async function POST(request: NextRequest) {
       name, code, description, features, base_price_usd, is_active, is_popular, prices,
       plan_type, // Add plan_type support
       platform_fee_percent, platform_fee_fixed, platform_fee_type,
-      print_commission_percent, print_commission_fixed, print_commission_type
+      print_commission_percent, print_commission_fixed, print_commission_type,
+      trial_enabled, trial_duration_days, trial_feature_policy, trial_auto_bill_enabled
     } = body;
 
     const planType = normalizePlanTypeInput(plan_type);
     if (!planType) {
       return NextResponse.json(
         { error: 'Invalid plan type. Drop-In pricing is configured via credit settings.' },
+        { status: 400 }
+      );
+    }
+    const trialFeaturePolicy = normalizeTrialFeaturePolicyInput(trial_feature_policy);
+    if (!trialFeaturePolicy) {
+      return NextResponse.json(
+        { error: 'Invalid trial feature policy' },
+        { status: 400 }
+      );
+    }
+    const trialDurationDays = parseTrialDurationDaysInput(trial_duration_days);
+    if (!trialDurationDays) {
+      return NextResponse.json(
+        { error: 'Trial duration must be between 1 and 30 days' },
         { status: 400 }
       );
     }
@@ -118,6 +150,10 @@ export async function POST(request: NextRequest) {
       print_commission_percent: print_commission_percent ?? 15.0,
       print_commission_fixed: print_commission_fixed ?? 0,
       print_commission_type: print_commission_type ?? 'percent',
+      trial_enabled: Boolean(trial_enabled ?? false),
+      trial_duration_days: trialDurationDays,
+      trial_feature_policy: trialFeaturePolicy,
+      trial_auto_bill_enabled: Boolean(trial_auto_bill_enabled ?? true),
     };
 
     let { data, error } = await supabaseAdmin

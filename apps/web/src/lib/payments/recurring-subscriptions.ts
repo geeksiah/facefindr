@@ -17,6 +17,12 @@ export interface ProviderPlanMapping {
   billing_cycle: BillingCycle;
   currency: string;
   region_code: string;
+  // Optional capability metadata.
+  // Trial-aware checkout expects these keys for non-Stripe providers:
+  // - trial_supported: boolean
+  // - trial_duration_days: number (optional when trial_duration_flexible=true)
+  // - trial_duration_flexible: boolean (optional)
+  // - trial_auto_bill_off_supported: boolean (required when plan has trial_auto_bill_enabled=false)
   metadata: Record<string, unknown> | null;
 }
 

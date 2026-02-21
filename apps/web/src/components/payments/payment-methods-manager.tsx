@@ -54,6 +54,7 @@ interface PaymentMethodsManagerProps {
   selectable?: boolean;
   selectedId?: string;
   showAddNew?: boolean;
+  showAutoRenewToggle?: boolean;
 }
 
 // ============================================
@@ -65,6 +66,7 @@ export function PaymentMethodsManager({
   selectable = false,
   selectedId,
   showAddNew = true,
+  showAutoRenewToggle = true,
 }: PaymentMethodsManagerProps) {
   const [methods, setMethods] = useState<PaymentMethod[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -308,7 +310,7 @@ export function PaymentMethodsManager({
       )}
 
       {/* Auto-Renew Toggle */}
-      {!selectable && methods.length > 0 && (
+      {!selectable && showAutoRenewToggle && methods.length > 0 && (
         <div className="flex items-center justify-between rounded-2xl border border-border bg-card p-4">
           <div>
             <p className="font-medium text-foreground">Auto-Renew Subscription</p>

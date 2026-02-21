@@ -7,8 +7,9 @@ export const dynamic = 'force-dynamic';
  * Returns full plan details from the modular pricing system.
  */
 
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
+import { stripe } from '@/lib/payments/stripe';
 import { getUserPlan, getPlanByCode } from '@/lib/subscription';
 import { resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
@@ -41,7 +42,7 @@ export async function GET() {
     const nowIso = new Date().toISOString();
     const { data: subscriptions } = await supabase
       .from('subscriptions')
-      .select('plan_id, plan_code, status, current_period_end, updated_at, created_at')
+      .select('id, plan_id, plan_code, status, current_period_end, cancel_at_period_end, payment_provider, external_subscription_id, stripe_subscription_id, updated_at, created_at')
       .eq('photographer_id', creatorId)
       .in('status', ['active', 'trialing'])
       .or(`current_period_end.is.null,current_period_end.gte.${nowIso}`)
@@ -52,6 +53,11 @@ export async function GET() {
       subscriptions?.find((row: any) => String(row.plan_code || '').toLowerCase() !== 'free') ||
       subscriptions?.[0] ||
       null;
+    const { data: subscriptionSettings } = await supabase
+      .from('subscription_settings')
+      .select('auto_renew')
+      .eq('user_id', user.id)
+      .maybeSingle();
 
     // Get usage stats
     const { count: eventCount } = await supabase
@@ -155,11 +161,15 @@ export async function GET() {
         planCode: resolvedPlanCode,
         status: subscription.status,
         currentPeriodEnd: subscription.current_period_end,
+        cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
+        paymentProvider: subscription.payment_provider || null,
       } : {
         planId: resolvedPlanId,
         planCode: resolvedPlanCode,
         status: 'active',
         currentPeriodEnd: null,
+        cancelAtPeriodEnd: false,
+        paymentProvider: null,
       },
       
       // Legacy features format for backward compatibility
@@ -177,12 +187,118 @@ export async function GET() {
       
       paymentMethod,
       hasStripeAccount: !!wallet?.stripe_account_id,
+      autoRenew:
+        subscriptionSettings?.auto_renew === undefined || subscriptionSettings?.auto_renew === null
+          ? !(subscription?.cancel_at_period_end === true)
+          : Boolean(subscriptionSettings.auto_renew),
+      canToggleAutoRenew: String(resolvedPlanCode || 'free').toLowerCase() !== 'free',
     });
 
   } catch (error) {
     console.error('Subscription GET error:', error);
     return NextResponse.json(
       { error: 'Failed to get subscription' },
+      { status: 500 }
+    );
+  }
+}
+
+// PATCH - Toggle creator auto-renew
+export async function PATCH(request: NextRequest) {
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const body = await request.json().catch(() => ({}));
+    if (typeof body?.autoRenew !== 'boolean') {
+      return NextResponse.json({ error: 'autoRenew must be boolean' }, { status: 400 });
+    }
+    const autoRenew = Boolean(body.autoRenew);
+
+    const serviceClient = createServiceClient();
+    const { data: creatorProfile } = await resolvePhotographerProfileByUser(
+      serviceClient,
+      user.id,
+      user.email
+    );
+    if (!creatorProfile?.id) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
+    const creatorId = creatorProfile.id as string;
+    const nowIso = new Date().toISOString();
+
+    const { data: subscriptions } = await serviceClient
+      .from('subscriptions')
+      .select(
+        'id, plan_code, status, current_period_end, payment_provider, external_subscription_id, stripe_subscription_id'
+      )
+      .eq('photographer_id', creatorId)
+      .in('status', ['active', 'trialing'])
+      .or(`current_period_end.is.null,current_period_end.gte.${nowIso}`)
+      .order('updated_at', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    const subscription =
+      subscriptions?.find((row: any) => String(row.plan_code || '').toLowerCase() !== 'free') ||
+      subscriptions?.[0] ||
+      null;
+
+    if (!subscription || String(subscription.plan_code || 'free').toLowerCase() === 'free') {
+      return NextResponse.json(
+        { error: 'Auto-renew can only be changed for paid creator subscriptions' },
+        { status: 400 }
+      );
+    }
+
+    const provider = String(subscription.payment_provider || 'stripe').toLowerCase();
+    const externalSubscriptionId =
+      String(subscription.external_subscription_id || subscription.stripe_subscription_id || '').trim() || null;
+
+    if (provider === 'stripe' && externalSubscriptionId) {
+      if (!stripe) {
+        return NextResponse.json({ error: 'Stripe is not configured' }, { status: 500 });
+      }
+      await stripe.subscriptions.update(externalSubscriptionId, {
+        cancel_at_period_end: !autoRenew,
+      });
+    }
+
+    await serviceClient
+      .from('subscriptions')
+      .update({
+        cancel_at_period_end: !autoRenew,
+        canceled_at: autoRenew ? null : nowIso,
+        updated_at: nowIso,
+      })
+      .eq('id', subscription.id);
+
+    await serviceClient
+      .from('subscription_settings')
+      .upsert(
+        {
+          user_id: user.id,
+          auto_renew: autoRenew,
+          updated_at: nowIso,
+        },
+        { onConflict: 'user_id' }
+      );
+
+    return NextResponse.json({
+      success: true,
+      autoRenew,
+      cancelAtPeriodEnd: !autoRenew,
+      paymentProvider: provider,
+      providerSyncApplied: provider === 'stripe' && Boolean(externalSubscriptionId),
+    });
+  } catch (error) {
+    console.error('Subscription PATCH error:', error);
+    return NextResponse.json(
+      { error: 'Failed to update auto-renew setting' },
       { status: 500 }
     );
   }

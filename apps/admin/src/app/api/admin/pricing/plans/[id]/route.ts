@@ -21,6 +21,23 @@ function toLegacyPlanType(planType: 'creator' | 'payg'): 'photographer' | 'payg'
   return planType === 'creator' ? 'photographer' : 'payg';
 }
 
+function normalizeTrialFeaturePolicyInput(
+  value: unknown
+): 'full_plan_access' | 'free_plan_limits' | null {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return 'full_plan_access';
+  if (normalized === 'full_plan_access') return 'full_plan_access';
+  if (normalized === 'free_plan_limits') return 'free_plan_limits';
+  return null;
+}
+
+function parseTrialDurationDaysInput(value: unknown): number | null {
+  if (value === undefined || value === null || value === '') return 14;
+  const parsed = Math.round(Number(value));
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 30) return null;
+  return parsed;
+}
+
 // PUT - Update a plan
 export async function PUT(
   request: NextRequest,
@@ -42,13 +59,34 @@ export async function PUT(
       name, code, description, features, base_price_usd, is_active, is_popular, prices,
       plan_type, // Add plan_type support
       platform_fee_percent, platform_fee_fixed, platform_fee_type,
-      print_commission_percent, print_commission_fixed, print_commission_type
+      print_commission_percent, print_commission_fixed, print_commission_type,
+      trial_enabled, trial_duration_days, trial_feature_policy, trial_auto_bill_enabled
     } = body;
 
     const normalizedPlanType = normalizePlanTypeInput(plan_type);
     if (plan_type !== undefined && !normalizedPlanType) {
       return NextResponse.json(
         { error: 'Invalid plan type. Drop-In pricing is configured via credit settings.' },
+        { status: 400 }
+      );
+    }
+    const trialFeaturePolicy =
+      trial_feature_policy === undefined
+        ? null
+        : normalizeTrialFeaturePolicyInput(trial_feature_policy);
+    if (trial_feature_policy !== undefined && !trialFeaturePolicy) {
+      return NextResponse.json(
+        { error: 'Invalid trial feature policy' },
+        { status: 400 }
+      );
+    }
+    const trialDurationDays =
+      trial_duration_days === undefined
+        ? null
+        : parseTrialDurationDaysInput(trial_duration_days);
+    if (trial_duration_days !== undefined && !trialDurationDays) {
+      return NextResponse.json(
+        { error: 'Trial duration must be between 1 and 30 days' },
         { status: 400 }
       );
     }
@@ -107,6 +145,18 @@ export async function PUT(
     // Include plan_type if provided
     if (normalizedPlanType) {
       updateData.plan_type = normalizedPlanType;
+    }
+    if (trial_enabled !== undefined) {
+      updateData.trial_enabled = Boolean(trial_enabled);
+    }
+    if (trialDurationDays !== null) {
+      updateData.trial_duration_days = trialDurationDays;
+    }
+    if (trialFeaturePolicy) {
+      updateData.trial_feature_policy = trialFeaturePolicy;
+    }
+    if (trial_auto_bill_enabled !== undefined) {
+      updateData.trial_auto_bill_enabled = Boolean(trial_auto_bill_enabled);
     }
 
     let { data, error } = await supabaseAdmin

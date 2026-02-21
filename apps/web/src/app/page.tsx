@@ -15,7 +15,8 @@ interface CreatorPlanCard {
   monthlyPrice: number;
   formattedMonthly: string;
   isPopular?: boolean;
-  displayFeatures?: string[];
+  trialEnabled?: boolean;
+  trialDurationDays?: number;
   features?: {
     maxActiveEvents?: number;
     maxPhotosPerEvent?: number;
@@ -90,12 +91,20 @@ export default function HomePage() {
 
       return {
         ...plan,
-        renderedFeatures:
-          Array.isArray(plan.displayFeatures) && plan.displayFeatures.length > 0
-            ? plan.displayFeatures.slice(0, 6)
-            : fallbackFeatures.slice(0, 6),
+        renderedFeatures: fallbackFeatures.slice(0, 6),
       };
     });
+  }, [pricingPlans]);
+  const trialHeadline = useMemo(() => {
+    const trialPlans = pricingPlans
+      .filter((plan) => plan.trialEnabled)
+      .map((plan) => Number(plan.trialDurationDays || 0))
+      .filter((days) => Number.isFinite(days) && days > 0);
+    if (!trialPlans.length) {
+      return 'No trial configured - choose a plan to start';
+    }
+    const minDays = Math.min(...trialPlans);
+    return `${minDays}-day trial on selected plans - no hidden fees`;
   }, [pricingPlans]);
 
   return (
@@ -156,7 +165,7 @@ export default function HomePage() {
 
             {/* Trust indicators */}
             <p className="animate-fade-in delay-300 mt-8 text-sm text-muted-foreground">
-              Free 14-day trial · No credit card required
+              {trialHeadline}
             </p>
           </div>
 

@@ -26,6 +26,7 @@ import {
   initializePaystackSubscription,
   resolvePaystackSecretKey,
 } from '@/lib/payments/paystack';
+import { resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import {
   resolveProviderPlanMapping,
 } from '@/lib/payments/recurring-subscriptions';
@@ -55,6 +56,51 @@ function buildRequestHash(payload: Record<string, unknown>): string {
   return createHash('sha256').update(stableStringify(payload)).digest('hex');
 }
 
+function readMetadataBoolean(metadata: Record<string, unknown> | null | undefined, key: string): boolean {
+  const value = metadata?.[key];
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  if (typeof value === 'string') return value.trim().toLowerCase() === 'true';
+  return false;
+}
+
+function readMetadataNumber(metadata: Record<string, unknown> | null | undefined, key: string): number | null {
+  const value = metadata?.[key];
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return parsed;
+}
+
+function isTrialCompatibleMapping(params: {
+  mapping: {
+    provider: 'stripe' | 'paypal' | 'flutterwave' | 'paystack';
+    metadata: Record<string, unknown> | null;
+  } | null;
+  trialDurationDays: number;
+  trialAutoBillEnabled: boolean;
+}): boolean {
+  const { mapping, trialDurationDays, trialAutoBillEnabled } = params;
+  if (!mapping) return false;
+  if (mapping.provider === 'stripe') return true;
+
+  const metadata = mapping.metadata || {};
+  const trialSupported = readMetadataBoolean(metadata, 'trial_supported');
+  if (!trialSupported) return false;
+
+  const isFlexibleDuration = readMetadataBoolean(metadata, 'trial_duration_flexible');
+  const mappedTrialDuration = readMetadataNumber(metadata, 'trial_duration_days');
+  if (!isFlexibleDuration && mappedTrialDuration !== null && mappedTrialDuration !== trialDurationDays) {
+    return false;
+  }
+
+  if (!trialAutoBillEnabled) {
+    const supportsAutoBillOff = readMetadataBoolean(metadata, 'trial_auto_bill_off_supported');
+    if (!supportsAutoBillOff) return false;
+  }
+
+  return true;
+}
+
 export async function POST(request: NextRequest) {
   let idempotencyFinalizeRef:
     | ((
@@ -64,6 +110,8 @@ export async function POST(request: NextRequest) {
       ) => Promise<void>)
     | null = null;
   let responseHeaders: HeadersInit = {};
+  let trialClaimDeleteKey: string | null = null;
+  let trialCheckoutSessionCreated = false;
 
   try {
     const appUrl = getAppUrl();
@@ -75,6 +123,16 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const { data: creatorProfile } = await resolvePhotographerProfileByUser(
+      serviceClient,
+      user.id,
+      user.email
+    );
+    if (!creatorProfile?.id) {
+      return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
+    }
+    const creatorId = creatorProfile.id as string;
+    const normalizedEmail = String(user.email || '').trim().toLowerCase();
 
     const body = await request.json();
     const {
@@ -252,6 +310,38 @@ export async function POST(request: NextRequest) {
         'failed'
       );
     }
+    const trialEnabled = Boolean((plan as any).trialEnabled);
+    const trialDurationDays = Math.max(1, Math.min(30, Number((plan as any).trialDurationDays || 14)));
+    const trialFeaturePolicy =
+      String((plan as any).trialFeaturePolicy || 'full_plan_access') === 'free_plan_limits'
+        ? 'free_plan_limits'
+        : 'full_plan_access';
+    const trialAutoBillEnabled = Boolean((plan as any).trialAutoBillEnabled ?? true);
+    const { data: subscriptionSettings } = await serviceClient
+      .from('subscription_settings')
+      .select('auto_renew')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    const autoRenewPreference = subscriptionSettings?.auto_renew !== false;
+    let trialAlreadyRedeemed = false;
+    if (trialEnabled) {
+      if (!normalizedEmail) {
+        return respond(
+          {
+            error: 'A verified email is required before starting a trial',
+            code: 'trial_email_required',
+          },
+          400,
+          'failed'
+        );
+      }
+      const { data: existingTrialByEmail } = await serviceClient
+        .from('subscription_trial_redemptions')
+        .select('id')
+        .eq('email_normalized', normalizedEmail)
+        .maybeSingle();
+      trialAlreadyRedeemed = Boolean(existingTrialByEmail?.id);
+    }
 
     const detectedCountry = getCountryFromRequest(request.headers) || undefined;
     const fallbackCurrency = await getEffectiveCurrency(user.id, detectedCountry);
@@ -283,53 +373,93 @@ export async function POST(request: NextRequest) {
     const configuredGateways = Array.from(
       new Set([gatewaySelection.gateway, ...(gatewaySelection.availableGateways || [])])
     );
-    let selectedGateway = gatewaySelection.gateway;
-    let mapping = await resolveProviderPlanMapping({
-      productScope: 'creator_subscription',
-      internalPlanCode: plan.code,
-      provider: selectedGateway,
-      billingCycle,
-      currency: normalizedCurrency,
-      regionCode: gatewaySelection.countryCode,
-    });
+    const trialRequested = trialEnabled && !trialAlreadyRedeemed;
+    const mappingCache = new Map<string, Awaited<ReturnType<typeof resolveProviderPlanMapping>>>();
+    const loadMappingForGateway = async (
+      gateway: 'stripe' | 'paypal' | 'flutterwave' | 'paystack'
+    ) => {
+      const cacheKey = `${gateway}:${billingCycle}:${normalizedCurrency}:${gatewaySelection.countryCode || 'GLOBAL'}`;
+      if (mappingCache.has(cacheKey)) {
+        return mappingCache.get(cacheKey) || null;
+      }
+      const resolved = await resolveProviderPlanMapping({
+        productScope: 'creator_subscription',
+        internalPlanCode: plan.code,
+        provider: gateway,
+        billingCycle,
+        currency: normalizedCurrency,
+        regionCode: gatewaySelection.countryCode,
+      });
+      mappingCache.set(cacheKey, resolved);
+      return resolved;
+    };
 
-    // Mapping fallback strategy:
-    // - If selected gateway has no mapping, try alternative configured gateways.
-    // - Stripe can operate without a provider-plan mapping using dynamic recurring price_data.
-    if (!mapping) {
+    let selectedGateway: 'stripe' | 'paypal' | 'flutterwave' | 'paystack' = gatewaySelection.gateway;
+    let mapping = await loadMappingForGateway(selectedGateway);
+
+    const isGatewayUsable = (candidateGateway: 'stripe' | 'paypal' | 'flutterwave' | 'paystack', candidateMapping: any) => {
+      if (!trialRequested) {
+        if (candidateGateway === 'stripe') {
+          return Boolean(stripe) || Boolean(candidateMapping);
+        }
+        return Boolean(candidateMapping);
+      }
+
+      if (candidateGateway === 'stripe') {
+        if (!stripe) return false;
+        if (!trialAutoBillEnabled) return true;
+        return true;
+      }
+      return isTrialCompatibleMapping({
+        mapping: candidateMapping,
+        trialDurationDays,
+        trialAutoBillEnabled,
+      });
+    };
+
+    if (!isGatewayUsable(selectedGateway, mapping)) {
+      let resolvedGateway: 'stripe' | 'paypal' | 'flutterwave' | 'paystack' | null = null;
+      let resolvedMapping: any = null;
+
       for (const candidate of configuredGateways) {
         if (candidate === selectedGateway) continue;
-
-        const candidateMapping = await resolveProviderPlanMapping({
-          productScope: 'creator_subscription',
-          internalPlanCode: plan.code,
-          provider: candidate,
-          billingCycle,
-          currency: normalizedCurrency,
-          regionCode: gatewaySelection.countryCode,
-        });
-        if (candidateMapping) {
-          mapping = candidateMapping;
-          selectedGateway = candidate;
+        const candidateGateway = candidate as 'stripe' | 'paypal' | 'flutterwave' | 'paystack';
+        const candidateMapping = await loadMappingForGateway(candidateGateway);
+        if (isGatewayUsable(candidateGateway, candidateMapping)) {
+          resolvedGateway = candidateGateway;
+          resolvedMapping = candidateMapping;
           break;
         }
-
-        if (candidate === 'stripe' && stripe) {
-          selectedGateway = 'stripe';
-        }
       }
-    }
 
-    if (!mapping && selectedGateway !== 'stripe') {
-      return respond(
-        {
-          error: `Recurring mapping missing for available gateways (${configuredGateways.join(', ')}) on ${plan.code}/${billingCycle}/${normalizedCurrency}`,
-          failClosed: true,
-          code: 'missing_provider_plan_mapping',
-        },
-        503,
-        'failed'
-      );
+      if (!resolvedGateway) {
+        if (trialRequested) {
+          return respond(
+            {
+              error:
+                `Trial checkout is not configured for available gateways (${configuredGateways.join(', ')}).` +
+                ' Configure provider_plan_mappings.metadata with trial_supported=true and matching trial constraints.',
+              code: 'trial_gateway_unsupported',
+              failClosed: true,
+            },
+            503,
+            'failed'
+          );
+        }
+
+        return respond(
+          {
+            error: `Recurring mapping missing for available gateways (${configuredGateways.join(', ')}) on ${plan.code}/${billingCycle}/${normalizedCurrency}`,
+            failClosed: true,
+            code: 'missing_provider_plan_mapping',
+          },
+          503,
+          'failed'
+        );
+      }
+
+      selectedGateway = resolvedGateway;
+      mapping = resolvedMapping;
     }
 
     const checkoutCurrency = String(mapping?.currency || normalizedCurrency).toUpperCase();
@@ -346,6 +476,40 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    let trialApplied = false;
+    if (trialRequested) {
+      const { data: trialInsert, error: trialInsertError } = await serviceClient
+        .from('subscription_trial_redemptions')
+        .insert({
+          email_normalized: normalizedEmail,
+          user_id: user.id,
+          plan_id: plan.id,
+          plan_code: plan.code,
+          checkout_idempotency_key: idempotencyKey,
+          metadata: {
+            gateway: selectedGateway,
+            currency: checkoutCurrency,
+            billing_cycle: billingCycle,
+            trial_duration_days: trialDurationDays,
+            trial_auto_bill_enabled: trialAutoBillEnabled,
+          },
+        })
+        .select('id')
+        .single();
+
+      if (trialInsertError) {
+        if (trialInsertError.code === '23505') {
+          trialAlreadyRedeemed = true;
+          trialApplied = false;
+        } else {
+          throw trialInsertError;
+        }
+      } else if (trialInsert?.id) {
+        trialApplied = true;
+        trialClaimDeleteKey = idempotencyKey;
+      }
+    }
+
     // Handle Stripe
     if (selectedGateway === 'stripe') {
       if (!stripe) {
@@ -357,10 +521,10 @@ export async function POST(request: NextRequest) {
       }
 
       // Get or create Stripe customer
-      const { data: photographer } = await supabase
+      const { data: photographer } = await serviceClient
         .from('photographers')
         .select('stripe_customer_id, email')
-        .eq('id', user.id)
+        .eq('id', creatorId)
         .single();
 
       let customerId = photographer?.stripe_customer_id;
@@ -369,17 +533,22 @@ export async function POST(request: NextRequest) {
         const customer = await stripe.customers.create({
           email: user.email,
           metadata: {
-            photographer_id: user.id,
+            photographer_id: creatorId,
           },
         });
 
         customerId = customer.id;
 
-        await supabase
+        await serviceClient
           .from('photographers')
           .update({ stripe_customer_id: customerId })
-          .eq('id', user.id);
+          .eq('id', creatorId);
       }
+
+      const trialCancelAtUnix =
+        trialApplied && !trialAutoBillEnabled
+          ? Math.floor(Date.now() / 1000) + trialDurationDays * 24 * 60 * 60
+          : null;
 
       const lineItems: any[] = [];
       if (mapping?.provider_plan_id?.startsWith('price_')) {
@@ -437,8 +606,11 @@ export async function POST(request: NextRequest) {
         success_url: `${appUrl}/dashboard/billing?success=true&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${appUrl}/dashboard/billing?canceled=true`,
         subscription_data: {
+          ...(trialApplied ? { trial_period_days: trialDurationDays } : {}),
+          ...(trialCancelAtUnix ? { cancel_at: trialCancelAtUnix } : {}),
+          ...(!autoRenewPreference && !trialCancelAtUnix ? { cancel_at_period_end: true } : {}),
           metadata: {
-            photographer_id: user.id,
+            photographer_id: creatorId,
             subscription_scope: 'creator_subscription',
             plan_code: plan.code,
             plan_id: plan.id,
@@ -446,10 +618,15 @@ export async function POST(request: NextRequest) {
             pricing_currency: pricingCurrency,
             pricing_amount_cents: String(Math.round(amountCents)),
             provider_plan_id: mapping?.provider_plan_id || 'dynamic',
+            auto_renew_preference: autoRenewPreference ? 'true' : 'false',
+            trial_applied: trialApplied ? 'true' : 'false',
+            trial_feature_policy: trialApplied ? trialFeaturePolicy : null,
+            trial_auto_bill_enabled: trialApplied ? (trialAutoBillEnabled ? 'true' : 'false') : null,
+            trial_duration_days: trialApplied ? String(trialDurationDays) : null,
           },
         },
         metadata: {
-          photographer_id: user.id,
+          photographer_id: creatorId,
           subscription_scope: 'creator_subscription',
           plan_code: plan.code,
           plan_id: plan.id,
@@ -457,6 +634,11 @@ export async function POST(request: NextRequest) {
           pricing_currency: pricingCurrency,
           pricing_amount_cents: String(Math.round(amountCents)),
           provider_plan_id: mapping?.provider_plan_id || 'dynamic',
+          auto_renew_preference: autoRenewPreference ? 'true' : 'false',
+          trial_applied: trialApplied ? 'true' : 'false',
+          trial_feature_policy: trialApplied ? trialFeaturePolicy : null,
+          trial_auto_bill_enabled: trialApplied ? (trialAutoBillEnabled ? 'true' : 'false') : null,
+          trial_duration_days: trialApplied ? String(trialDurationDays) : null,
         },
       });
 
@@ -485,6 +667,7 @@ export async function POST(request: NextRequest) {
         effectiveStripeCurrency = 'USD';
         effectiveStripeAmount = Math.round(usdAmount);
       }
+      trialCheckoutSessionCreated = true;
 
       return respond({
         checkoutUrl: session.url,
@@ -492,6 +675,11 @@ export async function POST(request: NextRequest) {
         gateway: selectedGateway,
         pricingCurrency: effectiveStripeCurrency,
         pricingAmountCents: effectiveStripeAmount,
+        trialApplied,
+        trialAlreadyRedeemed,
+        trialDurationDays: trialApplied ? trialDurationDays : 0,
+        trialAutoBillEnabled: trialApplied ? trialAutoBillEnabled : true,
+        trialFeaturePolicy: trialApplied ? trialFeaturePolicy : null,
         gatewaySelection: {
           reason: gatewaySelection.reason,
           availableGateways: gatewaySelection.availableGateways,
@@ -513,12 +701,17 @@ export async function POST(request: NextRequest) {
 
       const customPayload = JSON.stringify({
         subscription_scope: 'creator_subscription',
-        photographer_id: user.id,
+        photographer_id: creatorId,
         plan_code: plan.code,
         plan_id: plan.id,
         billing_cycle: billingCycle,
         pricing_currency: checkoutCurrency,
         pricing_amount_cents: Math.round(checkoutAmountInCents),
+        auto_renew_preference: autoRenewPreference ? 'true' : 'false',
+        trial_applied: trialApplied,
+        trial_duration_days: trialApplied ? trialDurationDays : 0,
+        trial_feature_policy: trialApplied ? trialFeaturePolicy : null,
+        trial_auto_bill_enabled: trialApplied ? trialAutoBillEnabled : true,
       });
 
       const subscription = await createBillingSubscription({
@@ -539,11 +732,17 @@ export async function POST(request: NextRequest) {
           'failed'
         );
       }
+      trialCheckoutSessionCreated = true;
 
       return respond({
         checkoutUrl: approvalUrl,
         sessionId: subscription.id,
         gateway: selectedGateway,
+        trialApplied,
+        trialAlreadyRedeemed,
+        trialDurationDays: trialApplied ? trialDurationDays : 0,
+        trialAutoBillEnabled: trialApplied ? trialAutoBillEnabled : true,
+        trialFeaturePolicy: trialApplied ? trialFeaturePolicy : null,
         gatewaySelection: {
           reason: gatewaySelection.reason,
           availableGateways: gatewaySelection.availableGateways,
@@ -563,7 +762,7 @@ export async function POST(request: NextRequest) {
         return respond({ error: 'Flutterwave is not configured' }, 500, 'failed');
       }
 
-      const txRef = `sub_${user.id}_${Date.now()}`;
+      const txRef = `sub_${creatorId}_${Date.now()}`;
       const payment = await initializeRecurringPayment({
         txRef,
         amount: Math.round(checkoutAmountInCents),
@@ -573,19 +772,34 @@ export async function POST(request: NextRequest) {
         paymentPlanId: mapping.provider_plan_id,
         metadata: {
           subscription_scope: 'creator_subscription',
-          photographer_id: user.id,
+          photographer_id: creatorId,
           plan_code: plan.code,
           plan_id: plan.id,
           billing_cycle: billingCycle,
           pricing_currency: checkoutCurrency,
           pricing_amount_cents: String(Math.round(checkoutAmountInCents)),
+          auto_renew_preference: autoRenewPreference ? 'true' : 'false',
+          trial_applied: trialApplied ? 'true' : 'false',
+          ...(trialApplied
+            ? {
+                trial_duration_days: String(trialDurationDays),
+                trial_feature_policy: trialFeaturePolicy,
+                trial_auto_bill_enabled: trialAutoBillEnabled ? 'true' : 'false',
+              }
+            : {}),
         },
       });
+      trialCheckoutSessionCreated = true;
 
       return respond({
         checkoutUrl: payment.link,
         sessionId: txRef,
         gateway: selectedGateway,
+        trialApplied,
+        trialAlreadyRedeemed,
+        trialDurationDays: trialApplied ? trialDurationDays : 0,
+        trialAutoBillEnabled: trialApplied ? trialAutoBillEnabled : true,
+        trialFeaturePolicy: trialApplied ? trialFeaturePolicy : null,
         gatewaySelection: {
           reason: gatewaySelection.reason,
           availableGateways: gatewaySelection.availableGateways,
@@ -606,7 +820,7 @@ export async function POST(request: NextRequest) {
         return respond({ error: 'Paystack is not configured' }, 500, 'failed');
       }
 
-      const reference = `sub_${user.id}_${Date.now()}`;
+      const reference = `sub_${creatorId}_${Date.now()}`;
       const payment = await initializePaystackSubscription(
         {
           reference,
@@ -617,21 +831,36 @@ export async function POST(request: NextRequest) {
           plan: mapping.provider_plan_id,
           metadata: {
             subscription_scope: 'creator_subscription',
-            photographer_id: user.id,
+            photographer_id: creatorId,
             plan_code: plan.code,
             plan_id: plan.id,
             billing_cycle: billingCycle,
             pricing_currency: checkoutCurrency,
             pricing_amount_cents: Math.round(checkoutAmountInCents),
+            auto_renew_preference: autoRenewPreference ? 'true' : 'false',
+            trial_applied: trialApplied ? 'true' : 'false',
+            ...(trialApplied
+              ? {
+                  trial_duration_days: String(trialDurationDays),
+                  trial_feature_policy: trialFeaturePolicy,
+                  trial_auto_bill_enabled: trialAutoBillEnabled ? 'true' : 'false',
+                }
+              : {}),
           },
         },
         paystackSecretKey
       );
+      trialCheckoutSessionCreated = true;
 
       return respond({
         checkoutUrl: payment.authorizationUrl,
         sessionId: payment.reference,
         gateway: selectedGateway,
+        trialApplied,
+        trialAlreadyRedeemed,
+        trialDurationDays: trialApplied ? trialDurationDays : 0,
+        trialAutoBillEnabled: trialApplied ? trialAutoBillEnabled : true,
+        trialFeaturePolicy: trialApplied ? trialFeaturePolicy : null,
         gatewaySelection: {
           reason: gatewaySelection.reason,
           availableGateways: gatewaySelection.availableGateways,
@@ -650,6 +879,16 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('Subscription checkout error:', error);
+    if (trialClaimDeleteKey && !trialCheckoutSessionCreated) {
+      try {
+        await createServiceClient()
+          .from('subscription_trial_redemptions')
+          .delete()
+          .eq('checkout_idempotency_key', trialClaimDeleteKey);
+      } catch (cleanupError) {
+        console.error('Failed to release trial redemption claim after checkout failure:', cleanupError);
+      }
+    }
     const errorPayload = {
       error:
         error instanceof Error && error.message

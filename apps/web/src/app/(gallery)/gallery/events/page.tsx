@@ -265,6 +265,39 @@ export default function MyEventsPage() {
           throw new Error('QR scanning is not supported in this browser.');
         }
 
+        const decodeWithJsQr = (
+          context: CanvasRenderingContext2D,
+          width: number,
+          height: number
+        ): string | null => {
+          if (!jsQRModule || width < 80 || height < 80) return null;
+
+          const tryDecode = (sx: number, sy: number, sw: number, sh: number): string | null => {
+            if (sw < 80 || sh < 80) return null;
+            const imageData = context.getImageData(sx, sy, sw, sh);
+            const code = jsQRModule(imageData.data, sw, sh, {
+              inversionAttempts: 'attemptBoth',
+            });
+            return code?.data || null;
+          };
+
+          // Try the full frame first, then tighter center crops for small/far QR codes.
+          const fullFrame = tryDecode(0, 0, width, height);
+          if (fullFrame) return fullFrame;
+
+          const cropRatios = [0.8, 0.6, 0.45];
+          for (const ratio of cropRatios) {
+            const cropWidth = Math.floor(width * ratio);
+            const cropHeight = Math.floor(height * ratio);
+            const startX = Math.floor((width - cropWidth) / 2);
+            const startY = Math.floor((height - cropHeight) / 2);
+            const cropped = tryDecode(startX, startY, cropWidth, cropHeight);
+            if (cropped) return cropped;
+          }
+
+          return null;
+        };
+
         const scanFrame = async () => {
           if (isCancelled || !videoRef.current || !canvasRef.current) return;
 
@@ -294,24 +327,25 @@ export default function MyEventsPage() {
 
                 if (nativeDetector) {
                   try {
-                    const barcodes = await nativeDetector.detect(canvas);
+                    const barcodes = await nativeDetector.detect(video);
                     if (barcodes.length > 0 && barcodes[0]?.rawValue) {
                       qrValue = barcodes[0].rawValue;
                     }
                   } catch (error) {
-                    console.warn('Native BarcodeDetector failed for current frame.', error);
-                    nativeDetector = null;
+                    try {
+                      const barcodes = await nativeDetector.detect(canvas);
+                      if (barcodes.length > 0 && barcodes[0]?.rawValue) {
+                        qrValue = barcodes[0].rawValue;
+                      }
+                    } catch (fallbackError) {
+                      console.warn('Native BarcodeDetector failed for current frame.', fallbackError);
+                      nativeDetector = null;
+                    }
                   }
                 }
 
                 if (!qrValue && jsQRModule) {
-                  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-                  const code = jsQRModule(imageData.data, canvas.width, canvas.height, {
-                    inversionAttempts: 'attemptBoth',
-                  });
-                  if (code?.data) {
-                    qrValue = code.data;
-                  }
+                  qrValue = decodeWithJsQr(context, canvas.width, canvas.height);
                 }
 
                 if (qrValue) {
@@ -354,8 +388,8 @@ export default function MyEventsPage() {
   const qrScannerOverlay =
     showQrScanner && typeof document !== 'undefined'
       ? createPortal(
-          <div className="fixed left-0 top-0 z-[120] h-[100dvh] w-screen bg-black/85 p-3 sm:p-4">
-            <div className="mx-auto flex h-full w-full items-center justify-center">
+          <div className="fixed inset-0 z-[120] bg-black/85">
+            <div className="mx-auto flex h-full w-full items-center justify-center p-3 sm:p-4">
               <div className="max-h-full w-full max-w-3xl overflow-hidden rounded-2xl border border-border bg-card">
                 <div className="flex items-center justify-between border-b border-border px-4 py-3">
                   <div>

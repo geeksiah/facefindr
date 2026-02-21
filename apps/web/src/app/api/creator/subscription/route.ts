@@ -1,1 +1,1 @@
-export { dynamic, GET } from '@/app/api/photographer/subscription/route';
+export { dynamic, GET, PATCH } from '@/app/api/photographer/subscription/route';

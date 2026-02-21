@@ -37,6 +37,10 @@ interface Plan {
   print_commission_fixed: number;
   print_commission_type: 'percent' | 'fixed' | 'both';
   plan_type?: 'creator' | 'photographer' | 'payg';
+  trial_enabled?: boolean;
+  trial_duration_days?: number;
+  trial_feature_policy?: 'full_plan_access' | 'free_plan_limits';
+  trial_auto_bill_enabled?: boolean;
   created_at: string;
 }
 
@@ -1144,6 +1148,10 @@ export default function PricingPage() {
     print_commission_percent: 15.00,
     print_commission_fixed: 0,
     print_commission_type: 'percent' as 'percent' | 'fixed' | 'both',
+    trial_enabled: false,
+    trial_duration_days: 14,
+    trial_feature_policy: 'full_plan_access' as 'full_plan_access' | 'free_plan_limits',
+    trial_auto_bill_enabled: true,
   });
 
   useEffect(() => {
@@ -1444,6 +1452,10 @@ export default function PricingPage() {
       print_commission_percent: 15.00,
       print_commission_fixed: 0,
       print_commission_type: 'percent',
+      trial_enabled: false,
+      trial_duration_days: 14,
+      trial_feature_policy: 'full_plan_access',
+      trial_auto_bill_enabled: true,
     });
     setSelectedPlanFeatures({});
     setEditingPlan(null);
@@ -1500,6 +1512,13 @@ export default function PricingPage() {
       print_commission_percent: plan.print_commission_percent ?? 0,
       print_commission_fixed: (plan.print_commission_fixed || 0) / 100,
       print_commission_type: plan.print_commission_type || 'percent',
+      trial_enabled: Boolean(plan.trial_enabled),
+      trial_duration_days: Math.max(1, Math.min(30, Number(plan.trial_duration_days || 14))),
+      trial_feature_policy:
+        plan.trial_feature_policy === 'free_plan_limits'
+          ? 'free_plan_limits'
+          : 'full_plan_access',
+      trial_auto_bill_enabled: plan.trial_auto_bill_enabled ?? true,
     });
     setEditingPlan(plan);
     // Load features for this plan
@@ -1554,6 +1573,10 @@ export default function PricingPage() {
         print_commission_percent: formData.print_commission_percent,
         print_commission_fixed: Math.round(formData.print_commission_fixed * 100),
         print_commission_type: formData.print_commission_type,
+        trial_enabled: formData.trial_enabled,
+        trial_duration_days: Math.round(Number(formData.trial_duration_days || 14)),
+        trial_feature_policy: formData.trial_feature_policy,
+        trial_auto_bill_enabled: formData.trial_auto_bill_enabled,
       };
 
       const url = editingPlan 
@@ -2257,6 +2280,83 @@ export default function PricingPage() {
                     </div>
                   ))}
                 </div>
+              </div>
+
+              {/* Trial Controls */}
+              <div className="space-y-4 rounded-lg bg-muted/50 p-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-foreground">Trial Controls</h3>
+                  <label className="inline-flex items-center gap-2 text-sm text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={formData.trial_enabled}
+                      onChange={(e) => setFormData({ ...formData, trial_enabled: e.target.checked })}
+                      className="rounded"
+                    />
+                    Enable trial for this plan
+                  </label>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Each email can redeem a creator trial only once forever.
+                </p>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-foreground">
+                      Trial Duration (days)
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="30"
+                      value={formData.trial_duration_days}
+                      onChange={(e) =>
+                        {
+                          const parsed = parseInt(e.target.value || '14', 10);
+                          const safeValue = Number.isFinite(parsed) ? parsed : 14;
+                          setFormData({
+                            ...formData,
+                            trial_duration_days: Math.max(1, Math.min(30, safeValue)),
+                          });
+                        }
+                      }
+                      disabled={!formData.trial_enabled}
+                      className="w-full rounded-lg border border-input bg-card px-4 py-2 text-foreground disabled:opacity-50"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-foreground">
+                      Trial Feature Access
+                    </label>
+                    <select
+                      value={formData.trial_feature_policy}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          trial_feature_policy: e.target.value as 'full_plan_access' | 'free_plan_limits',
+                        })
+                      }
+                      disabled={!formData.trial_enabled}
+                      className="w-full rounded-lg border border-input bg-card px-4 py-2 text-foreground disabled:opacity-50"
+                    >
+                      <option value="full_plan_access">Full plan access during trial</option>
+                      <option value="free_plan_limits">Free-plan limits during trial</option>
+                    </select>
+                  </div>
+                </div>
+
+                <label className="inline-flex items-center gap-2 text-sm text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={formData.trial_auto_bill_enabled}
+                    onChange={(e) =>
+                      setFormData({ ...formData, trial_auto_bill_enabled: e.target.checked })
+                    }
+                    disabled={!formData.trial_enabled}
+                    className="rounded"
+                  />
+                  Auto-bill after trial ends
+                </label>
               </div>
 
               {/* Platform Fee */}

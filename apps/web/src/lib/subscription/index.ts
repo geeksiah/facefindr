@@ -37,6 +37,10 @@ export interface SubscriptionPlan {
   printCommissionPercent: number;
   printCommissionFixed: number;
   printCommissionType: 'percent' | 'fixed' | 'both';
+  trialEnabled: boolean;
+  trialDurationDays: number;
+  trialFeaturePolicy: 'full_plan_access' | 'free_plan_limits';
+  trialAutoBillEnabled: boolean;
   createdAt: string;
 }
 
@@ -238,6 +242,13 @@ export async function getAllPlans(planType?: PlanType): Promise<FullPlanDetails[
         printCommissionPercent: Number(plan.print_commission_percent) || 15,
         printCommissionFixed: plan.print_commission_fixed || 0,
         printCommissionType: plan.print_commission_type || 'percent',
+        trialEnabled: Boolean(plan.trial_enabled),
+        trialDurationDays: Math.max(1, Math.min(30, Number(plan.trial_duration_days || 14))),
+        trialFeaturePolicy:
+          String(plan.trial_feature_policy || 'full_plan_access') === 'free_plan_limits'
+            ? 'free_plan_limits'
+            : 'full_plan_access',
+        trialAutoBillEnabled: Boolean(plan.trial_auto_bill_enabled ?? true),
         createdAt: plan.created_at,
         featureValues,
         limits: extractLimits(featureValues, plan),

@@ -64,7 +64,10 @@ export async function GET(request: NextRequest) {
           formattedMonthly: await formatPrice(priceInCurrency, normalizedCurrency),
           formattedAnnual: await formatPrice(annualPrice, normalizedCurrency),
           isPopular: plan.isPopular,
-          displayFeatures: plan.features, // Optional marketing highlights only
+          trialEnabled: plan.trialEnabled,
+          trialDurationDays: plan.trialDurationDays,
+          trialFeaturePolicy: plan.trialFeaturePolicy,
+          trialAutoBillEnabled: plan.trialAutoBillEnabled,
           features: {
             maxActiveEvents: plan.limits.maxActiveEvents,
             maxPhotosPerEvent: plan.limits.maxPhotosPerEvent,
