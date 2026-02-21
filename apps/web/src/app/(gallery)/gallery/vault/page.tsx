@@ -163,6 +163,7 @@ export default function VaultPage() {
     const subscriptionId = String(searchParams.get('subscription_id') || '').trim();
     const txRef = String(searchParams.get('tx_ref') || '').trim();
     const reference = String(searchParams.get('reference') || '').trim();
+    const regionCode = String(searchParams.get('region') || '').trim().toUpperCase();
     const provider = providerParam || (sessionId ? 'stripe' : '');
 
     if (subscriptionStatus !== 'success') {
@@ -179,7 +180,10 @@ export default function VaultPage() {
           if (provider === 'stripe' && sessionId) payload.sessionId = sessionId;
           if (provider === 'paypal' && subscriptionId) payload.subscriptionId = subscriptionId;
           if (provider === 'flutterwave' && txRef) payload.txRef = txRef;
-          if (provider === 'paystack' && reference) payload.reference = reference;
+          if (provider === 'paystack' && reference) {
+            payload.reference = reference;
+            if (regionCode) payload.regionCode = regionCode;
+          }
 
           const hasProviderReference =
             (provider === 'stripe' && Boolean(payload.sessionId)) ||

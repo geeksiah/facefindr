@@ -356,6 +356,7 @@ export async function POST(request: NextRequest) {
     if (selectedGateway === 'paystack') {
       const paystackSecretKey = await resolvePaystackSecretKey(gatewaySelection.countryCode);
       const paystackPublicKey = await resolvePaystackPublicKey(gatewaySelection.countryCode);
+      const paystackRegionCode = gatewaySelection.countryCode || 'GLOBAL';
       if (!paystackSecretKey) {
         return NextResponse.json({ error: 'Paystack is not configured' }, { status: 500 });
       }
@@ -386,7 +387,7 @@ export async function POST(request: NextRequest) {
               email: user.email || '',
               amount: priceCents,
               currency: normalizedCurrency,
-              callbackUrl: `${appUrl}/gallery/vault?subscription=success&provider=paystack&reference=${encodeURIComponent(reference)}`,
+              callbackUrl: `${appUrl}/gallery/vault?subscription=success&provider=paystack&reference=${encodeURIComponent(reference)}&region=${encodeURIComponent(paystackRegionCode)}`,
               metadata,
             },
             paystackSecretKey
@@ -397,7 +398,7 @@ export async function POST(request: NextRequest) {
               email: user.email || '',
               amount: priceCents,
               currency: normalizedCurrency,
-              callbackUrl: `${appUrl}/gallery/vault?subscription=success&provider=paystack&reference=${encodeURIComponent(reference)}`,
+              callbackUrl: `${appUrl}/gallery/vault?subscription=success&provider=paystack&reference=${encodeURIComponent(reference)}&region=${encodeURIComponent(paystackRegionCode)}`,
               plan: mapping!.provider_plan_id,
               metadata,
             },
@@ -444,11 +445,13 @@ export async function POST(request: NextRequest) {
               currency: normalizedCurrency,
               reference: payment.reference,
               accessCode: payment.accessCode,
+              regionCode: paystackRegionCode,
             }
           : null,
         renewalMode: manualRenewalMode ? 'manual_renewal' : 'provider_recurring',
         currentPeriodEnd: manualPeriodEndIso,
         autoRenewSupported: !manualRenewalMode,
+        regionCode: paystackRegionCode,
       });
     }
 

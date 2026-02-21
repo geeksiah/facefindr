@@ -120,24 +120,47 @@ function extractPublicKey(credentials: unknown): string | null {
 }
 
 export async function resolvePaystackSecretKey(regionCode?: string): Promise<string | null> {
-  if (!regionCode) {
-    return process.env.PAYSTACK_SECRET_KEY || null;
-  }
+  const candidates = await resolvePaystackSecretKeyCandidates(regionCode);
+  return candidates[0] || null;
+}
 
+export async function resolvePaystackSecretKeyCandidates(regionCode?: string): Promise<string[]> {
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  const pushUnique = (value?: string | null) => {
+    const normalized = String(value || '').trim();
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    keys.push(normalized);
+  };
+
+  const normalizedRegion = String(regionCode || '').trim().toUpperCase();
   const supabase = createServiceClient();
-  const { data } = await (supabase
+  const { data: rows } = await (supabase
     .from('payment_provider_credentials') as any)
-    .select('credentials, is_active')
-    .eq('region_code', regionCode.toUpperCase())
+    .select('region_code, credentials, is_active')
     .eq('provider', 'paystack')
-    .maybeSingle();
+    .eq('is_active', true);
 
-  if (data?.is_active) {
-    const fromDb = extractSecretKey((data as any).credentials);
-    if (fromDb) return fromDb;
+  const credentialRows = Array.isArray(rows) ? rows : [];
+  if (normalizedRegion) {
+    const exactRegion = credentialRows.find(
+      (row) => String((row as any).region_code || '').toUpperCase() === normalizedRegion
+    );
+    pushUnique(extractSecretKey((exactRegion as any)?.credentials));
   }
 
-  return process.env.PAYSTACK_SECRET_KEY || null;
+  const globalRegion = credentialRows.find(
+    (row) => String((row as any).region_code || '').toUpperCase() === 'GLOBAL'
+  );
+  pushUnique(extractSecretKey((globalRegion as any)?.credentials));
+
+  for (const row of credentialRows) {
+    pushUnique(extractSecretKey((row as any)?.credentials));
+  }
+
+  pushUnique(process.env.PAYSTACK_SECRET_KEY || null);
+  return keys;
 }
 
 export async function resolvePaystackPublicKey(regionCode?: string): Promise<string | null> {

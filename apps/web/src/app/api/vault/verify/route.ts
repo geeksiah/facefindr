@@ -5,7 +5,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyTransactionByRef } from '@/lib/payments/flutterwave';
 import { getBillingSubscription } from '@/lib/payments/paypal';
 import {
-  resolvePaystackSecretKey,
+  PaystackApiError,
+  resolvePaystackSecretKeyCandidates,
   verifyPaystackTransaction,
 } from '@/lib/payments/paystack';
 import {
@@ -341,13 +342,29 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Paystack reference is required.' }, { status: 400 });
       }
 
-      const secretKey =
-        (await resolvePaystackSecretKey(regionCode)) || (await resolvePaystackSecretKey());
-      if (!secretKey) {
-        return NextResponse.json({ error: 'Paystack is not configured.' }, { status: 500 });
+      const regionHint =
+        readString(body?.regionCode) ||
+        readString(body?.region) ||
+        regionCode;
+      const candidateSecretKeys = await resolvePaystackSecretKeyCandidates(regionHint || undefined);
+      if (!candidateSecretKeys.length) {
+        return NextResponse.json({ error: 'Paystack is not configured.' }, { status: 503 });
       }
 
-      const verified = await verifyPaystackTransaction(reference, secretKey);
+      let verified: Awaited<ReturnType<typeof verifyPaystackTransaction>> | null = null;
+      let lastPaystackError: unknown = null;
+      for (const secretKey of candidateSecretKeys) {
+        try {
+          verified = await verifyPaystackTransaction(reference, secretKey);
+          break;
+        } catch (candidateError) {
+          lastPaystackError = candidateError;
+        }
+      }
+      if (!verified) {
+        throw lastPaystackError || new Error('Failed to verify Paystack transaction');
+      }
+
       if (!isSuccessfulPaystackStatus(verified.status)) {
         return NextResponse.json(
           { error: `Payment is not yet successful (status: ${verified.status || 'unknown'}).` },
@@ -420,10 +437,20 @@ export async function POST(request: NextRequest) {
     });
   } catch (error: any) {
     console.error('Vault payment verification error:', error);
+    if (error instanceof PaystackApiError) {
+      const statusCode = error.statusCode >= 400 && error.statusCode < 500 ? 400 : 502;
+      return NextResponse.json(
+        {
+          error: error.message || 'Paystack verification failed.',
+          code: 'paystack_verify_failed',
+          failClosed: statusCode >= 500,
+        },
+        { status: statusCode }
+      );
+    }
     return NextResponse.json(
       { error: error?.message || 'Failed to verify vault payment.' },
       { status: 500 }
     );
   }
 }
-

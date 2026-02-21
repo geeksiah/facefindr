@@ -110,8 +110,13 @@ export default function VaultPricingPage() {
             plan_slug: planSlug,
           },
           onSuccess: (reference) => {
+            const checkoutRegion = String(data?.regionCode || data?.paystack?.regionCode || '')
+              .trim()
+              .toUpperCase();
             window.location.assign(
-              `/gallery/vault?subscription=success&provider=paystack&reference=${encodeURIComponent(reference)}`
+              `/gallery/vault?subscription=success&provider=paystack&reference=${encodeURIComponent(reference)}${
+                checkoutRegion ? `&region=${encodeURIComponent(checkoutRegion)}` : ''
+              }`
             );
           },
         });

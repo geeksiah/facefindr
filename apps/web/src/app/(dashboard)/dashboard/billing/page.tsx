@@ -307,6 +307,7 @@ export default function BillingPage() {
     const subscriptionId = String(searchParams.get('subscription_id') || '').trim();
     const txRef = String(searchParams.get('tx_ref') || '').trim();
     const reference = String(searchParams.get('reference') || '').trim();
+    const regionCode = String(searchParams.get('region') || '').trim().toUpperCase();
     const provider =
       providerParam ||
       (sessionId ? 'stripe' : '');
@@ -323,7 +324,10 @@ export default function BillingPage() {
         if (provider === 'stripe' && sessionId) payload.sessionId = sessionId;
         if (provider === 'paypal' && subscriptionId) payload.subscriptionId = subscriptionId;
         if (provider === 'flutterwave' && txRef) payload.txRef = txRef;
-        if (provider === 'paystack' && reference) payload.reference = reference;
+        if (provider === 'paystack' && reference) {
+          payload.reference = reference;
+          if (regionCode) payload.regionCode = regionCode;
+        }
 
         const hasProviderReference =
           (provider === 'stripe' && Boolean(payload.sessionId)) ||
@@ -450,8 +454,13 @@ export default function BillingPage() {
             plan_code: planCode,
           },
           onSuccess: (reference) => {
+            const checkoutRegion = String(data?.regionCode || data?.paystack?.regionCode || '')
+              .trim()
+              .toUpperCase();
             window.location.assign(
-              `/dashboard/billing?success=true&provider=paystack&reference=${encodeURIComponent(reference)}`
+              `/dashboard/billing?success=true&provider=paystack&reference=${encodeURIComponent(reference)}${
+                checkoutRegion ? `&region=${encodeURIComponent(checkoutRegion)}` : ''
+              }`
             );
           },
         });
