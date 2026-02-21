@@ -6,10 +6,64 @@ import { getPhotographerIdCandidates } from '@/lib/profiles/ids';
 import { checkFeature } from '@/lib/subscription/enforcement';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
-// ============================================
-// LIVE EVENT MODE API
-// SRS §6.5: Toggle live mode for real-time notifications
-// ============================================
+function getMissingColumnName(error: any): string | null {
+  if (error?.code !== '42703' || typeof error?.message !== 'string') return null;
+  const quotedMatch = error.message.match(/column \"([^\"]+)\"/i);
+  const bareMatch = error.message.match(/column\s+([a-zA-Z0-9_.]+)/i);
+  const rawName = quotedMatch?.[1] || bareMatch?.[1] || null;
+  if (!rawName) return null;
+  return rawName.includes('.') ? rawName.split('.').pop() || rawName : rawName;
+}
+
+async function fetchLiveModeEvent(serviceClient: any, eventId: string) {
+  const selectedColumns = ['id', 'name', 'live_mode_enabled', 'photographer_id', 'status'];
+  while (selectedColumns.length > 0) {
+    const result = await serviceClient
+      .from('events')
+      .select(selectedColumns.join(', '))
+      .eq('id', eventId)
+      .maybeSingle();
+    if (!result.error) return result.data || null;
+
+    const missing = getMissingColumnName(result.error);
+    if (missing && selectedColumns.includes(missing)) {
+      const nextColumns = selectedColumns.filter((column) => column !== missing);
+      selectedColumns.splice(0, selectedColumns.length, ...nextColumns);
+      continue;
+    }
+    if (result.error?.code === 'PGRST116') return null;
+    throw result.error;
+  }
+  return null;
+}
+
+async function updateLiveModeColumn(
+  serviceClient: any,
+  eventId: string,
+  enabled: boolean
+): Promise<{ success: boolean; missingColumn: boolean }> {
+  const payload: Record<string, unknown> = {
+    live_mode_enabled: enabled,
+    updated_at: new Date().toISOString(),
+  };
+
+  while (Object.keys(payload).length > 0) {
+    const { error } = await serviceClient
+      .from('events')
+      .update(payload)
+      .eq('id', eventId);
+    if (!error) return { success: true, missingColumn: false };
+
+    const missing = getMissingColumnName(error);
+    if (missing && Object.prototype.hasOwnProperty.call(payload, missing)) {
+      delete payload[missing];
+      continue;
+    }
+    throw error;
+  }
+
+  return { success: false, missingColumn: true };
+}
 
 /**
  * GET - Get current live mode status
@@ -29,29 +83,23 @@ export async function GET(
 
     const eventId = params.id;
     const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
+    const event = await fetchLiveModeEvent(serviceClient, eventId);
 
-    // Get event with live mode status
-    const { data: event, error } = await serviceClient
-      .from('events')
-      .select('id, name, live_mode_enabled, photographer_id')
-      .eq('id', eventId)
-      .single();
-
-    if (error || !event) {
+    if (!event) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 });
     }
 
-    // Verify ownership
     if (!photographerIdCandidates.includes(event.photographer_id)) {
       return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
     }
 
+    const liveModeSupported = Object.prototype.hasOwnProperty.call(event, 'live_mode_enabled');
     return NextResponse.json({
       eventId: event.id,
       eventName: event.name,
-      liveModeEnabled: event.live_mode_enabled || false,
+      liveModeEnabled: liveModeSupported ? Boolean(event.live_mode_enabled) : false,
+      liveModeSupported,
     });
-
   } catch (error) {
     console.error('Get live mode error:', error);
     return NextResponse.json(
@@ -86,14 +134,9 @@ export async function POST(
       return NextResponse.json({ error: 'enabled must be a boolean' }, { status: 400 });
     }
 
-    // Get event and verify ownership
-    const { data: event, error: fetchError } = await serviceClient
-      .from('events')
-      .select('id, photographer_id, status')
-      .eq('id', eventId)
-      .single();
+    const event = await fetchLiveModeEvent(serviceClient, eventId);
 
-    if (fetchError || !event) {
+    if (!event) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 });
     }
 
@@ -101,11 +144,11 @@ export async function POST(
       return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
     }
 
-    // Only allow live mode for active events
     if (enabled && event.status !== 'active') {
-      return NextResponse.json({ 
-        error: 'Live mode can only be enabled for active events' 
-      }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Live mode can only be enabled for active events' },
+        { status: 400 }
+      );
     }
 
     if (enabled) {
@@ -118,24 +161,21 @@ export async function POST(
       }
     }
 
-    // Update live mode
-    const { error: updateError } = await serviceClient
-      .from('events')
-      .update({ 
-        live_mode_enabled: enabled,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', eventId);
+    const updateResult = await updateLiveModeColumn(serviceClient, eventId, enabled);
+    if (!updateResult.success && updateResult.missingColumn) {
+      return NextResponse.json(
+        { error: 'Live mode toggle is unavailable in this deployment. Apply latest migrations.' },
+        { status: 400 }
+      );
+    }
 
-    if (updateError) {
-      console.error('Update live mode error:', updateError);
+    if (!updateResult.success) {
       return NextResponse.json(
         { error: 'Failed to update live mode' },
         { status: 500 }
       );
     }
 
-    // Log the action
     await serviceClient
       .from('audit_logs')
       .insert({
@@ -150,11 +190,10 @@ export async function POST(
       success: true,
       eventId,
       liveModeEnabled: enabled,
-      message: enabled 
+      message: enabled
         ? 'Live mode enabled - attendees will receive notifications within 5 minutes'
         : 'Live mode disabled - standard notification timing restored',
     });
-
   } catch (error) {
     console.error('Toggle live mode error:', error);
     return NextResponse.json(
@@ -163,4 +202,3 @@ export async function POST(
     );
   }
 }
-

@@ -412,7 +412,8 @@ async function maybeRefreshRates(
     const { error } = await supabase.from('exchange_rates').insert(payload);
     if (error) {
       console.error('Exchange rate persist error:', error);
-      return null;
+      // Keep runtime conversion working even when persistence is unavailable.
+      return providerResult.rates;
     }
 
     return providerResult.rates;
@@ -441,6 +442,9 @@ export async function getExchangeRates(): Promise<Map<string, number>> {
       .or('valid_until.is.null,valid_until.gt.now()')
       .order('valid_from', { ascending: false }),
   ]);
+  if (rateResult.error) {
+    console.error('Exchange rate lookup error:', rateResult.error);
+  }
 
   const currencyCodes = Array.from(currencyMap.keys()).map((code) => code.toUpperCase());
   if (!currencyCodes.includes(EXCHANGE_BASE_CURRENCY)) {

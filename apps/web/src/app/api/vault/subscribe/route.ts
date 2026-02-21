@@ -23,6 +23,7 @@ import {
 import {
   initializePaystackPayment,
   initializePaystackSubscription,
+  resolvePaystackPublicKey,
   resolvePaystackSecretKey,
 } from '@/lib/payments/paystack';
 import { resolveProviderPlanMapping } from '@/lib/payments/recurring-subscriptions';
@@ -345,6 +346,7 @@ export async function POST(request: NextRequest) {
 
     if (selectedGateway === 'paystack') {
       const paystackSecretKey = await resolvePaystackSecretKey(gatewaySelection.countryCode);
+      const paystackPublicKey = await resolvePaystackPublicKey(gatewaySelection.countryCode);
       if (!paystackSecretKey) {
         return NextResponse.json({ error: 'Paystack is not configured' }, { status: 500 });
       }
@@ -392,10 +394,48 @@ export async function POST(request: NextRequest) {
             paystackSecretKey
           );
 
+      await supabase
+        .from('storage_subscriptions')
+        .upsert(
+          {
+            user_id: user.id,
+            plan_id: plan.id,
+            status: 'pending',
+            billing_cycle: normalizedBillingCycle,
+            price_paid: priceCents / 100,
+            currency: normalizedCurrency,
+            payment_provider: 'paystack',
+            external_subscription_id: payment.reference,
+            metadata: {
+              ...metadata,
+              paystack_reference: payment.reference,
+              pending_checkout: true,
+            },
+            updated_at: new Date().toISOString(),
+          } as any,
+          { onConflict: 'user_id' }
+        )
+        .then(() => null)
+        .catch((error: any) => {
+          // Best effort pre-seeding; webhook/verify path remains source of truth.
+          console.error('Failed to pre-seed pending vault subscription row:', error);
+          return null;
+        });
+
       return NextResponse.json({
         checkoutUrl: payment.authorizationUrl,
         sessionId: payment.reference,
         gateway: selectedGateway,
+        paystack: paystackPublicKey
+          ? {
+              publicKey: paystackPublicKey,
+              email: user.email || '',
+              amount: priceCents,
+              currency: normalizedCurrency,
+              reference: payment.reference,
+              accessCode: payment.accessCode,
+            }
+          : null,
         renewalMode: manualRenewalMode ? 'manual_renewal' : 'provider_recurring',
         currentPeriodEnd: manualPeriodEndIso,
         autoRenewSupported: !manualRenewalMode,

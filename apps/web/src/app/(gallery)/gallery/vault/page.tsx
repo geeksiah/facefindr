@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui';
@@ -80,6 +80,7 @@ export default function VaultPage() {
   const [isMutating, setIsMutating] = useState(false);
   const [isUpdatingAutoRenew, setIsUpdatingAutoRenew] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const handledRedirectRef = useRef(false);
 
   const filteredPhotos = useMemo(() => {
     if (activeAlbumFilter === 'all') return photos;
@@ -150,6 +151,49 @@ export default function VaultPage() {
 
     return () => clearInterval(usageInterval);
   }, []);
+
+  useEffect(() => {
+    if (handledRedirectRef.current) return;
+    handledRedirectRef.current = true;
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const subscriptionStatus = String(searchParams.get('subscription') || '').toLowerCase();
+    const provider = String(searchParams.get('provider') || '').toLowerCase();
+    const reference = String(searchParams.get('reference') || '').trim();
+
+    if (subscriptionStatus !== 'success') {
+      return;
+    }
+
+    const cleanUrl = window.location.pathname;
+    window.history.replaceState({}, document.title, cleanUrl);
+
+    void (async () => {
+      if (provider === 'paystack' && reference) {
+        try {
+          const verifyResponse = await fetch('/api/vault/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              provider: 'paystack',
+              reference,
+            }),
+          });
+          const verifyPayload = await verifyResponse.json().catch(() => ({}));
+          if (!verifyResponse.ok) {
+            throw new Error(verifyPayload?.error || 'Payment verification failed');
+          }
+          toast.success('Subscription activated', 'Your vault plan is now active.');
+        } catch (error: any) {
+          toast.error('Verification pending', error?.message || 'Please refresh in a moment.');
+        }
+      } else {
+        toast.success('Checkout completed', 'We are confirming your subscription now.');
+      }
+
+      await loadVaultData(false);
+    })();
+  }, [toast]);
 
   const toggleSelection = (photoId: string) => {
     setSelectedPhotos((prev) => {

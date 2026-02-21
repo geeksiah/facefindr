@@ -13,6 +13,53 @@ import { generateQRCode, generateTransparentQRCode, generateEventUrls, generateE
 import { generateAccessCode } from '@/lib/sharing/share-service';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
+function getMissingColumnName(error: any): string | null {
+  if (error?.code !== '42703' || typeof error?.message !== 'string') return null;
+  const quotedMatch = error.message.match(/column \"([^\"]+)\"/i);
+  const bareMatch = error.message.match(/column\s+([a-zA-Z0-9_.]+)/i);
+  const rawName = quotedMatch?.[1] || bareMatch?.[1] || null;
+  if (!rawName) return null;
+  return rawName.includes('.') ? rawName.split('.').pop() || rawName : rawName;
+}
+
+async function fetchEventShareRecord(serviceClient: any, eventId: string, photographerIds: string[]) {
+  const selectColumns = [
+    'id',
+    'name',
+    'public_slug',
+    'short_link',
+    'is_publicly_listed',
+    'allow_anonymous_scan',
+    'require_access_code',
+    'public_access_code',
+    'qr_code_url',
+    'status',
+  ];
+
+  while (selectColumns.length > 0) {
+    const result = await serviceClient
+      .from('events')
+      .select(selectColumns.join(', '))
+      .eq('id', eventId)
+      .in('photographer_id', photographerIds)
+      .maybeSingle();
+
+    if (!result.error) return result.data || null;
+
+    const missing = getMissingColumnName(result.error);
+    if (missing && selectColumns.includes(missing)) {
+      const nextColumns = selectColumns.filter((column) => column !== missing);
+      selectColumns.splice(0, selectColumns.length, ...nextColumns);
+      continue;
+    }
+
+    if (result.error?.code === 'PGRST116') return null;
+    throw result.error;
+  }
+
+  return null;
+}
+
 // GET - Get sharing info for an event
 export async function GET(
   request: NextRequest,
@@ -34,18 +81,8 @@ export async function GET(
     }
 
     // Get event with sharing info
-    const { data: event, error } = await serviceClient
-      .from('events')
-      .select(`
-        id, name, public_slug, short_link, is_publicly_listed,
-        allow_anonymous_scan, require_access_code, public_access_code,
-        qr_code_url, status
-      `)
-      .eq('id', id)
-      .in('photographer_id', photographerIdCandidates)
-      .single();
-
-    if (error || !event) {
+    const event = await fetchEventShareRecord(serviceClient, id, photographerIdCandidates);
+    if (!event) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 });
     }
 
@@ -169,10 +206,27 @@ export async function PUT(
     }
 
     // Update event
-    const { error: updateError } = await serviceClient
-      .from('events')
-      .update(updates)
-      .eq('id', id);
+    let updateError: any = null;
+    const updatePayload = { ...updates };
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const result = await serviceClient
+        .from('events')
+        .update(updatePayload)
+        .eq('id', id);
+      updateError = result.error;
+      if (!updateError) break;
+
+      const missingColumn = getMissingColumnName(updateError);
+      if (!missingColumn || !(missingColumn in updatePayload)) {
+        break;
+      }
+
+      delete updatePayload[missingColumn];
+      if (!Object.keys(updatePayload).length) {
+        updateError = null;
+        break;
+      }
+    }
 
     if (updateError) {
       // Check for unique constraint violation
@@ -183,6 +237,12 @@ export async function PUT(
         );
       }
       throw updateError;
+    }
+    if (Object.keys(updates).length > 0 && Object.keys(updatePayload).length === 0) {
+      return NextResponse.json(
+        { error: 'No compatible sharing setting columns are available. Apply latest migrations.' },
+        { status: 400 }
+      );
     }
 
     return NextResponse.json({ success: true });

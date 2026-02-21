@@ -25,6 +25,7 @@ import {
 import {
   initializePaystackPayment,
   initializePaystackSubscription,
+  resolvePaystackPublicKey,
   resolvePaystackSecretKey,
 } from '@/lib/payments/paystack';
 import { resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
@@ -111,6 +112,15 @@ function isMissingRelationError(error: unknown, relationName?: string): boolean 
   if (code !== '42P01') return false;
   if (!relationName) return true;
   return message.includes(relationName.toLowerCase());
+}
+
+function isMissingColumnError(error: unknown, columnName?: string): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = String((error as any).code || '');
+  const message = String((error as any).message || '').toLowerCase();
+  if (code !== '42703') return false;
+  if (!columnName) return true;
+  return message.includes(columnName.toLowerCase());
 }
 
 function getManualPeriodEndIso(billingCycle: 'monthly' | 'annual'): string {
@@ -225,16 +235,20 @@ export async function POST(request: NextRequest) {
     ) => {
       if (!idempotencyRecordId || idempotencyFinalized) return;
       idempotencyFinalized = true;
-      await serviceClient
-        .from('api_idempotency_keys')
-        .update({
-          status,
-          response_code: responseCode,
-          response_payload: status === 'completed' ? payload : null,
-          error_payload: status === 'failed' ? payload : null,
-          last_seen_at: new Date().toISOString(),
-        })
-        .eq('id', idempotencyRecordId);
+      try {
+        await serviceClient
+          .from('api_idempotency_keys')
+          .update({
+            status,
+            response_code: responseCode,
+            response_payload: status === 'completed' ? payload : null,
+            error_payload: status === 'failed' ? payload : null,
+            last_seen_at: new Date().toISOString(),
+          })
+          .eq('id', idempotencyRecordId);
+      } catch (error) {
+        console.error('Failed to finalize idempotency record:', error);
+      }
     };
     idempotencyFinalizeRef = finalizeIdempotency;
 
@@ -268,7 +282,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (claimError) {
-      if (isMissingRelationError(claimError, 'api_idempotency_keys')) {
+      if (isMissingRelationError(claimError, 'api_idempotency_keys') || isMissingColumnError(claimError)) {
         return NextResponse.json(
           {
             error:
@@ -382,7 +396,8 @@ export async function POST(request: NextRequest) {
         .maybeSingle();
       if (
         existingTrialLookupError &&
-        isMissingRelationError(existingTrialLookupError, 'subscription_trial_redemptions')
+        (isMissingRelationError(existingTrialLookupError, 'subscription_trial_redemptions') ||
+          isMissingColumnError(existingTrialLookupError))
       ) {
         return respond(
           {
@@ -560,7 +575,10 @@ export async function POST(request: NextRequest) {
         if (trialInsertError.code === '23505') {
           trialAlreadyRedeemed = true;
           trialApplied = false;
-        } else if (isMissingRelationError(trialInsertError, 'subscription_trial_redemptions')) {
+        } else if (
+          isMissingRelationError(trialInsertError, 'subscription_trial_redemptions') ||
+          isMissingColumnError(trialInsertError)
+        ) {
           return respond(
             {
               error:
@@ -621,9 +639,10 @@ export async function POST(request: NextRequest) {
           : null;
 
       const lineItems: any[] = [];
-      if (mapping?.provider_plan_id?.startsWith('price_')) {
+      const useMappedStripePrice = Boolean(mapping?.provider_plan_id?.startsWith('price_'));
+      if (useMappedStripePrice) {
         lineItems.push({
-          price: mapping.provider_plan_id,
+          price: mapping!.provider_plan_id,
           quantity: 1,
         });
       } else {
@@ -647,10 +666,14 @@ export async function POST(request: NextRequest) {
           quantity: 1,
         });
       }
-      const buildSessionPayload = (pricingCurrency: string, amountCents: number) => ({
+      const buildSessionPayload = (
+        pricingCurrency: string,
+        amountCents: number,
+        options?: { mappedStripePrice?: boolean; providerPlanId?: string }
+      ) => ({
         customer: customerId,
         mode: 'subscription' as const,
-        line_items: mapping?.provider_plan_id?.startsWith('price_')
+        line_items: options?.mappedStripePrice
           ? (lineItems as any)
           : ([
               {
@@ -687,7 +710,7 @@ export async function POST(request: NextRequest) {
             billing_cycle: billingCycle,
             pricing_currency: pricingCurrency,
             pricing_amount_cents: String(Math.round(amountCents)),
-            provider_plan_id: mapping?.provider_plan_id || 'dynamic',
+            provider_plan_id: options?.providerPlanId || 'dynamic',
             auto_renew_preference: autoRenewPreference ? 'true' : 'false',
             trial_applied: trialApplied ? 'true' : 'false',
             trial_feature_policy: trialApplied ? trialFeaturePolicy : null,
@@ -703,7 +726,7 @@ export async function POST(request: NextRequest) {
           billing_cycle: billingCycle,
           pricing_currency: pricingCurrency,
           pricing_amount_cents: String(Math.round(amountCents)),
-          provider_plan_id: mapping?.provider_plan_id || 'dynamic',
+          provider_plan_id: options?.providerPlanId || 'dynamic',
           auto_renew_preference: autoRenewPreference ? 'true' : 'false',
           trial_applied: trialApplied ? 'true' : 'false',
           trial_feature_policy: trialApplied ? trialFeaturePolicy : null,
@@ -715,16 +738,37 @@ export async function POST(request: NextRequest) {
       let session;
       let effectiveStripeCurrency = checkoutCurrency;
       let effectiveStripeAmount = Math.round(checkoutAmountInCents);
+      let effectiveProviderPlanId = mapping?.provider_plan_id || 'dynamic';
 
       try {
         session = await stripe.checkout.sessions.create(
-          buildSessionPayload(checkoutCurrency, checkoutAmountInCents)
+          buildSessionPayload(checkoutCurrency, checkoutAmountInCents, {
+            mappedStripePrice: useMappedStripePrice,
+            providerPlanId: mapping?.provider_plan_id || 'dynamic',
+          })
         );
       } catch (stripeError) {
+        let recovered = false;
+
+        if (useMappedStripePrice) {
+          try {
+            session = await stripe.checkout.sessions.create(
+              buildSessionPayload(checkoutCurrency, checkoutAmountInCents, {
+                mappedStripePrice: false,
+                providerPlanId: 'dynamic',
+              })
+            );
+            recovered = true;
+            effectiveProviderPlanId = 'dynamic';
+          } catch (fallbackError) {
+            console.warn('Stripe mapped price checkout failed; dynamic fallback also failed.', fallbackError);
+          }
+        }
+
         const resolvedUsd = await resolvePlanPriceForCurrency(plan, 'USD');
         const usdAmount = Number(resolvedUsd?.amountCents || 0);
         const shouldRetryInUsd =
-          !mapping &&
+          !recovered &&
           checkoutCurrency !== 'USD' &&
           Number.isFinite(usdAmount) &&
           usdAmount > 0;
@@ -733,9 +777,15 @@ export async function POST(request: NextRequest) {
           throw stripeError;
         }
 
-        session = await stripe.checkout.sessions.create(buildSessionPayload('USD', usdAmount));
+        session = await stripe.checkout.sessions.create(
+          buildSessionPayload('USD', usdAmount, {
+            mappedStripePrice: false,
+            providerPlanId: 'dynamic',
+          })
+        );
         effectiveStripeCurrency = 'USD';
         effectiveStripeAmount = Math.round(usdAmount);
+        effectiveProviderPlanId = 'dynamic';
       }
       trialCheckoutSessionCreated = true;
 
@@ -745,6 +795,7 @@ export async function POST(request: NextRequest) {
         gateway: selectedGateway,
         pricingCurrency: effectiveStripeCurrency,
         pricingAmountCents: effectiveStripeAmount,
+        providerPlanId: effectiveProviderPlanId,
         trialApplied,
         trialAlreadyRedeemed,
         trialDurationDays: trialApplied ? trialDurationDays : 0,
@@ -879,6 +930,7 @@ export async function POST(request: NextRequest) {
 
     if (selectedGateway === 'paystack') {
       const paystackSecretKey = await resolvePaystackSecretKey(gatewaySelection.countryCode);
+      const paystackPublicKey = await resolvePaystackPublicKey(gatewaySelection.countryCode);
       if (!paystackSecretKey) {
         return respond({ error: 'Paystack is not configured' }, 500, 'failed');
       }
@@ -951,6 +1003,16 @@ export async function POST(request: NextRequest) {
         checkoutUrl: payment.authorizationUrl,
         sessionId: payment.reference,
         gateway: selectedGateway,
+        paystack: paystackPublicKey
+          ? {
+              publicKey: paystackPublicKey,
+              email: user.email || '',
+              amount: Math.round(checkoutAmountInCents),
+              currency: checkoutCurrency,
+              reference: payment.reference,
+              accessCode: payment.accessCode,
+            }
+          : null,
         renewalMode: manualRenewalMode ? 'manual_renewal' : 'provider_recurring',
         currentPeriodEnd: manualPeriodEndIso,
         autoRenewSupported: !manualRenewalMode,

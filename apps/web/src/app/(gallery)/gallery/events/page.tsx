@@ -46,9 +46,8 @@ export default function MyEventsPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const frameRequestRef = useRef<number | null>(null);
+  const scanTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scanInFlightRef = useRef(false);
-  const lastScanAtRef = useRef(0);
 
   const refreshEvents = useCallback(async () => {
     try {
@@ -139,13 +138,12 @@ export default function MyEventsPage() {
   };
 
   const stopQrScanner = useCallback(() => {
-    if (frameRequestRef.current !== null) {
-      cancelAnimationFrame(frameRequestRef.current);
-      frameRequestRef.current = null;
+    if (scanTimerRef.current !== null) {
+      clearInterval(scanTimerRef.current);
+      scanTimerRef.current = null;
     }
 
     scanInFlightRef.current = false;
-    lastScanAtRef.current = 0;
 
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
@@ -246,6 +244,8 @@ export default function MyEventsPage() {
     let isCancelled = false;
     setQrScannerError(null);
     setIsInitializingScanner(true);
+    const originalBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
 
     const initScanner = async () => {
       try {
@@ -256,8 +256,8 @@ export default function MyEventsPage() {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: { ideal: 'environment' },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
           },
         });
         if (isCancelled) {
@@ -266,167 +266,79 @@ export default function MyEventsPage() {
         }
 
         streamRef.current = stream;
-        if (!videoRef.current) {
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        if (!video || !canvas) {
           throw new Error('Unable to initialize camera preview.');
         }
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+        video.srcObject = stream;
+        video.setAttribute('playsinline', 'true');
+        await video.play();
 
-        // Prefer native detector when available, with jsQR fallback for reliability.
-        const BarcodeDetectorCtor = (window as any).BarcodeDetector;
-        let nativeDetector: any = null;
-        let jsQRModule: any = null;
-        const videoTrack = stream.getVideoTracks()[0] || null;
-        let imageCapture: any = null;
+        const jsQR = (await import('jsqr')).default;
+        if (typeof jsQR !== 'function') {
+          throw new Error('QR scanner engine failed to load.');
+        }
 
-        if (BarcodeDetectorCtor) {
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        if (!context) {
+          throw new Error('Unable to start QR scanner.');
+        }
+
+        const decodeFrame = async () => {
+          if (isCancelled || scanInFlightRef.current) return;
+          if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.videoWidth < 60 || video.videoHeight < 60) {
+            return;
+          }
+
+          scanInFlightRef.current = true;
           try {
-            if (typeof BarcodeDetectorCtor.getSupportedFormats === 'function') {
-              const supportedFormats = await BarcodeDetectorCtor.getSupportedFormats();
-              if (Array.isArray(supportedFormats) && supportedFormats.includes('qr_code')) {
-                nativeDetector = new BarcodeDetectorCtor({ formats: ['qr_code'] });
-              }
-            } else {
-              nativeDetector = new BarcodeDetectorCtor({ formats: ['qr_code'] });
+            const maxDimension = 960;
+            const sourceWidth = video.videoWidth;
+            const sourceHeight = video.videoHeight;
+            const scale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight));
+            const width = Math.max(320, Math.round(sourceWidth * scale));
+            const height = Math.max(240, Math.round(sourceHeight * scale));
+
+            if (canvas.width !== width || canvas.height !== height) {
+              canvas.width = width;
+              canvas.height = height;
             }
-          } catch (error) {
-            console.warn('Native BarcodeDetector unavailable, falling back to jsQR.', error);
+
+            context.drawImage(video, 0, 0, width, height);
+
+            const tryDecode = (sx: number, sy: number, sw: number, sh: number): string | null => {
+              if (sw < 80 || sh < 80) return null;
+              const imageData = context.getImageData(sx, sy, sw, sh);
+              const result = jsQR(imageData.data, sw, sh, { inversionAttempts: 'attemptBoth' });
+              return result?.data || null;
+            };
+
+            let qrValue = tryDecode(0, 0, width, height);
+            if (!qrValue) {
+              const cropRatios = [0.85, 0.7, 0.55];
+              for (const ratio of cropRatios) {
+                const cropWidth = Math.floor(width * ratio);
+                const cropHeight = Math.floor(height * ratio);
+                const startX = Math.floor((width - cropWidth) / 2);
+                const startY = Math.floor((height - cropHeight) / 2);
+                qrValue = tryDecode(startX, startY, cropWidth, cropHeight);
+                if (qrValue) break;
+              }
+            }
+
+            if (qrValue) {
+              await handleQrPayload(qrValue);
+            }
+          } finally {
+            scanInFlightRef.current = false;
           }
-        }
-
-        try {
-          jsQRModule = (await import('jsqr')).default;
-        } catch (error) {
-          console.warn('jsQR failed to load.', error);
-        }
-
-        if (videoTrack && typeof (window as any).ImageCapture === 'function') {
-          try {
-            imageCapture = new (window as any).ImageCapture(videoTrack);
-          } catch (error) {
-            console.warn('ImageCapture unavailable, continuing with video frame scanning.', error);
-          }
-        }
-
-        if (!nativeDetector && !jsQRModule) {
-          throw new Error('QR scanning is not supported in this browser.');
-        }
-
-        const decodeWithJsQr = (
-          context: CanvasRenderingContext2D,
-          width: number,
-          height: number
-        ): string | null => {
-          if (!jsQRModule || width < 80 || height < 80) return null;
-
-          const tryDecode = (sx: number, sy: number, sw: number, sh: number): string | null => {
-            if (sw < 80 || sh < 80) return null;
-            const imageData = context.getImageData(sx, sy, sw, sh);
-            const code = jsQRModule(imageData.data, sw, sh, {
-              inversionAttempts: 'attemptBoth',
-            });
-            return code?.data || null;
-          };
-
-          // Try the full frame first, then tighter center crops for small/far QR codes.
-          const fullFrame = tryDecode(0, 0, width, height);
-          if (fullFrame) return fullFrame;
-
-          const cropRatios = [0.92, 0.8, 0.68, 0.55, 0.42];
-          for (const ratio of cropRatios) {
-            const cropWidth = Math.floor(width * ratio);
-            const cropHeight = Math.floor(height * ratio);
-            const startX = Math.floor((width - cropWidth) / 2);
-            const startY = Math.floor((height - cropHeight) / 2);
-            const cropped = tryDecode(startX, startY, cropWidth, cropHeight);
-            if (cropped) return cropped;
-          }
-
-          return null;
         };
 
-        const scanFrame = async () => {
-          if (isCancelled || !videoRef.current || !canvasRef.current) return;
-
-          const video = videoRef.current;
-          const canvas = canvasRef.current;
-          if (!scanInFlightRef.current && video.readyState >= 2) {
-            const now = Date.now();
-            if (now - lastScanAtRef.current < 80) {
-              frameRequestRef.current = requestAnimationFrame(scanFrame);
-              return;
-            }
-
-            scanInFlightRef.current = true;
-            try {
-              let frameBitmap: ImageBitmap | null = null;
-              if (imageCapture && typeof imageCapture.grabFrame === 'function') {
-                try {
-                  frameBitmap = await imageCapture.grabFrame();
-                } catch {
-                  frameBitmap = null;
-                }
-              }
-
-              const sourceWidth = frameBitmap?.width || video.videoWidth || 1280;
-              const sourceHeight = frameBitmap?.height || video.videoHeight || 720;
-              const source = frameBitmap || video;
-              const maxDimension = 1600;
-              const scale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight));
-              canvas.width = Math.max(320, Math.round(sourceWidth * scale));
-              canvas.height = Math.max(240, Math.round(sourceHeight * scale));
-
-              const context = canvas.getContext('2d', { willReadFrequently: true });
-              if (context) {
-                context.drawImage(source as CanvasImageSource, 0, 0, canvas.width, canvas.height);
-
-                let qrValue: string | null = null;
-
-                if (nativeDetector) {
-                  try {
-                    const barcodes = await nativeDetector.detect(source);
-                    if (barcodes.length > 0 && barcodes[0]?.rawValue) {
-                      qrValue = barcodes[0].rawValue;
-                    }
-                  } catch (error) {
-                    try {
-                      const barcodes = await nativeDetector.detect(canvas);
-                      if (barcodes.length > 0 && barcodes[0]?.rawValue) {
-                        qrValue = barcodes[0].rawValue;
-                      }
-                    } catch (fallbackError) {
-                      console.warn('Native BarcodeDetector failed for current frame.', fallbackError);
-                      nativeDetector = null;
-                    }
-                  }
-                }
-
-                if (!qrValue && jsQRModule) {
-                  qrValue = decodeWithJsQr(context, canvas.width, canvas.height);
-                }
-
-                if (qrValue) {
-                  await handleQrPayload(qrValue);
-                  if (frameBitmap && typeof frameBitmap.close === 'function') {
-                    frameBitmap.close();
-                  }
-                  return;
-                }
-              }
-
-              if (frameBitmap && typeof frameBitmap.close === 'function') {
-                frameBitmap.close();
-              }
-            } finally {
-              lastScanAtRef.current = Date.now();
-              scanInFlightRef.current = false;
-            }
-          }
-
-          frameRequestRef.current = requestAnimationFrame(scanFrame);
-        };
-
-        frameRequestRef.current = requestAnimationFrame(scanFrame);
+        await decodeFrame();
+        scanTimerRef.current = setInterval(() => {
+          void decodeFrame();
+        }, 220);
       } catch (error: any) {
         console.error('QR scanner initialization failed:', error);
         setQrScannerError(error?.message || 'Failed to start QR scanner.');
@@ -439,6 +351,7 @@ export default function MyEventsPage() {
 
     return () => {
       isCancelled = true;
+      document.body.style.overflow = originalBodyOverflow;
       stopQrScanner();
     };
   }, [showQrScanner, handleQrPayload, stopQrScanner]);
@@ -454,7 +367,7 @@ export default function MyEventsPage() {
       ? createPortal(
           <div
             className="fixed inset-0 z-[120] bg-black/85"
-            style={{ position: 'fixed', inset: 0, top: 0, left: 0, width: '100vw', height: '100vh', margin: 0 }}
+            style={{ position: 'fixed', inset: 0, top: 0, left: 0, width: '100dvw', height: '100dvh', margin: 0 }}
           >
             <div className="mx-auto flex h-full w-full items-center justify-center p-3 sm:p-4">
               <div className="max-h-full w-full max-w-3xl overflow-hidden rounded-2xl border border-border bg-card">

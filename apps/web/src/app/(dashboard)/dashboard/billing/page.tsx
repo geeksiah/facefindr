@@ -9,6 +9,7 @@ import { useCurrency } from '@/components/providers';
 import { Button, CurrencySwitcher, Switch } from '@/components/ui';
 import { useRealtimeSubscription } from '@/hooks/use-realtime';
 import { useSSEWithPolling } from '@/hooks/use-sse-fallback';
+import { openPaystackInlineCheckout } from '@/lib/payments/paystack-inline';
 
 interface PlanPricing {
   planId: string;
@@ -299,6 +300,23 @@ export default function BillingPage() {
   }, [requestRefresh]);
 
   useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const isSuccess = searchParams.get('success') === 'true';
+    const provider = String(searchParams.get('provider') || '').toLowerCase();
+    const reference = String(searchParams.get('reference') || '').trim();
+
+    if (!isSuccess || provider !== 'paystack' || !reference) {
+      return;
+    }
+
+    setCheckoutError(null);
+    requestRefresh(true);
+
+    const cleanUrl = window.location.pathname;
+    window.history.replaceState({}, document.title, cleanUrl);
+  }, [requestRefresh]);
+
+  useEffect(() => {
     return () => {
       mountedRef.current = false;
       loadAbortRef.current?.abort();
@@ -363,6 +381,27 @@ export default function BillingPage() {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         setCheckoutError(data?.error || 'Failed to start checkout');
+        return;
+      }
+
+      if (data?.gateway === 'paystack' && data?.paystack?.publicKey) {
+        await openPaystackInlineCheckout({
+          publicKey: String(data.paystack.publicKey),
+          email: String(data.paystack.email || ''),
+          amount: Number(data.paystack.amount || 0),
+          currency: String(data.paystack.currency || currencyCode || 'USD'),
+          reference: String(data.paystack.reference || ''),
+          accessCode: data.paystack.accessCode ? String(data.paystack.accessCode) : null,
+          metadata: {
+            type: 'creator_subscription',
+            plan_code: planCode,
+          },
+          onSuccess: (reference) => {
+            window.location.assign(
+              `/dashboard/billing?success=true&provider=paystack&reference=${encodeURIComponent(reference)}`
+            );
+          },
+        });
         return;
       }
 

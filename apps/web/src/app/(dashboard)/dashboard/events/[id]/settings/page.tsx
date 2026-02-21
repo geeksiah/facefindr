@@ -872,7 +872,8 @@ export default function EventSettingsPage() {
                         ...settings, 
                         price_per_photo: Math.round(parseFloat(e.target.value || '0') * 100)
                       })}
-                      className="pl-7"
+                      className="pl-14"
+                      placeholder="0.00"
                     />
                   </div>
                   <Select
@@ -901,12 +902,13 @@ export default function EventSettingsPage() {
                     type="number"
                     step="0.01"
                     min="0"
-                    value={((settings as any).unlock_all_price || 0) / 100}
+                    value={(settings as any).unlock_all_price == null ? '' : Number((settings as any).unlock_all_price) / 100}
                     onChange={(e) => setSettings({ 
                       ...settings, 
-                      unlock_all_price: e.target.value ? Math.round(parseFloat(e.target.value) * 100) : null
+                      unlock_all_price:
+                        e.target.value === '' ? null : Math.round(parseFloat(e.target.value || '0') * 100)
                     } as any)}
-                    className="pl-7"
+                    className="pl-14"
                     placeholder="0.00"
                   />
                 </div>

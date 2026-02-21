@@ -145,6 +145,9 @@ export async function GET(
       );
     }
 
+    const pricing = event.event_pricing as any;
+    const pricingIsFree = Boolean(pricing?.is_free);
+
     // Get matched photos for this attendee
     const { data: matches } = await serviceClient
       .from('photo_drop_matches')
@@ -164,17 +167,46 @@ export async function GET(
       .map((match: any) => match.media)
       .filter(Boolean);
 
+    // Get purchased photos for this attendee.
+    const { data: entitlements } = await supabase
+      .from('entitlements')
+      .select('media_id')
+      .eq('attendee_id', user.id)
+      .eq('event_id', eventId);
+    const purchasedMediaIds = new Set(entitlements?.map((entry) => entry.media_id) || []);
+
     const toCleanPath = (path: string | null | undefined) =>
       path ? (path.startsWith('/') ? path.slice(1) : path) : null;
 
-    const thumbnailPaths = Array.from(
-      new Set(mediaRecords.map((media: any) => toCleanPath(media.thumbnail_path || media.storage_path)).filter(Boolean))
-    ) as string[];
-    const displayPaths = Array.from(
-      new Set(mediaRecords.map((media: any) => toCleanPath(media.watermarked_path || media.storage_path)).filter(Boolean))
+    const resolveThumbnailPath = (media: any) =>
+      toCleanPath(media.thumbnail_path) ||
+      toCleanPath(media.watermarked_path) ||
+      toCleanPath(media.storage_path);
+
+    const resolvePreviewPath = (media: any, isPurchased: boolean) => {
+      const originalPath = toCleanPath(media.storage_path);
+      const watermarkPath = toCleanPath(media.watermarked_path);
+      const thumbnailPath = toCleanPath(media.thumbnail_path);
+
+      if (pricingIsFree || isPurchased) {
+        return originalPath || watermarkPath || thumbnailPath;
+      }
+
+      // Guardrail: unpaid attendees never receive the original path.
+      return watermarkPath || thumbnailPath;
+    };
+
+    const uniquePaths = Array.from(
+      new Set(
+        mediaRecords
+          .flatMap((media: any) => {
+            const isPurchased = purchasedMediaIds.has(media.id);
+            return [resolveThumbnailPath(media), resolvePreviewPath(media, isPurchased)];
+          })
+          .filter(Boolean)
+      )
     ) as string[];
 
-    const uniquePaths = Array.from(new Set([...thumbnailPaths, ...displayPaths]));
     const signedPathEntries = await Promise.all(
       uniquePaths.map(async (path) => {
         const { data } = await serviceClient.storage.from('media').createSignedUrl(path, 3600);
@@ -182,17 +214,6 @@ export async function GET(
       })
     );
     const signedPathMap = new Map<string, string | null>(signedPathEntries);
-
-    // Get purchased photos
-    const { data: entitlements } = await supabase
-      .from('entitlements')
-      .select('media_id')
-      .eq('attendee_id', user.id)
-      .eq('event_id', eventId);
-
-    const purchasedMediaIds = new Set(entitlements?.map(e => e.media_id) || []);
-
-    const pricing = event.event_pricing as any;
     const photographer = event.photographers as any;
 
     const { count: totalPhotos } = await serviceClient
@@ -240,11 +261,12 @@ export async function GET(
       totalPhotos: totalPhotos || 0,
       matchedPhotos: mediaRecords
         .map((media: any) => {
-        const thumbnailPath = toCleanPath(media.thumbnail_path || media.storage_path);
-        const displayPath = toCleanPath(media.watermarked_path || media.storage_path);
+        const isPurchased = purchasedMediaIds.has(media.id);
+        const thumbnailPath = resolveThumbnailPath(media);
+        const previewPath = resolvePreviewPath(media, isPurchased);
         const thumbnailUrl = thumbnailPath ? signedPathMap.get(thumbnailPath) : null;
-        const displayUrl = displayPath ? signedPathMap.get(displayPath) : null;
-        const resolvedThumbnail = thumbnailUrl || displayUrl;
+        const previewUrl = previewPath ? signedPathMap.get(previewPath) : null;
+        const resolvedThumbnail = thumbnailUrl || previewUrl;
 
         if (!resolvedThumbnail) {
           return null;
@@ -252,11 +274,11 @@ export async function GET(
 
         return {
           id: media.id,
-          url: displayUrl || resolvedThumbnail,
+          url: previewUrl || resolvedThumbnail,
           thumbnailUrl: resolvedThumbnail,
-          watermarkedUrl: displayUrl || null,
-          isPurchased: purchasedMediaIds.has(media.id),
-          isWatermarked: !pricing?.is_free && !purchasedMediaIds.has(media.id),
+          watermarkedUrl: !pricingIsFree && !isPurchased ? previewUrl || null : null,
+          isPurchased,
+          isWatermarked: !pricingIsFree && !isPurchased,
           price: pricing?.price_per_media || 0,
         };
       })

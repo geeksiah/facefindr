@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
+import { openPaystackInlineCheckout } from '@/lib/payments/paystack-inline';
 
 interface StoragePlan {
   id: string;
@@ -73,6 +74,17 @@ export default function VaultPricingPage() {
   }, []);
 
   const handleUpgradeStorage = async (planSlug: string) => {
+    const openCheckoutPopup = (checkoutUrl: string) => {
+      const popup = window.open(
+        checkoutUrl,
+        'ferchrVaultCheckout',
+        'popup=yes,width=520,height=760,menubar=no,toolbar=no,location=yes,status=no'
+      );
+      if (!popup) {
+        window.location.href = checkoutUrl;
+      }
+    };
+
     try {
       setSubscribingPlan(planSlug);
       const response = await fetch('/api/vault/subscribe', {
@@ -84,7 +96,29 @@ export default function VaultPricingPage() {
       if (!response.ok || !data?.checkoutUrl) {
         throw new Error(data?.error || 'Unable to start storage checkout');
       }
-      window.location.href = data.checkoutUrl;
+
+      if (data?.gateway === 'paystack' && data?.paystack?.publicKey) {
+        await openPaystackInlineCheckout({
+          publicKey: String(data.paystack.publicKey),
+          email: String(data.paystack.email || ''),
+          amount: Number(data.paystack.amount || 0),
+          currency: String(data.paystack.currency || 'USD'),
+          reference: String(data.paystack.reference || ''),
+          accessCode: data.paystack.accessCode ? String(data.paystack.accessCode) : null,
+          metadata: {
+            type: 'vault_subscription',
+            plan_slug: planSlug,
+          },
+          onSuccess: (reference) => {
+            window.location.assign(
+              `/gallery/vault?subscription=success&provider=paystack&reference=${encodeURIComponent(reference)}`
+            );
+          },
+        });
+        return;
+      }
+
+      openCheckoutPopup(data.checkoutUrl);
     } catch (error: any) {
       toast.error('Upgrade failed', error?.message || 'Unable to upgrade storage right now');
     } finally {

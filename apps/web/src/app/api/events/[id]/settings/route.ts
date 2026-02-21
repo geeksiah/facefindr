@@ -115,6 +115,83 @@ function getEmbeddedEventPricing(event: any) {
   return null;
 }
 
+const EVENT_SETTINGS_COLUMNS = [
+  'id',
+  'name',
+  'description',
+  'location',
+  'event_date',
+  'event_start_at_utc',
+  'event_end_at_utc',
+  'event_timezone',
+  'end_date',
+  'cover_image_url',
+  'status',
+  'is_public',
+  'is_publicly_listed',
+  'include_in_public_profile',
+  'allow_anonymous_scan',
+  'require_access_code',
+  'public_access_code',
+  'face_recognition_enabled',
+  'live_mode_enabled',
+  'watermark_enabled',
+  'currency_code',
+  'currency',
+] as const;
+
+async function fetchEventSettingsRecord(serviceClient: any, eventId: string) {
+  const selectedColumns = [...EVENT_SETTINGS_COLUMNS];
+  while (selectedColumns.length > 0) {
+    const result = await serviceClient
+      .from('events')
+      .select(`${selectedColumns.join(', ')}, event_pricing (*)`)
+      .eq('id', eventId)
+      .maybeSingle();
+
+    if (!result.error) {
+      return result.data || null;
+    }
+
+    const missingColumn = getMissingColumnName(result.error);
+    if (missingColumn && selectedColumns.includes(missingColumn as any)) {
+      const nextColumns = selectedColumns.filter((column) => column !== missingColumn);
+      selectedColumns.splice(0, selectedColumns.length, ...nextColumns);
+      continue;
+    }
+
+    if (result.error?.code === 'PGRST116') {
+      return null;
+    }
+
+    throw result.error;
+  }
+
+  return null;
+}
+
+function hydrateEventSettingsRecord(event: any) {
+  const pricing = getEmbeddedEventPricing(event);
+  return {
+    ...event,
+    allow_anonymous_scan: event?.allow_anonymous_scan ?? true,
+    require_access_code: event?.require_access_code ?? false,
+    include_in_public_profile: event?.include_in_public_profile ?? true,
+    face_recognition_enabled: event?.face_recognition_enabled ?? false,
+    live_mode_enabled: event?.live_mode_enabled ?? false,
+    watermark_enabled: event?.watermark_enabled ?? false,
+    pricing_type: pricing?.pricing_type || (pricing?.is_free ? 'free' : 'per_photo'),
+    price_per_photo: pricing?.price_per_media || 0,
+    bulk_tiers: pricing?.bulk_tiers || [],
+    unlock_all_price: pricing?.unlock_all_price || null,
+    currency_code:
+      pricing?.currency ||
+      event?.currency_code ||
+      event?.currency ||
+      'USD',
+  };
+}
+
 // GET - Get event settings
 export async function GET(
   request: NextRequest,
@@ -137,31 +214,11 @@ export async function GET(
       return NextResponse.json({ error: 'Not authorized to manage this event' }, { status: 403 });
     }
 
-    const { data: event, error } = await serviceClient
-      .from('events')
-      .select(`
-        *,
-        event_pricing (*)
-      `)
-      .eq('id', eventId)
-      .single();
-
-    if (error || !event) {
+    const event = await fetchEventSettingsRecord(serviceClient, eventId);
+    if (!event) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 });
     }
-
-    // Merge pricing data
-    const pricing = getEmbeddedEventPricing(event);
-    const eventWithPricing = {
-      ...event,
-      pricing_type: pricing?.pricing_type || (pricing?.is_free ? 'free' : 'per_photo'),
-      price_per_photo: pricing?.price_per_media || 0,
-      bulk_tiers: pricing?.bulk_tiers || [],
-      unlock_all_price: pricing?.unlock_all_price || null,
-      currency_code: pricing?.currency || event.currency_code || 'USD',
-    };
-
-    return NextResponse.json({ event: eventWithPricing });
+    return NextResponse.json({ event: hydrateEventSettingsRecord(event) });
 
   } catch (error) {
     console.error('Get event settings error:', error);
@@ -529,31 +586,8 @@ export async function PUT(
       );
     }
 
-    const { data: refreshedEvent } = await serviceClient
-      .from('events')
-      .select(`
-        *,
-        event_pricing (*)
-      `)
-      .eq('id', eventId)
-      .maybeSingle();
-
-    const refreshedPricing = getEmbeddedEventPricing(refreshedEvent);
-    const eventWithPricing = refreshedEvent
-      ? {
-          ...refreshedEvent,
-          pricing_type:
-            refreshedPricing?.pricing_type || (refreshedPricing?.is_free ? 'free' : 'per_photo'),
-          price_per_photo: refreshedPricing?.price_per_media || 0,
-          bulk_tiers: refreshedPricing?.bulk_tiers || [],
-          unlock_all_price: refreshedPricing?.unlock_all_price || null,
-          currency_code:
-            refreshedPricing?.currency ||
-            (refreshedEvent as any).currency_code ||
-            (refreshedEvent as any).currency ||
-            'USD',
-        }
-      : null;
+    const refreshedEvent = await fetchEventSettingsRecord(serviceClient, eventId);
+    const eventWithPricing = refreshedEvent ? hydrateEventSettingsRecord(refreshedEvent) : null;
 
     return NextResponse.json({ success: true, event: eventWithPricing });
 
