@@ -1,30 +1,45 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Lock, Download, Image as ImageIcon, Shield, Clock, Trash2 } from 'lucide-react';
+import {
+  Clock,
+  Download,
+  Folder,
+  FolderPlus,
+  HardDrive,
+  Image as ImageIcon,
+  Lock,
+  Trash2,
+} from 'lucide-react';
 import Image from 'next/image';
+import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
-import { createClient } from '@/lib/supabase/client';
 
 interface VaultPhoto {
   id: string;
-  thumbnailUrl: string;
-  fullUrl: string;
-  storagePath: string;
+  thumbnailUrl: string | null;
+  fileUrl: string | null;
+  filePath: string | null;
   eventName: string;
-  purchasedAt: string;
-  expiresAt: string | null;
+  uploadedAt: string;
+  albumId: string | null;
+  isFavorite: boolean;
+}
+
+interface VaultAlbum {
+  id: string;
+  name: string;
+  description?: string | null;
+  photo_count: number;
 }
 
 interface VaultUsage {
   totalPhotos: number;
   totalSizeBytes: number;
   storageLimitBytes: number;
-  photoLimit: number;
   usagePercent: number;
-  photosPercent: number;
 }
 
 interface VaultSubscription {
@@ -35,311 +50,279 @@ interface VaultSubscription {
 
 interface StoragePlan {
   id: string;
-  name: string;
   slug: string;
-  description?: string | null;
-  price_monthly?: number | null;
-  price_yearly?: number | null;
-  currency?: string | null;
-  storage_limit_mb?: number | null;
-  photo_limit?: number | null;
-  is_popular?: boolean | null;
+  sort_order: number;
+  is_active: boolean;
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / Math.pow(1024, exponent);
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[exponent]}`;
 }
 
 export default function VaultPage() {
   const toast = useToast();
   const [photos, setPhotos] = useState<VaultPhoto[]>([]);
+  const [albums, setAlbums] = useState<VaultAlbum[]>([]);
   const [usage, setUsage] = useState<VaultUsage | null>(null);
   const [subscription, setSubscription] = useState<VaultSubscription | null>(null);
   const [storagePlans, setStoragePlans] = useState<StoragePlan[]>([]);
-  const [subscribingPlan, setSubscribingPlan] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
+  const [activeAlbumFilter, setActiveAlbumFilter] = useState<string>('all');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isMutating, setIsMutating] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const filteredPhotos = useMemo(() => {
+    if (activeAlbumFilter === 'all') return photos;
+    if (activeAlbumFilter === 'unassigned') return photos.filter((photo) => !photo.albumId);
+    return photos.filter((photo) => photo.albumId === activeAlbumFilter);
+  }, [photos, activeAlbumFilter]);
+
+  const selectedCount = selectedPhotos.size;
+  const activePlans = useMemo(
+    () => storagePlans.filter((plan) => plan.is_active).sort((a, b) => a.sort_order - b.sort_order),
+    [storagePlans]
+  );
+  const isOnTopPlan = useMemo(() => {
+    if (!activePlans.length) return true;
+    const currentSlug = subscription?.planSlug || 'free';
+    const currentIndex = activePlans.findIndex((plan) => plan.slug === currentSlug);
+    const lastIndex = activePlans.length - 1;
+    if (currentIndex < 0) return false;
+    return currentIndex >= lastIndex;
+  }, [activePlans, subscription?.planSlug]);
+
+  const loadVaultData = async (showLoader = true) => {
+    try {
+      if (showLoader) setIsLoading(true);
+      const [vaultRes, plansRes] = await Promise.all([
+        fetch('/api/vault?limit=200', { cache: 'no-store' }),
+        fetch('/api/storage/plans', { cache: 'no-store' }),
+      ]);
+
+      const vaultPayload = await vaultRes.json().catch(() => ({}));
+      const plansPayload = await plansRes.json().catch(() => ({}));
+
+      if (!vaultRes.ok) {
+        throw new Error(vaultPayload?.error || 'Failed to load vault');
+      }
+
+      const nextPhotos: VaultPhoto[] = (Array.isArray(vaultPayload?.photos) ? vaultPayload.photos : []).map((row: any) => ({
+        id: row.id,
+        thumbnailUrl: row.thumbnailUrl || row.fileUrl || null,
+        fileUrl: row.fileUrl || null,
+        filePath: row.file_path || null,
+        eventName: row?.events?.name || 'Vault Photo',
+        uploadedAt: row.uploaded_at || row.created_at || new Date().toISOString(),
+        albumId: row.album_id || null,
+        isFavorite: Boolean(row.is_favorite),
+      }));
+
+      setPhotos(nextPhotos);
+      setUsage(vaultPayload?.usage || null);
+      setSubscription(vaultPayload?.subscription || null);
+      setAlbums(Array.isArray(vaultPayload?.albums) ? vaultPayload.albums : []);
+      setStoragePlans(Array.isArray(plansPayload?.plans) ? plansPayload.plans : []);
+      setErrorMessage(null);
+    } catch (error: any) {
+      console.error('Vault load error:', error);
+      setErrorMessage(error?.message || 'Failed to load vault');
+    } finally {
+      if (showLoader) setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    loadVaultPhotos();
+    void loadVaultData(true);
+
+    const usageInterval = setInterval(() => {
+      void loadVaultData(false);
+    }, 30000);
+
+    return () => clearInterval(usageInterval);
   }, []);
 
-  const loadVaultPhotos = async () => {
-    const supabase = createClient();
-    try {
-      setIsLoading(true);
-      setErrorMessage(null);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setPhotos([]);
-        return;
-      }
-
-      // Get entitlements (purchased photos)
-      const { data: entitlements, error } = await supabase
-        .from('entitlements')
-        .select(`
-          id,
-          created_at,
-          expires_at,
-          media:media_id (
-            id,
-            thumbnail_path,
-            storage_path,
-            event:event_id (
-              name
-            )
-          )
-        `)
-        .eq('attendee_id', user.id)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('Error loading vault:', error);
-        setErrorMessage('Unable to load your vault right now.');
-        return;
-      }
-
-      // Build raw list first
-      const rawPhotos = (entitlements || [])
-        .filter((e: any) => e.media)
-        .map((e: any) => ({
-          id: e.media.id,
-          thumbnailPath: e.media.thumbnail_path || '',
-          storagePath: e.media.storage_path || '',
-          eventName: e.media.event?.name || 'Unknown Event',
-          purchasedAt: e.created_at,
-          expiresAt: e.expires_at,
-        }));
-
-      if (rawPhotos.length === 0) {
-        await Promise.all([loadVaultUsageAndSubscription(), loadStoragePlans()]);
-        setPhotos([]);
-        return;
-      }
-
-      // Generate signed URLs in batches (private bucket)
-      const vaultPhotos: VaultPhoto[] = [];
-      const batchSize = 20;
-      for (let i = 0; i < rawPhotos.length; i += batchSize) {
-        const batch = rawPhotos.slice(i, i + batchSize);
-        const thumbPaths = batch
-          .map((p) => (p.thumbnailPath || p.storagePath).replace(/^\/?(media\/)?/, ''))
-          .filter(Boolean);
-        const fullPaths = batch
-          .map((p) => p.storagePath.replace(/^\/?(media\/)?/, ''))
-          .filter(Boolean);
-
-        const [thumbResult, fullResult] = await Promise.all([
-          thumbPaths.length > 0
-            ? supabase.storage.from('media').createSignedUrls(thumbPaths, 3600)
-            : { data: null },
-          fullPaths.length > 0
-            ? supabase.storage.from('media').createSignedUrls(fullPaths, 3600)
-            : { data: null },
-        ]);
-
-        if ((thumbResult as any).error || (fullResult as any).error) {
-          console.error('Vault signed URL error:', (thumbResult as any).error || (fullResult as any).error);
-          setErrorMessage('Some photos could not be loaded. Please refresh.');
-        }
-
-        const thumbUrls = new Map<string, string>();
-        const fullUrls = new Map<string, string>();
-        (thumbResult.data || []).forEach((item: any) => {
-          if (item.signedUrl) thumbUrls.set(item.path, item.signedUrl);
-        });
-        (fullResult.data || []).forEach((item: any) => {
-          if (item.signedUrl) fullUrls.set(item.path, item.signedUrl);
-        });
-
-        for (const raw of batch) {
-          const thumbKey = (raw.thumbnailPath || raw.storagePath).replace(/^\/?(media\/)?/, '');
-          const fullKey = raw.storagePath.replace(/^\/?(media\/)?/, '');
-          vaultPhotos.push({
-            id: raw.id,
-            thumbnailUrl: thumbUrls.get(thumbKey) || '',
-            fullUrl: fullUrls.get(fullKey) || '',
-            storagePath: raw.storagePath,
-            eventName: raw.eventName,
-            purchasedAt: raw.purchasedAt,
-            expiresAt: raw.expiresAt,
-          });
-        }
-      }
-
-      setPhotos(vaultPhotos);
-      await Promise.all([loadVaultUsageAndSubscription(), loadStoragePlans()]);
-    } catch (err) {
-      console.error('Failed to load vault:', err);
-      setErrorMessage('Failed to load your vault.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const loadVaultUsageAndSubscription = async () => {
-    try {
-      const response = await fetch('/api/vault?limit=1', { cache: 'no-store' });
-      if (!response.ok) return;
-      const data = await response.json();
-      if (data?.usage) setUsage(data.usage);
-      if (data?.subscription) setSubscription(data.subscription);
-    } catch {
-      // non-fatal
-    }
-  };
-
-  const loadStoragePlans = async () => {
-    try {
-      const response = await fetch('/api/storage/plans', { cache: 'no-store' });
-      if (!response.ok) return;
-      const data = await response.json();
-      if (Array.isArray(data?.plans)) {
-        setStoragePlans(data.plans);
-      }
-    } catch {
-      // non-fatal
-    }
-  };
-
-  const formatBytes = (bytes: number) => {
-    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-    const value = bytes / Math.pow(1024, exponent);
-    return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[exponent]}`;
-  };
-
-  const handleUpgradeStorage = async (planSlug: string) => {
-    try {
-      setSubscribingPlan(planSlug);
-      const response = await fetch('/api/vault/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planSlug, billingCycle: 'monthly' }),
-      });
-      const data = await response.json();
-      if (!response.ok || !data?.checkoutUrl) {
-        throw new Error(data?.error || 'Unable to start storage checkout');
-      }
-      window.location.href = data.checkoutUrl;
-    } catch (error: any) {
-      toast.error('Upgrade failed', error?.message || 'Unable to upgrade storage right now');
-    } finally {
-      setSubscribingPlan(null);
-    }
-  };
-
-  const toggleSelection = (id: string) => {
-    setSelectedPhotos(prev => {
+  const toggleSelection = (photoId: string) => {
+    setSelectedPhotos((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
+      if (next.has(photoId)) next.delete(photoId);
+      else next.add(photoId);
       return next;
     });
   };
 
+  const clearSelection = () => setSelectedPhotos(new Set());
+
+  const createAlbum = async () => {
+    const name = window.prompt('Folder name');
+    if (!name || !name.trim()) return;
+    setIsMutating(true);
+    try {
+      const res = await fetch('/api/vault/albums', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload?.error || 'Failed to create folder');
+      toast.success('Folder created', `${name.trim()} is ready.`);
+      await loadVaultData(false);
+    } catch (error: any) {
+      toast.error('Create folder failed', error?.message || 'Unable to create folder');
+    } finally {
+      setIsMutating(false);
+    }
+  };
+
+  const deleteAlbum = async (album: VaultAlbum) => {
+    const confirmed = window.confirm(
+      `Delete folder "${album.name}"? Photos will remain in vault but be moved out of this folder.`
+    );
+    if (!confirmed) return;
+    setIsMutating(true);
+    try {
+      const res = await fetch(`/api/vault/albums?id=${encodeURIComponent(album.id)}`, {
+        method: 'DELETE',
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload?.error || 'Failed to delete folder');
+      toast.success('Folder deleted', `"${album.name}" was removed.`);
+      if (activeAlbumFilter === album.id) setActiveAlbumFilter('all');
+      await loadVaultData(false);
+    } catch (error: any) {
+      toast.error('Delete folder failed', error?.message || 'Unable to delete folder');
+    } finally {
+      setIsMutating(false);
+    }
+  };
+
+  const moveSelectedToAlbum = async (albumId: string | null) => {
+    if (!selectedCount) {
+      toast.error('No photos selected', 'Select photos first.');
+      return;
+    }
+    setIsMutating(true);
+    try {
+      const res = await fetch('/api/vault', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'assign_album',
+          photoIds: Array.from(selectedPhotos),
+          albumId,
+        }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload?.error || 'Failed to move photos');
+      toast.success('Photos moved', `${selectedCount} photo(s) updated.`);
+      clearSelection();
+      await loadVaultData(false);
+    } catch (error: any) {
+      toast.error('Move failed', error?.message || 'Unable to move selected photos');
+    } finally {
+      setIsMutating(false);
+    }
+  };
+
+  const deleteSelectedPhotos = async () => {
+    if (!selectedCount) {
+      toast.error('No photos selected', 'Select photos to remove.');
+      return;
+    }
+    const confirmed = window.confirm(`Remove ${selectedCount} selected photo(s) from vault?`);
+    if (!confirmed) return;
+
+    setIsMutating(true);
+    try {
+      const res = await fetch('/api/vault', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          photoIds: Array.from(selectedPhotos),
+        }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload?.error || 'Failed to remove photos');
+      toast.success('Removed from vault', `${selectedCount} photo(s) removed.`);
+      clearSelection();
+      await loadVaultData(false);
+    } catch (error: any) {
+      toast.error('Remove failed', error?.message || 'Unable to remove selected photos');
+    } finally {
+      setIsMutating(false);
+    }
+  };
+
   const downloadSelected = async () => {
-    if (selectedPhotos.size === 0) {
-      toast.error('No Photos Selected', 'Please select photos to download.');
+    if (!selectedCount) {
+      toast.error('No photos selected', 'Select photos to download.');
       return;
     }
 
-    toast.success('Download Started', `Downloading ${selectedPhotos.size} photos...`);
-    const supabase = createClient();
-    
     for (const photoId of selectedPhotos) {
-      const photo = photos.find(p => p.id === photoId);
-      if (photo) {
-        const path = photo.storagePath.replace(/^\/?(media\/)?/, '');
-        const { data } = await supabase.storage.from('media').createSignedUrl(path, 3600, { download: true });
-        if (data?.signedUrl) {
-          const a = document.createElement('a');
-          a.href = data.signedUrl;
-          a.download = `photo-${photoId}.jpg`;
-          a.click();
-        }
-      }
+      const photo = photos.find((item) => item.id === photoId);
+      if (!photo?.fileUrl) continue;
+      const anchor = document.createElement('a');
+      anchor.href = photo.fileUrl;
+      anchor.download = photo.filePath?.split('/').pop() || `vault-${photo.id}.jpg`;
+      anchor.click();
     }
+
+    toast.success('Download started', `${selectedCount} photo(s) download queued.`);
   };
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
+      <div className="flex min-h-[360px] items-center justify-center">
         <div className="animate-pulse text-muted-foreground">Loading vault...</div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Photo Vault</h1>
-          <p className="text-secondary mt-1">Your purchased photos, securely stored</p>
+          <p className="mt-1 text-sm text-secondary">Secure storage for your saved photos.</p>
         </div>
-        {photos.length > 0 && (
-          <Button onClick={downloadSelected} disabled={selectedPhotos.size === 0}>
-            <Download className="h-4 w-4 mr-2" />
-            Download ({selectedPhotos.size})
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={createAlbum} disabled={isMutating}>
+            <FolderPlus className="mr-2 h-4 w-4" />
+            New Folder
           </Button>
-        )}
-      </div>
-
-      {/* Stats Cards */}
-      <div className="grid gap-4 sm:grid-cols-3">
-        <div className="rounded-xl border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-accent/10 p-2">
-              <ImageIcon className="h-5 w-5 text-accent" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-foreground">{photos.length}</p>
-              <p className="text-sm text-secondary">Total Photos</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-success/10 p-2">
-              <Shield className="h-5 w-5 text-success" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-foreground">{photos.filter(p => !p.expiresAt).length}</p>
-              <p className="text-sm text-secondary">Permanent</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-warning/10 p-2">
-              <Clock className="h-5 w-5 text-warning" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-foreground">{photos.filter(p => p.expiresAt).length}</p>
-              <p className="text-sm text-secondary">Expiring</p>
-            </div>
-          </div>
+          <Button onClick={downloadSelected} disabled={!selectedCount}>
+            <Download className="mr-2 h-4 w-4" />
+            Download ({selectedCount})
+          </Button>
         </div>
       </div>
 
-      {/* Storage Usage + Upgrade */}
       <div className="rounded-xl border border-border bg-card p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-foreground">Vault Storage</h2>
-            <p className="text-sm text-secondary">
-              {subscription?.planName || 'Free'} plan
-            </p>
+            <h2 className="text-lg font-semibold text-foreground">Storage Usage</h2>
+            <p className="text-sm text-secondary">{subscription?.planName || 'Free'} plan</p>
           </div>
-          {usage && (
+          <div className="text-right">
             <p className="text-sm text-secondary">
-              {formatBytes(usage.totalSizeBytes)} /{' '}
-              {usage.storageLimitBytes === -1 ? 'Unlimited' : formatBytes(usage.storageLimitBytes)}
+              {usage ? formatBytes(usage.totalSizeBytes) : '0 B'} /{' '}
+              {usage && usage.storageLimitBytes === -1
+                ? 'Unlimited'
+                : usage
+                  ? formatBytes(usage.storageLimitBytes)
+                  : '0 B'}
             </p>
-          )}
+            {!isOnTopPlan && (
+              <Button asChild size="sm" className="mt-2">
+                <Link href="/gallery/vault/pricing">Upgrade Storage</Link>
+              </Button>
+            )}
+          </div>
         </div>
         {usage && usage.storageLimitBytes > 0 && (
           <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted">
@@ -349,47 +332,78 @@ export default function VaultPage() {
             />
           </div>
         )}
-
-        {storagePlans.length > 0 && (
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {storagePlans
-              .filter((plan) => plan.slug !== 'free')
-              .slice(0, 3)
-              .map((plan) => {
-                const currency = String(plan.currency || 'USD').toUpperCase();
-                const priceMonthly = Math.round(Number(plan.price_monthly || 0) * 100);
-                return (
-                  <div
-                    key={plan.id}
-                    className={`rounded-xl border p-4 ${
-                      plan.is_popular ? 'border-accent bg-accent/5' : 'border-border bg-background'
-                    }`}
-                  >
-                    <p className="font-semibold text-foreground">{plan.name}</p>
-                    <p className="mt-1 text-sm text-secondary">
-                      {plan.storage_limit_mb === -1 ? 'Unlimited' : `${Math.round((plan.storage_limit_mb || 0) / 1024)} GB`} storage
-                    </p>
-                    <p className="mt-2 text-lg font-bold text-foreground">
-                      {new Intl.NumberFormat('en-US', {
-                        style: 'currency',
-                        currency,
-                      }).format((priceMonthly || 0) / 100)}
-                      <span className="ml-1 text-xs font-normal text-secondary">/month</span>
-                    </p>
-                    <Button
-                      className="mt-3 w-full"
-                      variant={plan.is_popular ? 'primary' : 'outline'}
-                      disabled={subscribingPlan === plan.slug}
-                      onClick={() => handleUpgradeStorage(plan.slug)}
-                    >
-                      {subscribingPlan === plan.slug ? 'Starting...' : 'Upgrade'}
-                    </Button>
-                  </div>
-                );
-              })}
-          </div>
-        )}
       </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant={activeAlbumFilter === 'all' ? 'primary' : 'outline'}
+          size="sm"
+          onClick={() => setActiveAlbumFilter('all')}
+        >
+          All ({photos.length})
+        </Button>
+        <Button
+          variant={activeAlbumFilter === 'unassigned' ? 'primary' : 'outline'}
+          size="sm"
+          onClick={() => setActiveAlbumFilter('unassigned')}
+        >
+          Unassigned
+        </Button>
+        {albums.map((album) => (
+          <div key={album.id} className="flex items-center gap-1">
+            <Button
+              variant={activeAlbumFilter === album.id ? 'primary' : 'outline'}
+              size="sm"
+              onClick={() => setActiveAlbumFilter(album.id)}
+            >
+              <Folder className="mr-1 h-3.5 w-3.5" />
+              {album.name} ({album.photo_count || 0})
+            </Button>
+            <button
+              onClick={() => deleteAlbum(album)}
+              className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
+              title={`Delete folder ${album.name}`}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {selectedCount > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-muted/40 p-3">
+          <p className="text-sm text-foreground">{selectedCount} photo(s) selected</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => moveSelectedToAlbum(null)} disabled={isMutating}>
+              Remove Folder
+            </Button>
+            <select
+              className="rounded-lg border border-input bg-background px-3 py-1.5 text-sm"
+              defaultValue=""
+              onChange={(event) => {
+                const next = event.target.value;
+                if (!next) return;
+                void moveSelectedToAlbum(next);
+                event.currentTarget.value = '';
+              }}
+              disabled={isMutating}
+            >
+              <option value="">Move to folder...</option>
+              {albums.map((album) => (
+                <option key={album.id} value={album.id}>
+                  {album.name}
+                </option>
+              ))}
+            </select>
+            <Button size="sm" variant="destructive" onClick={deleteSelectedPhotos} disabled={isMutating}>
+              Remove From Vault
+            </Button>
+            <Button size="sm" variant="ghost" onClick={clearSelection}>
+              Clear
+            </Button>
+          </div>
+        </div>
+      )}
 
       {errorMessage && (
         <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-foreground">
@@ -397,72 +411,85 @@ export default function VaultPage() {
         </div>
       )}
 
-      {/* Photo Grid */}
-      {photos.length === 0 ? (
+      {filteredPhotos.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border bg-card/50 p-12 text-center">
-          <Lock className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-          <h3 className="text-lg font-medium text-foreground mb-2">Your vault is empty</h3>
-          <p className="text-secondary mb-4">
-            Photos you purchase will appear here for easy access and download.
+          <Lock className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
+          <h3 className="mb-2 text-lg font-medium text-foreground">No photos in this view</h3>
+          <p className="mb-4 text-secondary">
+            Save photos to vault, then organize them in folders.
           </p>
           <Button asChild>
-            <a href="/gallery/scan">Find Your Photos</a>
+            <Link href="/gallery/scan">Find Your Photos</Link>
           </Button>
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-          {photos.map((photo) => (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
+          {filteredPhotos.map((photo) => (
             <div
               key={photo.id}
-              className={`group relative aspect-square rounded-xl overflow-hidden border-2 cursor-pointer transition-all ${
+              className={`group relative aspect-square cursor-pointer overflow-hidden rounded-xl border-2 transition-all ${
                 selectedPhotos.has(photo.id) ? 'border-accent' : 'border-transparent hover:border-border'
               }`}
               onClick={() => toggleSelection(photo.id)}
             >
               {photo.thumbnailUrl ? (
-                <Image
-                  src={photo.thumbnailUrl}
-                  alt="Vault photo"
-                  fill
-                  className="object-cover"
-                />
+                <Image src={photo.thumbnailUrl} alt="Vault photo" fill className="object-cover" />
               ) : (
-                <div className="flex items-center justify-center h-full bg-muted">
+                <div className="flex h-full items-center justify-center bg-muted">
                   <ImageIcon className="h-8 w-8 text-muted-foreground" />
                 </div>
               )}
-              
-              {/* Selection checkbox */}
-              <div className={`absolute top-2 right-2 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
-                selectedPhotos.has(photo.id) 
-                  ? 'bg-accent border-accent' 
-                  : 'bg-black/50 border-white group-hover:bg-black/70'
-              }`}>
-                {selectedPhotos.has(photo.id) && (
-                  <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                  </svg>
-                )}
+
+              <div className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-[10px] text-white">
+                {photo.isFavorite ? 'Favorite' : 'Photo'}
               </div>
 
-              {/* Event name overlay */}
               <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-3">
-                <p className="text-white text-xs truncate">{photo.eventName}</p>
-                <p className="text-white/70 text-[10px]">
-                  {new Date(photo.purchasedAt).toLocaleDateString()}
-                </p>
+                <p className="truncate text-xs text-white">{photo.eventName}</p>
+                <p className="text-[10px] text-white/70">{new Date(photo.uploadedAt).toLocaleDateString()}</p>
               </div>
 
-              {/* Expiry warning */}
-              {photo.expiresAt && (
-                <div className="absolute top-2 left-2 bg-warning/90 text-warning-foreground text-[10px] px-2 py-0.5 rounded-full">
-                  Expires soon
+              <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setSelectedPhotos(new Set([photo.id]));
+                    void deleteSelectedPhotos();
+                  }}
+                  className="rounded-md bg-black/60 p-1.5 text-white hover:bg-destructive"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              {usage && usage.storageLimitBytes > 0 && (
+                <div className="absolute left-2 top-8 rounded-full bg-black/55 px-2 py-0.5 text-[10px] text-white">
+                  <HardDrive className="mr-1 inline h-3 w-3" />
+                  {formatBytes(usage.totalSizeBytes)}
                 </div>
               )}
             </div>
           ))}
         </div>
       )}
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <div className="rounded-xl border border-border bg-card p-4">
+          <p className="text-sm text-secondary">Total Photos</p>
+          <p className="text-2xl font-bold text-foreground">{photos.length}</p>
+        </div>
+        <div className="rounded-xl border border-border bg-card p-4">
+          <p className="text-sm text-secondary">Folders</p>
+          <p className="text-2xl font-bold text-foreground">{albums.length}</p>
+        </div>
+        <div className="rounded-xl border border-border bg-card p-4">
+          <p className="text-sm text-secondary">Expiring</p>
+          <p className="text-2xl font-bold text-foreground">
+            <Clock className="mr-1 inline h-5 w-5 text-warning" />
+            0
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

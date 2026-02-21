@@ -38,6 +38,7 @@ function normalizeBillingCycle(cycle?: string): BillingCycle {
 export async function resolveProviderPlanMapping(params: {
   productScope: RecurringProductScope;
   internalPlanCode: string;
+  internalPlanCodeAliases?: string[];
   provider: 'stripe' | 'paypal' | 'flutterwave' | 'paystack';
   billingCycle?: string;
   currency?: string;
@@ -47,6 +48,16 @@ export async function resolveProviderPlanMapping(params: {
   const billingCycle = normalizeBillingCycle(params.billingCycle);
   const currency = normalizeCurrency(params.currency);
   const regionCode = normalizeRegion(params.regionCode);
+  const planCodeCandidates = Array.from(
+    new Set(
+      [params.internalPlanCode, ...(params.internalPlanCodeAliases || [])]
+        .map((value) => String(value || '').trim())
+        .filter((value) => value.length > 0)
+    )
+  );
+  if (!planCodeCandidates.length) {
+    return null;
+  }
 
   const candidates: Array<{ currency: string; region: string }> = [
     { currency, region: regionCode },
@@ -55,22 +66,24 @@ export async function resolveProviderPlanMapping(params: {
     { currency: 'USD', region: 'GLOBAL' },
   ];
 
-  for (const candidate of candidates) {
-    const { data } = await supabase
-      .from('provider_plan_mappings')
-      .select('*')
-      .eq('product_scope', params.productScope)
-      .eq('internal_plan_code', params.internalPlanCode)
-      .eq('provider', params.provider)
-      .eq('billing_cycle', billingCycle)
-      .eq('currency', candidate.currency)
-      .eq('region_code', candidate.region)
-      .eq('is_active', true)
-      .limit(1)
-      .maybeSingle();
+  for (const planCode of planCodeCandidates) {
+    for (const candidate of candidates) {
+      const { data } = await supabase
+        .from('provider_plan_mappings')
+        .select('*')
+        .eq('product_scope', params.productScope)
+        .eq('internal_plan_code', planCode)
+        .eq('provider', params.provider)
+        .eq('billing_cycle', billingCycle)
+        .eq('currency', candidate.currency)
+        .eq('region_code', candidate.region)
+        .eq('is_active', true)
+        .limit(1)
+        .maybeSingle();
 
-    if (data) {
-      return data as ProviderPlanMapping;
+      if (data) {
+        return data as ProviderPlanMapping;
+      }
     }
   }
 

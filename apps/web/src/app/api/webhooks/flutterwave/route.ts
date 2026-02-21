@@ -4,6 +4,12 @@ import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 
 import { verifyWebhookSignature, verifyTransaction } from '@/lib/payments/flutterwave';
+import { emitFinancialInAppNotification } from '@/lib/payments/financial-notifications';
+import {
+  recordDropInCreditPurchaseJournal,
+  recordSettlementJournalForTransaction,
+  recordSubscriptionChargeJournal,
+} from '@/lib/payments/financial-flow-ledger';
 import {
   parseMetadataRecord,
   readNumber,
@@ -164,6 +170,22 @@ async function handleChargeCompleted(
     });
     return;
   }
+  if (verifiedMeta.type === 'drop_in_credit_purchase') {
+    await handleDropInCreditPurchaseSuccess(supabase, {
+      purchaseId: readString(verifiedMeta.purchase_id),
+      attendeeId: readString(verifiedMeta.attendee_id),
+      transactionRef: data.tx_ref || String(data.id),
+      currency: verifiedTx.currency || data.currency,
+      amountMinor:
+        readNumber((verifiedMeta as Record<string, unknown>).amount_paid_cents) ??
+        (readNumber(verifiedTx.charged_amount) !== null
+          ? Math.round(Number(verifiedTx.charged_amount) * 100)
+          : readNumber(data.charged_amount) !== null
+            ? Math.round(Number(data.charged_amount) * 100)
+            : 0),
+    });
+    return;
+  }
 
   await syncRecurringFromFlutterwaveData(supabase, 'charge.completed', {
     ...data,
@@ -175,6 +197,64 @@ async function handleChargeCompleted(
     subscription_id:
       (verifiedTx.meta as Record<string, unknown> | undefined)?.subscription_id as string | number | undefined,
   });
+  const recurringMeta = parseMetadataRecord(verifiedMeta);
+  const recurringScope = normalizeScope(recurringMeta.subscription_scope);
+  const recurringAmountMinor =
+    readNumber(recurringMeta.pricing_amount_cents) ??
+    (readNumber(verifiedTx.charged_amount) !== null
+      ? Math.round(Number(verifiedTx.charged_amount) * 100)
+      : readNumber(data.charged_amount) !== null
+        ? Math.round(Number(data.charged_amount) * 100)
+        : 0) ??
+    0;
+  const recurringCurrency =
+    readString(verifiedTx.currency) || readString(data.currency) || readString(recurringMeta.pricing_currency) || 'USD';
+  const recurringSourceId = readString(data.tx_ref) || String(data.id);
+  const recurringUserId =
+    readString(recurringMeta.photographer_id) ||
+    readString(recurringMeta.attendee_id) ||
+    readString(recurringMeta.user_id);
+
+  if (recurringScope && recurringAmountMinor > 0) {
+    await recordSubscriptionChargeJournal(supabase, {
+      sourceKind: recurringScope,
+      sourceId: `${recurringSourceId}:${recurringScope}`,
+      amountMinor: recurringAmountMinor,
+      currency: recurringCurrency,
+      provider: 'flutterwave',
+      scope: recurringScope,
+      actorId: recurringScope === 'creator_subscription' ? readString(recurringMeta.photographer_id) : null,
+      metadata: {
+        flutterwave_tx_ref: data.tx_ref,
+        flutterwave_tx_id: String(data.id),
+        external_subscription_id:
+          readString(recurringMeta.subscription_id) ||
+          readString(recurringMeta.provider_subscription_id) ||
+          readString(data.subscription_id),
+      },
+    }).catch((ledgerError) => {
+      console.error('[LEDGER] failed to record flutterwave subscription charge journal:', ledgerError);
+    });
+  }
+
+  if (recurringScope && recurringUserId) {
+    await emitFinancialInAppNotification(supabase, {
+      userId: recurringUserId,
+      templateCode: 'subscription_renewed',
+      subject: 'Subscription renewed',
+      body: `Subscription payment received: ${String(recurringCurrency).toUpperCase()} ${(Math.max(0, recurringAmountMinor) / 100).toFixed(2)}.`,
+      dedupeKey: `subscription_renewed:flutterwave:${recurringScope}:${recurringSourceId}`,
+      metadata: {
+        scope: recurringScope,
+        flutterwave_tx_ref: data.tx_ref,
+        flutterwave_tx_id: String(data.id),
+        amount_minor: recurringAmountMinor,
+        currency: String(recurringCurrency).toUpperCase(),
+      },
+    }).catch(() => {
+      // Best effort notification.
+    });
+  }
 
   const tipId = readString((data.meta || {}).tip_id);
   if (tipId) {
@@ -200,6 +280,19 @@ async function handleChargeCompleted(
       .contains('metadata', { tip_id: tipId });
     for (const transaction of tipTransactions || []) {
       await creditWalletFromTransaction(supabase, transaction.id);
+      await recordSettlementJournalForTransaction(supabase, {
+        transactionId: transaction.id,
+        flowType: 'tip',
+        sourceKind: 'tip',
+        sourceId: tipId,
+        description: 'Tip settled via Flutterwave webhook',
+        metadata: {
+          provider_event: 'charge.completed',
+          flutterwave_tx_ref: data.tx_ref,
+        },
+      }).catch((ledgerError) => {
+        console.error('[LEDGER] failed to record flutterwave tip settlement journal:', ledgerError);
+      });
     }
     return;
   }
@@ -255,6 +348,17 @@ async function handleChargeFailed(
     }
     return;
   }
+  if (metadata.type === 'drop_in_credit_purchase') {
+    const purchaseId = readString(metadata.purchase_id);
+    if (purchaseId) {
+      await supabase
+        .from('drop_in_credit_purchases')
+        .update({ status: 'failed' })
+        .eq('id', purchaseId)
+        .eq('status', 'pending');
+    }
+    return;
+  }
 
   const tipId = readString((data.meta || {}).tip_id);
   if (tipId) {
@@ -276,6 +380,38 @@ async function handleChargeFailed(
     .eq('flutterwave_tx_ref', data.tx_ref);
 
   await syncRecurringFromFlutterwaveData(supabase, 'charge.failed', data, 'past_due');
+
+  const scope = normalizeScope(metadata.subscription_scope);
+  const targetUserId =
+    readString(metadata.photographer_id) ||
+    readString(metadata.attendee_id) ||
+    readString(metadata.user_id);
+  if (scope && targetUserId) {
+    const amountMinor =
+      readNumber(metadata.pricing_amount_cents) ??
+      (readNumber(data.charged_amount) !== null
+        ? Math.round(Number(data.charged_amount) * 100)
+        : readNumber(data.amount) !== null
+          ? Math.round(Number(data.amount) * 100)
+          : 0);
+    const currency = readString(data.currency) || readString(metadata.pricing_currency) || 'USD';
+    await emitFinancialInAppNotification(supabase, {
+      userId: targetUserId,
+      templateCode: 'subscription_failed',
+      subject: 'Subscription payment failed',
+      body: `We could not process your subscription payment of ${String(currency).toUpperCase()} ${(Math.max(0, Number(amountMinor || 0)) / 100).toFixed(2)}.`,
+      dedupeKey: `subscription_failed:flutterwave:${scope}:${data.tx_ref || data.id}`,
+      metadata: {
+        scope,
+        flutterwave_tx_ref: data.tx_ref,
+        flutterwave_tx_id: String(data.id),
+        amount_minor: Number(amountMinor || 0),
+        currency: String(currency).toUpperCase(),
+      },
+    }).catch(() => {
+      // Best effort notification.
+    });
+  }
 }
 
 async function handleTransferCompleted(
@@ -365,6 +501,69 @@ async function handleDropInPaymentSuccess(
     .eq('id', params.dropInPhotoId);
 
   await triggerDropInProcessing(params.dropInPhotoId);
+}
+
+async function handleDropInCreditPurchaseSuccess(
+  supabase: ReturnType<typeof createServiceClient>,
+  params: {
+    purchaseId: string | null;
+    attendeeId: string | null;
+    transactionRef: string;
+    currency: string | null;
+    amountMinor: number;
+  }
+) {
+  const purchaseId = readString(params.purchaseId);
+  if (!purchaseId) return;
+
+  const { data: purchase } = await supabase
+    .from('drop_in_credit_purchases')
+    .select('id, attendee_id, credits_purchased, status')
+    .eq('id', purchaseId)
+    .maybeSingle();
+
+  if (!purchase || purchase.status !== 'pending') return;
+
+  const { data: activated } = await supabase
+    .from('drop_in_credit_purchases')
+    .update({
+      status: 'active',
+      credits_remaining: purchase.credits_purchased,
+      payment_intent_id: params.transactionRef || null,
+    })
+    .eq('id', purchase.id)
+    .eq('status', 'pending')
+    .select('id')
+    .maybeSingle();
+
+  if (!activated?.id) return;
+
+  const { data: attendee } = await supabase
+    .from('attendees')
+    .select('drop_in_credits')
+    .eq('id', purchase.attendee_id)
+    .maybeSingle();
+  const currentCredits = Number(attendee?.drop_in_credits || 0);
+
+  await supabase
+    .from('attendees')
+    .update({ drop_in_credits: currentCredits + Number(purchase.credits_purchased || 0) })
+    .eq('id', purchase.attendee_id);
+
+  if (Number(params.amountMinor || 0) > 0) {
+    await recordDropInCreditPurchaseJournal(supabase, {
+      purchaseId: purchase.id,
+      attendeeId: purchase.attendee_id || readString(params.attendeeId) || '',
+      amountMinor: Math.max(0, Math.round(Number(params.amountMinor || 0))),
+      currency: String(params.currency || 'USD').toUpperCase(),
+      provider: 'flutterwave',
+      metadata: {
+        flutterwave_tx_ref: params.transactionRef,
+      },
+    }).catch((ledgerError) => {
+      console.error('[LEDGER] failed to record flutterwave drop-in credit purchase journal:', ledgerError);
+    });
+  }
 }
 
 async function syncRecurringFromFlutterwaveData(
@@ -478,5 +677,18 @@ async function createEntitlements(
 
     await supabase.from('entitlements').insert(entitlements);
   }
+
+  await recordSettlementJournalForTransaction(supabase, {
+    transactionId: transaction.id,
+    flowType: 'photo_purchase',
+    sourceKind: 'transaction',
+    sourceId: transaction.id,
+    description: 'Photo purchase settled via Flutterwave webhook',
+    metadata: {
+      provider_event: 'charge.completed',
+    },
+  }).catch((ledgerError) => {
+    console.error('[LEDGER] failed to record flutterwave photo purchase settlement journal:', ledgerError);
+  });
 }
 

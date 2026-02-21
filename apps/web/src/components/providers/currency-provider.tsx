@@ -7,7 +7,8 @@
  * Auto-detects user location and manages currency preferences.
  */
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
+
 import { useSSEWithPolling } from '@/hooks/use-sse-fallback';
 
 // ============================================
@@ -79,30 +80,72 @@ export function CurrencyProvider({ children }: CurrencyProviderProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [detectedCountry, setDetectedCountry] = useState<string | null>(null);
   const [detectedCurrency, setDetectedCurrency] = useState<string | null>(null);
-  const [runtimeVersion, setRuntimeVersion] = useState(0);
+  const runtimeVersionRef = useRef(0);
+  const loadInFlightRef = useRef(false);
+  const loadQueuedRef = useRef(false);
+  const loadAbortRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
 
   const loadCurrencies = useCallback(async () => {
+    if (loadInFlightRef.current) {
+      loadQueuedRef.current = true;
+      loadAbortRef.current?.abort();
+      return;
+    }
+
+    loadInFlightRef.current = true;
     try {
-      const response = await fetch('/api/currency');
-      if (!response.ok) throw new Error('Failed to load currencies');
+      let shouldContinue = true;
+      while (shouldContinue) {
+        shouldContinue = false;
+        loadQueuedRef.current = false;
 
-      const data = await response.json();
+        loadAbortRef.current?.abort();
+        const controller = new AbortController();
+        loadAbortRef.current = controller;
 
-      setCurrencies(data.currencies || []);
-      setDetectedCountry(data.detectedCountry);
-      setDetectedCurrency(data.detectedCurrency);
+        try {
+          const response = await fetch('/api/currency', {
+            signal: controller.signal,
+            cache: 'no-store',
+          });
+          if (!response.ok) throw new Error('Failed to load currencies');
 
-      const effectiveCode = data.effectiveCurrency || 'USD';
-      setCurrencyCode(effectiveCode);
+          const data = await response.json();
+          if (controller.signal.aborted || !mountedRef.current) {
+            continue;
+          }
 
-      const currencyObj = data.currencies?.find(
-        (c: Currency) => c.code === effectiveCode
-      ) || DEFAULT_CURRENCY;
-      setCurrencyObj(currencyObj);
-    } catch (error) {
-      console.error('Failed to load currencies:', error);
+          setCurrencies(data.currencies || []);
+          setDetectedCountry(data.detectedCountry);
+          setDetectedCurrency(data.detectedCurrency);
+
+          const effectiveCode = data.effectiveCurrency || 'USD';
+          setCurrencyCode(effectiveCode);
+
+          const currencyObj = data.currencies?.find(
+            (c: Currency) => c.code === effectiveCode
+          ) || DEFAULT_CURRENCY;
+          setCurrencyObj(currencyObj);
+        } catch (error: any) {
+          if (error?.name !== 'AbortError') {
+            console.error('Failed to load currencies:', error);
+          }
+        } finally {
+          if (loadAbortRef.current === controller) {
+            loadAbortRef.current = null;
+          }
+        }
+
+        if (loadQueuedRef.current) {
+          shouldContinue = true;
+        }
+      }
     } finally {
-      setIsLoading(false);
+      loadInFlightRef.current = false;
+      if (mountedRef.current) {
+        setIsLoading(false);
+      }
     }
   }, []);
 
@@ -110,6 +153,14 @@ export function CurrencyProvider({ children }: CurrencyProviderProps) {
   useEffect(() => {
     void loadCurrencies();
   }, [loadCurrencies]);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      loadAbortRef.current?.abort();
+      loadAbortRef.current = null;
+    };
+  }, []);
 
   useSSEWithPolling<{ version?: string }>({
     url: '/api/stream/runtime-config',
@@ -119,8 +170,8 @@ export function CurrencyProvider({ children }: CurrencyProviderProps) {
     heartbeatTimeoutMs: 45000,
     onMessage: (payload) => {
       const version = Number(payload.version || 0);
-      if (!version || version > runtimeVersion) {
-        setRuntimeVersion(version || Date.now());
+      if (!version || version > runtimeVersionRef.current) {
+        runtimeVersionRef.current = version || Date.now();
         void loadCurrencies();
       }
     },

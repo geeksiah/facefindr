@@ -6,6 +6,12 @@ import { NextResponse } from 'next/server';
 import {
   verifyPaystackWebhookSignatureAsync,
 } from '@/lib/payments/paystack';
+import { emitFinancialInAppNotification } from '@/lib/payments/financial-notifications';
+import {
+  recordDropInCreditPurchaseJournal,
+  recordSettlementJournalForTransaction,
+  recordSubscriptionChargeJournal,
+} from '@/lib/payments/financial-flow-ledger';
 import {
   parseMetadataRecord,
   readNumber,
@@ -166,11 +172,74 @@ async function handleChargeSuccess(
       .contains('metadata', { tip_id: tipId });
     for (const transaction of tipTransactions || []) {
       await creditWalletFromTransaction(supabase, transaction.id);
+      await recordSettlementJournalForTransaction(supabase, {
+        transactionId: transaction.id,
+        flowType: 'tip',
+        sourceKind: 'tip',
+        sourceId: tipId,
+        description: 'Tip settled via Paystack webhook',
+        metadata: {
+          provider_event: payload.event,
+          paystack_reference: reference,
+        },
+      }).catch((ledgerError) => {
+        console.error('[LEDGER] failed to record paystack tip settlement journal:', ledgerError);
+      });
     }
     return;
   }
   if (metadata.subscription_scope) {
     await syncRecurringFromPaystackPayload(supabase, payload.event, payload.data, metadata, 'active');
+    const scope = normalizeScope(metadata.subscription_scope);
+    const subscriptionChargeRef = readString(payload.data.reference) || (payload.data.id ? String(payload.data.id) : null);
+    const amountMinor =
+      readNumber(metadata.pricing_amount_cents) ??
+      (readNumber(payload.data.amount) !== null ? Math.round(Number(payload.data.amount)) : 0) ??
+      0;
+    const currency = readString(payload.data.currency) || readString(metadata.pricing_currency) || 'USD';
+    const targetUserId =
+      readString(metadata.photographer_id) ||
+      readString(metadata.attendee_id) ||
+      readString(metadata.user_id);
+
+    if (scope && subscriptionChargeRef && amountMinor > 0) {
+      await recordSubscriptionChargeJournal(supabase, {
+        sourceKind: scope,
+        sourceId: `${subscriptionChargeRef}:${scope}`,
+        amountMinor,
+        currency,
+        provider: 'paystack',
+        scope,
+        actorId: scope === 'creator_subscription' ? readString(metadata.photographer_id) : null,
+        metadata: {
+          external_subscription_id:
+            readString(payload.data.subscription_code) || readString(metadata.subscription_id) || null,
+          paystack_reference: payload.data.reference || null,
+          paystack_event: payload.event,
+        },
+      }).catch((ledgerError) => {
+        console.error('[LEDGER] failed to record paystack subscription charge journal:', ledgerError);
+      });
+    }
+
+    if (targetUserId) {
+      await emitFinancialInAppNotification(supabase, {
+        userId: targetUserId,
+        templateCode: 'subscription_renewed',
+        subject: 'Subscription renewed',
+        body: `Subscription payment received: ${String(currency).toUpperCase()} ${(Math.max(0, amountMinor) / 100).toFixed(2)}.`,
+        dedupeKey: `subscription_renewed:paystack:${scope || 'unknown'}:${subscriptionChargeRef || 'none'}`,
+        metadata: {
+          scope: scope || null,
+          paystack_event: payload.event,
+          paystack_reference: payload.data.reference || null,
+          amount_minor: amountMinor,
+          currency: String(currency).toUpperCase(),
+        },
+      }).catch(() => {
+        // Best effort notification.
+      });
+    }
     return;
   }
 
@@ -251,6 +320,35 @@ async function handleChargeFailure(
   }
   if (metadata.subscription_scope) {
     await syncRecurringFromPaystackPayload(supabase, payload.event, payload.data, metadata, 'past_due');
+    const scope = normalizeScope(metadata.subscription_scope);
+    const targetUserId =
+      readString(metadata.photographer_id) ||
+      readString(metadata.attendee_id) ||
+      readString(metadata.user_id);
+    const amountMinor =
+      readNumber(metadata.pricing_amount_cents) ??
+      (readNumber(payload.data.amount) !== null ? Math.round(Number(payload.data.amount)) : 0) ??
+      0;
+    const currency = readString(payload.data.currency) || readString(metadata.pricing_currency) || 'USD';
+
+    if (targetUserId) {
+      await emitFinancialInAppNotification(supabase, {
+        userId: targetUserId,
+        templateCode: 'subscription_failed',
+        subject: 'Subscription payment failed',
+        body: `We could not process your subscription payment of ${String(currency).toUpperCase()} ${(Math.max(0, amountMinor) / 100).toFixed(2)}.`,
+        dedupeKey: `subscription_failed:paystack:${scope || 'unknown'}:${payload.data.reference || payload.data.id || 'none'}`,
+        metadata: {
+          scope: scope || null,
+          paystack_event: payload.event,
+          paystack_reference: payload.data.reference || null,
+          amount_minor: amountMinor,
+          currency: String(currency).toUpperCase(),
+        },
+      }).catch(() => {
+        // Best effort notification.
+      });
+    }
     return;
   }
 
@@ -441,6 +539,27 @@ async function handleDropInCreditPurchaseSuccess(
     .from('attendees')
     .update({ drop_in_credits: currentCredits + Number(purchase.credits_purchased || 0) })
     .eq('id', purchase.attendee_id);
+
+  const amountMinor =
+    readNumber(metadata.amount_paid_cents) ??
+    (readNumber(payload.data.amount) !== null ? Math.round(Number(payload.data.amount)) : null) ??
+    0;
+
+  if (amountMinor > 0) {
+    await recordDropInCreditPurchaseJournal(supabase, {
+      purchaseId: purchase.id,
+      attendeeId: purchase.attendee_id,
+      amountMinor,
+      currency: String(payload.data.currency || 'USD').toUpperCase(),
+      provider: 'paystack',
+      metadata: {
+        paystack_reference: payload.data.reference || null,
+        paystack_transaction_id: payload.data.id ? String(payload.data.id) : null,
+      },
+    }).catch((ledgerError) => {
+      console.error('[LEDGER] failed to record paystack drop-in credit purchase journal:', ledgerError);
+    });
+  }
 }
 
 async function createEntitlements(
@@ -482,4 +601,17 @@ async function createEntitlements(
     }));
     await supabase.from('entitlements').insert(entitlements);
   }
+
+  await recordSettlementJournalForTransaction(supabase, {
+    transactionId: transaction.id,
+    flowType: 'photo_purchase',
+    sourceKind: 'transaction',
+    sourceId: transaction.id,
+    description: 'Photo purchase settled via Paystack webhook',
+    metadata: {
+      provider_event: 'charge.success',
+    },
+  }).catch((ledgerError) => {
+    console.error('[LEDGER] failed to record paystack photo purchase settlement journal:', ledgerError);
+  });
 }

@@ -2,6 +2,8 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { consumeDropInCredits } from '@/lib/drop-in/consume-credits';
+import { getAvailableDropInCredits } from '@/lib/drop-in/credits';
 import { resolveDropInCreditRules } from '@/lib/drop-in/credit-rules';
 import { crawlExternalPlatforms, hasExternalCrawlerProviderConfigured } from '@/lib/drop-in/external-crawler';
 import { getAttendeeIdCandidates, resolveAttendeeProfileByUser } from '@/lib/profiles/ids';
@@ -35,15 +37,15 @@ export async function GET(request: NextRequest) {
     }
     const attendeeIdCandidates = await getAttendeeIdCandidates(serviceClient, user.id, user.email);
 
-    const [{ data: attendee }, { data: searches }, { data: rawResults }] = await Promise.all([
-      serviceClient.from('attendees').select('drop_in_credits').eq('id', attendeeId).maybeSingle(),
-      supabase
+    const [availableCredits, searchesResponse, resultsResponse] = await Promise.all([
+      getAvailableDropInCredits(serviceClient, attendeeId),
+      serviceClient
         .from('drop_in_searches')
         .select('id, search_type, status, match_count, credits_used, error_message, created_at, completed_at')
         .in('attendee_id', attendeeIdCandidates)
         .order('created_at', { ascending: false })
         .limit(20),
-      supabase
+      serviceClient
         .from('drop_in_search_results')
         .select(
           `
@@ -71,6 +73,8 @@ export async function GET(request: NextRequest) {
         .order('created_at', { ascending: false })
         .limit(40),
     ]);
+    const searches = searchesResponse.data;
+    const rawResults = resultsResponse.data;
 
     const mediaPaths: string[] = Array.from(
       new Set(
@@ -107,7 +111,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      credits: attendee?.drop_in_credits || 0,
+      credits: availableCredits,
       creditRules: {
         internal: rules.internalSearch,
         contacts: rules.contactsSearch,
@@ -160,7 +164,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid searchType' }, { status: 400 });
     }
 
-    const { data: search, error: searchCreateError } = await supabase
+    const { data: search, error: searchCreateError } = await serviceClient
       .from('drop_in_searches')
       .insert({
         attendee_id: attendeeId,
@@ -177,7 +181,7 @@ export async function POST(request: NextRequest) {
     }
 
     const failSearch = async (message: string) => {
-      await supabase
+      await serviceClient
         .from('drop_in_searches')
         .update({
           status: 'failed',
@@ -188,7 +192,7 @@ export async function POST(request: NextRequest) {
     };
 
     const completeSearch = async (count: number, creditsUsed: number) => {
-      await supabase
+      await serviceClient
         .from('drop_in_searches')
         .update({
           status: 'completed',
@@ -209,7 +213,7 @@ export async function POST(request: NextRequest) {
 
     const { data: attendeeProfile } = await serviceClient
       .from('attendees')
-      .select('display_name, face_tag, drop_in_credits')
+      .select('display_name, face_tag')
       .eq('id', attendeeId)
       .maybeSingle();
 
@@ -218,10 +222,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Attendee profile is incomplete' }, { status: 400 });
     }
 
-    if (Number(attendeeProfile.drop_in_credits || 0) < requiredCredits) {
+    const availableCredits = await getAvailableDropInCredits(serviceClient, attendeeId);
+    if (availableCredits < requiredCredits) {
       await failSearch(`Insufficient credits for ${searchType} search`);
       return NextResponse.json(
-        { error: `Insufficient credits (${requiredCredits} required)` },
+        {
+          error: `Insufficient credits (${requiredCredits} required)`,
+          requiredCredits,
+          availableCredits,
+        },
         { status: 402 }
       );
     }
@@ -251,19 +260,26 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const { data: creditsConsumed, error: creditsError } = await supabase.rpc('use_drop_in_credits', {
-        p_attendee_id: attendeeId,
-        p_action: 'external_search',
-        p_credits_needed: requiredCredits,
-        p_metadata: {
+      const creditConsumption = await consumeDropInCredits(serviceClient, {
+        attendeeId,
+        action: 'external_search',
+        creditsNeeded: requiredCredits,
+        metadata: {
           search_id: search.id,
           results_count: externalResults.length,
         },
       });
 
-      if (creditsError || !creditsConsumed) {
+      if (!creditConsumption.consumed) {
         await failSearch('Insufficient credits for external search');
-        return NextResponse.json({ error: 'Insufficient credits' }, { status: 402 });
+        return NextResponse.json(
+          {
+            error: `Insufficient credits (${requiredCredits} required)`,
+            requiredCredits,
+            availableCredits: creditConsumption.availableCredits,
+          },
+          { status: 402 }
+        );
       }
 
       creditsUsed = requiredCredits;
@@ -280,7 +296,7 @@ export async function POST(request: NextRequest) {
       }));
 
       if (searchResultsToInsert.length > 0) {
-        const { error: insertError } = await supabase.from('drop_in_search_results').insert(searchResultsToInsert);
+        const { error: insertError } = await serviceClient.from('drop_in_search_results').insert(searchResultsToInsert);
         if (insertError) {
           await failSearch('Failed to store external search results');
           return NextResponse.json({ error: 'Failed to store external search results' }, { status: 500 });
@@ -296,19 +312,23 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const { data: creditsConsumed, error: creditsError } = await supabase.rpc('use_drop_in_credits', {
-      p_attendee_id: attendeeId,
-      p_action: searchType === 'contacts' ? 'contacts_search' : 'internal_search',
-      p_credits_needed: requiredCredits,
-      p_metadata: {
+    const creditConsumption = await consumeDropInCredits(serviceClient, {
+      attendeeId,
+      action: searchType === 'contacts' ? 'contacts_search' : 'internal_search',
+      creditsNeeded: requiredCredits,
+      metadata: {
         search_id: search.id,
       },
     });
 
-    if (creditsError || !creditsConsumed) {
+    if (!creditConsumption.consumed) {
       await failSearch(`Insufficient credits for ${searchType} search`);
       return NextResponse.json(
-        { error: `Insufficient credits (${requiredCredits} required)` },
+        {
+          error: `Insufficient credits (${requiredCredits} required)`,
+          requiredCredits,
+          availableCredits: creditConsumption.availableCredits,
+        },
         { status: 402 }
       );
     }
@@ -414,7 +434,7 @@ export async function POST(request: NextRequest) {
     }));
 
     if (searchResultsToInsert.length > 0) {
-      await supabase.from('drop_in_search_results').insert(searchResultsToInsert);
+      await serviceClient.from('drop_in_search_results').insert(searchResultsToInsert);
     }
 
     await completeSearch(searchResultsToInsert.length, creditsUsed);

@@ -38,14 +38,22 @@ export function PayoutQueue({ payouts }: { payouts: PendingPayout[] }) {
   const handleProcessSingle = async (walletId: string, amount: number, currency: string) => {
     setProcessing(walletId);
     try {
+      const idempotencyKey =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? `admin_manual_payout:${crypto.randomUUID()}`
+          : `admin_manual_payout:${Date.now()}_${Math.random().toString(36).slice(2)}`;
       const response = await fetch('/api/admin/payouts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
         body: JSON.stringify({
           action: 'single',
           walletId,
           amount,
           currency,
+          idempotencyKey,
         }),
       });
 

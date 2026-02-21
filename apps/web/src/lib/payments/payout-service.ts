@@ -16,6 +16,8 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { createServiceClient } from '@/lib/supabase/server';
 
+import { emitFinancialInAppNotification } from './financial-notifications';
+import { recordFinancialJournal } from './financial-ledger';
 import { createMomoTransfer, isFlutterwaveConfigured } from './flutterwave';
 import { createMtnDisbursementTransfer, isMtnMomoConfiguredForRegion } from './mtn-momo';
 import {
@@ -100,6 +102,7 @@ export async function processPayout(request: PayoutRequest): Promise<PayoutResul
   const supabase = createServiceClient();
   const reference = `PO-${uuidv4().slice(0, 8).toUpperCase()}`;
   const dedupeWindowStartIso = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const payoutIdentityKey = String(request.identityKey || '').trim() || null;
 
   try {
     // Get wallet details
@@ -124,18 +127,39 @@ export async function processPayout(request: PayoutRequest): Promise<PayoutResul
       return { success: false, error: 'Payouts not enabled for this wallet' };
     }
 
-    // Best-effort dedupe against recent equivalent payouts.
-    const { data: existingPayout } = await supabase
-      .from('payouts')
-      .select('id, status, provider_payout_id, failure_reason')
-      .eq('wallet_id', request.walletId)
-      .eq('amount', request.amount)
-      .eq('currency', request.currency)
-      .in('status', ['pending', 'processing', 'completed'])
-      .gte('created_at', dedupeWindowStartIso)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    let existingPayout: {
+      id: string;
+      status: string;
+      provider_payout_id: string | null;
+      failure_reason: string | null;
+    } | null = null;
+
+    if (payoutIdentityKey) {
+      const { data: dedupedByIdentity } = await supabase
+        .from('payouts')
+        .select('id, status, provider_payout_id, failure_reason')
+        .eq('payout_identity_key', payoutIdentityKey)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      existingPayout = dedupedByIdentity || null;
+    } else {
+      // Fallback dedupe for legacy callers that do not pass an identity key.
+      const { data: recentEquivalent } = await supabase
+        .from('payouts')
+        .select('id, status, provider_payout_id, failure_reason')
+        .eq('wallet_id', request.walletId)
+        .eq('amount', request.amount)
+        .eq('currency', request.currency)
+        .in('status', ['pending', 'processing', 'completed'])
+        .gte('created_at', dedupeWindowStartIso)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      existingPayout = recentEquivalent || null;
+    }
 
     if (existingPayout) {
       const terminalFailure = existingPayout.status === 'failed';
@@ -161,10 +185,34 @@ export async function processPayout(request: PayoutRequest): Promise<PayoutResul
         status: 'processing',
         payout_method: wallet.provider === 'momo' ? wallet.momo_provider : 'bank',
         provider_payout_id: reference,
+        payout_identity_key: payoutIdentityKey,
         initiated_at: new Date().toISOString(),
       })
       .select()
       .single();
+
+    if (createError?.code === '23505' && payoutIdentityKey) {
+      const { data: duplicateIdentityPayout } = await supabase
+        .from('payouts')
+        .select('id, status, provider_payout_id, failure_reason')
+        .eq('payout_identity_key', payoutIdentityKey)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (duplicateIdentityPayout) {
+        const terminalFailure = duplicateIdentityPayout.status === 'failed';
+        return {
+          success: !terminalFailure,
+          payoutId: duplicateIdentityPayout.id,
+          providerReference: duplicateIdentityPayout.provider_payout_id || undefined,
+          error: terminalFailure
+            ? duplicateIdentityPayout.failure_reason || 'Payout already failed for this request'
+            : undefined,
+          deduped: true,
+        };
+      }
+    }
 
     if (createError || !payout) {
       return { success: false, error: 'Failed to create payout record' };
@@ -209,6 +257,74 @@ export async function processPayout(request: PayoutRequest): Promise<PayoutResul
 
     if (result.success) {
       await applyWalletBalancePayout(supabase, wallet as any, request);
+
+      await recordFinancialJournal(supabase, {
+        idempotencyKey: `ledger:payout:${payout.id}:completed`,
+        sourceKind: 'payout',
+        sourceId: payout.id,
+        flowType: 'payout',
+        currency: request.currency,
+        provider: wallet.provider || null,
+        description: 'Creator payout completed',
+        metadata: {
+          payout_id: payout.id,
+          wallet_id: wallet.id,
+          provider_reference: result.providerReference || reference,
+          mode: request.mode,
+        },
+        postings: [
+          {
+            accountCode: 'creator_payable',
+            direction: 'debit',
+            amountMinor: Number(request.amount || 0),
+            currency: request.currency,
+            counterpartyType: 'creator',
+            counterpartyId: wallet.photographer_id || null,
+          },
+          {
+            accountCode: 'creator_payouts',
+            direction: 'credit',
+            amountMinor: Number(request.amount || 0),
+            currency: request.currency,
+            counterpartyType: 'creator',
+            counterpartyId: wallet.photographer_id || null,
+          },
+        ],
+      }).catch((error) => {
+        console.error('[LEDGER] failed to record payout completion journal:', error);
+      });
+
+      if (wallet.photographer_id) {
+        await emitFinancialInAppNotification(supabase, {
+          userId: wallet.photographer_id,
+          templateCode: 'payout_completed',
+          subject: 'Payout completed',
+          body: `Your payout of ${request.currency} ${(Number(request.amount || 0) / 100).toFixed(2)} completed successfully.`,
+          dedupeKey: `payout_completed:${payout.id}`,
+          metadata: {
+            payout_id: payout.id,
+            wallet_id: wallet.id,
+            provider_reference: result.providerReference || reference,
+          },
+        }).catch(() => {
+          // Notification should never block payout processing.
+        });
+      }
+    } else if (wallet.photographer_id) {
+      await emitFinancialInAppNotification(supabase, {
+        userId: wallet.photographer_id,
+        templateCode: 'payout_failed',
+        subject: 'Payout failed',
+        body: `A payout of ${request.currency} ${(Number(request.amount || 0) / 100).toFixed(2)} failed. Please review payout settings.`,
+        dedupeKey: `payout_failed:${payout.id}`,
+        metadata: {
+          payout_id: payout.id,
+          wallet_id: wallet.id,
+          failure_reason: result.error || null,
+        },
+      }).catch(() => {
+        // Notification should never block payout processing.
+      });
     }
 
     return {

@@ -26,10 +26,28 @@ export function useSSEWithPolling<T>({
   onPoll,
   onError,
 }: UseSSEWithPollingOptions<T>) {
+  const sseEnabled = process.env.NEXT_PUBLIC_ENABLE_SSE_STREAMS !== 'false';
   const lastMessageAtRef = useRef<number>(0);
   const eventSourceRef = useRef<EventSource | null>(null);
-  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const healthRef = useRef<'healthy' | 'stale'>('stale');
+  const onMessageRef = useRef(onMessage);
+  const onPollRef = useRef(onPoll);
+  const onErrorRef = useRef(onError);
+  const pollInFlightRef = useRef(false);
+  const pollQueuedRef = useRef(false);
+
+  useEffect(() => {
+    onMessageRef.current = onMessage;
+  }, [onMessage]);
+
+  useEffect(() => {
+    onPollRef.current = onPoll;
+  }, [onPoll]);
+
+  useEffect(() => {
+    onErrorRef.current = onError;
+  }, [onError]);
 
   const clearPolling = useCallback(() => {
     if (pollingRef.current) {
@@ -38,21 +56,39 @@ export function useSSEWithPolling<T>({
     }
   }, []);
 
+  const runPoll = useCallback(async () => {
+    if (pollInFlightRef.current) {
+      pollQueuedRef.current = true;
+      return;
+    }
+
+    pollInFlightRef.current = true;
+    try {
+      let shouldContinue = true;
+      while (shouldContinue) {
+        pollQueuedRef.current = false;
+        try {
+          await onPollRef.current();
+        } catch (error) {
+          onErrorRef.current?.(error);
+        }
+        shouldContinue = pollQueuedRef.current;
+      }
+    } finally {
+      pollInFlightRef.current = false;
+    }
+  }, []);
+
   const schedulePolling = useCallback(() => {
     clearPolling();
 
     const run = async () => {
-      try {
-        await onPoll();
-      } catch (error) {
-        onError?.(error);
-      } finally {
-        pollingRef.current = setTimeout(run, withJitter(pollIntervalMs));
-      }
+      await runPoll();
+      pollingRef.current = setTimeout(run, withJitter(pollIntervalMs));
     };
 
     pollingRef.current = setTimeout(run, withJitter(pollIntervalMs));
-  }, [clearPolling, onError, onPoll, pollIntervalMs]);
+  }, [clearPolling, pollIntervalMs, runPoll]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -61,22 +97,34 @@ export function useSSEWithPolling<T>({
     let streamErrorCount = 0;
     lastMessageAtRef.current = Date.now();
     healthRef.current = 'stale';
+    pollQueuedRef.current = false;
 
     // Always do an immediate poll for initial correctness.
-    void onPoll().catch((error) => onError?.(error));
+    void runPoll();
     schedulePolling();
 
-    const resolvedUrl = (() => {
-      try {
-        if (typeof window === 'undefined') return url;
-        return new URL(url, window.location.origin).toString();
-      } catch (error) {
-        onError?.(error);
-        return null;
-      }
-    })();
+    if (!sseEnabled) {
+      return () => {
+        cancelled = true;
+        clearPolling();
+        if (eventSourceRef.current) {
+          eventSourceRef.current.close();
+          eventSourceRef.current = null;
+        }
+      };
+    }
 
     try {
+      const resolvedUrl = (() => {
+        try {
+          if (typeof window === 'undefined') return url;
+          return new URL(url, window.location.origin).toString();
+        } catch (error) {
+          onErrorRef.current?.(error);
+          return null;
+        }
+      })();
+
       if (!resolvedUrl) {
         return () => {
           cancelled = true;
@@ -102,9 +150,9 @@ export function useSSEWithPolling<T>({
         markHealthy();
         try {
           const parsed = JSON.parse((event as MessageEvent).data) as T;
-          onMessage(parsed);
+          onMessageRef.current(parsed);
         } catch (error) {
-          onError?.(error);
+          onErrorRef.current?.(error);
         }
       });
 
@@ -116,17 +164,17 @@ export function useSSEWithPolling<T>({
           es.close();
           eventSourceRef.current = null;
         }
-        onError?.(error);
+        onErrorRef.current?.(error);
       };
     } catch (error) {
-      onError?.(error);
+      onErrorRef.current?.(error);
     }
 
     const healthCheck = setInterval(() => {
       if (cancelled) return;
       if (Date.now() - lastMessageAtRef.current > heartbeatTimeoutMs) {
         healthRef.current = 'stale';
-        void onPoll().catch((error) => onError?.(error));
+        void runPoll();
       }
     }, Math.min(heartbeatTimeoutMs, 15000));
 
@@ -144,10 +192,9 @@ export function useSSEWithPolling<T>({
     enabled,
     eventName,
     heartbeatTimeoutMs,
-    onError,
-    onMessage,
-    onPoll,
+    runPoll,
     schedulePolling,
+    sseEnabled,
     url,
   ]);
 }

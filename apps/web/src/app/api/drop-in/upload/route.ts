@@ -11,6 +11,8 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { consumeDropInCredits } from '@/lib/drop-in/consume-credits';
+import { getAvailableDropInCredits } from '@/lib/drop-in/credits';
 import { resolveDropInCreditRules } from '@/lib/drop-in/credit-rules';
 import { resolveDropInPricingConfig } from '@/lib/drop-in/pricing';
 import { resolveAttendeeProfileByUser } from '@/lib/profiles/ids';
@@ -30,6 +32,14 @@ function needsFaceTag(error: any): boolean {
   if (error?.code !== '23502' || typeof error?.message !== 'string') return false;
   const message = error.message.toLowerCase();
   return message.includes('face_tag') || message.includes('face_tag_suffix');
+}
+
+function parseOptionalNumber(input: FormDataEntryValue | null): number | null {
+  if (typeof input !== 'string') return null;
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 async function tryInsertAttendeeProfile(
@@ -230,8 +240,8 @@ export async function POST(request: NextRequest) {
     const file = formData.get('photo') as File;
     const giftMessage = formData.get('giftMessage') as string | null;
     const includeGift = formData.get('includeGift') === 'true';
-    const locationLat = formData.get('locationLat') ? parseFloat(formData.get('locationLat') as string) : null;
-    const locationLng = formData.get('locationLng') ? parseFloat(formData.get('locationLng') as string) : null;
+    const locationLat = parseOptionalNumber(formData.get('locationLat'));
+    const locationLng = parseOptionalNumber(formData.get('locationLng'));
     const locationName = formData.get('locationName') as string | null;
 
     if (!file) {
@@ -258,12 +268,7 @@ export async function POST(request: NextRequest) {
     const giftCreditsRequired = includeGift ? rules.gift : 0;
     const totalCreditsRequired = uploadCreditsRequired + giftCreditsRequired;
 
-    const { data: attendeeBalance } = await serviceClient
-      .from('attendees')
-      .select('drop_in_credits')
-      .eq('id', attendee.id)
-      .maybeSingle();
-    const availableCredits = Number(attendeeBalance?.drop_in_credits || 0);
+    const availableCredits = await getAvailableDropInCredits(serviceClient, attendee.id);
     if (availableCredits < totalCreditsRequired) {
       return NextResponse.json(
         {
@@ -298,7 +303,6 @@ export async function POST(request: NextRequest) {
 
     const uploadAmountEquivalent = uploadCreditsRequired * pricing.creditUnitCents;
     const giftAmountEquivalent = includeGift ? giftCreditsRequired * pricing.creditUnitCents : null;
-    const creditBackedTxRef = `credits_${Date.now()}_${attendee.id.slice(0, 8)}`;
 
     const { data: dropInPhoto, error: dbError } = await serviceClient
       .from('drop_in_photos')
@@ -315,7 +319,6 @@ export async function POST(request: NextRequest) {
         gift_payment_status: includeGift ? 'paid' : null,
         gift_payment_amount: giftAmountEquivalent,
         gift_message: includeGift && giftMessage ? giftMessage : null,
-        upload_payment_transaction_id: creditBackedTxRef,
         location_lat: locationLat,
         location_lng: locationLng,
         location_name: locationName,
@@ -326,14 +329,22 @@ export async function POST(request: NextRequest) {
 
     if (dbError || !dropInPhoto?.id) {
       await serviceClient.storage.from('media').remove([storagePath]);
-      return NextResponse.json({ error: 'Failed to create drop-in record' }, { status: 500 });
+      return NextResponse.json(
+        {
+          error: dbError?.message || 'Failed to create drop-in record',
+          code: dbError?.code || null,
+          hint: dbError?.hint || null,
+          detail: dbError?.details || null,
+        },
+        { status: 500 }
+      );
     }
 
-    const { data: creditsConsumed, error: creditsError } = await serviceClient.rpc('use_drop_in_credits', {
-      p_attendee_id: attendee.id,
-      p_action: includeGift ? 'drop_in_upload_with_gift' : 'drop_in_upload',
-      p_credits_needed: totalCreditsRequired,
-      p_metadata: {
+    const creditConsumption = await consumeDropInCredits(serviceClient, {
+      attendeeId: attendee.id,
+      action: includeGift ? 'drop_in_upload_with_gift' : 'drop_in_upload',
+      creditsNeeded: totalCreditsRequired,
+      metadata: {
         drop_in_photo_id: dropInPhoto.id,
         include_gift: includeGift,
         upload_credits_required: uploadCreditsRequired,
@@ -341,14 +352,14 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    if (creditsError || !creditsConsumed) {
+    if (!creditConsumption.consumed) {
       await serviceClient.from('drop_in_photos').delete().eq('id', dropInPhoto.id);
       await serviceClient.storage.from('media').remove([storagePath]);
       return NextResponse.json(
         {
           error: `Insufficient credits (${totalCreditsRequired} required)`,
           requiredCredits: totalCreditsRequired,
-          availableCredits,
+          availableCredits: creditConsumption.availableCredits,
         },
         { status: 402 }
       );
@@ -360,11 +371,7 @@ export async function POST(request: NextRequest) {
       request.headers.get('cookie')
     );
 
-    const { data: remaining } = await serviceClient
-      .from('attendees')
-      .select('drop_in_credits')
-      .eq('id', attendee.id)
-      .maybeSingle();
+    const remainingCredits = await getAvailableDropInCredits(serviceClient, attendee.id);
 
     return NextResponse.json({
       success: true,
@@ -372,7 +379,7 @@ export async function POST(request: NextRequest) {
       creditsUsed: totalCreditsRequired,
       uploadCreditsRequired,
       giftCreditsRequired,
-      remainingCredits: Number(remaining?.drop_in_credits || 0),
+      remainingCredits,
       processingTriggered,
       message: 'Drop-In uploaded successfully',
     });

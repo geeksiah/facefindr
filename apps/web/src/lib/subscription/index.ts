@@ -94,6 +94,11 @@ const plansCache: Map<string, FullPlanDetails> = new Map();
 let plansCacheTime = 0;
 const PLANS_CACHE_TTL = 60 * 1000; // 1 minute
 
+function isPlanTypeEnumError(error: any): boolean {
+  const message = String(error?.message || '').toLowerCase();
+  return error?.code === '22P02' && message.includes('plan_type');
+}
+
 // ============================================
 // FETCH ALL PLANS
 // ============================================
@@ -156,8 +161,20 @@ export async function getAllPlans(planType?: PlanType): Promise<FullPlanDetails[
       query = query.eq('plan_type', 'drop_in');
     }
     
-    const { data: plans, error: plansError } = await query;
-    
+    let { data: plans, error: plansError } = await query;
+
+    // Compatibility fallback for legacy enum environments that don't yet expose 'creator'.
+    if (plansError && normalizedType === 'creator' && isPlanTypeEnumError(plansError)) {
+      const retry = await supabase
+        .from('subscription_plans')
+        .select('*')
+        .eq('is_active', true)
+        .eq('plan_type', 'photographer')
+        .order('base_price_usd', { ascending: true });
+      plans = retry.data as any;
+      plansError = retry.error as any;
+    }
+
     if (plansError) {
       console.error('Error fetching plans:', plansError);
       return [];

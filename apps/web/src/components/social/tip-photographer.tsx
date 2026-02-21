@@ -123,12 +123,19 @@ export function TipCreator({
 
     setLoading(true);
     setError(null);
+    const idempotencyKey =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? `tip_checkout:${crypto.randomUUID()}`
+        : `tip_checkout:${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
     try {
       // Create tip checkout session
       const response = await fetch(`/api/creators/${photographerId}/tip`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
         body: JSON.stringify({
           amount,
           currency: resolvedCurrency || undefined,
@@ -136,6 +143,7 @@ export function TipCreator({
           mediaId,
           message: message.trim() || null,
           isAnonymous,
+          idempotencyKey,
         }),
       });
 

@@ -9,6 +9,13 @@ import {
   markWebhookFailed,
   markWebhookProcessed,
 } from '@/lib/payments/webhook-ledger';
+import { emitFinancialInAppNotification } from '@/lib/payments/financial-notifications';
+import {
+  recordDropInCreditPurchaseJournal,
+  recordRefundJournalForTransaction,
+  recordSettlementJournalForTransaction,
+  recordSubscriptionChargeJournal,
+} from '@/lib/payments/financial-flow-ledger';
 import { addCard, getUserPaymentMethods } from '@/lib/payments/payment-methods';
 import {
   syncRecurringSubscriptionRecord,
@@ -106,6 +113,11 @@ export async function POST(request: Request) {
           await handleSubscriptionInvoiceFailed(supabase, invoice);
           break;
         }
+        case 'invoice.payment_succeeded': {
+          const invoice = event.data.object as Stripe.Invoice;
+          await handleSubscriptionInvoiceSucceeded(supabase, invoice);
+          break;
+        }
 
         default:
           console.log(`Unhandled Stripe event: ${event.type}`);
@@ -177,6 +189,17 @@ async function handleCheckoutComplete(
     return;
   }
 
+  if (metadata?.type === 'drop_in_credit_purchase') {
+    await handleDropInCreditPurchaseSuccess(supabase, {
+      purchaseId: metadata.purchase_id || '',
+      attendeeId: metadata.attendee_id || '',
+      transactionRef:
+        (typeof payment_intent === 'string' ? payment_intent : null) || session.id,
+      provider: 'stripe',
+    });
+    return;
+  }
+
   if (metadata?.tip_id) {
     await updateTipStatus(supabase, metadata.tip_id, 'completed', {
       stripe_payment_intent_id:
@@ -222,6 +245,16 @@ async function handlePaymentSuccess(
     return;
   }
 
+  if (paymentIntent.metadata?.type === 'drop_in_credit_purchase') {
+    await handleDropInCreditPurchaseSuccess(supabase, {
+      purchaseId: paymentIntent.metadata.purchase_id || '',
+      attendeeId: paymentIntent.metadata.attendee_id || '',
+      transactionRef: paymentIntent.id,
+      provider: 'stripe',
+    });
+    return;
+  }
+
   const tipId = paymentIntent.metadata?.tip_id;
   if (tipId) {
     await updateTipStatus(supabase, tipId, 'completed', {
@@ -246,6 +279,29 @@ async function handlePaymentSuccess(
 
   if (error) {
     console.error('Failed to update transaction status:', error);
+    return;
+  }
+
+  const { data: transaction } = await supabase
+    .from('transactions')
+    .select('id')
+    .eq('stripe_payment_intent_id', paymentIntent.id)
+    .maybeSingle();
+
+  if (transaction?.id) {
+    await recordSettlementJournalForTransaction(supabase, {
+      transactionId: transaction.id,
+      flowType: 'photo_purchase',
+      sourceKind: 'transaction',
+      sourceId: transaction.id,
+      description: 'Photo purchase settled via Stripe webhook',
+      metadata: {
+        provider_event: 'payment_intent.succeeded',
+        payment_intent_id: paymentIntent.id,
+      },
+    }).catch((ledgerError) => {
+      console.error('[LEDGER] failed to record stripe payment success journal:', ledgerError);
+    });
   }
 }
 
@@ -304,12 +360,53 @@ async function handleRefund(
   // Remove entitlements for refunded transaction
   const { data: transaction } = await supabase
     .from('transactions')
-    .select('id')
+    .select('id, attendee_id, wallet_id, gross_amount, currency')
     .eq('stripe_payment_intent_id', paymentIntentId)
     .single();
 
   if (transaction) {
     await supabase.from('entitlements').delete().eq('purchase_id', transaction.id);
+
+    await recordRefundJournalForTransaction(supabase, {
+      transactionId: transaction.id,
+      sourceKind: 'transaction',
+      sourceId: transaction.id,
+      description: 'Photo purchase refund processed',
+      metadata: {
+        provider_event: 'charge.refunded',
+        payment_intent_id: paymentIntentId,
+      },
+    }).catch((ledgerError) => {
+      console.error('[LEDGER] failed to record stripe refund journal:', ledgerError);
+    });
+
+    const creatorId = transaction.wallet_id
+      ? (
+          await supabase
+            .from('wallets')
+            .select('photographer_id')
+            .eq('id', transaction.wallet_id)
+            .maybeSingle()
+        ).data?.photographer_id
+      : null;
+
+    if (creatorId) {
+      await emitFinancialInAppNotification(supabase, {
+        userId: creatorId,
+        templateCode: 'refund_processed',
+        subject: 'Refund processed',
+        body: `A refund of ${String(transaction.currency || 'USD').toUpperCase()} ${(
+          Number(transaction.gross_amount || 0) / 100
+        ).toFixed(2)} was processed.`,
+        dedupeKey: `refund_processed:stripe:${transaction.id}:${paymentIntentId}`,
+        metadata: {
+          transaction_id: transaction.id,
+          payment_intent_id: paymentIntentId,
+        },
+      }).catch(() => {
+        // Best effort notification.
+      });
+    }
   }
 }
 
@@ -358,6 +455,37 @@ async function updateTipStatus(
 
   for (const transaction of tipTransactions || []) {
     await creditWalletFromTransaction(supabase, transaction.id);
+
+    if (status === 'completed') {
+      await recordSettlementJournalForTransaction(supabase, {
+        transactionId: transaction.id,
+        flowType: 'tip',
+        sourceKind: 'tip',
+        sourceId: tipId,
+        description: 'Tip settled',
+        metadata: {
+          provider_event: 'tip_status_completed',
+          tip_id: tipId,
+        },
+      }).catch((ledgerError) => {
+        console.error('[LEDGER] failed to record tip settlement journal:', ledgerError);
+      });
+    }
+
+    if (status === 'refunded') {
+      await recordRefundJournalForTransaction(supabase, {
+        transactionId: transaction.id,
+        sourceKind: 'tip',
+        sourceId: tipId,
+        description: 'Tip refund processed',
+        metadata: {
+          provider_event: 'tip_status_refunded',
+          tip_id: tipId,
+        },
+      }).catch((ledgerError) => {
+        console.error('[LEDGER] failed to record tip refund journal:', ledgerError);
+      });
+    }
   }
 }
 
@@ -522,6 +650,26 @@ function toIsoFromUnix(timestamp: number | null | undefined) {
   return new Date(Number(timestamp) * 1000).toISOString();
 }
 
+function resolveInvoiceAmountMinor(invoice: Stripe.Invoice): number {
+  const raw = Number(
+    (invoice as any).amount_paid ??
+      (invoice as any).amount_due ??
+      (invoice as any).total ??
+      (invoice as any).subtotal ??
+      0
+  );
+  if (!Number.isFinite(raw)) return 0;
+  return Math.max(0, Math.round(raw));
+}
+
+function resolveInvoiceCurrency(invoice: Stripe.Invoice): string {
+  return String((invoice as any).currency || 'USD').toUpperCase();
+}
+
+function formatMinorAmountForDisplay(amountMinor: number, currency: string): string {
+  return `${String(currency || 'USD').toUpperCase()} ${(Math.max(0, Number(amountMinor || 0)) / 100).toFixed(2)}`;
+}
+
 async function handleSubscriptionLifecycle(
   supabase: ReturnType<typeof createServiceClient>,
   subscription: Stripe.Subscription,
@@ -654,20 +802,327 @@ async function handleSubscriptionInvoiceFailed(
 ) {
   const subscriptionId = typeof invoice.subscription === 'string' ? invoice.subscription : null;
   if (!subscriptionId) return;
+  const amountMinor = resolveInvoiceAmountMinor(invoice);
+  const currency = resolveInvoiceCurrency(invoice);
+  const invoiceId = String((invoice as any).id || subscriptionId);
+  const now = new Date().toISOString();
 
-  await Promise.all([
+  const [creatorResult, attendeeResult, vaultResult] = await Promise.all([
     supabase
       .from('subscriptions')
-      .update({ status: 'past_due', last_webhook_event_at: new Date().toISOString() })
-      .eq('external_subscription_id', subscriptionId),
+      .update({ status: 'past_due', last_webhook_event_at: now })
+      .eq('external_subscription_id', subscriptionId)
+      .select('id, photographer_id')
+      .maybeSingle(),
     supabase
       .from('attendee_subscriptions')
-      .update({ status: 'past_due', last_webhook_event_at: new Date().toISOString() })
-      .eq('external_subscription_id', subscriptionId),
+      .update({ status: 'past_due', last_webhook_event_at: now })
+      .eq('external_subscription_id', subscriptionId)
+      .select('id, attendee_id')
+      .maybeSingle(),
     supabase
       .from('storage_subscriptions')
-      .update({ status: 'past_due', last_webhook_event_at: new Date().toISOString() })
-      .eq('external_subscription_id', subscriptionId),
+      .update({ status: 'past_due', last_webhook_event_at: now })
+      .eq('external_subscription_id', subscriptionId)
+      .select('id, user_id')
+      .maybeSingle(),
   ]);
+
+  const notifications: Array<Promise<unknown>> = [];
+  const failureMessage = `We could not process your subscription payment of ${formatMinorAmountForDisplay(
+    amountMinor,
+    currency
+  )}. Please update your payment method.`;
+
+  if (creatorResult.data?.photographer_id) {
+    notifications.push(
+      emitFinancialInAppNotification(supabase, {
+        userId: creatorResult.data.photographer_id,
+        templateCode: 'subscription_failed',
+        subject: 'Subscription payment failed',
+        body: failureMessage,
+        dedupeKey: `subscription_failed:stripe:creator:${subscriptionId}:${invoiceId}`,
+        metadata: {
+          scope: 'creator_subscription',
+          subscription_id: subscriptionId,
+          invoice_id: invoiceId,
+          amount_minor: amountMinor,
+          currency,
+        },
+      })
+    );
+  }
+
+  if (attendeeResult.data?.attendee_id) {
+    notifications.push(
+      emitFinancialInAppNotification(supabase, {
+        userId: attendeeResult.data.attendee_id,
+        templateCode: 'subscription_failed',
+        subject: 'Subscription payment failed',
+        body: failureMessage,
+        dedupeKey: `subscription_failed:stripe:attendee:${subscriptionId}:${invoiceId}`,
+        metadata: {
+          scope: 'attendee_subscription',
+          subscription_id: subscriptionId,
+          invoice_id: invoiceId,
+          amount_minor: amountMinor,
+          currency,
+        },
+      })
+    );
+  }
+
+  if (vaultResult.data?.user_id) {
+    notifications.push(
+      emitFinancialInAppNotification(supabase, {
+        userId: vaultResult.data.user_id,
+        templateCode: 'subscription_failed',
+        subject: 'Subscription payment failed',
+        body: failureMessage,
+        dedupeKey: `subscription_failed:stripe:vault:${subscriptionId}:${invoiceId}`,
+        metadata: {
+          scope: 'vault_subscription',
+          subscription_id: subscriptionId,
+          invoice_id: invoiceId,
+          amount_minor: amountMinor,
+          currency,
+        },
+      })
+    );
+  }
+
+  await Promise.all(
+    notifications.map((promise) =>
+      promise.catch(() => {
+        // Non-blocking notification best effort.
+      })
+    )
+  );
+}
+
+async function handleSubscriptionInvoiceSucceeded(
+  supabase: ReturnType<typeof createServiceClient>,
+  invoice: Stripe.Invoice
+) {
+  const subscriptionId = typeof invoice.subscription === 'string' ? invoice.subscription : null;
+  if (!subscriptionId) return;
+  const amountMinor = resolveInvoiceAmountMinor(invoice);
+  const currency = resolveInvoiceCurrency(invoice);
+  const invoiceId = String((invoice as any).id || subscriptionId);
+  const paymentIntentId = String((invoice as any).payment_intent || '');
+  const now = new Date().toISOString();
+
+  const [creatorResult, attendeeResult, vaultResult] = await Promise.all([
+    supabase
+      .from('subscriptions')
+      .update({ status: 'active', last_webhook_event_at: now })
+      .eq('external_subscription_id', subscriptionId)
+      .select('id, photographer_id')
+      .maybeSingle(),
+    supabase
+      .from('attendee_subscriptions')
+      .update({ status: 'active', last_webhook_event_at: now })
+      .eq('external_subscription_id', subscriptionId)
+      .select('id, attendee_id')
+      .maybeSingle(),
+    supabase
+      .from('storage_subscriptions')
+      .update({ status: 'active', last_webhook_event_at: now })
+      .eq('external_subscription_id', subscriptionId)
+      .select('id, user_id')
+      .maybeSingle(),
+  ]);
+
+  if (creatorResult.data?.id && amountMinor > 0) {
+    await recordSubscriptionChargeJournal(supabase, {
+      sourceKind: 'creator_subscription',
+      sourceId: creatorResult.data.id,
+      amountMinor,
+      currency,
+      provider: 'stripe',
+      scope: 'creator_subscription',
+      actorId: creatorResult.data.photographer_id || null,
+      metadata: {
+        subscription_id: subscriptionId,
+        invoice_id: invoiceId,
+        payment_intent_id: paymentIntentId || null,
+      },
+    }).catch((ledgerError) => {
+      console.error('[LEDGER] failed to record creator subscription charge journal:', ledgerError);
+    });
+  } else if (attendeeResult.data?.id && amountMinor > 0) {
+    await recordSubscriptionChargeJournal(supabase, {
+      sourceKind: 'attendee_subscription',
+      sourceId: attendeeResult.data.id,
+      amountMinor,
+      currency,
+      provider: 'stripe',
+      scope: 'attendee_subscription',
+      metadata: {
+        subscription_id: subscriptionId,
+        invoice_id: invoiceId,
+        payment_intent_id: paymentIntentId || null,
+        attendee_id: attendeeResult.data.attendee_id || null,
+      },
+    }).catch((ledgerError) => {
+      console.error('[LEDGER] failed to record attendee subscription charge journal:', ledgerError);
+    });
+  } else if (vaultResult.data?.id && amountMinor > 0) {
+    await recordSubscriptionChargeJournal(supabase, {
+      sourceKind: 'vault_subscription',
+      sourceId: vaultResult.data.id,
+      amountMinor,
+      currency,
+      provider: 'stripe',
+      scope: 'vault_subscription',
+      metadata: {
+        subscription_id: subscriptionId,
+        invoice_id: invoiceId,
+        payment_intent_id: paymentIntentId || null,
+        user_id: vaultResult.data.user_id || null,
+      },
+    }).catch((ledgerError) => {
+      console.error('[LEDGER] failed to record vault subscription charge journal:', ledgerError);
+    });
+  }
+
+  const notifications: Array<Promise<unknown>> = [];
+  const successMessage = `Subscription payment received: ${formatMinorAmountForDisplay(amountMinor, currency)}.`;
+
+  if (creatorResult.data?.photographer_id) {
+    notifications.push(
+      emitFinancialInAppNotification(supabase, {
+        userId: creatorResult.data.photographer_id,
+        templateCode: 'subscription_renewed',
+        subject: 'Subscription renewed',
+        body: successMessage,
+        dedupeKey: `subscription_renewed:stripe:creator:${subscriptionId}:${invoiceId}`,
+        metadata: {
+          scope: 'creator_subscription',
+          subscription_id: subscriptionId,
+          invoice_id: invoiceId,
+          amount_minor: amountMinor,
+          currency,
+        },
+      })
+    );
+  }
+
+  if (attendeeResult.data?.attendee_id) {
+    notifications.push(
+      emitFinancialInAppNotification(supabase, {
+        userId: attendeeResult.data.attendee_id,
+        templateCode: 'subscription_renewed',
+        subject: 'Subscription renewed',
+        body: successMessage,
+        dedupeKey: `subscription_renewed:stripe:attendee:${subscriptionId}:${invoiceId}`,
+        metadata: {
+          scope: 'attendee_subscription',
+          subscription_id: subscriptionId,
+          invoice_id: invoiceId,
+          amount_minor: amountMinor,
+          currency,
+        },
+      })
+    );
+  }
+
+  if (vaultResult.data?.user_id) {
+    notifications.push(
+      emitFinancialInAppNotification(supabase, {
+        userId: vaultResult.data.user_id,
+        templateCode: 'subscription_renewed',
+        subject: 'Subscription renewed',
+        body: successMessage,
+        dedupeKey: `subscription_renewed:stripe:vault:${subscriptionId}:${invoiceId}`,
+        metadata: {
+          scope: 'vault_subscription',
+          subscription_id: subscriptionId,
+          invoice_id: invoiceId,
+          amount_minor: amountMinor,
+          currency,
+        },
+      })
+    );
+  }
+
+  await Promise.all(
+    notifications.map((promise) =>
+      promise.catch(() => {
+        // Non-blocking notification best effort.
+      })
+    )
+  );
+}
+
+async function handleDropInCreditPurchaseSuccess(
+  supabase: ReturnType<typeof createServiceClient>,
+  params: {
+    purchaseId: string;
+    attendeeId: string;
+    transactionRef: string;
+    provider: 'stripe' | 'paystack' | 'flutterwave' | 'paypal';
+  }
+) {
+  const purchaseId = String(params.purchaseId || '').trim();
+  if (!purchaseId) return;
+
+  const { data: purchase } = await supabase
+    .from('drop_in_credit_purchases')
+    .select('id, attendee_id, credits_purchased, amount_paid, currency, status')
+    .eq('id', purchaseId)
+    .maybeSingle();
+
+  if (!purchase) return;
+
+  let activated = false;
+  if (purchase.status === 'pending') {
+    const { data: updated } = await supabase
+      .from('drop_in_credit_purchases')
+      .update({
+        status: 'active',
+        credits_remaining: purchase.credits_purchased,
+        payment_intent_id: params.transactionRef || null,
+      })
+      .eq('id', purchase.id)
+      .eq('status', 'pending')
+      .select('id')
+      .maybeSingle();
+    activated = Boolean(updated?.id);
+  } else if (purchase.status === 'active') {
+    activated = true;
+  }
+
+  if (!activated) return;
+
+  if (purchase.status === 'pending') {
+    const { data: attendee } = await supabase
+      .from('attendees')
+      .select('drop_in_credits')
+      .eq('id', purchase.attendee_id)
+      .maybeSingle();
+    const currentCredits = Number(attendee?.drop_in_credits || 0);
+
+    await supabase
+      .from('attendees')
+      .update({ drop_in_credits: currentCredits + Number(purchase.credits_purchased || 0) })
+      .eq('id', purchase.attendee_id);
+  }
+
+  const amountMinor = Math.max(0, Math.round(Number(purchase.amount_paid || 0)));
+  if (amountMinor > 0) {
+    await recordDropInCreditPurchaseJournal(supabase, {
+      purchaseId: purchase.id,
+      attendeeId: purchase.attendee_id || params.attendeeId || '',
+      amountMinor,
+      currency: String(purchase.currency || 'USD').toUpperCase(),
+      provider: params.provider,
+      metadata: {
+        provider_transaction_ref: params.transactionRef || null,
+      },
+    }).catch((ledgerError) => {
+      console.error('[LEDGER] failed to record drop-in credit purchase journal:', ledgerError);
+    });
+  }
 }
 

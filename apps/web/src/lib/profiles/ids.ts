@@ -50,18 +50,18 @@ export async function resolvePhotographerProfileByUser(
   userId: string,
   userEmail?: string | null
 ) {
-  const byId = await selectProfileById(supabase, 'photographers', userId);
-  if (byId.data?.id) {
-    return {
-      data: { id: byId.data.id, user_id: byId.data.user_id || byId.data.id },
-      error: null,
-    };
-  }
-
   const byUserId = await selectProfileByUserId(supabase, 'photographers', userId);
   if (byUserId.data?.id) {
     return {
       data: { id: byUserId.data.id, user_id: byUserId.data.user_id || userId },
+      error: null,
+    };
+  }
+
+  const byId = await selectProfileById(supabase, 'photographers', userId);
+  if (byId.data?.id) {
+    return {
+      data: { id: byId.data.id, user_id: byId.data.user_id || byId.data.id },
       error: null,
     };
   }
@@ -111,18 +111,18 @@ export async function resolveAttendeeProfileByUser(
   userId: string,
   userEmail?: string | null
 ) {
-  const byId = await selectProfileById(supabase, 'attendees', userId);
-  if (byId.data?.id) {
-    return {
-      data: { id: byId.data.id, user_id: byId.data.user_id || byId.data.id },
-      error: null,
-    };
-  }
-
   const byUserId = await selectProfileByUserId(supabase, 'attendees', userId);
   if (byUserId.data?.id) {
     return {
       data: { id: byUserId.data.id, user_id: byUserId.data.user_id || userId },
+      error: null,
+    };
+  }
+
+  const byId = await selectProfileById(supabase, 'attendees', userId);
+  if (byId.data?.id) {
+    return {
+      data: { id: byId.data.id, user_id: byId.data.user_id || byId.data.id },
       error: null,
     };
   }

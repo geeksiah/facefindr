@@ -144,15 +144,17 @@ export default function BillingPage() {
         })));
       }
 
-      // Load drop-in credits
-      const { data: attendee } = await supabase
-        .from('attendees')
-        .select('drop_in_credits')
-        .eq('id', user.id)
-        .single();
-
-      if (attendee) {
-        setDropInCredits(attendee.drop_in_credits || 0);
+      // Load authoritative drop-in credits from runtime pricing endpoint.
+      try {
+        const pricingResponse = await fetch('/api/runtime/drop-in/pricing', { cache: 'no-store' });
+        const pricingPayload = await pricingResponse.json().catch(() => ({}));
+        if (pricingResponse.ok) {
+          setDropInCredits(Number(pricingPayload?.attendeeCredits || 0));
+        } else {
+          setDropInCredits(0);
+        }
+      } catch {
+        setDropInCredits(0);
       }
 
       // Load recent transactions
@@ -319,10 +321,17 @@ export default function BillingPage() {
   const purchaseCredits = async (credits: number, buttonKey: string) => {
     try {
       setPurchasingCode(buttonKey);
+      const idempotencyKey =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? `dropin_credits_checkout:${crypto.randomUUID()}`
+          : `dropin_credits_checkout:${Date.now()}_${Math.random().toString(36).slice(2)}`;
       const response = await fetch('/api/drop-in/credits/checkout', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credits }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({ credits, idempotencyKey }),
       });
       const data = await response.json();
 

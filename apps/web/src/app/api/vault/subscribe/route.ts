@@ -124,20 +124,54 @@ export async function POST(request: NextRequest) {
       throw gatewayError;
     }
 
-    const selectedGateway = gatewaySelection.gateway;
-    const mapping = await resolveProviderPlanMapping({
+    const configuredGateways = Array.from(
+      new Set([gatewaySelection.gateway, ...(gatewaySelection.availableGateways || [])])
+    );
+    let selectedGateway = gatewaySelection.gateway;
+    const mappingAliases = Array.from(
+      new Set([plan.slug, `${plan.slug}_vault`, `vault_${plan.slug}`])
+    );
+    let mapping = await resolveProviderPlanMapping({
       productScope: 'vault_subscription',
       internalPlanCode: plan.slug,
+      internalPlanCodeAliases: mappingAliases,
       provider: selectedGateway,
       billingCycle: normalizedBillingCycle,
       currency: normalizedCurrency,
       regionCode: gatewaySelection.countryCode,
     });
 
-    if (!mapping) {
+    // Mapping fallback strategy:
+    // - Stripe can run recurring in dynamic mode without provider_plan_mappings.
+    // - Other providers require mapping, so try other configured gateways.
+    if (!mapping && selectedGateway !== 'stripe') {
+      for (const candidate of configuredGateways) {
+        if (candidate === selectedGateway) continue;
+        if (candidate === 'stripe' && stripe) {
+          selectedGateway = 'stripe';
+          break;
+        }
+        const candidateMapping = await resolveProviderPlanMapping({
+          productScope: 'vault_subscription',
+          internalPlanCode: plan.slug,
+          internalPlanCodeAliases: mappingAliases,
+          provider: candidate,
+          billingCycle: normalizedBillingCycle,
+          currency: normalizedCurrency,
+          regionCode: gatewaySelection.countryCode,
+        });
+        if (candidateMapping) {
+          mapping = candidateMapping;
+          selectedGateway = candidate;
+          break;
+        }
+      }
+    }
+
+    if (!mapping && !(selectedGateway === 'stripe' && stripe)) {
       return NextResponse.json(
         {
-          error: `Recurring mapping missing for ${selectedGateway} (${plan.slug}/${normalizedBillingCycle}/${normalizedCurrency})`,
+          error: `Recurring mapping missing for available gateways (${configuredGateways.join(', ')}) on ${plan.slug}/${normalizedBillingCycle}/${normalizedCurrency}`,
           failClosed: true,
           code: 'missing_provider_plan_mapping',
         },
@@ -156,9 +190,9 @@ export async function POST(request: NextRequest) {
       }
 
       const lineItems: any[] = [];
-      if (mapping.provider_plan_id?.startsWith('price_')) {
+      if (mapping?.provider_plan_id?.startsWith('price_')) {
         lineItems.push({
-          price: mapping.provider_plan_id,
+          price: mapping?.provider_plan_id,
           quantity: 1,
         });
       } else {
@@ -196,7 +230,7 @@ export async function POST(request: NextRequest) {
             billing_cycle: normalizedBillingCycle,
             pricing_currency: normalizedCurrency,
             pricing_amount_cents: String(priceCents),
-            provider_plan_id: mapping.provider_plan_id,
+            provider_plan_id: mapping?.provider_plan_id || 'dynamic',
           },
         },
         metadata: {
@@ -207,7 +241,7 @@ export async function POST(request: NextRequest) {
           billing_cycle: normalizedBillingCycle,
           pricing_currency: normalizedCurrency,
           pricing_amount_cents: String(priceCents),
-          provider_plan_id: mapping.provider_plan_id,
+          provider_plan_id: mapping?.provider_plan_id || 'dynamic',
           type: 'storage_subscription',
         },
         success_url: `${appUrl}/gallery/vault?subscription=success`,
@@ -222,6 +256,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (selectedGateway === 'paypal') {
+      if (!mapping) {
+        return NextResponse.json(
+          { error: 'Recurring mapping missing for PayPal vault plan', code: 'missing_provider_plan_mapping' },
+          { status: 503 }
+        );
+      }
       if (!isPayPalConfigured()) {
         return NextResponse.json({ error: 'PayPal is not configured' }, { status: 500 });
       }
@@ -257,6 +297,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (selectedGateway === 'flutterwave') {
+      if (!mapping) {
+        return NextResponse.json(
+          { error: 'Recurring mapping missing for Flutterwave vault plan', code: 'missing_provider_plan_mapping' },
+          { status: 503 }
+        );
+      }
       if (!isFlutterwaveConfigured()) {
         return NextResponse.json({ error: 'Flutterwave is not configured' }, { status: 500 });
       }
@@ -288,6 +334,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (selectedGateway === 'paystack') {
+      if (!mapping) {
+        return NextResponse.json(
+          { error: 'Recurring mapping missing for Paystack vault plan', code: 'missing_provider_plan_mapping' },
+          { status: 503 }
+        );
+      }
       const paystackSecretKey = await resolvePaystackSecretKey(gatewaySelection.countryCode);
       if (!paystackSecretKey) {
         return NextResponse.json({ error: 'Paystack is not configured' }, { status: 500 });

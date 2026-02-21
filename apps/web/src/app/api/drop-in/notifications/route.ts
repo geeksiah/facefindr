@@ -8,9 +8,10 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { consumeDropInCredits } from '@/lib/drop-in/consume-credits';
 import { resolveDropInCreditRules } from '@/lib/drop-in/credit-rules';
 import { getAttendeeIdCandidates } from '@/lib/profiles/ids';
-import { createClient, createClientWithAccessToken } from '@/lib/supabase/server';
+import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
 // GET - List notifications
 export async function GET(request: NextRequest) {
@@ -134,6 +135,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Attendee profile not found' }, { status: 404 });
     }
     const rules = await resolveDropInCreditRules();
+    const serviceClient = createServiceClient();
 
     const { notificationId, action } = await request.json();
 
@@ -181,19 +183,23 @@ export async function POST(request: NextRequest) {
     if (action === 'view') {
       if (notification.requires_premium && !notification.is_gifted && !notification.viewed_at) {
         const creditsNeeded = rules.recipientUnlock;
-        const { data: creditsConsumed, error: creditsError } = await supabase.rpc('use_drop_in_credits', {
-          p_attendee_id: recipientAttendeeId,
-          p_action: 'drop_in_recipient_unlock',
-          p_credits_needed: creditsNeeded,
-          p_metadata: {
+        const creditConsumption = await consumeDropInCredits(serviceClient, {
+          attendeeId: recipientAttendeeId,
+          action: 'drop_in_recipient_unlock',
+          creditsNeeded,
+          metadata: {
             notification_id: notification.id,
             drop_in_photo_id: notification.drop_in_photo_id,
           },
         });
 
-        if (creditsError || !creditsConsumed) {
+        if (!creditConsumption.consumed) {
           return NextResponse.json(
-            { error: `Drop-In credit required to open this photo (${creditsNeeded} credits)` },
+            {
+              error: `Drop-In credit required to open this photo (${creditsNeeded} credits)`,
+              requiredCredits: creditsNeeded,
+              availableCredits: creditConsumption.availableCredits,
+            },
             { status: 402 }
           );
         }

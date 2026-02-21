@@ -346,7 +346,13 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const authHeader = request.headers.get('authorization');
+    const accessToken = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : null;
+    const supabase = accessToken
+      ? createClientWithAccessToken(accessToken)
+      : await createClient();
     
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
@@ -355,8 +361,14 @@ export async function DELETE(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const photoId = searchParams.get('id');
+    const body = await request.json().catch(() => ({}));
+    const photoIds = Array.isArray(body?.photoIds)
+      ? body.photoIds.filter((value: unknown): value is string => typeof value === 'string' && value.length > 0)
+      : [];
+    const idsToDelete = photoId ? [photoId, ...photoIds] : photoIds;
+    const uniqueIds = Array.from(new Set(idsToDelete));
 
-    if (!photoId) {
+    if (uniqueIds.length === 0) {
       return NextResponse.json(
         { error: 'Photo ID is required' },
         { status: 400 }
@@ -366,7 +378,7 @@ export async function DELETE(request: NextRequest) {
     const { error } = await supabase
       .from('photo_vault')
       .delete()
-      .eq('id', photoId)
+      .in('id', uniqueIds)
       .eq('user_id', user.id);
 
     if (error) {
@@ -377,9 +389,109 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, deletedCount: uniqueIds.length });
   } catch (error) {
     console.error('Vault DELETE error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const authHeader = request.headers.get('authorization');
+    const accessToken = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : null;
+    const supabase = accessToken
+      ? createClientWithAccessToken(accessToken)
+      : await createClient();
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const action = String(body?.action || '').trim();
+
+    if (action !== 'assign_album' && action !== 'favorite') {
+      return NextResponse.json({ error: 'Unsupported action' }, { status: 400 });
+    }
+
+    if (action === 'favorite') {
+      const photoId = typeof body?.photoId === 'string' ? body.photoId : '';
+      const isFavorite = Boolean(body?.isFavorite);
+      if (!photoId) {
+        return NextResponse.json({ error: 'photoId is required' }, { status: 400 });
+      }
+
+      const { error } = await supabase
+        .from('photo_vault')
+        .update({
+          is_favorite: isFavorite,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', photoId)
+        .eq('user_id', user.id);
+
+      if (error) {
+        return NextResponse.json({ error: 'Failed to update favorite' }, { status: 500 });
+      }
+
+      return NextResponse.json({ success: true });
+    }
+
+    const photoIds = Array.isArray(body?.photoIds)
+      ? body.photoIds.filter((value: unknown): value is string => typeof value === 'string' && value.length > 0)
+      : [];
+    const uniquePhotoIds = Array.from(new Set(photoIds));
+    if (uniquePhotoIds.length === 0) {
+      return NextResponse.json({ error: 'photoIds are required' }, { status: 400 });
+    }
+
+    const albumId =
+      body?.albumId === null || body?.albumId === ''
+        ? null
+        : typeof body?.albumId === 'string'
+          ? body.albumId
+          : null;
+
+    if (albumId) {
+      const { data: album, error: albumError } = await supabase
+        .from('photo_albums')
+        .select('id')
+        .eq('id', albumId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (albumError || !album) {
+        return NextResponse.json({ error: 'Album not found' }, { status: 404 });
+      }
+    }
+
+    const { error } = await supabase
+      .from('photo_vault')
+      .update({
+        album_id: albumId,
+        updated_at: new Date().toISOString(),
+      })
+      .in('id', uniquePhotoIds)
+      .eq('user_id', user.id);
+
+    if (error) {
+      return NextResponse.json({ error: 'Failed to update album assignment' }, { status: 500 });
+    }
+
+    return NextResponse.json({
+      success: true,
+      updatedCount: uniquePhotoIds.length,
+      albumId,
+    });
+  } catch (error) {
+    console.error('Vault PATCH error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

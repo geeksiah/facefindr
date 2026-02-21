@@ -1,7 +1,7 @@
 'use client';
 
 import { Check, Download, Sparkles, Loader2, ExternalLink } from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 import { DashboardBanner } from '@/components/notifications';
 import { PaymentMethodsManager } from '@/components/payments';
@@ -76,15 +76,41 @@ interface UsageData {
   platformFee: number;
 }
 
+interface BillingHistoryRow {
+  id: string;
+  occurredAt: string;
+  type: string;
+  provider?: string | null;
+  currency: string;
+  description?: string | null;
+  amountMinor: number;
+  providerFeeMinor?: number;
+}
+
 export default function BillingPage() {
   const { currencyCode } = useCurrency();
   const [plans, setPlans] = useState<PlanPricing[]>([]);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [usageData, setUsageData] = useState<UsageData | null>(null);
+  const [billingHistory, setBillingHistory] = useState<BillingHistoryRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isUpgrading, setIsUpgrading] = useState<string | null>(null);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
-  const [lastSubscriptionVersion, setLastSubscriptionVersion] = useState(0);
+  const lastSubscriptionVersionRef = useRef(0);
+  const loadInFlightRef = useRef(false);
+  const loadQueuedRef = useRef(false);
+  const loadAbortRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
+  const upgradeInFlightRef = useRef(false);
+
+  const createIdempotencyKey = useCallback((scope: string) => {
+    const randomPart =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    return `${scope}:${randomPart}`;
+  }, []);
 
   const openCheckoutPopup = useCallback((checkoutUrl: string) => {
     const popup = window.open(
@@ -99,37 +125,92 @@ export default function BillingPage() {
 
   // Load subscription and usage data
   const loadData = useCallback(async () => {
+    if (loadInFlightRef.current) {
+      loadQueuedRef.current = true;
+      loadAbortRef.current?.abort();
+      return;
+    }
+
+    loadInFlightRef.current = true;
     try {
-      // Load subscription pricing
-      const pricingRes = await fetch(`/api/subscriptions/pricing?currency=${currencyCode}`);
-      if (pricingRes.ok) {
-        const data = await pricingRes.json();
-        setPlans(data.plans || []);
-      }
+      let shouldContinue = true;
+      while (shouldContinue) {
+        shouldContinue = false;
+        loadQueuedRef.current = false;
 
-      // Load current subscription
-      const subRes = await fetch('/api/creator/subscription');
-      if (subRes.ok) {
-        const data = await subRes.json();
-        setSubscription(data.subscription);
-      }
+        loadAbortRef.current?.abort();
+        const controller = new AbortController();
+        loadAbortRef.current = controller;
 
-      // Load real-time usage data
-      const usageRes = await fetch('/api/creator/usage');
-      if (usageRes.ok) {
-        const data = await usageRes.json();
-        setUsageData(data);
+        try {
+          const pricingRes = await fetch(`/api/subscriptions/pricing?currency=${currencyCode}`, {
+            signal: controller.signal,
+            cache: 'no-store',
+          });
+          if (pricingRes.ok && !controller.signal.aborted && mountedRef.current) {
+            const data = await pricingRes.json();
+            setPlans(data.plans || []);
+          }
+
+          const subRes = await fetch('/api/creator/subscription', {
+            signal: controller.signal,
+            cache: 'no-store',
+          });
+          if (subRes.ok && !controller.signal.aborted && mountedRef.current) {
+            const data = await subRes.json();
+            setSubscription(data.subscription);
+          }
+
+          const usageRes = await fetch('/api/creator/usage', {
+            signal: controller.signal,
+            cache: 'no-store',
+          });
+          if (usageRes.ok && !controller.signal.aborted && mountedRef.current) {
+            const data = await usageRes.json();
+            setUsageData(data);
+          }
+
+          const historyRes = await fetch('/api/creator/billing/history?limit=25', {
+            signal: controller.signal,
+            cache: 'no-store',
+          });
+          if (historyRes.ok && !controller.signal.aborted && mountedRef.current) {
+            const data = await historyRes.json();
+            setBillingHistory((data.history || []) as BillingHistoryRow[]);
+          }
+        } catch (error: any) {
+          if (error?.name !== 'AbortError') {
+            console.error('Failed to load billing data:', error);
+          }
+        } finally {
+          if (loadAbortRef.current === controller) {
+            loadAbortRef.current = null;
+          }
+        }
+
+        if (loadQueuedRef.current) {
+          shouldContinue = true;
+        }
       }
-    } catch (error) {
-      console.error('Failed to load billing data:', error);
     } finally {
-      setIsLoading(false);
+      loadInFlightRef.current = false;
+      if (mountedRef.current) {
+        setIsLoading(false);
+      }
     }
   }, [currencyCode]);
 
   useEffect(() => {
-    loadData();
+    void loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      loadAbortRef.current?.abort();
+      loadAbortRef.current = null;
+    };
+  }, []);
 
   // Subscribe to realtime updates for usage changes
   useRealtimeSubscription({
@@ -150,8 +231,8 @@ export default function BillingPage() {
     heartbeatTimeoutMs: 35000,
     onMessage: (payload) => {
       const version = Number(payload.version || 0);
-      if (!version || version > lastSubscriptionVersion) {
-        setLastSubscriptionVersion(version || Date.now());
+      if (!version || version > lastSubscriptionVersionRef.current) {
+        lastSubscriptionVersionRef.current = version || Date.now();
         void loadData();
       }
     },
@@ -159,27 +240,42 @@ export default function BillingPage() {
 
   // Upgrade plan
   const handleUpgrade = async (planCode: string) => {
+    if (upgradeInFlightRef.current) return;
+    upgradeInFlightRef.current = true;
     setIsUpgrading(planCode);
+    setCheckoutError(null);
+    const idempotencyKey = createIdempotencyKey('subscription_checkout');
     try {
       const response = await fetch('/api/subscriptions/checkout', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
         body: JSON.stringify({ 
           planCode, 
           billingCycle,
           currency: currencyCode,
+          idempotencyKey,
         }),
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data.checkoutUrl) {
-          openCheckoutPopup(data.checkoutUrl);
-        }
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setCheckoutError(data?.error || 'Failed to start checkout');
+        return;
+      }
+
+      if (data.checkoutUrl) {
+        openCheckoutPopup(data.checkoutUrl);
+      } else {
+        setCheckoutError('Checkout session was created but no redirect URL was returned');
       }
     } catch (error) {
       console.error('Failed to start checkout:', error);
+      setCheckoutError('Failed to start checkout');
     } finally {
+      upgradeInFlightRef.current = false;
       setIsUpgrading(null);
     }
   };
@@ -208,6 +304,37 @@ export default function BillingPage() {
     maxFaceOps: limitsRaw.maxFaceOps ?? limitsRaw.maxFaceOpsPerEvent ?? 0,
   };
   const percentages = usageData?.percentages || { events: 0, storage: 0, team: 0 };
+
+  const formatHistoryAmount = (amountMinor: number, currency: string) => {
+    const amount = Number(amountMinor || 0) / 100;
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: String(currency || 'USD').toUpperCase(),
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  };
+
+  const mapHistoryLabel = (type: string) => {
+    switch (type) {
+      case 'photo_purchase':
+        return 'Photo purchase';
+      case 'tip':
+        return 'Tip';
+      case 'subscription_charge':
+        return 'Subscription charge';
+      case 'drop_in_credit_purchase':
+        return 'Credit purchase';
+      case 'drop_in_credit_consumption':
+        return 'Credit consumption';
+      case 'payout':
+        return 'Payout';
+      case 'refund':
+        return 'Refund';
+      default:
+        return type.replace(/_/g, ' ');
+    }
+  };
 
   if (isLoading) {
     return (
@@ -363,6 +490,12 @@ export default function BillingPage() {
           <span className="ml-2 text-xs text-success">Save 2 months</span>
         </button>
       </div>
+
+      {checkoutError && (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {checkoutError}
+        </div>
+      )}
 
       {/* Plans */}
       <div className={`grid gap-6 ${plans.length <= 3 ? 'md:grid-cols-3' : 'md:grid-cols-4'}`}>
@@ -558,12 +691,30 @@ export default function BillingPage() {
         <div className="border-b border-border px-6 py-4">
           <h2 className="font-semibold text-foreground">Billing History</h2>
         </div>
-        <div className="p-12 text-center">
-          <Download className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
-          <p className="text-sm text-muted-foreground">
-            No invoices yet.
-          </p>
-        </div>
+        {billingHistory.length === 0 ? (
+          <div className="p-12 text-center">
+            <Download className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
+            <p className="text-sm text-muted-foreground">No billing history yet.</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {billingHistory.map((entry) => (
+              <div key={entry.id} className="flex items-center justify-between px-6 py-4">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground capitalize">
+                    {entry.description || mapHistoryLabel(entry.type)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {new Date(entry.occurredAt).toLocaleString()} {entry.provider ? `• ${entry.provider}` : ''}
+                  </p>
+                </div>
+                <p className={`text-sm font-semibold ${entry.amountMinor >= 0 ? 'text-foreground' : 'text-warning'}`}>
+                  {formatHistoryAmount(entry.amountMinor, entry.currency)}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -33,20 +33,59 @@ export function NotificationBell() {
   const [isClearingAll, setIsClearingAll] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const latestVersionRef = useRef<number>(0);
+  const fetchInFlightRef = useRef(false);
+  const fetchQueuedRef = useRef(false);
+  const fetchAbortRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
 
   // Fetch notifications
   const fetchNotifications = useCallback(async () => {
+    if (fetchInFlightRef.current) {
+      fetchQueuedRef.current = true;
+      fetchAbortRef.current?.abort();
+      return;
+    }
+
+    fetchInFlightRef.current = true;
     try {
-      const response = await fetch('/api/notifications?limit=10');
-      if (response.ok) {
-        const data = await response.json();
-        setNotifications(data.notifications || []);
-        setUnreadCount(data.unreadCount || 0);
+      let shouldContinue = true;
+      while (shouldContinue) {
+        shouldContinue = false;
+        fetchQueuedRef.current = false;
+
+        fetchAbortRef.current?.abort();
+        const controller = new AbortController();
+        fetchAbortRef.current = controller;
+
+        try {
+          const response = await fetch('/api/notifications?limit=10', {
+            signal: controller.signal,
+            cache: 'no-store',
+          });
+          if (response.ok && !controller.signal.aborted && mountedRef.current) {
+            const data = await response.json();
+            setNotifications(data.notifications || []);
+            setUnreadCount(data.unreadCount || 0);
+          }
+        } catch (error: any) {
+          if (error?.name !== 'AbortError') {
+            console.error('Failed to fetch notifications:', error);
+          }
+        } finally {
+          if (fetchAbortRef.current === controller) {
+            fetchAbortRef.current = null;
+          }
+        }
+
+        if (fetchQueuedRef.current) {
+          shouldContinue = true;
+        }
       }
-    } catch (error) {
-      console.error('Failed to fetch notifications:', error);
     } finally {
-      setIsLoading(false);
+      fetchInFlightRef.current = false;
+      if (mountedRef.current) {
+        setIsLoading(false);
+      }
     }
   }, []);
 
@@ -54,6 +93,14 @@ export function NotificationBell() {
   useEffect(() => {
     fetchNotifications();
   }, [fetchNotifications]);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      fetchAbortRef.current?.abort();
+      fetchAbortRef.current = null;
+    };
+  }, []);
 
   useSSEWithPolling<{
     unreadCount: number;

@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 
+import { getAvailableDropInCredits } from '@/lib/drop-in/credits';
 import { resolveDropInCreditRules } from '@/lib/drop-in/credit-rules';
 import { resolveDropInPricingConfig } from '@/lib/drop-in/pricing';
 import { convertCurrency, getCountryFromRequest, getEffectiveCurrency } from '@/lib/currency/currency-service';
@@ -37,12 +38,7 @@ export async function GET(request: Request) {
       const serviceClient = createServiceClient();
       const { data: attendee } = await resolveAttendeeProfileByUser(serviceClient, user.id, user.email);
       if (attendee?.id) {
-        const { data: attendeeRow } = await serviceClient
-          .from('attendees')
-          .select('drop_in_credits')
-          .eq('id', attendee.id)
-          .maybeSingle();
-        attendeeCredits = Number((attendeeRow as any)?.drop_in_credits || 0);
+        attendeeCredits = await getAvailableDropInCredits(serviceClient, attendee.id);
       }
     }
 
