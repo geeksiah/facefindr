@@ -273,6 +273,37 @@ async function resolveCreatorPlanCodeFromProviderPlanId(
   };
 }
 
+async function resolveAttendeePlanCodeFromProviderPlanId(
+  input: RecurringSyncInput
+): Promise<string | null> {
+  const providerPlanId = String(input.externalPlanId || '').trim();
+  if (!providerPlanId) return null;
+
+  const { data: mapping, error: mappingError } = await input.supabase
+    .from('provider_plan_mappings')
+    .select('internal_plan_code')
+    .eq('product_scope', 'attendee_subscription')
+    .eq('provider', input.provider)
+    .eq('provider_plan_id', providerPlanId)
+    .eq('is_active', true)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (mappingError) {
+    if (isMissingRelationError(mappingError, 'provider_plan_mappings')) {
+      return null;
+    }
+    throw mappingError;
+  }
+
+  const planCode = String((mapping as any)?.internal_plan_code || '')
+    .trim()
+    .toLowerCase();
+  if (!planCode || planCode === 'free') return null;
+  return planCode;
+}
+
 export async function syncRecurringSubscriptionRecord(input: RecurringSyncInput) {
   const nowIso = new Date().toISOString();
   const status = normalizeStatus(input.scope, input.status);
@@ -290,7 +321,13 @@ export async function syncRecurringSubscriptionRecord(input: RecurringSyncInput)
   const canceledAt = toIso(input.canceledAt);
 
   if (input.scope === 'attendee_subscription') {
-    const planCode = input.planCode || 'free';
+    let planCode = String(input.planCode || 'free').trim().toLowerCase() || 'free';
+    if (planCode === 'free' && input.externalPlanId) {
+      const resolvedFromMapping = await resolveAttendeePlanCodeFromProviderPlanId(input);
+      if (resolvedFromMapping) {
+        planCode = resolvedFromMapping;
+      }
+    }
     const isPremium = planCode === 'premium' || planCode === 'premium_plus';
     const isPremiumPlus = planCode === 'premium_plus';
 

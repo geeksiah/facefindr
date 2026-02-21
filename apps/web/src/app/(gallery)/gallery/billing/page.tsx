@@ -75,6 +75,7 @@ export default function BillingPage() {
   const [packsError, setPacksError] = useState<string | null>(null);
   const [purchasingCode, setPurchasingCode] = useState<string | null>(null);
   const hasHandledCreditsRedirect = useRef(false);
+  const hasHandledSubscriptionRedirect = useRef(false);
 
   useEffect(() => {
     void loadBillingData();
@@ -287,6 +288,18 @@ export default function BillingPage() {
     }
   };
 
+  const verifyAttendeeSubscription = async (payload: Record<string, string>) => {
+    const response = await fetch('/api/attendee/subscription/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || 'Subscription verification failed');
+    }
+  };
+
   useEffect(() => {
     if (hasHandledCreditsRedirect.current) return;
     hasHandledCreditsRedirect.current = true;
@@ -312,6 +325,59 @@ export default function BillingPage() {
       } catch (verifyError: any) {
         toast.error(
           'Credit confirmation failed',
+          verifyError?.message || 'Payment succeeded but verification failed. Please contact support.'
+        );
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (hasHandledSubscriptionRedirect.current) return;
+    hasHandledSubscriptionRedirect.current = true;
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const subscriptionStatus = String(searchParams.get('subscription') || '').toLowerCase();
+    const providerParam = String(searchParams.get('provider') || '').toLowerCase();
+    const sessionId = String(searchParams.get('session_id') || '').trim();
+    const subscriptionId = String(searchParams.get('subscription_id') || '').trim();
+    const txRef = String(searchParams.get('tx_ref') || '').trim();
+    const reference = String(searchParams.get('reference') || '').trim();
+    const regionCode = String(searchParams.get('region') || '').trim().toUpperCase();
+    const provider = providerParam || (sessionId ? 'stripe' : '');
+
+    if (subscriptionStatus !== 'success' || !provider) {
+      return;
+    }
+
+    const nextUrl = `${window.location.pathname}`;
+    window.history.replaceState({}, document.title, nextUrl);
+
+    void (async () => {
+      try {
+        const payload: Record<string, string> = { provider };
+        if (provider === 'stripe' && sessionId) payload.sessionId = sessionId;
+        if (provider === 'paypal' && subscriptionId) payload.subscriptionId = subscriptionId;
+        if (provider === 'flutterwave' && txRef) payload.txRef = txRef;
+        if (provider === 'paystack' && reference) {
+          payload.reference = reference;
+          if (regionCode) payload.regionCode = regionCode;
+        }
+
+        const hasProviderReference =
+          (provider === 'stripe' && Boolean(payload.sessionId)) ||
+          (provider === 'paypal' && Boolean(payload.subscriptionId)) ||
+          (provider === 'flutterwave' && Boolean(payload.txRef)) ||
+          (provider === 'paystack' && Boolean(payload.reference));
+        if (!hasProviderReference) {
+          throw new Error('Payment succeeded but callback is missing provider reference.');
+        }
+
+        await verifyAttendeeSubscription(payload);
+        toast.success('Subscription activated', 'Your attendee subscription is now active.');
+        await loadBillingData();
+      } catch (verifyError: any) {
+        toast.error(
+          'Subscription confirmation failed',
           verifyError?.message || 'Payment succeeded but verification failed. Please contact support.'
         );
       }

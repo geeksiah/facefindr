@@ -15,7 +15,7 @@ import { resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // GET - Get subscription details
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -33,6 +33,9 @@ export async function GET() {
       return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
     }
     const creatorId = creatorProfile.id as string;
+    const lite =
+      request.nextUrl.searchParams.get('lite') === '1' ||
+      request.nextUrl.searchParams.get('lite') === 'true';
 
     // Get current plan with full details from modular system
     const currentPlan = await getUserPlan(creatorId, 'photographer');
@@ -59,50 +62,56 @@ export async function GET() {
       .eq('user_id', user.id)
       .maybeSingle();
 
-    // Get usage stats
-    const { count: eventCount } = await supabase
-      .from('events')
-      .select('id', { count: 'exact' })
-      .eq('photographer_id', creatorId)
-      .in('status', ['draft', 'active']);
-
-    // Get photo count from most recent event
-    const { data: recentEvent } = await supabase
-      .from('events')
-      .select('id')
-      .eq('photographer_id', creatorId)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
-
+    let eventCount = 0;
     let photoCount = 0;
     let faceOpsCount = 0;
-    
-    if (recentEvent) {
+    let wallet: { stripe_account_id?: string | null } | null = null;
+
+    if (!lite) {
+      // Get usage stats
       const { count } = await supabase
-        .from('media')
-        .select('id', { count: 'exact' })
-        .eq('event_id', recentEvent.id)
-        .is('deleted_at', null);
-      
-      photoCount = count || 0;
-
-      // Get face ops from event
-      const { data: eventData } = await supabase
         .from('events')
-        .select('face_ops_used')
-        .eq('id', recentEvent.id)
-        .single();
-      
-      faceOpsCount = eventData?.face_ops_used || 0;
-    }
+        .select('id', { count: 'exact' })
+        .eq('photographer_id', creatorId)
+        .in('status', ['draft', 'active']);
+      eventCount = count || 0;
 
-    // Get wallet/payment method info
-    const { data: wallet } = await supabase
-      .from('wallets')
-      .select('stripe_account_id')
-      .eq('photographer_id', creatorId)
-      .single();
+      // Get photo count from most recent event
+      const { data: recentEvent } = await supabase
+        .from('events')
+        .select('id')
+        .eq('photographer_id', creatorId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (recentEvent) {
+        const { count: mediaCount } = await supabase
+          .from('media')
+          .select('id', { count: 'exact' })
+          .eq('event_id', recentEvent.id)
+          .is('deleted_at', null);
+
+        photoCount = mediaCount || 0;
+
+        // Get face ops from event
+        const { data: eventData } = await supabase
+          .from('events')
+          .select('face_ops_used')
+          .eq('id', recentEvent.id)
+          .single();
+
+        faceOpsCount = eventData?.face_ops_used || 0;
+      }
+
+      // Get wallet/payment method info
+      const { data } = await supabase
+        .from('wallets')
+        .select('stripe_account_id')
+        .eq('photographer_id', creatorId)
+        .single();
+      wallet = data;
+    }
 
     const paymentMethod = null;
     // Note: To get actual payment method details, you'd need to call Stripe API
@@ -183,7 +192,7 @@ export async function GET() {
       
       // Usage stats
       usage: {
-        events: eventCount || 0,
+        events: eventCount,
         photos: photoCount,
         faceOps: faceOpsCount,
       },

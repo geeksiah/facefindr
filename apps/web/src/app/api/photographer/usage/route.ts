@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 
-import { getUsageSummary, checkLimit } from '@/lib/subscription/enforcement';
+import { getUsageSummary } from '@/lib/subscription/enforcement';
 import { getPlanByCode, getUserPlan } from '@/lib/subscription';
 import { resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
@@ -32,23 +32,38 @@ export async function GET() {
       return NextResponse.json({ error: 'Creator profile not found' }, { status: 404 });
     }
     const creatorId = creatorProfile.id as string;
-    const currentPlan = await getUserPlan(creatorId, 'photographer');
-    const freePlan = await getPlanByCode('free', 'creator');
-    const resolvedPlanId = currentPlan?.id || freePlan?.id || null;
-    const resolvedPlanCode = currentPlan?.code || freePlan?.code || 'free';
-    const resolvedPlanLimits = {
-      maxEvents: currentPlan?.limits.maxActiveEvents ?? freePlan?.limits.maxActiveEvents ?? 1,
-      maxPhotosPerEvent: currentPlan?.limits.maxPhotosPerEvent ?? freePlan?.limits.maxPhotosPerEvent ?? 50,
-      maxStorageGb: currentPlan?.limits.storageGb ?? freePlan?.limits.storageGb ?? 1,
-      maxTeamMembers: currentPlan?.limits.teamMembers ?? freePlan?.limits.teamMembers ?? 1,
-      maxFaceOps: currentPlan?.limits.maxFaceOpsPerEvent ?? freePlan?.limits.maxFaceOpsPerEvent ?? 0,
-    };
-    const resolvedPlatformFee = currentPlan?.platformFeePercent ?? freePlan?.platformFeePercent ?? 20;
 
     // Get comprehensive usage summary
     const usage = await getUsageSummary(creatorId);
+
+    const nowIso = new Date().toISOString();
+    const { data: subscriptionRows } = await serviceClient
+      .from('subscriptions')
+      .select('plan_id, plan_code')
+      .eq('photographer_id', creatorId)
+      .in('status', ['active', 'trialing'])
+      .or(`current_period_end.is.null,current_period_end.gte.${nowIso}`)
+      .order('updated_at', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(20);
+    const activeSubscription =
+      subscriptionRows?.find((row: any) => String(row.plan_code || '').toLowerCase() !== 'free') ||
+      subscriptionRows?.[0] ||
+      null;
+    const subscriptionPlanId = (activeSubscription as any)?.plan_id || null;
     
     if (!usage) {
+      const currentPlan = await getUserPlan(creatorId, 'photographer');
+      const freePlan = await getPlanByCode('free', 'creator');
+      const resolvedPlanCode = currentPlan?.code || freePlan?.code || 'free';
+      const resolvedPlanLimits = {
+        maxEvents: currentPlan?.limits.maxActiveEvents ?? freePlan?.limits.maxActiveEvents ?? 1,
+        maxPhotosPerEvent: currentPlan?.limits.maxPhotosPerEvent ?? freePlan?.limits.maxPhotosPerEvent ?? 50,
+        maxStorageGb: currentPlan?.limits.storageGb ?? freePlan?.limits.storageGb ?? 1,
+        maxTeamMembers: currentPlan?.limits.teamMembers ?? freePlan?.limits.teamMembers ?? 1,
+        maxFaceOps: currentPlan?.limits.maxFaceOpsPerEvent ?? freePlan?.limits.maxFaceOpsPerEvent ?? 0,
+      };
+      const resolvedPlatformFee = currentPlan?.platformFeePercent ?? freePlan?.platformFeePercent ?? 20;
       // Return defaults if no usage data
       return NextResponse.json({
         usage: {
@@ -66,18 +81,11 @@ export async function GET() {
           storage: 0,
           team: 0,
         },
-        planId: resolvedPlanId,
+        planId: subscriptionPlanId || currentPlan?.id || freePlan?.id || null,
         planCode: resolvedPlanCode,
         platformFee: resolvedPlatformFee,
       });
     }
-
-    // Also get individual limit checks for more detailed info
-    const [eventsCheck, storageCheck, teamCheck] = await Promise.all([
-      checkLimit(creatorId, 'events'),
-      checkLimit(creatorId, 'storage'),
-      checkLimit(creatorId, 'team_members'),
-    ]);
 
     return NextResponse.json({
       usage: {
@@ -88,46 +96,20 @@ export async function GET() {
         faceOpsUsed: usage.faceOpsUsed,
       },
       limits: {
-        maxEvents: resolvedPlanLimits.maxEvents,
-        maxPhotosPerEvent: resolvedPlanLimits.maxPhotosPerEvent,
-        maxStorageGb: resolvedPlanLimits.maxStorageGb,
-        maxTeamMembers: resolvedPlanLimits.maxTeamMembers,
-        maxFaceOps: resolvedPlanLimits.maxFaceOps,
+        maxEvents: usage.maxEvents,
+        maxPhotosPerEvent: usage.maxPhotosPerEvent,
+        maxStorageGb: usage.maxStorageGb,
+        maxTeamMembers: usage.maxTeamMembers,
+        maxFaceOps: usage.maxFaceOps,
       },
       percentages: {
-        events:
-          resolvedPlanLimits.maxEvents === -1
-            ? 0
-            : Math.min(100, Math.round((usage.activeEvents * 100) / Math.max(1, resolvedPlanLimits.maxEvents))),
-        storage:
-          resolvedPlanLimits.maxStorageGb === -1
-            ? 0
-            : Math.min(
-                100,
-                Math.round((Number(usage.storageUsedGb || 0) * 100) / Math.max(0.01, resolvedPlanLimits.maxStorageGb))
-              ),
-        team:
-          resolvedPlanLimits.maxTeamMembers === -1
-            ? 0
-            : Math.min(100, Math.round((usage.teamMembers * 100) / Math.max(1, resolvedPlanLimits.maxTeamMembers))),
+        events: Math.min(100, Math.max(0, Number(usage.eventsPercent || 0))),
+        storage: Math.min(100, Math.max(0, Number(usage.storagePercent || 0))),
+        team: Math.min(100, Math.max(0, Number(usage.teamPercent || 0))),
       },
-      checks: {
-        events: {
-          allowed: eventsCheck.allowed,
-          message: eventsCheck.message,
-        },
-        storage: {
-          allowed: storageCheck.allowed,
-          message: storageCheck.message,
-        },
-        team: {
-          allowed: teamCheck.allowed,
-          message: teamCheck.message,
-        },
-      },
-      planId: resolvedPlanId,
-      planCode: resolvedPlanCode,
-      platformFee: resolvedPlatformFee,
+      planId: subscriptionPlanId,
+      planCode: usage.planCode || String(activeSubscription?.plan_code || 'free'),
+      platformFee: usage.platformFee,
     });
 
   } catch (error) {

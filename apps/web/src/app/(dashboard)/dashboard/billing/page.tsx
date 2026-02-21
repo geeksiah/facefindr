@@ -206,7 +206,7 @@ export default function BillingPage() {
               signal: controller.signal,
               cache: 'no-store',
             }),
-            fetch('/api/creator/subscription', {
+            fetch('/api/creator/subscription?lite=1', {
               signal: controller.signal,
               cache: 'no-store',
             }),

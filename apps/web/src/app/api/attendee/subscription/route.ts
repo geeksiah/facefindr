@@ -22,6 +22,7 @@ import {
 import {
   initializePaystackPayment,
   initializePaystackSubscription,
+  resolvePaystackPublicKey,
   resolvePaystackSecretKey,
 } from '@/lib/payments/paystack';
 import { resolveProviderPlanMapping } from '@/lib/payments/recurring-subscriptions';
@@ -224,8 +225,8 @@ export async function POST(request: NextRequest) {
         payment_method_types: ['card'],
         line_items: lineItems as any,
         mode: 'subscription',
-        success_url: `${baseUrl}/gallery/billing?subscription=success&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${baseUrl}/gallery/billing?subscription=canceled`,
+        success_url: `${baseUrl}/gallery/billing?subscription=success&provider=stripe&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${baseUrl}/gallery/billing?subscription=canceled&provider=stripe`,
         subscription_data: {
           metadata: {
             subscription_scope: 'attendee_subscription',
@@ -276,7 +277,7 @@ export async function POST(request: NextRequest) {
 
       const subscription = await createBillingSubscription({
         planId: mapping.provider_plan_id,
-        returnUrl: `${baseUrl}/gallery/billing?subscription=success&provider=paypal`,
+        returnUrl: `${baseUrl}/gallery/billing?subscription=success&provider=paypal&subscription_id={subscription_id}`,
         cancelUrl: `${baseUrl}/gallery/billing?subscription=canceled&provider=paypal`,
         customId: JSON.stringify({
           subscription_scope: 'attendee_subscription',
@@ -353,6 +354,8 @@ export async function POST(request: NextRequest) {
 
     if (selectedGateway === 'paystack') {
       const paystackSecretKey = await resolvePaystackSecretKey(gatewaySelection.countryCode);
+      const paystackPublicKey = await resolvePaystackPublicKey(gatewaySelection.countryCode);
+      const paystackRegionCode = gatewaySelection.countryCode || 'GLOBAL';
       if (!paystackSecretKey) {
         return NextResponse.json({ error: 'Paystack is not configured' }, { status: 500 });
       }
@@ -382,7 +385,7 @@ export async function POST(request: NextRequest) {
               email: user.email || '',
               amount: unitAmount,
               currency: normalizedCurrency,
-              callbackUrl: `${baseUrl}/gallery/billing?subscription=success&provider=paystack&reference=${encodeURIComponent(reference)}`,
+              callbackUrl: `${baseUrl}/gallery/billing?subscription=success&provider=paystack&reference=${encodeURIComponent(reference)}&region=${encodeURIComponent(paystackRegionCode)}`,
               metadata,
             },
             paystackSecretKey
@@ -393,7 +396,7 @@ export async function POST(request: NextRequest) {
               email: user.email || '',
               amount: unitAmount,
               currency: normalizedCurrency,
-              callbackUrl: `${baseUrl}/gallery/billing?subscription=success&provider=paystack&reference=${encodeURIComponent(reference)}`,
+              callbackUrl: `${baseUrl}/gallery/billing?subscription=success&provider=paystack&reference=${encodeURIComponent(reference)}&region=${encodeURIComponent(paystackRegionCode)}`,
               plan: mapping!.provider_plan_id,
               metadata,
             },
@@ -405,9 +408,21 @@ export async function POST(request: NextRequest) {
         checkoutUrl: payment.authorizationUrl,
         sessionId: payment.reference,
         gateway: selectedGateway,
+        paystack: paystackPublicKey
+          ? {
+              publicKey: paystackPublicKey,
+              email: user.email || '',
+              amount: unitAmount,
+              currency: normalizedCurrency,
+              reference: payment.reference,
+              accessCode: payment.accessCode,
+              regionCode: paystackRegionCode,
+            }
+          : null,
         renewalMode: manualRenewalMode ? 'manual_renewal' : 'provider_recurring',
         currentPeriodEnd: manualPeriodEndIso,
         autoRenewSupported: !manualRenewalMode,
+        regionCode: paystackRegionCode,
         gatewaySelection: {
           reason: gatewaySelection.reason,
           availableGateways: gatewaySelection.availableGateways,
