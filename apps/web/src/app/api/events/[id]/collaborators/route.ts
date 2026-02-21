@@ -25,6 +25,29 @@ interface EventAccessResult {
   } | null;
 }
 
+function getMissingColumnName(error: any): string | null {
+  if (typeof error?.message !== 'string') return null;
+  const code = String(error?.code || '');
+  const isColumnError =
+    code === '42703' ||
+    code.startsWith('PGRST') ||
+    error.message.toLowerCase().includes('schema cache');
+  if (!isColumnError) return null;
+
+  const schemaCacheMatch = error.message.match(/could not find the '([^']+)' column/i);
+  const quotedMatch = error.message.match(/column \"([^\"]+)\"/i);
+  const singleQuotedMatch = error.message.match(/column '([^']+)'/i);
+  const bareMatch = error.message.match(/column\s+([a-zA-Z0-9_.]+)/i);
+  const rawName =
+    schemaCacheMatch?.[1] ||
+    quotedMatch?.[1] ||
+    singleQuotedMatch?.[1] ||
+    bareMatch?.[1] ||
+    null;
+  if (!rawName) return null;
+  return rawName.includes('.') ? rawName.split('.').pop() || rawName : rawName;
+}
+
 async function getEventAccess(
   db: ReturnType<typeof createServiceClient>,
   eventId: string,
@@ -42,18 +65,57 @@ async function getEventAccess(
 
   const isOwner = photographerIdCandidates.includes(event.photographer_id);
 
-  const { data: collaboratorAccess } = await db
-    .from('event_collaborators')
-    .select('role, can_invite_collaborators')
-    .eq('event_id', eventId)
-    .in('photographer_id', photographerIdCandidates)
-    .eq('status', 'active')
-    .maybeSingle();
+  const collaboratorColumns = ['role', 'can_invite_collaborators', 'status'];
+  let useStatusFilter = true;
+  let collaboratorAccess: any = null;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    if (!collaboratorColumns.length) break;
+    let query = db
+      .from('event_collaborators')
+      .select(collaboratorColumns.join(', '))
+      .eq('event_id', eventId)
+      .in('photographer_id', photographerIdCandidates);
+    if (useStatusFilter) {
+      query = query.eq('status', 'active');
+    }
+
+    const result = await query.maybeSingle();
+    if (!result.error) {
+      collaboratorAccess = result.data || null;
+      break;
+    }
+
+    const missingColumn = getMissingColumnName(result.error);
+    if (!missingColumn) {
+      throw result.error;
+    }
+    if (missingColumn === 'status') {
+      useStatusFilter = false;
+    }
+    if (collaboratorColumns.includes(missingColumn)) {
+      const index = collaboratorColumns.indexOf(missingColumn);
+      collaboratorColumns.splice(index, 1);
+      continue;
+    }
+    throw result.error;
+  }
+
+  if (collaboratorAccess && useStatusFilter === false) {
+    const status = String((collaboratorAccess as any).status || '').toLowerCase();
+    if (status && status !== 'active') {
+      collaboratorAccess = null;
+    }
+  }
 
   return {
     eventOwnerId: event.photographer_id,
     isOwner,
-    collaboratorAccess: collaboratorAccess || null,
+    collaboratorAccess: collaboratorAccess
+      ? {
+          role: String((collaboratorAccess as any).role || 'collaborator'),
+          can_invite_collaborators: Boolean((collaboratorAccess as any).can_invite_collaborators),
+        }
+      : null,
   };
 }
 
@@ -189,41 +251,91 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Not authorized to view this event' }, { status: 403 });
     }
 
-    // Get all collaborators
-    const { data: collaborators, error } = await db
-      .from('event_collaborators')
-      .select(`
-        id,
-        photographer_id,
-        role,
-        status,
-        can_upload,
-        can_edit_own_photos,
-        can_delete_own_photos,
-        can_view_all_photos,
-        can_edit_event,
-        can_manage_pricing,
-        can_invite_collaborators,
-        can_view_analytics,
-        can_view_revenue,
-        revenue_share_percent,
-        invited_at,
-        accepted_at,
-        notes,
-        photographers (
-          id,
-          display_name,
-          face_tag,
-          profile_photo_url,
-          email
-        )
-      `)
-      .eq('event_id', eventId)
-      .order('role', { ascending: true })
-      .order('created_at', { ascending: true });
+    const collaboratorColumns = [
+      'id',
+      'photographer_id',
+      'role',
+      'status',
+      'can_upload',
+      'can_edit_own_photos',
+      'can_delete_own_photos',
+      'can_view_all_photos',
+      'can_edit_event',
+      'can_manage_pricing',
+      'can_invite_collaborators',
+      'can_view_analytics',
+      'can_view_revenue',
+      'revenue_share_percent',
+      'invited_at',
+      'accepted_at',
+      'notes',
+      'created_at',
+    ];
+    let collaborators: any[] = [];
+    let orderByRole = true;
+    let orderByCreatedAt = true;
+    for (let attempt = 0; attempt < 12; attempt++) {
+      if (!collaboratorColumns.length) break;
+      let query = db
+        .from('event_collaborators')
+        .select(collaboratorColumns.join(', '))
+        .eq('event_id', eventId);
+      if (orderByRole) {
+        query = query.order('role', { ascending: true });
+      }
+      if (orderByCreatedAt) {
+        query = query.order('created_at', { ascending: true });
+      }
+      const result = await query;
+      if (!result.error) {
+        collaborators = result.data || [];
+        break;
+      }
+      const missingColumn = getMissingColumnName(result.error);
+      if (missingColumn === 'role') {
+        orderByRole = false;
+      }
+      if (missingColumn === 'created_at') {
+        orderByCreatedAt = false;
+      }
+      if (missingColumn && collaboratorColumns.includes(missingColumn)) {
+        collaboratorColumns.splice(collaboratorColumns.indexOf(missingColumn), 1);
+        continue;
+      }
+      throw result.error;
+    }
 
-    if (error) {
-      throw error;
+    const collaboratorPhotographerIds = Array.from(
+      new Set(
+        (collaborators || [])
+          .map((collaborator) => collaborator?.photographer_id as string | null | undefined)
+          .filter((value): value is string => typeof value === 'string' && value.length > 0)
+      )
+    );
+    const photographerById = new Map<string, Record<string, unknown>>();
+    if (collaboratorPhotographerIds.length > 0) {
+      const photographerColumns = ['id', 'display_name', 'face_tag', 'profile_photo_url', 'email'];
+      for (let attempt = 0; attempt < 8; attempt++) {
+        if (!photographerColumns.length) break;
+        const profileResult = await db
+          .from('photographers')
+          .select(photographerColumns.join(', '))
+          .in('id', collaboratorPhotographerIds);
+        if (!profileResult.error) {
+          for (const profile of profileResult.data || []) {
+            if (profile?.id) {
+              photographerById.set(profile.id as string, profile as Record<string, unknown>);
+            }
+          }
+          break;
+        }
+        const missingColumn = getMissingColumnName(profileResult.error);
+        if (missingColumn && photographerColumns.includes(missingColumn)) {
+          photographerColumns.splice(photographerColumns.indexOf(missingColumn), 1);
+          continue;
+        }
+        throw profileResult.error;
+      }
     }
 
     // Get photo counts per collaborator
@@ -240,6 +352,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const collaboratorsWithCounts = collaborators?.map((c) => ({
       ...c,
+      photographers: photographerById.get(c.photographer_id) || null,
       photo_count: photoCountMap.get(c.photographer_id) || 0,
     }));
 

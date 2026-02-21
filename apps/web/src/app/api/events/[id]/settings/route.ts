@@ -74,10 +74,24 @@ async function getEventAccess(supabase: any, eventId: string, photographerIds: s
 }
 
 function getMissingColumnName(error: any): string | null {
-  if (error?.code !== '42703' || typeof error?.message !== 'string') return null;
+  if (typeof error?.message !== 'string') return null;
+  const code = String(error?.code || '');
+  const isColumnError =
+    code === '42703' ||
+    code.startsWith('PGRST') ||
+    error.message.toLowerCase().includes('schema cache');
+  if (!isColumnError) return null;
+
+  const singleQuotedSchemaCacheMatch = error.message.match(/could not find the '([^']+)' column/i);
   const quotedMatch = error.message.match(/column \"([^\"]+)\"/i);
+  const singleQuotedColumnMatch = error.message.match(/column '([^']+)'/i);
   const bareMatch = error.message.match(/column\s+([a-zA-Z0-9_.]+)/i);
-  const rawName = quotedMatch?.[1] || bareMatch?.[1] || null;
+  const rawName =
+    singleQuotedSchemaCacheMatch?.[1] ||
+    quotedMatch?.[1] ||
+    singleQuotedColumnMatch?.[1] ||
+    bareMatch?.[1] ||
+    null;
   if (!rawName) return null;
   return rawName.includes('.') ? rawName.split('.').pop() || rawName : rawName;
 }
@@ -579,17 +593,28 @@ export async function PUT(
     if (updateError) {
       throw updateError;
     }
-    if (requestedEventUpdateKeys.length > 0 && Object.keys(updatePayload).length === 0 && !pricingTouched) {
-      return NextResponse.json(
-        { error: 'No compatible event setting columns are available in this environment. Please run latest migrations.' },
-        { status: 400 }
-      );
-    }
-
     const refreshedEvent = await fetchEventSettingsRecord(serviceClient, eventId);
     const eventWithPricing = refreshedEvent ? hydrateEventSettingsRecord(refreshedEvent) : null;
+    const ignoredEventFields = requestedEventUpdateKeys.filter((key) => !(key in updatePayload));
+    if (requestedEventUpdateKeys.length > 0 && Object.keys(updatePayload).length === 0 && !pricingTouched) {
+      return NextResponse.json({
+        success: true,
+        event: eventWithPricing,
+        warning: 'Some event settings are not available in this environment and were ignored.',
+        ignoredFields: ignoredEventFields,
+      });
+    }
 
-    return NextResponse.json({ success: true, event: eventWithPricing });
+    return NextResponse.json({
+      success: true,
+      event: eventWithPricing,
+      ...(ignoredEventFields.length > 0
+        ? {
+            warning: 'Some event settings were ignored because their columns are unavailable.',
+            ignoredFields: ignoredEventFields,
+          }
+        : {}),
+    });
 
   } catch (error: any) {
     console.error('Update event settings error:', error);

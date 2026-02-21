@@ -25,6 +25,7 @@ import {
 import {
   initializePaystackPayment,
   initializePaystackSubscription,
+  PaystackApiError,
   resolvePaystackPublicKey,
   resolvePaystackSecretKey,
 } from '@/lib/payments/paystack';
@@ -121,6 +122,13 @@ function isMissingColumnError(error: unknown, columnName?: string): boolean {
   if (code !== '42703') return false;
   if (!columnName) return true;
   return message.includes(columnName.toLowerCase());
+}
+
+function isSchemaCacheColumnError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = String((error as any).code || '');
+  const message = String((error as any).message || '').toLowerCase();
+  return code.startsWith('PGRST') && message.includes('schema cache') && message.includes('column');
 }
 
 function getManualPeriodEndIso(billingCycle: 'monthly' | 'annual'): string {
@@ -534,6 +542,45 @@ export async function POST(request: NextRequest) {
 
       selectedGateway = resolvedGateway;
       mapping = resolvedMapping;
+    }
+
+    if (selectedGateway === 'paystack') {
+      const paystackSecretKey = await resolvePaystackSecretKey(gatewaySelection.countryCode);
+      if (!paystackSecretKey) {
+        let fallbackGateway: 'stripe' | 'paypal' | 'flutterwave' | 'paystack' | null = null;
+        let fallbackMapping: any = null;
+        for (const candidate of configuredGateways) {
+          if (candidate === 'paystack') continue;
+          const candidateGateway = candidate as 'stripe' | 'paypal' | 'flutterwave' | 'paystack';
+          const candidateMapping = await loadMappingForGateway(candidateGateway);
+          if (!isGatewayUsable(candidateGateway, candidateMapping)) {
+            continue;
+          }
+          if (candidateGateway === 'stripe' && !stripe) continue;
+          if (candidateGateway === 'paypal' && !isPayPalConfigured()) continue;
+          if (candidateGateway === 'flutterwave' && !isFlutterwaveConfigured()) continue;
+
+          fallbackGateway = candidateGateway;
+          fallbackMapping = candidateMapping;
+          break;
+        }
+
+        if (!fallbackGateway) {
+          return respond(
+            {
+              error:
+                'Paystack is not configured for your region and no fallback subscription gateway is available.',
+              code: 'gateway_not_configured',
+              failClosed: true,
+            },
+            503,
+            'failed'
+          );
+        }
+
+        selectedGateway = fallbackGateway;
+        mapping = fallbackMapping;
+      }
     }
 
     const checkoutCurrency = String(mapping?.currency || normalizedCurrency).toUpperCase();
@@ -1049,16 +1096,37 @@ export async function POST(request: NextRequest) {
         console.error('Failed to release trial redemption claim after checkout failure:', cleanupError);
       }
     }
-    const errorPayload = {
+    let responseCode = 500;
+    let errorPayload: Record<string, unknown> = {
       error:
         error instanceof Error && error.message
           ? error.message
           : 'Failed to create checkout session',
     };
-    if (idempotencyFinalizeRef) {
-      await idempotencyFinalizeRef('failed', 500, errorPayload);
+    if (error instanceof PaystackApiError) {
+      responseCode = error.statusCode >= 400 && error.statusCode < 500 ? 400 : 502;
+      errorPayload = {
+        error: error.message || 'Paystack checkout initialization failed',
+        code: 'paystack_checkout_failed',
+        failClosed: responseCode >= 500,
+      };
+    } else if (
+      isMissingRelationError(error) ||
+      isMissingColumnError(error) ||
+      isSchemaCacheColumnError(error)
+    ) {
+      responseCode = 503;
+      errorPayload = {
+        error:
+          'Billing schema is not aligned with this release. Apply latest migrations and retry checkout.',
+        code: 'billing_schema_mismatch',
+        failClosed: true,
+      };
     }
-    return NextResponse.json(errorPayload, { status: 500, headers: responseHeaders });
+    if (idempotencyFinalizeRef) {
+      await idempotencyFinalizeRef('failed', responseCode, errorPayload);
+    }
+    return NextResponse.json(errorPayload, { status: responseCode, headers: responseHeaders });
   }
 }
 
