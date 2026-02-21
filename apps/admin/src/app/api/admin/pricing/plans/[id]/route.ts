@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAdminSession, hasPermission, logAction } from '@/lib/auth';
+import { provisionCreatorPlanProviderMappings } from '@/lib/payments/provider-plan-provisioning';
 import { bumpRuntimeConfigVersion } from '@/lib/runtime-config-version';
 import { supabaseAdmin } from '@/lib/supabase';
 
@@ -182,14 +183,36 @@ export async function PUT(
 
     if (error) throw error;
 
-    await logAction('plan_update', 'subscription_plan', id, { name, code });
+    let provisioning: Awaited<ReturnType<typeof provisionCreatorPlanProviderMappings>> | null = null;
+    try {
+      provisioning = await provisionCreatorPlanProviderMappings({
+        id: String(data.id || id),
+        code: String(data.code || code || ''),
+        name: String(data.name || name || ''),
+        description: data.description,
+        planType: data.plan_type,
+        prices: (data as any).prices || prices || {},
+        trialEnabled: Boolean((data as any).trial_enabled),
+        trialDurationDays: Number((data as any).trial_duration_days || 14),
+        trialAutoBillEnabled: (data as any).trial_auto_bill_enabled !== false,
+      });
+    } catch (provisionError) {
+      console.error('Provider plan auto-provisioning failed:', provisionError);
+    }
+
+    await logAction('plan_update', 'subscription_plan', id, {
+      name,
+      code,
+      provider_provisioning_attempted: Boolean(provisioning?.attempted),
+      provider_provisioning_warnings: provisioning?.warnings || [],
+    });
     await bumpRuntimeConfigVersion('plans', session.adminId);
 
     const normalizedData = {
       ...data,
       plan_type: data?.plan_type === 'photographer' ? 'creator' : data?.plan_type,
     };
-    return NextResponse.json({ success: true, plan: normalizedData });
+    return NextResponse.json({ success: true, plan: normalizedData, provisioning });
   } catch (error) {
     console.error('Update plan error:', error);
     return NextResponse.json({ error: 'Failed to update plan' }, { status: 500 });

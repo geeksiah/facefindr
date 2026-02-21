@@ -1611,6 +1611,17 @@ export default function PricingPage() {
           editingPlan ? 'Plan Updated' : 'Plan Created',
           `${formData.name} has been ${editingPlan ? 'updated' : 'created'} successfully.`
         );
+
+        const provisioningWarnings: string[] = Array.isArray(savedPlan?.provisioning?.warnings)
+          ? savedPlan.provisioning.warnings
+          : [];
+        if (provisioningWarnings.length > 0) {
+          toast.warning(
+            'Provider Plan Sync Warnings',
+            `Saved, but ${provisioningWarnings.length} provider sync warning(s) occurred.`
+          );
+        }
+
         setShowCreateModal(false);
         resetForm();
         loadPlans();

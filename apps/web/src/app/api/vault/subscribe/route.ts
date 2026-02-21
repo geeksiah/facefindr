@@ -52,13 +52,31 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { planSlug, billingCycle, currency: requestedCurrency } = body;
+    const {
+      planSlug,
+      billingCycle,
+      currency: requestedCurrency,
+      paymentChannel: requestedPaymentChannel,
+    } = body;
 
     if (!planSlug || !billingCycle) {
       return NextResponse.json(
         { error: 'Plan and billing cycle are required' },
         { status: 400 }
       );
+    }
+    const normalizedPaymentChannelRaw = String(requestedPaymentChannel || 'auto').trim().toLowerCase();
+    const paymentChannel: 'auto' | 'card' | 'mobile_money' =
+      normalizedPaymentChannelRaw === 'card' || normalizedPaymentChannelRaw === 'mobile_money'
+        ? normalizedPaymentChannelRaw
+        : normalizedPaymentChannelRaw === 'auto'
+        ? 'auto'
+        : 'auto';
+    if (
+      normalizedPaymentChannelRaw &&
+      !['auto', 'card', 'mobile_money'].includes(normalizedPaymentChannelRaw)
+    ) {
+      return NextResponse.json({ error: 'Invalid payment channel' }, { status: 400 });
     }
 
     // Get the plan
@@ -239,6 +257,7 @@ export async function POST(request: NextRequest) {
             plan_id: plan.id,
             plan_slug: plan.slug,
             billing_cycle: normalizedBillingCycle,
+            payment_channel: paymentChannel,
             pricing_currency: normalizedCurrency,
             pricing_amount_cents: String(priceCents),
             provider_plan_id: mapping?.provider_plan_id || 'dynamic',
@@ -250,6 +269,7 @@ export async function POST(request: NextRequest) {
           plan_id: plan.id,
           plan_slug: plan.slug,
           billing_cycle: normalizedBillingCycle,
+          payment_channel: paymentChannel,
           pricing_currency: normalizedCurrency,
           pricing_amount_cents: String(priceCents),
           provider_plan_id: mapping?.provider_plan_id || 'dynamic',
@@ -287,6 +307,7 @@ export async function POST(request: NextRequest) {
           plan_id: plan.id,
           plan_slug: plan.slug,
           billing_cycle: normalizedBillingCycle,
+          payment_channel: paymentChannel,
           pricing_currency: normalizedCurrency,
           pricing_amount_cents: priceCents,
         }),
@@ -332,6 +353,7 @@ export async function POST(request: NextRequest) {
           plan_id: plan.id,
           plan_slug: plan.slug,
           billing_cycle: normalizedBillingCycle,
+          payment_channel: paymentChannel,
           pricing_currency: normalizedCurrency,
           pricing_amount_cents: String(priceCents),
         },
@@ -351,7 +373,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Paystack is not configured' }, { status: 500 });
       }
 
-      const manualRenewalMode = !mapping;
+      const manualRenewalMode = !mapping || paymentChannel === 'mobile_money';
       const reference = `vault_sub_${user.id}_${Date.now()}`;
       const manualPeriodEndIso = manualRenewalMode ? getManualPeriodEndIso(normalizedBillingCycle) : null;
       const metadata = {
@@ -360,6 +382,7 @@ export async function POST(request: NextRequest) {
         plan_id: plan.id,
         plan_slug: plan.slug,
         billing_cycle: normalizedBillingCycle,
+        payment_channel: paymentChannel,
         pricing_currency: normalizedCurrency,
         pricing_amount_cents: priceCents,
         renewal_mode: manualRenewalMode ? 'manual_renewal' : 'provider_recurring',

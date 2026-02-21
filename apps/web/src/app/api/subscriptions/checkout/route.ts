@@ -110,9 +110,19 @@ function isMissingRelationError(error: unknown, relationName?: string): boolean 
   if (!error || typeof error !== 'object') return false;
   const code = String((error as any).code || '');
   const message = String((error as any).message || '').toLowerCase();
-  if (code !== '42P01') return false;
+  const isPostgresMissingRelation = code === '42P01';
+  const isPostgrestSchemaMissingRelation =
+    code === 'PGRST205' &&
+    message.includes('schema cache') &&
+    message.includes('could not find the table');
+  if (!isPostgresMissingRelation && !isPostgrestSchemaMissingRelation) return false;
   if (!relationName) return true;
-  return message.includes(relationName.toLowerCase());
+  const normalized = relationName.toLowerCase();
+  return (
+    message.includes(normalized) ||
+    message.includes(`public.${normalized}`) ||
+    message.includes(`'${normalized}'`)
+  );
 }
 
 function isMissingColumnError(error: unknown, columnName?: string): boolean {
@@ -184,6 +194,7 @@ export async function POST(request: NextRequest) {
       planCode,
       billingCycle = 'monthly',
       currency: requestedCurrency,
+      paymentChannel: requestedPaymentChannel,
       idempotencyKey: bodyIdempotencyKey,
     } = body;
     const headerIdempotencyKey =
@@ -225,11 +236,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const normalizedPaymentChannelRaw = String(requestedPaymentChannel || 'auto').trim().toLowerCase();
+    const paymentChannel: 'auto' | 'card' | 'mobile_money' =
+      normalizedPaymentChannelRaw === 'card' || normalizedPaymentChannelRaw === 'mobile_money'
+        ? normalizedPaymentChannelRaw
+        : normalizedPaymentChannelRaw === 'auto'
+        ? 'auto'
+        : 'auto';
+    if (
+      normalizedPaymentChannelRaw &&
+      !['auto', 'card', 'mobile_money'].includes(normalizedPaymentChannelRaw)
+    ) {
+      return NextResponse.json(
+        { error: 'Invalid payment channel' },
+        { status: 400 }
+      );
+    }
+
     const operationScope = 'subscription.checkout.create';
     const requestHash = buildRequestHash({
       planCode,
       billingCycle,
       currency: requestedCurrency || null,
+      paymentChannel,
       actorId: user.id,
     });
     let idempotencyRecordId: string | null = null;
@@ -1047,7 +1076,8 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const manualRenewalMode = !mapping;
+      const manualRenewalMode =
+        !mapping || !autoRenewPreference || paymentChannel === 'mobile_money';
       if (manualRenewalMode && trialApplied) {
         return respond(
           {
@@ -1072,6 +1102,7 @@ export async function POST(request: NextRequest) {
         pricing_amount_cents: Math.round(checkoutAmountInCents),
         auto_renew_preference: manualRenewalMode ? 'false' : autoRenewPreference ? 'true' : 'false',
         renewal_mode: manualRenewalMode ? 'manual_renewal' : 'provider_recurring',
+        payment_channel: paymentChannel,
         cancel_at_period_end: manualRenewalMode ? 'true' : !autoRenewPreference ? 'true' : 'false',
         region_code: gatewaySelection.countryCode || null,
         trial_applied: trialApplied ? 'true' : 'false',

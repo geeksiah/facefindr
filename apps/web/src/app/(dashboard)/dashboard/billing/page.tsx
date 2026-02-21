@@ -105,6 +105,7 @@ export default function BillingPage() {
   const [isUpdatingAutoRenew, setIsUpdatingAutoRenew] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
+  const [paymentChannel, setPaymentChannel] = useState<'auto' | 'card' | 'mobile_money'>('auto');
   const [autoRenew, setAutoRenew] = useState(true);
   const [providerAutoRenewSupported, setProviderAutoRenewSupported] = useState(false);
   const lastSubscriptionVersionRef = useRef(0);
@@ -374,6 +375,7 @@ export default function BillingPage() {
           planCode, 
           billingCycle,
           currency: currencyCode,
+          paymentChannel,
           idempotencyKey,
         }),
       });
@@ -707,6 +709,24 @@ export default function BillingPage() {
           Annual
           <span className="ml-2 text-xs text-success">Save 2 months</span>
         </button>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-4">
+        <label className="mb-2 block text-sm font-medium text-foreground">Payment Channel</label>
+        <select
+          value={paymentChannel}
+          onChange={(event) =>
+            setPaymentChannel(event.target.value as 'auto' | 'card' | 'mobile_money')
+          }
+          className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground"
+        >
+          <option value="auto">Auto (recommended)</option>
+          <option value="card">Card</option>
+          <option value="mobile_money">Mobile Money (force manual renewal)</option>
+        </select>
+        <p className="mt-2 text-xs text-muted-foreground">
+          For Paystack subscriptions, Mobile Money forces manual renewal and disables provider auto-renew.
+        </p>
       </div>
 
       {checkoutError && (
