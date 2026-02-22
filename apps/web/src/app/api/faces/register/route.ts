@@ -70,6 +70,42 @@ function mapRekognitionError(error: any): { status: number; error: string; code:
   return null;
 }
 
+async function indexPrimaryAttendeeFace(params: {
+  attendeeId: string;
+  imageBytes: Uint8Array;
+}) {
+  const { attendeeId, imageBytes } = params;
+
+  const buildCommand = () =>
+    new IndexFacesCommand({
+      CollectionId: ATTENDEE_COLLECTION_ID,
+      Image: { Bytes: imageBytes },
+      ExternalImageId: attendeeId, // Use attendee profile ID as external ID for consistency
+      MaxFaces: 1,
+      QualityFilter: 'HIGH',
+      DetectionAttributes: ['ALL'],
+    });
+
+  try {
+    return await rekognitionClient.send(buildCommand());
+  } catch (firstError: any) {
+    if (firstError?.name !== 'ResourceNotFoundException') {
+      throw firstError;
+    }
+
+    const ensureCollection = await ensureAttendeeCollection();
+    if (!ensureCollection.success) {
+      const error = new Error(
+        ensureCollection.error || 'Unable to create attendee face collection'
+      ) as Error & { name?: string };
+      error.name = ensureCollection.errorName || 'ResourceNotFoundException';
+      throw error;
+    }
+
+    return await rekognitionClient.send(buildCommand());
+  }
+}
+
 export async function POST(request: NextRequest) {
   // Rate limiting for face operations
   const clientIP = getClientIP(request);
@@ -139,31 +175,11 @@ export async function POST(request: NextRequest) {
     const imageBuffer = Buffer.from(primaryImage, 'base64');
     const imageBytes = new Uint8Array(imageBuffer);
 
-    const ensureCollection = await ensureAttendeeCollection();
-    if (!ensureCollection.success) {
-      return NextResponse.json(
-        {
-          error: 'Face recognition service is warming up. Please retry in a few seconds.',
-          code: 'REKOGNITION_COLLECTION_UNAVAILABLE',
-        },
-        { status: 503 }
-      );
-    }
-
-    // Index face in global collection for drop-in matching
-    // This ensures the face can be found by drop-in photos
-    const indexCommand = new IndexFacesCommand({
-      CollectionId: ATTENDEE_COLLECTION_ID,
-      Image: { Bytes: imageBytes },
-      ExternalImageId: attendeeId, // Use attendee profile ID as external ID for consistency
-      MaxFaces: 1,
-      QualityFilter: 'HIGH',
-      DetectionAttributes: ['ALL'],
-    });
-
     let indexResult;
     try {
-      indexResult = await rekognitionClient.send(indexCommand);
+      // Index face in global collection for drop-in matching.
+      // Retry once after creating the collection when it does not exist yet.
+      indexResult = await indexPrimaryAttendeeFace({ attendeeId, imageBytes });
     } catch (indexError: any) {
       console.error('Face registration index error:', indexError);
       const mappedError = mapRekognitionError(indexError);

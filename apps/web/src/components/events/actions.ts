@@ -225,7 +225,7 @@ export async function uploadPhotos(formData: FormData) {
   // Verify event access - either owner or collaborator with upload permission
   const { data: event, error: eventError } = await serviceClient
     .from('events')
-      .select('id, name, public_slug, status, photographer_id, face_recognition_enabled, watermark_enabled')
+      .select('id, name, public_slug, status, photographer_id, face_recognition_enabled')
       .eq('id', eventId)
       .maybeSingle();
 
@@ -442,20 +442,18 @@ export async function uploadPhotos(formData: FormData) {
         });
     }
 
-    if (event.watermark_enabled) {
-      const canUseCustomWatermark = await checkFeature(event.photographer_id, 'custom_watermark');
-      if (canUseCustomWatermark) {
-        serviceClient
-          .rpc('enqueue_media_processing_job', {
-            p_media_id: media.id,
-            p_job_type: 'watermark_generate',
-            p_priority: priority,
-            p_payload: { source: 'event_upload' },
-          })
-          .catch((err) => {
-            console.error('Failed to enqueue watermark job:', err);
-          });
-      }
+    const canUseCustomWatermark = await checkFeature(event.photographer_id, 'custom_watermark');
+    if (canUseCustomWatermark) {
+      serviceClient
+        .rpc('enqueue_media_processing_job', {
+          p_media_id: media.id,
+          p_job_type: 'watermark_generate',
+          p_priority: priority,
+          p_payload: { source: 'event_upload' },
+        })
+        .catch((err) => {
+          console.error('Failed to enqueue watermark job:', err);
+        });
     }
 
     notifyEventSubscribersAboutNewPhotos(serviceClient, event as any, media.id).catch((err) => {

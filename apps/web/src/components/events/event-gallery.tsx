@@ -291,6 +291,7 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
       url: photoUrls[photo.id],
       alt: photo.original_filename || `Photo ${index + 1}`,
     }));
+  const allSelected = photos.length > 0 && selectedPhotos.size === photos.length;
 
   if (photos.length === 0) {
     return (
@@ -318,27 +319,34 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
     <>
       <ConfirmDialog />
       <div className="space-y-4">
-        {/* Bulk Actions */}
-      {selectedPhotos.size > 0 && (
+        {/* Selection & Bulk Actions */}
         <div className="flex items-center justify-between rounded-xl bg-muted p-3">
           <p className="text-sm font-medium text-foreground">
-            {selectedPhotos.size} photo{selectedPhotos.size !== 1 ? 's' : ''} selected
+            {selectedPhotos.size > 0
+              ? `${selectedPhotos.size} photo${selectedPhotos.size !== 1 ? 's' : ''} selected`
+              : 'Select photos to manage'}
           </p>
           <div className="flex gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setSelectedPhotos(new Set())}>
-              Clear
+            <Button variant="ghost" size="sm" onClick={selectAll}>
+              {allSelected ? 'Deselect All' : 'Select All'}
             </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={handleBulkDelete}
-            >
-              <Trash2 className="h-4 w-4 mr-2" />
-              Delete Selected
-            </Button>
+            {selectedPhotos.size > 0 && (
+              <>
+                <Button variant="ghost" size="sm" onClick={() => setSelectedPhotos(new Set())}>
+                  Clear
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={handleBulkDelete}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Selected
+                </Button>
+              </>
+            )}
           </div>
         </div>
-      )}
 
       {/* Photo Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
@@ -382,12 +390,18 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
               )}
 
               {/* Selection checkbox */}
-              <div
+              <button
+                type="button"
+                aria-label={isSelected ? 'Deselect photo' : 'Select photo'}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleSelect(photo.id);
+                }}
                 className={cn(
                   'absolute top-2 left-2 h-5 w-5 rounded-md border-2 flex items-center justify-center transition-all',
                   isSelected
                     ? 'bg-accent border-accent'
-                    : 'border-white/70 bg-black/20 opacity-0 group-hover:opacity-100'
+                    : 'border-white/70 bg-black/35 opacity-100'
                 )}
               >
                 {isSelected && (
@@ -395,7 +409,7 @@ export function EventGallery({ eventId, photos: initialPhotos }: EventGalleryPro
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                   </svg>
                 )}
-              </div>
+              </button>
 
               {/* Deleting overlay */}
               {isDeleting && (

@@ -313,11 +313,6 @@ export default async function EventPage({ params }: EventPageProps) {
       <div className="rounded-2xl border border-border bg-card p-6">
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="font-semibold text-foreground">Photos ({mediaCount})</h2>
-          {mediaCount > 0 && (
-            <Button variant="outline" size="sm">
-              Select All
-            </Button>
-          )}
         </div>
         <EventGallery eventId={event.id} photos={mediaData} />
       </div>

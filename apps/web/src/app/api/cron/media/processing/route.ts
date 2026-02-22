@@ -145,8 +145,7 @@ async function processWatermarkJob(supabase: ReturnType<typeof createServiceClie
       storage_path,
       events!inner (
         id,
-        photographer_id,
-        watermark_enabled
+        photographer_id
       )
     `)
     .eq('id', job.media_id)
@@ -156,7 +155,6 @@ async function processWatermarkJob(supabase: ReturnType<typeof createServiceClie
 
   const event = Array.isArray((media as any).events) ? (media as any).events[0] : (media as any).events;
   if (!event?.id) return;
-  if (!event.watermark_enabled) return;
 
   const canUseCustomWatermark = await checkFeature(event.photographer_id, 'custom_watermark');
   if (!canUseCustomWatermark) return;

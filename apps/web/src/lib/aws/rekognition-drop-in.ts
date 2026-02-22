@@ -15,7 +15,11 @@ import { rekognitionClient, ATTENDEE_COLLECTION_ID, LEGACY_ATTENDEE_COLLECTION_I
 /**
  * Ensure global attendee collection exists
  */
-export async function ensureAttendeeCollection(): Promise<{ success: boolean; error?: string }> {
+export async function ensureAttendeeCollection(): Promise<{
+  success: boolean;
+  error?: string;
+  errorName?: string;
+}> {
   try {
     await rekognitionClient.send(
       new CreateCollectionCommand({
@@ -28,7 +32,7 @@ export async function ensureAttendeeCollection(): Promise<{ success: boolean; er
       return { success: true };
     }
     console.error('Error creating attendee collection:', error);
-    return { success: false, error: error.message };
+    return { success: false, error: error.message, errorName: error?.name };
   }
 }
 

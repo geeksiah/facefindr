@@ -66,6 +66,39 @@ function asMinorAmount(value: unknown): number {
   return Math.max(0, Math.round(parsed));
 }
 
+function normalizeOptionalCode(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeScope(value: unknown): PromoProductScope | null {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'creator_subscription') return 'creator_subscription';
+  if (normalized === 'vault_subscription') return 'vault_subscription';
+  if (normalized === 'drop_in_credits') return 'drop_in_credits';
+  return null;
+}
+
+function normalizeDiscountType(value: unknown): 'fixed' | 'percent' | null {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'fixed') return 'fixed';
+  if (normalized === 'percent') return 'percent';
+  return null;
+}
+
+function toIsoDate(value: unknown): Date | null {
+  if (!value) return null;
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+}
+
+function codesEqual(left: string | null | undefined, right: string | null | undefined): boolean {
+  if (!left || !right) return false;
+  return left.trim().toUpperCase() === right.trim().toUpperCase();
+}
+
 function isUuid(value: unknown): value is string {
   return (
     typeof value === 'string' &&
@@ -88,6 +121,196 @@ export function toPromoMetadata(
     promo_applied_amount_cents: promo.appliedAmountCents,
     promo_final_amount_cents: promo.finalAmountCents,
     promo_applied: promo.applied ? 'true' : 'false',
+  };
+}
+
+async function validatePromoCodeFallback(
+  supabase: ServiceClient,
+  input: PromoValidationInput,
+  normalizedCode: string,
+  appliedAmountCents: number,
+  baseResult: PromoValidationResult
+): Promise<PromoValidationResult> {
+  const { data: promo, error: promoError } = await supabase
+    .from('promo_codes')
+    .select(
+      [
+        'id',
+        'code',
+        'product_scope',
+        'discount_type',
+        'discount_value',
+        'currency',
+        'target_plan_code',
+        'target_storage_plan_slug',
+        'is_active',
+        'starts_at',
+        'expires_at',
+        'max_redemptions',
+        'max_redemptions_per_user',
+        'times_redeemed',
+      ].join(', ')
+    )
+    .eq('code', normalizedCode)
+    .maybeSingle();
+
+  if (promoError) {
+    if (isMissingPromoInfrastructureError(promoError)) {
+      return {
+        ...baseResult,
+        reason: 'promo_infrastructure_unavailable',
+      };
+    }
+    throw promoError;
+  }
+
+  if (!promo?.id) {
+    return {
+      ...baseResult,
+      reason: 'not_found',
+      promoCode: normalizedCode,
+    };
+  }
+
+  if (promo.is_active === false) {
+    return {
+      ...baseResult,
+      reason: 'inactive',
+      promoCode: normalizedCode,
+    };
+  }
+
+  const promoScope = normalizeScope(promo.product_scope);
+  if (!promoScope || promoScope !== input.scope) {
+    return {
+      ...baseResult,
+      reason: 'scope_mismatch',
+      promoCode: normalizedCode,
+    };
+  }
+
+  const now = new Date();
+  const startsAt = toIsoDate(promo.starts_at);
+  if (startsAt && startsAt.getTime() > now.getTime()) {
+    return {
+      ...baseResult,
+      reason: 'not_started',
+      promoCode: normalizedCode,
+    };
+  }
+
+  const expiresAt = toIsoDate(promo.expires_at);
+  if (expiresAt && expiresAt.getTime() <= now.getTime()) {
+    return {
+      ...baseResult,
+      reason: 'expired',
+      promoCode: normalizedCode,
+    };
+  }
+
+  const targetPlanCode = normalizeOptionalCode(promo.target_plan_code);
+  if (targetPlanCode && !codesEqual(targetPlanCode, input.planCode || null)) {
+    return {
+      ...baseResult,
+      reason: 'plan_mismatch',
+      promoCode: normalizedCode,
+    };
+  }
+
+  const targetStoragePlanSlug = normalizeOptionalCode(promo.target_storage_plan_slug);
+  if (targetStoragePlanSlug && !codesEqual(targetStoragePlanSlug, input.storagePlanSlug || null)) {
+    return {
+      ...baseResult,
+      reason: 'plan_mismatch',
+      promoCode: normalizedCode,
+    };
+  }
+
+  const promoCurrency = normalizeOptionalCode(promo.currency);
+  const requestedCurrency = normalizeOptionalCode(input.currency)?.toUpperCase() || 'USD';
+  if (promoCurrency && promoCurrency.toUpperCase() !== requestedCurrency) {
+    return {
+      ...baseResult,
+      reason: 'currency_mismatch',
+      promoCode: normalizedCode,
+    };
+  }
+
+  const maxRedemptions = Number(promo.max_redemptions);
+  const timesRedeemed = Number(promo.times_redeemed || 0);
+  if (
+    Number.isFinite(maxRedemptions) &&
+    maxRedemptions > 0 &&
+    Number.isFinite(timesRedeemed) &&
+    timesRedeemed >= maxRedemptions
+  ) {
+    return {
+      ...baseResult,
+      reason: 'max_redemptions_reached',
+      promoCode: normalizedCode,
+    };
+  }
+
+  const maxPerUser = Number(promo.max_redemptions_per_user);
+  if (Number.isFinite(maxPerUser) && maxPerUser > 0) {
+    const { count, error: redemptionCountError } = await supabase
+      .from('promo_code_redemptions')
+      .select('id', { head: true, count: 'exact' })
+      .eq('promo_code_id', promo.id)
+      .eq('user_id', input.userId);
+
+    if (redemptionCountError) {
+      if (isMissingPromoInfrastructureError(redemptionCountError)) {
+        return {
+          ...baseResult,
+          reason: 'promo_infrastructure_unavailable',
+        };
+      }
+      throw redemptionCountError;
+    }
+
+    if (Number(count || 0) >= maxPerUser) {
+      return {
+        ...baseResult,
+        reason: 'user_limit_reached',
+        promoCode: normalizedCode,
+      };
+    }
+  }
+
+  const discountType = normalizeDiscountType(promo.discount_type);
+  const discountValue = Number(promo.discount_value || 0);
+  let discountCents = 0;
+  if (discountType === 'percent') {
+    const boundedPercent = Math.max(0, Math.min(100, discountValue));
+    discountCents = Math.round((appliedAmountCents * boundedPercent) / 100);
+  } else if (discountType === 'fixed') {
+    discountCents = asMinorAmount(discountValue);
+  } else {
+    return {
+      ...baseResult,
+      reason: 'invalid_promo',
+      promoCode: normalizedCode,
+    };
+  }
+
+  discountCents = Math.min(discountCents, appliedAmountCents);
+  if (discountCents <= 0) {
+    return {
+      ...baseResult,
+      reason: 'invalid_promo',
+      promoCode: normalizedCode,
+    };
+  }
+
+  return {
+    applied: true,
+    reason: null,
+    promoCodeId: promo.id,
+    promoCode: normalizedCode,
+    discountCents,
+    appliedAmountCents,
+    finalAmountCents: Math.max(0, appliedAmountCents - discountCents),
   };
 }
 
@@ -123,10 +346,7 @@ export async function validatePromoCodeForCheckout(
 
   if (error) {
     if (isMissingPromoInfrastructureError(error)) {
-      return {
-        ...baseResult,
-        reason: 'promo_infrastructure_unavailable',
-      };
+      return validatePromoCodeFallback(supabase, input, normalizedCode, appliedAmountCents, baseResult);
     }
     throw error;
   }
