@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic';
 import { DeleteFacesCommand } from '@aws-sdk/client-rekognition';
 import { NextResponse } from 'next/server';
 
-import { rekognitionClient, ATTENDEE_COLLECTION_ID } from '@/lib/aws/rekognition';
+import { rekognitionClient, ATTENDEE_COLLECTION_ID, LEGACY_ATTENDEE_COLLECTION_ID } from '@/lib/aws/rekognition';
 import { resolveAttendeeProfileByUser } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
@@ -104,16 +104,20 @@ export async function DELETE() {
     if (faceProfiles && faceProfiles.length > 0) {
       const faceIds = faceProfiles.map(p => p.rekognition_face_id);
 
-      try {
-        const deleteCommand = new DeleteFacesCommand({
-          CollectionId: ATTENDEE_COLLECTION_ID,
-          FaceIds: faceIds,
-        });
-
-        await rekognitionClient.send(deleteCommand);
-      } catch (error) {
-        console.error('Failed to delete faces from Rekognition:', error);
-        // Continue with database deletion even if Rekognition fails
+      const collectionIds = [ATTENDEE_COLLECTION_ID, LEGACY_ATTENDEE_COLLECTION_ID];
+      for (const collectionId of collectionIds) {
+        try {
+          const deleteCommand = new DeleteFacesCommand({
+            CollectionId: collectionId,
+            FaceIds: faceIds,
+          });
+          await rekognitionClient.send(deleteCommand);
+        } catch (error: any) {
+          if (error?.name === 'ResourceNotFoundException') {
+            continue;
+          }
+          console.error(`Failed to delete faces from Rekognition (${collectionId}):`, error);
+        }
       }
     }
 

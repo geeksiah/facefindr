@@ -192,6 +192,26 @@ async function notifyEventSubscribersAboutNewPhotos(
   );
 }
 
+async function enqueueMediaProcessingJob(
+  serviceClient: any,
+  params: {
+    mediaId: string;
+    jobType: 'face_index' | 'watermark_generate';
+    priority: 'high' | 'normal';
+    payload?: Record<string, unknown>;
+  }
+) {
+  const { error } = await serviceClient.rpc('enqueue_media_processing_job', {
+    p_media_id: params.mediaId,
+    p_job_type: params.jobType,
+    p_priority: params.priority,
+    p_payload: params.payload || {},
+  });
+  if (error) {
+    throw error;
+  }
+}
+
 // ============================================
 // UPLOAD PHOTOS
 // ============================================
@@ -427,13 +447,12 @@ export async function uploadPhotos(formData: FormData) {
     const priority = (await checkFeature(event.photographer_id, 'priority_processing')) ? 'high' : 'normal';
 
     if (event.face_recognition_enabled) {
-      serviceClient
-        .rpc('enqueue_media_processing_job', {
-          p_media_id: media.id,
-          p_job_type: 'face_index',
-          p_priority: priority,
-          p_payload: { source: 'event_upload' },
-        })
+      void enqueueMediaProcessingJob(serviceClient, {
+        mediaId: media.id,
+        jobType: 'face_index',
+        priority,
+        payload: { source: 'event_upload' },
+      })
         .catch((err) => {
           console.error('Failed to enqueue face-index job, falling back to direct processing:', err);
           processFacesAsync(media.id, eventId).catch((fallbackErr) => {
@@ -444,13 +463,12 @@ export async function uploadPhotos(formData: FormData) {
 
     const canUseCustomWatermark = await checkFeature(event.photographer_id, 'custom_watermark');
     if (canUseCustomWatermark) {
-      serviceClient
-        .rpc('enqueue_media_processing_job', {
-          p_media_id: media.id,
-          p_job_type: 'watermark_generate',
-          p_priority: priority,
-          p_payload: { source: 'event_upload' },
-        })
+      void enqueueMediaProcessingJob(serviceClient, {
+        mediaId: media.id,
+        jobType: 'watermark_generate',
+        priority,
+        payload: { source: 'event_upload' },
+      })
         .catch((err) => {
           console.error('Failed to enqueue watermark job:', err);
         });

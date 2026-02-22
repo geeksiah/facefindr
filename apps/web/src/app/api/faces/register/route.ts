@@ -3,7 +3,13 @@ export const dynamic = 'force-dynamic';
 import { DeleteFacesCommand, IndexFacesCommand } from '@aws-sdk/client-rekognition';
 import { NextRequest, NextResponse } from 'next/server';
 
-import { isRekognitionConfigured, rekognitionClient, ATTENDEE_COLLECTION_ID, searchEventCollectionWithFallback } from '@/lib/aws/rekognition';
+import {
+  isRekognitionConfigured,
+  rekognitionClient,
+  ATTENDEE_COLLECTION_ID,
+  LEGACY_ATTENDEE_COLLECTION_ID,
+  searchEventCollectionWithFallback,
+} from '@/lib/aws/rekognition';
 import { ensureAttendeeCollection } from '@/lib/aws/rekognition-drop-in';
 import { resolveAttendeeProfileByUser } from '@/lib/profiles/ids';
 import { checkRateLimit, getClientIP, rateLimitHeaders, rateLimits } from '@/lib/rate-limit';
@@ -28,15 +34,19 @@ function mapRekognitionError(error: any): { status: number; error: string; code:
       code: 'REKOGNITION_COLLECTION_UNAVAILABLE',
     };
   }
-  if (
-    name === 'UnrecognizedClientException' ||
-    name === 'InvalidSignatureException' ||
-    name === 'AccessDeniedException'
-  ) {
+  if (name === 'UnrecognizedClientException' || name === 'InvalidSignatureException') {
     return {
       status: 500,
-      error: 'Face recognition credentials are invalid or missing required permissions.',
+      error: 'Face recognition credentials are invalid for AWS Rekognition.',
       code: 'REKOGNITION_AUTH_FAILED',
+    };
+  }
+  if (name === 'AccessDeniedException') {
+    return {
+      status: 500,
+      error:
+        'AWS Rekognition request was denied. Ensure IAM allows rekognition:IndexFaces, rekognition:CreateCollection, rekognition:DeleteFaces, rekognition:SearchFacesByImage, and rekognition:DetectFaces in the configured region.',
+      code: 'REKOGNITION_PERMISSION_DENIED',
     };
   }
   if (name === 'InvalidImageFormatException') {
@@ -76,9 +86,9 @@ async function indexPrimaryAttendeeFace(params: {
 }) {
   const { attendeeId, imageBytes } = params;
 
-  const buildCommand = () =>
+  const buildCommand = (collectionId: string) =>
     new IndexFacesCommand({
-      CollectionId: ATTENDEE_COLLECTION_ID,
+      CollectionId: collectionId,
       Image: { Bytes: imageBytes },
       ExternalImageId: attendeeId, // Use attendee profile ID as external ID for consistency
       MaxFaces: 1,
@@ -87,7 +97,8 @@ async function indexPrimaryAttendeeFace(params: {
     });
 
   try {
-    return await rekognitionClient.send(buildCommand());
+    const result = await rekognitionClient.send(buildCommand(ATTENDEE_COLLECTION_ID));
+    return { result, collectionId: ATTENDEE_COLLECTION_ID };
   } catch (firstError: any) {
     if (firstError?.name !== 'ResourceNotFoundException') {
       throw firstError;
@@ -95,14 +106,47 @@ async function indexPrimaryAttendeeFace(params: {
 
     const ensureCollection = await ensureAttendeeCollection();
     if (!ensureCollection.success) {
-      const error = new Error(
-        ensureCollection.error || 'Unable to create attendee face collection'
-      ) as Error & { name?: string };
-      error.name = ensureCollection.errorName || 'ResourceNotFoundException';
-      throw error;
+      if (ensureCollection.errorName !== 'AccessDeniedException') {
+        const error = new Error(
+          ensureCollection.error || 'Unable to create attendee face collection'
+        ) as Error & { name?: string };
+        error.name = ensureCollection.errorName || 'ResourceNotFoundException';
+        throw error;
+      }
+    } else {
+      try {
+        const result = await rekognitionClient.send(buildCommand(ATTENDEE_COLLECTION_ID));
+        return { result, collectionId: ATTENDEE_COLLECTION_ID };
+      } catch (retryPrimaryError: any) {
+        if (retryPrimaryError?.name !== 'ResourceNotFoundException') {
+          throw retryPrimaryError;
+        }
+      }
     }
 
-    return await rekognitionClient.send(buildCommand());
+    const legacyResult = await rekognitionClient.send(buildCommand(LEGACY_ATTENDEE_COLLECTION_ID));
+    return { result: legacyResult, collectionId: LEGACY_ATTENDEE_COLLECTION_ID };
+  }
+}
+
+async function deleteFacesFromAttendeeCollections(faceIds: string[]) {
+  if (!faceIds.length) return;
+
+  const collectionIds = [ATTENDEE_COLLECTION_ID, LEGACY_ATTENDEE_COLLECTION_ID];
+  for (const collectionId of collectionIds) {
+    try {
+      await rekognitionClient.send(
+        new DeleteFacesCommand({
+          CollectionId: collectionId,
+          FaceIds: faceIds,
+        })
+      );
+    } catch (deleteError: any) {
+      if (deleteError?.name === 'ResourceNotFoundException') {
+        continue;
+      }
+      console.warn(`Failed to delete old attendee faces from Rekognition (${collectionId}):`, deleteError);
+    }
   }
 }
 
@@ -176,10 +220,13 @@ export async function POST(request: NextRequest) {
     const imageBytes = new Uint8Array(imageBuffer);
 
     let indexResult;
+    let attendeeCollectionId = ATTENDEE_COLLECTION_ID;
     try {
       // Index face in global collection for drop-in matching.
       // Retry once after creating the collection when it does not exist yet.
-      indexResult = await indexPrimaryAttendeeFace({ attendeeId, imageBytes });
+      const primaryIndex = await indexPrimaryAttendeeFace({ attendeeId, imageBytes });
+      indexResult = primaryIndex.result;
+      attendeeCollectionId = primaryIndex.collectionId;
     } catch (indexError: any) {
       console.error('Face registration index error:', indexError);
       const mappedError = mapRekognitionError(indexError);
@@ -232,16 +279,7 @@ export async function POST(request: NextRequest) {
     );
 
     if (existingFaceIds.length > 0) {
-      try {
-        await rekognitionClient.send(
-          new DeleteFacesCommand({
-            CollectionId: ATTENDEE_COLLECTION_ID,
-            FaceIds: existingFaceIds,
-          })
-        );
-      } catch (deleteError) {
-        console.warn('Failed to delete old attendee faces from Rekognition:', deleteError);
-      }
+      await deleteFacesFromAttendeeCollections(existingFaceIds);
     }
 
     await serviceClient
@@ -308,7 +346,7 @@ export async function POST(request: NextRequest) {
         const additionalBuffer = Buffer.from(additionalImages[i], 'base64');
         const additionalBytes = new Uint8Array(additionalBuffer);
         const additionalCommand = new IndexFacesCommand({
-          CollectionId: ATTENDEE_COLLECTION_ID,
+          CollectionId: attendeeCollectionId,
           Image: { Bytes: additionalBytes },
           ExternalImageId: `${attendeeId}_angle_${i + 1}`, // Index in global collection for drop-in
           MaxFaces: 1,
