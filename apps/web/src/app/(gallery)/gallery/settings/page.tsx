@@ -11,6 +11,7 @@ import {
   Eye,
   UserX,
   Users,
+  Loader2,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -34,6 +35,7 @@ export default function SettingsPage() {
   const [showDeleteAccount, setShowDeleteAccount] = useState(false);
   const [showDeleteFace, setShowDeleteFace] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isSwitchingToCreator, setIsSwitchingToCreator] = useState(false);
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
   const [privacySettings, setPrivacySettings] = useState<PrivacySettingsState | null>(null);
   const privacyHook = usePrivacySettings();
@@ -128,6 +130,32 @@ export default function SettingsPage() {
       console.error('Failed to delete account:', error);
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleSwitchToCreatorView = async () => {
+    if (isSwitchingToCreator) return;
+    setIsSwitchingToCreator(true);
+    try {
+      const response = await fetch('/api/account/view-mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetView: 'creator',
+          switchView: true,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || 'Unable to switch to creator view');
+      }
+      toast.success('Switched', 'Opening creator dashboard');
+      router.push('/dashboard');
+      router.refresh();
+    } catch (error: any) {
+      toast.error('Switch failed', error?.message || 'Unable to switch to creator view');
+    } finally {
+      setIsSwitchingToCreator(false);
     }
   };
 
@@ -324,6 +352,24 @@ export default function SettingsPage() {
       <div>
         <h2 className="text-sm font-medium text-secondary mb-3 px-1">Account</h2>
         <div className="rounded-2xl border border-border bg-card divide-y divide-border">
+          <button
+            onClick={handleSwitchToCreatorView}
+            disabled={isSwitchingToCreator}
+            className="flex w-full items-center justify-between p-4 transition-colors hover:bg-muted/50 disabled:opacity-60"
+          >
+            <div className="flex items-center gap-3">
+              <Users className="h-5 w-5 text-secondary" />
+              <div className="text-left">
+                <p className="font-medium text-foreground">Switch to Creator View</p>
+                <p className="text-sm text-secondary">Open creator dashboard for this account</p>
+              </div>
+            </div>
+            {isSwitchingToCreator ? (
+              <Loader2 className="h-4 w-4 animate-spin text-secondary" />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-secondary" />
+            )}
+          </button>
           <button
             onClick={handleLogout}
             className="flex w-full items-center gap-3 p-4 transition-colors hover:bg-muted/50"

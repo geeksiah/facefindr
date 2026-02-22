@@ -105,6 +105,7 @@ export default function BillingPage() {
   const [isUpgrading, setIsUpgrading] = useState<string | null>(null);
   const [isUpdatingAutoRenew, setIsUpdatingAutoRenew] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [promoCode, setPromoCode] = useState('');
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
   const [autoRenew, setAutoRenew] = useState(true);
   const [providerAutoRenewSupported, setProviderAutoRenewSupported] = useState(false);
@@ -460,6 +461,7 @@ export default function BillingPage() {
     setIsUpgrading(planCode);
     setCheckoutError(null);
     const idempotencyKey = createIdempotencyKey('subscription_checkout');
+    const normalizedPromoCode = promoCode.trim().toUpperCase();
     try {
       const response = await fetch('/api/subscriptions/checkout', {
         method: 'POST',
@@ -471,6 +473,7 @@ export default function BillingPage() {
           planCode, 
           billingCycle,
           currency: currencyCode,
+          promoCode: normalizedPromoCode || undefined,
           idempotencyKey,
         }),
       });
@@ -494,6 +497,7 @@ export default function BillingPage() {
           metadata: {
             type: 'creator_subscription',
             plan_code: planCode,
+            promo_code: normalizedPromoCode || null,
           },
           onSuccess: (reference) => {
             const checkoutRegion = String(data?.regionCode || data?.paystack?.regionCode || '')
@@ -817,6 +821,31 @@ export default function BillingPage() {
           Annual
           <span className="ml-2 text-xs text-success">Save 2 months</span>
         </button>
+      </div>
+
+      <div className="mx-auto w-full max-w-md rounded-xl border border-border bg-card p-4">
+        <label htmlFor="creator-promo-code" className="text-sm font-medium text-foreground">
+          Promo Code
+        </label>
+        <div className="mt-2 flex gap-2">
+          <input
+            id="creator-promo-code"
+            value={promoCode}
+            onChange={(event) => setPromoCode(event.target.value.toUpperCase())}
+            placeholder="Enter promo code"
+            className="flex-1 rounded-lg border border-input bg-muted px-3 py-2 text-sm text-foreground"
+          />
+          <Button
+            variant="outline"
+            onClick={() => setPromoCode('')}
+            disabled={!promoCode.trim()}
+          >
+            Clear
+          </Button>
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Applied at checkout. The server validates plan, limits, and expiry.
+        </p>
       </div>
 
       {checkoutError && (

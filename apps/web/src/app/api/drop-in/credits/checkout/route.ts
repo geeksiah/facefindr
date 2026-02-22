@@ -12,6 +12,10 @@ import {
   resolvePaystackPublicKey,
   resolvePaystackSecretKey,
 } from '@/lib/payments/paystack';
+import {
+  toPromoMetadata,
+  validatePromoCodeForCheckout,
+} from '@/lib/promotions/promo-service';
 import { stripe } from '@/lib/payments/stripe';
 import { resolveAttendeeProfileByUser } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
@@ -180,6 +184,31 @@ async function getCreditPricing(userId: string | undefined, requestHeaders: Head
   };
 }
 
+function promoValidationErrorMessage(reason: string): string {
+  switch (reason) {
+    case 'not_found':
+      return 'Promo code not found.';
+    case 'inactive':
+      return 'Promo code is inactive.';
+    case 'scope_mismatch':
+      return 'Promo code does not apply to drop-in credits.';
+    case 'expired':
+      return 'Promo code has expired.';
+    case 'not_started':
+      return 'Promo code is not active yet.';
+    case 'currency_mismatch':
+      return 'Promo code currency does not match this checkout currency.';
+    case 'max_redemptions_reached':
+      return 'Promo code redemption limit has been reached.';
+    case 'user_limit_reached':
+      return 'You have already used this promo code the maximum number of times.';
+    case 'promo_infrastructure_unavailable':
+      return 'Promo code validation is temporarily unavailable. Please try again.';
+    default:
+      return 'Promo code is not valid for this checkout.';
+  }
+}
+
 export async function POST(request: NextRequest) {
   let idempotencyFinalizeRef:
     | ((
@@ -229,6 +258,7 @@ export async function POST(request: NextRequest) {
     }
 
     const credits = Number.parseInt(String(body?.credits || ''), 10);
+    const promoCode = String(body?.promoCode || '').trim().toUpperCase() || null;
 
     if (!Number.isFinite(credits) || credits < 1 || credits > 1000) {
       return NextResponse.json(
@@ -241,6 +271,7 @@ export async function POST(request: NextRequest) {
     const requestHash = buildRequestHash({
       actorId: user.id,
       credits,
+      promoCode,
     });
     const serviceClient = createServiceClient();
     let idempotencyRecordId: string | null = null;
@@ -369,10 +400,44 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const amountCents = Math.round(pricing.creditUnitCents * credits);
-    if (amountCents <= 0) {
+    const baseAmountCents = Math.round(pricing.creditUnitCents * credits);
+    if (baseAmountCents <= 0) {
       return respond({ error: 'Invalid purchase amount' }, 400, 'failed');
     }
+    const promoValidation = await validatePromoCodeForCheckout({
+      supabase: serviceClient,
+      userId: user.id,
+      promoCode,
+      scope: 'drop_in_credits',
+      amountCents: baseAmountCents,
+      currency: pricing.currencyCode,
+    });
+    if (promoCode && !promoValidation.applied) {
+      const message = promoValidationErrorMessage(promoValidation.reason || 'invalid_promo');
+      const statusCode =
+        promoValidation.reason === 'promo_infrastructure_unavailable' ? 503 : 400;
+      return respond(
+        {
+          error: message,
+          code: promoValidation.reason || 'invalid_promo',
+          failClosed: statusCode >= 500,
+        },
+        statusCode,
+        'failed'
+      );
+    }
+    const amountCents = promoValidation.finalAmountCents;
+    if (amountCents <= 0) {
+      return respond(
+        { error: 'Promo code cannot reduce checkout total to zero.', code: 'invalid_discount_amount' },
+        400,
+        'failed'
+      );
+    }
+    const promoMetadata = toPromoMetadata(promoValidation);
+    const promoMetadataText = Object.fromEntries(
+      Object.entries(promoMetadata).map(([key, value]) => [key, value === null ? null : String(value)])
+    ) as Record<string, string | null>;
 
     const attendeeId = await ensureAttendeeId(serviceClient, {
       id: user.id,
@@ -452,6 +517,8 @@ export async function POST(request: NextRequest) {
             attendee_id: attendeeId,
             purchase_id: purchase.id,
             credits_purchased: credits,
+            pricing_amount_before_discount_cents: baseAmountCents,
+            ...promoMetadata,
           },
         },
         secretKey
@@ -467,6 +534,14 @@ export async function POST(request: NextRequest) {
         provider: 'paystack',
         purchaseId: purchase.id,
         checkoutUrl: payment.authorizationUrl,
+        promo: promoValidation.applied
+          ? {
+              code: promoValidation.promoCode,
+              discountCents: promoValidation.discountCents,
+              appliedAmountCents: promoValidation.appliedAmountCents,
+              finalAmountCents: promoValidation.finalAmountCents,
+            }
+          : null,
         paystack: {
           publicKey,
           email: user.email,
@@ -506,6 +581,8 @@ export async function POST(request: NextRequest) {
           attendee_id: attendeeId,
           purchase_id: purchase.id,
           credits_purchased: String(credits),
+          pricing_amount_before_discount_cents: String(baseAmountCents),
+          ...promoMetadataText,
         },
       });
 
@@ -519,6 +596,14 @@ export async function POST(request: NextRequest) {
         provider: 'stripe',
         purchaseId: purchase.id,
         checkoutUrl: session.url,
+        promo: promoValidation.applied
+          ? {
+              code: promoValidation.promoCode,
+              discountCents: promoValidation.discountCents,
+              appliedAmountCents: promoValidation.appliedAmountCents,
+              finalAmountCents: promoValidation.finalAmountCents,
+            }
+          : null,
       }, 200, 'completed');
     }
 

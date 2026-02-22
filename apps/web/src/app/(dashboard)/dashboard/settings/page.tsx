@@ -22,7 +22,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import Image from 'next/image';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, useEffect, useRef } from 'react';
 
 import { WalletSettings } from '@/components/dashboard/wallet-settings';
@@ -70,10 +70,12 @@ interface NotificationSettings {
 
 export default function SettingsPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const toast = useToast();
   const [activeTab, setActiveTab] = useState('profile');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSwitchingToAttendee, setIsSwitchingToAttendee] = useState(false);
   
   // Profile state
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -131,6 +133,33 @@ export default function SettingsPage() {
     shareActivityWithCreators: false,
     allowFollows: true,
   });
+
+  const handleSwitchToAttendeeView = async () => {
+    if (isSwitchingToAttendee) return;
+    setIsSwitchingToAttendee(true);
+    try {
+      const response = await fetch('/api/account/view-mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetView: 'attendee',
+          ensureAttendee: true,
+          switchView: true,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || 'Failed to switch to attendee view');
+      }
+      toast.success('Done', 'Switched to attendee view');
+      router.push('/gallery');
+      router.refresh();
+    } catch (error: any) {
+      toast.error('Switch failed', error?.message || 'Failed to switch view');
+    } finally {
+      setIsSwitchingToAttendee(false);
+    }
+  };
 
   // Handle URL params for tab switching
   useEffect(() => {
@@ -915,6 +944,27 @@ export default function SettingsPage() {
                 />
               </div>
             </div>
+          </div>
+
+          {/* View Mode */}
+          <div className="rounded-2xl border border-border bg-card p-6">
+            <h2 className="font-semibold text-foreground">Attendee View</h2>
+            <p className="text-sm text-secondary mt-1">
+              Create your attendee profile (if missing) and switch from creator dashboard to attendee experience.
+            </p>
+            <Button
+              className="mt-4"
+              variant="outline"
+              onClick={handleSwitchToAttendeeView}
+              disabled={isSwitchingToAttendee}
+            >
+              {isSwitchingToAttendee ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Users className="h-4 w-4" />
+              )}
+              Switch to Attendee View
+            </Button>
           </div>
 
           {/* Export Data */}

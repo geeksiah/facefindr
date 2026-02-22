@@ -72,6 +72,7 @@ export default function BillingPage() {
   const [unitPriceCents, setUnitPriceCents] = useState<number | null>(null);
   const [unitPriceCurrency, setUnitPriceCurrency] = useState('USD');
   const [customCredits, setCustomCredits] = useState('10');
+  const [promoCode, setPromoCode] = useState('');
   const [packsError, setPacksError] = useState<string | null>(null);
   const [purchasingCode, setPurchasingCode] = useState<string | null>(null);
   const hasHandledCreditsRedirect = useRef(false);
@@ -391,13 +392,18 @@ export default function BillingPage() {
         typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
           ? `dropin_credits_checkout:${crypto.randomUUID()}`
           : `dropin_credits_checkout:${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      const normalizedPromoCode = promoCode.trim().toUpperCase();
       const response = await fetch('/api/drop-in/credits/checkout', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Idempotency-Key': idempotencyKey,
         },
-        body: JSON.stringify({ credits, idempotencyKey }),
+        body: JSON.stringify({
+          credits,
+          idempotencyKey,
+          promoCode: normalizedPromoCode || undefined,
+        }),
       });
       const data = await response.json();
 
@@ -511,6 +517,27 @@ export default function BillingPage() {
       {/* Drop-in Credit Packs */}
       <div>
         <h2 className="text-lg font-semibold text-foreground mb-4">Buy Drop-in Credits</h2>
+        <div className="mb-4 w-full max-w-md rounded-xl border border-border bg-card p-4">
+          <label htmlFor="credits-promo-code" className="block text-sm font-medium text-foreground mb-2">
+            Promo Code
+          </label>
+          <div className="flex gap-2">
+            <input
+              id="credits-promo-code"
+              value={promoCode}
+              onChange={(event) => setPromoCode(event.target.value.toUpperCase())}
+              className="flex-1 rounded-lg border border-input bg-muted px-3 py-2 text-sm text-foreground"
+              placeholder="Enter promo code"
+            />
+            <Button
+              variant="outline"
+              onClick={() => setPromoCode('')}
+              disabled={!promoCode.trim()}
+            >
+              Clear
+            </Button>
+          </div>
+        </div>
         {unitPriceCents && unitPriceCents > 0 && (
           <p className="text-sm text-secondary mb-3">
             1 credit = {formatCurrency(unitPriceCents, unitPriceCurrency)}

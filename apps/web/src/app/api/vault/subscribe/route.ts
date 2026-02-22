@@ -27,6 +27,10 @@ import {
   resolvePaystackSecretKey,
 } from '@/lib/payments/paystack';
 import { resolveProviderPlanMapping } from '@/lib/payments/recurring-subscriptions';
+import {
+  toPromoMetadata,
+  validatePromoCodeForCheckout,
+} from '@/lib/promotions/promo-service';
 import { createClient } from '@/lib/supabase/server';
 
 const stripe = process.env.STRIPE_SECRET_KEY 
@@ -40,6 +44,33 @@ function getManualPeriodEndIso(billingCycle: 'monthly' | 'annual'): string {
       ? 365 * 24 * 60 * 60 * 1000
       : 30 * 24 * 60 * 60 * 1000;
   return new Date(now + durationMs).toISOString();
+}
+
+function promoValidationErrorMessage(reason: string): string {
+  switch (reason) {
+    case 'not_found':
+      return 'Promo code not found.';
+    case 'inactive':
+      return 'Promo code is inactive.';
+    case 'scope_mismatch':
+      return 'Promo code does not apply to vault subscriptions.';
+    case 'expired':
+      return 'Promo code has expired.';
+    case 'not_started':
+      return 'Promo code is not active yet.';
+    case 'storage_plan_mismatch':
+      return 'Promo code is not valid for this storage plan.';
+    case 'currency_mismatch':
+      return 'Promo code currency does not match this checkout currency.';
+    case 'max_redemptions_reached':
+      return 'Promo code redemption limit has been reached.';
+    case 'user_limit_reached':
+      return 'You have already used this promo code the maximum number of times.';
+    case 'promo_infrastructure_unavailable':
+      return 'Promo code validation is temporarily unavailable. Please try again.';
+    default:
+      return 'Promo code is not valid for this checkout.';
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -56,6 +87,7 @@ export async function POST(request: NextRequest) {
       planSlug,
       billingCycle,
       currency: requestedCurrency,
+      promoCode: requestedPromoCode,
     } = body;
 
     if (!planSlug || !billingCycle) {
@@ -65,6 +97,7 @@ export async function POST(request: NextRequest) {
       );
     }
     const paymentChannel: 'auto' = 'auto';
+    const promoCode = String(requestedPromoCode || '').trim().toUpperCase() || null;
 
     // Get the plan
     const { data: plan, error: planError } = await supabase
@@ -111,13 +144,46 @@ export async function POST(request: NextRequest) {
     const normalizedBillingCycle =
       billingCycle === 'yearly' || billingCycle === 'annual' ? 'annual' : 'monthly';
     const rawPrice = normalizedBillingCycle === 'annual' ? plan.price_yearly : plan.price_monthly;
-    const priceCents = Math.round(Number(rawPrice || 0) * 100);
-    if (!priceCents || priceCents <= 0) {
+    const priceBeforeDiscountCents = Math.round(Number(rawPrice || 0) * 100);
+    if (!priceBeforeDiscountCents || priceBeforeDiscountCents <= 0) {
       return NextResponse.json(
         { error: 'Storage plan price is not configured', failClosed: true },
         { status: 503 }
       );
     }
+    const promoValidation = await validatePromoCodeForCheckout({
+      supabase,
+      userId: user.id,
+      promoCode,
+      scope: 'vault_subscription',
+      amountCents: priceBeforeDiscountCents,
+      currency: normalizedCurrency,
+      storagePlanSlug: plan.slug,
+    });
+    if (promoCode && !promoValidation.applied) {
+      const message = promoValidationErrorMessage(promoValidation.reason || 'invalid_promo');
+      const statusCode =
+        promoValidation.reason === 'promo_infrastructure_unavailable' ? 503 : 400;
+      return NextResponse.json(
+        {
+          error: message,
+          code: promoValidation.reason || 'invalid_promo',
+          failClosed: statusCode >= 500,
+        },
+        { status: statusCode }
+      );
+    }
+    const priceCents = promoValidation.finalAmountCents;
+    if (!priceCents || priceCents <= 0) {
+      return NextResponse.json(
+        { error: 'Promo code cannot reduce checkout total to zero.', code: 'invalid_discount_amount' },
+        { status: 400 }
+      );
+    }
+    const promoMetadata = toPromoMetadata(promoValidation);
+    const promoMetadataText = Object.fromEntries(
+      Object.entries(promoMetadata).map(([key, value]) => [key, value === null ? null : String(value)])
+    ) as Record<string, string | null>;
 
     let gatewaySelection;
     try {
@@ -248,6 +314,8 @@ export async function POST(request: NextRequest) {
             pricing_currency: normalizedCurrency,
             pricing_amount_cents: String(priceCents),
             provider_plan_id: mapping?.provider_plan_id || 'dynamic',
+            pricing_amount_before_discount_cents: String(priceBeforeDiscountCents),
+            ...promoMetadataText,
           },
         },
         metadata: {
@@ -260,6 +328,8 @@ export async function POST(request: NextRequest) {
           pricing_currency: normalizedCurrency,
           pricing_amount_cents: String(priceCents),
           provider_plan_id: mapping?.provider_plan_id || 'dynamic',
+          pricing_amount_before_discount_cents: String(priceBeforeDiscountCents),
+          ...promoMetadataText,
           type: 'storage_subscription',
         },
         success_url: `${appUrl}/gallery/vault?subscription=success&provider=stripe&session_id={CHECKOUT_SESSION_ID}`,
@@ -270,6 +340,14 @@ export async function POST(request: NextRequest) {
         checkoutUrl: session.url,
         sessionId: session.id,
         gateway: selectedGateway,
+        promo: promoValidation.applied
+          ? {
+              code: promoValidation.promoCode,
+              discountCents: promoValidation.discountCents,
+              appliedAmountCents: promoValidation.appliedAmountCents,
+              finalAmountCents: promoValidation.finalAmountCents,
+            }
+          : null,
       });
     }
 
@@ -297,6 +375,8 @@ export async function POST(request: NextRequest) {
           payment_channel: paymentChannel,
           pricing_currency: normalizedCurrency,
           pricing_amount_cents: priceCents,
+          pricing_amount_before_discount_cents: priceBeforeDiscountCents,
+          ...promoMetadata,
         }),
         subscriber: {
           email: user.email || undefined,
@@ -312,6 +392,14 @@ export async function POST(request: NextRequest) {
         checkoutUrl: approvalUrl,
         sessionId: subscription.id,
         gateway: selectedGateway,
+        promo: promoValidation.applied
+          ? {
+              code: promoValidation.promoCode,
+              discountCents: promoValidation.discountCents,
+              appliedAmountCents: promoValidation.appliedAmountCents,
+              finalAmountCents: promoValidation.finalAmountCents,
+            }
+          : null,
       });
     }
 
@@ -343,6 +431,8 @@ export async function POST(request: NextRequest) {
           payment_channel: paymentChannel,
           pricing_currency: normalizedCurrency,
           pricing_amount_cents: String(priceCents),
+          pricing_amount_before_discount_cents: String(priceBeforeDiscountCents),
+          ...promoMetadataText,
         },
       });
 
@@ -350,6 +440,14 @@ export async function POST(request: NextRequest) {
         checkoutUrl: payment.link,
         sessionId: txRef,
         gateway: selectedGateway,
+        promo: promoValidation.applied
+          ? {
+              code: promoValidation.promoCode,
+              discountCents: promoValidation.discountCents,
+              appliedAmountCents: promoValidation.appliedAmountCents,
+              finalAmountCents: promoValidation.finalAmountCents,
+            }
+          : null,
       });
     }
 
@@ -373,6 +471,8 @@ export async function POST(request: NextRequest) {
         payment_channel: paymentChannel,
         pricing_currency: normalizedCurrency,
         pricing_amount_cents: priceCents,
+        pricing_amount_before_discount_cents: priceBeforeDiscountCents,
+        ...promoMetadata,
         renewal_mode: manualRenewalMode ? 'manual_renewal' : 'provider_recurring',
         current_period_end: manualPeriodEndIso,
         auto_renew_preference: manualRenewalMode ? 'false' : 'true',
@@ -452,6 +552,14 @@ export async function POST(request: NextRequest) {
         currentPeriodEnd: manualPeriodEndIso,
         autoRenewSupported: !manualRenewalMode,
         regionCode: paystackRegionCode,
+        promo: promoValidation.applied
+          ? {
+              code: promoValidation.promoCode,
+              discountCents: promoValidation.discountCents,
+              appliedAmountCents: promoValidation.appliedAmountCents,
+              finalAmountCents: promoValidation.finalAmountCents,
+            }
+          : null,
       });
     }
 

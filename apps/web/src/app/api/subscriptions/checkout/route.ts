@@ -33,6 +33,10 @@ import { resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import {
   resolveProviderPlanMapping,
 } from '@/lib/payments/recurring-subscriptions';
+import {
+  toPromoMetadata,
+  validatePromoCodeForCheckout,
+} from '@/lib/promotions/promo-service';
 import { stripe } from '@/lib/payments/stripe';
 import { getPlanByCode } from '@/lib/subscription';
 import { resolvePlanPriceForCurrency } from '@/lib/subscription/price-resolution';
@@ -150,6 +154,33 @@ function getManualPeriodEndIso(billingCycle: 'monthly' | 'annual'): string {
   return new Date(now + durationMs).toISOString();
 }
 
+function promoValidationErrorMessage(reason: string): string {
+  switch (reason) {
+    case 'not_found':
+      return 'Promo code not found.';
+    case 'inactive':
+      return 'Promo code is inactive.';
+    case 'scope_mismatch':
+      return 'Promo code does not apply to creator subscriptions.';
+    case 'expired':
+      return 'Promo code has expired.';
+    case 'not_started':
+      return 'Promo code is not active yet.';
+    case 'plan_mismatch':
+      return 'Promo code is not valid for this plan.';
+    case 'currency_mismatch':
+      return 'Promo code currency does not match this checkout currency.';
+    case 'max_redemptions_reached':
+      return 'Promo code redemption limit has been reached.';
+    case 'user_limit_reached':
+      return 'You have already used this promo code the maximum number of times.';
+    case 'promo_infrastructure_unavailable':
+      return 'Promo code validation is temporarily unavailable. Please try again.';
+    default:
+      return 'Promo code is not valid for this checkout.';
+  }
+}
+
 export async function POST(request: NextRequest) {
   let idempotencyFinalizeRef:
     | ((
@@ -195,6 +226,7 @@ export async function POST(request: NextRequest) {
       billingCycle = 'monthly',
       currency: requestedCurrency,
       idempotencyKey: bodyIdempotencyKey,
+      promoCode: requestedPromoCode,
     } = body;
     const headerIdempotencyKey =
       request.headers.get('Idempotency-Key') || request.headers.get('idempotency-key');
@@ -236,12 +268,14 @@ export async function POST(request: NextRequest) {
     }
 
     const paymentChannel: 'auto' = 'auto';
+    const promoCode = String(requestedPromoCode || '').trim().toUpperCase() || null;
 
     const operationScope = 'subscription.checkout.create';
     const requestHash = buildRequestHash({
       planCode,
       billingCycle,
       currency: requestedCurrency || null,
+      promoCode,
       paymentChannel,
       actorId: user.id,
     });
@@ -656,8 +690,8 @@ export async function POST(request: NextRequest) {
 
     const checkoutCurrency = String(mapping?.currency || normalizedCurrency).toUpperCase();
     const resolvedPrice = await resolvePlanPriceForCurrency(plan, checkoutCurrency);
-    const checkoutAmountInCents = Number(resolvedPrice?.amountCents || 0);
-    if (!Number.isFinite(checkoutAmountInCents) || checkoutAmountInCents <= 0) {
+    const checkoutAmountBeforeDiscountCents = Number(resolvedPrice?.amountCents || 0);
+    if (!Number.isFinite(checkoutAmountBeforeDiscountCents) || checkoutAmountBeforeDiscountCents <= 0) {
       return respond(
         {
           error: `Plan pricing is not configured for ${checkoutCurrency}`,
@@ -667,6 +701,44 @@ export async function POST(request: NextRequest) {
         'failed'
       );
     }
+    const promoValidation = await validatePromoCodeForCheckout({
+      supabase: serviceClient,
+      userId: user.id,
+      promoCode,
+      scope: 'creator_subscription',
+      amountCents: checkoutAmountBeforeDiscountCents,
+      currency: checkoutCurrency,
+      planCode: plan.code,
+    });
+    if (promoCode && !promoValidation.applied) {
+      const message = promoValidationErrorMessage(promoValidation.reason || 'invalid_promo');
+      const statusCode =
+        promoValidation.reason === 'promo_infrastructure_unavailable' ? 503 : 400;
+      return respond(
+        {
+          error: message,
+          code: promoValidation.reason || 'invalid_promo',
+          failClosed: statusCode >= 500,
+        },
+        statusCode,
+        'failed'
+      );
+    }
+    const checkoutAmountInCents = promoValidation.finalAmountCents;
+    if (!Number.isFinite(checkoutAmountInCents) || checkoutAmountInCents <= 0) {
+      return respond(
+        {
+          error: 'Promo code cannot reduce checkout total to zero.',
+          code: 'invalid_discount_amount',
+        },
+        400,
+        'failed'
+      );
+    }
+    const promoMetadata = toPromoMetadata(promoValidation);
+    const promoMetadataText = Object.fromEntries(
+      Object.entries(promoMetadata).map(([key, value]) => [key, value === null ? null : String(value)])
+    ) as Record<string, string | null>;
 
     let trialApplied = false;
     if (trialRequested) {
@@ -828,8 +900,10 @@ export async function POST(request: NextRequest) {
             billing_cycle: billingCycle,
             pricing_currency: pricingCurrency,
             pricing_amount_cents: String(Math.round(amountCents)),
+            pricing_amount_before_discount_cents: String(Math.round(checkoutAmountBeforeDiscountCents)),
             provider_plan_id: options?.providerPlanId || 'dynamic',
             auto_renew_preference: autoRenewPreference ? 'true' : 'false',
+            ...promoMetadataText,
             trial_applied: trialApplied ? 'true' : 'false',
             trial_feature_policy: trialApplied ? trialFeaturePolicy : null,
             trial_auto_bill_enabled: trialApplied ? (trialAutoBillEnabled ? 'true' : 'false') : null,
@@ -844,8 +918,10 @@ export async function POST(request: NextRequest) {
           billing_cycle: billingCycle,
           pricing_currency: pricingCurrency,
           pricing_amount_cents: String(Math.round(amountCents)),
+          pricing_amount_before_discount_cents: String(Math.round(checkoutAmountBeforeDiscountCents)),
           provider_plan_id: options?.providerPlanId || 'dynamic',
           auto_renew_preference: autoRenewPreference ? 'true' : 'false',
+          ...promoMetadataText,
           trial_applied: trialApplied ? 'true' : 'false',
           trial_feature_policy: trialApplied ? trialFeaturePolicy : null,
           trial_auto_bill_enabled: trialApplied ? (trialAutoBillEnabled ? 'true' : 'false') : null,
@@ -914,6 +990,14 @@ export async function POST(request: NextRequest) {
         pricingCurrency: effectiveStripeCurrency,
         pricingAmountCents: effectiveStripeAmount,
         providerPlanId: effectiveProviderPlanId,
+        promo: promoValidation.applied
+          ? {
+              code: promoValidation.promoCode,
+              discountCents: promoValidation.discountCents,
+              appliedAmountCents: promoValidation.appliedAmountCents,
+              finalAmountCents: promoValidation.finalAmountCents,
+            }
+          : null,
         trialApplied,
         trialAlreadyRedeemed,
         trialDurationDays: trialApplied ? trialDurationDays : 0,
@@ -946,6 +1030,8 @@ export async function POST(request: NextRequest) {
         billing_cycle: billingCycle,
         pricing_currency: checkoutCurrency,
         pricing_amount_cents: Math.round(checkoutAmountInCents),
+        pricing_amount_before_discount_cents: Math.round(checkoutAmountBeforeDiscountCents),
+        ...promoMetadata,
         auto_renew_preference: autoRenewPreference ? 'true' : 'false',
         trial_applied: trialApplied,
         trial_duration_days: trialApplied ? trialDurationDays : 0,
@@ -982,6 +1068,14 @@ export async function POST(request: NextRequest) {
         trialDurationDays: trialApplied ? trialDurationDays : 0,
         trialAutoBillEnabled: trialApplied ? trialAutoBillEnabled : true,
         trialFeaturePolicy: trialApplied ? trialFeaturePolicy : null,
+        promo: promoValidation.applied
+          ? {
+              code: promoValidation.promoCode,
+              discountCents: promoValidation.discountCents,
+              appliedAmountCents: promoValidation.appliedAmountCents,
+              finalAmountCents: promoValidation.finalAmountCents,
+            }
+          : null,
         gatewaySelection: {
           reason: gatewaySelection.reason,
           availableGateways: gatewaySelection.availableGateways,
@@ -1017,6 +1111,8 @@ export async function POST(request: NextRequest) {
           billing_cycle: billingCycle,
           pricing_currency: checkoutCurrency,
           pricing_amount_cents: String(Math.round(checkoutAmountInCents)),
+          pricing_amount_before_discount_cents: String(Math.round(checkoutAmountBeforeDiscountCents)),
+          ...promoMetadataText,
           auto_renew_preference: autoRenewPreference ? 'true' : 'false',
           trial_applied: trialApplied ? 'true' : 'false',
           ...(trialApplied
@@ -1039,6 +1135,14 @@ export async function POST(request: NextRequest) {
         trialDurationDays: trialApplied ? trialDurationDays : 0,
         trialAutoBillEnabled: trialApplied ? trialAutoBillEnabled : true,
         trialFeaturePolicy: trialApplied ? trialFeaturePolicy : null,
+        promo: promoValidation.applied
+          ? {
+              code: promoValidation.promoCode,
+              discountCents: promoValidation.discountCents,
+              appliedAmountCents: promoValidation.appliedAmountCents,
+              finalAmountCents: promoValidation.finalAmountCents,
+            }
+          : null,
         gatewaySelection: {
           reason: gatewaySelection.reason,
           availableGateways: gatewaySelection.availableGateways,
@@ -1085,6 +1189,8 @@ export async function POST(request: NextRequest) {
         billing_cycle: billingCycle,
         pricing_currency: checkoutCurrency,
         pricing_amount_cents: Math.round(checkoutAmountInCents),
+        pricing_amount_before_discount_cents: Math.round(checkoutAmountBeforeDiscountCents),
+        ...promoMetadata,
         auto_renew_preference: manualRenewalMode ? 'false' : autoRenewPreference ? 'true' : 'false',
         renewal_mode: manualRenewalMode ? 'manual_renewal' : 'provider_recurring',
         payment_channel: paymentChannel,
@@ -1151,6 +1257,14 @@ export async function POST(request: NextRequest) {
         trialDurationDays: trialApplied ? trialDurationDays : 0,
         trialAutoBillEnabled: trialApplied ? trialAutoBillEnabled : true,
         trialFeaturePolicy: trialApplied ? trialFeaturePolicy : null,
+        promo: promoValidation.applied
+          ? {
+              code: promoValidation.promoCode,
+              discountCents: promoValidation.discountCents,
+              appliedAmountCents: promoValidation.appliedAmountCents,
+              finalAmountCents: promoValidation.finalAmountCents,
+            }
+          : null,
         gatewaySelection: {
           reason: gatewaySelection.reason,
           availableGateways: gatewaySelection.availableGateways,

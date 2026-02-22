@@ -101,3 +101,5 @@ supabase/migrations/084_media_processing_watermark_retention.sql
 .gitignore
 supabase/migrations/082_notifications_alignment_finalize.sql
 supabase/migrations/083_creator_plan_feature_guardrails.sql
+supabase/Schema structure.txt
+supabase/Schema structure.txt

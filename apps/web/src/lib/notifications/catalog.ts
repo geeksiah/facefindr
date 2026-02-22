@@ -53,6 +53,8 @@ export const NOTIFICATION_CATALOG: Record<string, NotificationCatalogEntry> = {
   drop_in_connection_accepted: { category: 'social', preferenceKey: 'system_enabled' },
   drop_in_connection_declined: { category: 'social', preferenceKey: 'system_enabled' },
   event_collaboration_invite: { category: 'system', preferenceKey: 'system_enabled' },
+  support_ticket_reply: { category: 'system', preferenceKey: 'system_enabled' },
+  support_ticket_status_updated: { category: 'system', preferenceKey: 'system_enabled' },
   verification_otp: { category: 'system', preferenceKey: 'system_enabled' },
 };
 
@@ -61,4 +63,3 @@ export function getNotificationCatalogEntry(templateCode: string): NotificationC
   if (!key) return DEFAULT_ENTRY;
   return NOTIFICATION_CATALOG[key] || DEFAULT_ENTRY;
 }
-

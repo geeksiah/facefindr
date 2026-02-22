@@ -21,6 +21,7 @@ import {
   Monitor,
   Globe,
   DollarSign,
+  MessageSquare,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -83,6 +84,7 @@ const navigation: NavGroup[] = [
     label: 'Operations',
     items: [
       { label: 'Announcements', href: '/announcements', icon: Bell },
+      { label: 'Support Tickets', href: '/support', icon: MessageSquare },
       { label: 'Promotions', href: '/promotions', icon: Tag },
       { label: 'Disputes', href: '/disputes', icon: AlertTriangle },
       { label: 'Audit Logs', href: '/audit-logs', icon: FileText },

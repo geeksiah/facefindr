@@ -6,10 +6,44 @@ import { incrementDropInCredits } from '@/lib/drop-in/credits';
 import { recordDropInCreditPurchaseJournal } from '@/lib/payments/financial-flow-ledger';
 import { verifyPaystackTransaction, resolvePaystackSecretKey } from '@/lib/payments/paystack';
 import { resolveAttendeeProfileByUser } from '@/lib/profiles/ids';
+import { commitPromoRedemption } from '@/lib/promotions/promo-service';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 function asString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function asNumber(value: unknown): number | null {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(0, Math.round(parsed));
+}
+
+function extractPromoFromMetadata(metadata: Record<string, unknown> | null | undefined) {
+  if (!metadata) return null;
+  const promoCodeId = asString(metadata.promo_code_id);
+  const discountCents = asNumber(metadata.promo_discount_cents);
+  if (!promoCodeId || !discountCents || discountCents <= 0) {
+    return null;
+  }
+
+  const appliedAmountCents =
+    asNumber(metadata.promo_applied_amount_cents) ??
+    asNumber(metadata.pricing_amount_before_discount_cents) ??
+    asNumber(metadata.pricing_amount_cents) ??
+    0;
+  const finalAmountCents =
+    asNumber(metadata.promo_final_amount_cents) ??
+    asNumber(metadata.pricing_amount_cents) ??
+    Math.max(0, appliedAmountCents - discountCents);
+
+  return {
+    promoCodeId,
+    promoCode: asString(metadata.promo_code) || null,
+    appliedAmountCents,
+    discountCents,
+    finalAmountCents,
+  };
 }
 
 function mapCurrencyToRegionCode(currency: string): string | null {
@@ -155,6 +189,29 @@ export async function POST(request: NextRequest) {
         },
       }).catch((ledgerError) => {
         console.error('[LEDGER] failed to record verify drop-in credit purchase journal:', ledgerError);
+      });
+    }
+
+    const promo = extractPromoFromMetadata((verified as any).metadata || null);
+    if (promo) {
+      await commitPromoRedemption({
+        supabase: serviceClient,
+        userId: user.id,
+        scope: 'drop_in_credits',
+        promoCodeId: promo.promoCodeId,
+        promoCode: promo.promoCode,
+        appliedAmountCents: promo.appliedAmountCents,
+        discountCents: promo.discountCents,
+        finalAmountCents: promo.finalAmountCents,
+        currency: String(purchase.currency || verified.currency || 'USD').toUpperCase(),
+        planReference: null,
+        sourceRef: verifyReference,
+        metadata: {
+          provider: 'paystack',
+          purchase_id: purchase.id,
+        },
+      }).catch((promoError) => {
+        console.error('[PROMO] failed to commit drop-in promo redemption:', promoError);
       });
     }
 

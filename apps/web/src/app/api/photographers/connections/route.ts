@@ -44,6 +44,7 @@ async function resolveCreatorId(userId: string, userEmail?: string) {
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
+    const serviceClient = createServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -66,17 +67,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Find attendee
-    let attendeeQuery = supabase
-      .from('attendees')
-      .select('id, display_name, face_tag');
-
     let attendee: any = null;
     let attendeeError: any = null;
     if (attendeeId) {
-      const byIdentifier = await supabase
+      const byIdentifier = await serviceClient
         .from('attendees')
         .select('id, display_name, face_tag')
-        .eq('id', attendeeId)
+        .or(`id.eq.${attendeeId},user_id.eq.${attendeeId}`)
         .maybeSingle();
 
       attendee = byIdentifier.data;
@@ -87,15 +84,21 @@ export async function POST(request: NextRequest) {
       const normalizedTag = trimmedTag.startsWith('@')
         ? trimmedTag
         : `@${trimmedTag}`;
-      const byFaceTag = await attendeeQuery
-        .or(`face_tag.ilike.${normalizedTag},face_tag.ilike.${normalizedTag.replace(/\./g, '')}`)
+      const sanitizedFaceTag = normalizedTag.replace(/\s+/g, '');
+      const byFaceTag = await serviceClient
+        .from('attendees')
+        .select('id, display_name, face_tag')
+        .ilike('face_tag', sanitizedFaceTag)
         .maybeSingle();
       attendee = byFaceTag.data;
       attendeeError = byFaceTag.error;
     }
 
     if (attendeeError || !attendee) {
-      return NextResponse.json({ error: 'Attendee not found' }, { status: 404 });
+      return NextResponse.json(
+        { error: 'Attendee profile not found. Confirm the FaceTag and try again.' },
+        { status: 404 }
+      );
     }
 
     // Check if connection already exists

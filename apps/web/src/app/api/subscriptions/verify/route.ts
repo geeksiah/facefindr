@@ -15,6 +15,7 @@ import {
   mapProviderSubscriptionStatusToLocal,
   type RecurringProductScope,
 } from '@/lib/payments/recurring-subscriptions';
+import { commitPromoRedemption } from '@/lib/promotions/promo-service';
 import {
   parseMetadataRecord,
   readNumber,
@@ -106,6 +107,32 @@ function isMissingColumnError(error: unknown): boolean {
     code === '42703' ||
     (code.startsWith('PGRST') && message.includes('schema cache') && message.includes('column'))
   );
+}
+
+function extractPromoFromMetadata(metadata: Record<string, unknown>) {
+  const promoCodeId = readString(metadata.promo_code_id);
+  const discountCents = readNumber(metadata.promo_discount_cents);
+  if (!promoCodeId || !discountCents || discountCents <= 0) {
+    return null;
+  }
+
+  const appliedAmountCents =
+    readNumber(metadata.promo_applied_amount_cents) ??
+    readNumber(metadata.pricing_amount_before_discount_cents) ??
+    readNumber(metadata.pricing_amount_cents) ??
+    0;
+  const finalAmountCents =
+    readNumber(metadata.promo_final_amount_cents) ??
+    readNumber(metadata.pricing_amount_cents) ??
+    Math.max(0, appliedAmountCents - discountCents);
+
+  return {
+    promoCodeId,
+    promoCode: readString(metadata.promo_code),
+    appliedAmountCents,
+    discountCents,
+    finalAmountCents,
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -241,6 +268,32 @@ export async function POST(request: NextRequest) {
           stripe_session_id: session.id,
         },
       });
+
+      const promo = extractPromoFromMetadata(metadata);
+      if (promo) {
+        await commitPromoRedemption({
+          supabase: serviceClient,
+          userId: user.id,
+          scope: 'creator_subscription',
+          promoCodeId: promo.promoCodeId,
+          promoCode: promo.promoCode,
+          appliedAmountCents: promo.appliedAmountCents,
+          discountCents: promo.discountCents,
+          finalAmountCents: promo.finalAmountCents,
+          currency:
+            readString(stripeSubscription.items?.data?.[0]?.price?.currency)?.toUpperCase() ||
+            readString(metadata.pricing_currency) ||
+            'USD',
+          planReference: readString(metadata.plan_code),
+          sourceRef: String(stripeSubscription.id),
+          metadata: {
+            provider: 'stripe',
+            provider_session_id: session.id,
+          },
+        }).catch((promoError) => {
+          console.error('[PROMO] failed to commit creator subscription promo redemption (stripe):', promoError);
+        });
+      }
     } else if (provider === 'paypal') {
       if (!subscriptionId) {
         return NextResponse.json({ error: 'PayPal subscriptionId is required.' }, { status: 400 });
@@ -292,6 +345,28 @@ export async function POST(request: NextRequest) {
           paypal_subscription_status: latest.status || null,
         },
       });
+
+      const promo = extractPromoFromMetadata(metadata);
+      if (promo) {
+        await commitPromoRedemption({
+          supabase: serviceClient,
+          userId: user.id,
+          scope: 'creator_subscription',
+          promoCodeId: promo.promoCodeId,
+          promoCode: promo.promoCode,
+          appliedAmountCents: promo.appliedAmountCents,
+          discountCents: promo.discountCents,
+          finalAmountCents: promo.finalAmountCents,
+          currency: readString(metadata.pricing_currency) || 'USD',
+          planReference: readString(metadata.plan_code),
+          sourceRef: String(latest.id || subscriptionId),
+          metadata: {
+            provider: 'paypal',
+          },
+        }).catch((promoError) => {
+          console.error('[PROMO] failed to commit creator subscription promo redemption (paypal):', promoError);
+        });
+      }
     } else if (provider === 'flutterwave') {
       if (!txRef) {
         return NextResponse.json({ error: 'Flutterwave txRef is required.' }, { status: 400 });
@@ -383,6 +458,28 @@ export async function POST(request: NextRequest) {
       }).catch((ledgerError) => {
         console.error('[LEDGER] failed to record creator subscription charge on verify:', ledgerError);
       });
+
+      const promo = extractPromoFromMetadata(metadata);
+      if (promo) {
+        await commitPromoRedemption({
+          supabase: serviceClient,
+          userId: user.id,
+          scope: 'creator_subscription',
+          promoCodeId: promo.promoCodeId,
+          promoCode: promo.promoCode,
+          appliedAmountCents: promo.appliedAmountCents,
+          discountCents: promo.discountCents,
+          finalAmountCents: promo.finalAmountCents,
+          currency: chargeCurrency,
+          planReference: readString(metadata.plan_code),
+          sourceRef: txRef,
+          metadata: {
+            provider: 'flutterwave',
+          },
+        }).catch((promoError) => {
+          console.error('[PROMO] failed to commit creator subscription promo redemption (flutterwave):', promoError);
+        });
+      }
     } else {
       if (!reference) {
         return NextResponse.json({ error: 'Paystack reference is required.' }, { status: 400 });
@@ -506,6 +603,28 @@ export async function POST(request: NextRequest) {
       }).catch((ledgerError) => {
         console.error('[LEDGER] failed to record creator subscription charge on verify:', ledgerError);
       });
+
+      const promo = extractPromoFromMetadata(mergedMetadata);
+      if (promo) {
+        await commitPromoRedemption({
+          supabase: serviceClient,
+          userId: user.id,
+          scope: 'creator_subscription',
+          promoCodeId: promo.promoCodeId,
+          promoCode: promo.promoCode,
+          appliedAmountCents: promo.appliedAmountCents,
+          discountCents: promo.discountCents,
+          finalAmountCents: promo.finalAmountCents,
+          currency: chargeCurrency,
+          planReference: readString(mergedMetadata.plan_code),
+          sourceRef: reference,
+          metadata: {
+            provider: 'paystack',
+          },
+        }).catch((promoError) => {
+          console.error('[PROMO] failed to commit creator subscription promo redemption (paystack):', promoError);
+        });
+      }
     }
 
     const nowIso = new Date().toISOString();

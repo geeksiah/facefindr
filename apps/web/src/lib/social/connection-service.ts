@@ -4,7 +4,7 @@
  * Manages photographer <-> attendee connections.
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 interface ConnectionResult {
   success: boolean;
@@ -26,6 +26,7 @@ export async function addConnection(
 ): Promise<ConnectionResult> {
   try {
     const supabase = await createClient();
+    const serviceClient = createServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -44,14 +45,17 @@ export async function addConnection(
     }
 
     // Verify attendee exists
-    const { data: attendee } = await supabase
+    const { data: attendee } = await serviceClient
       .from('attendees')
       .select('id, display_name, face_tag')
-      .eq('id', attendeeId)
-      .single();
+      .or(`id.eq.${attendeeId},user_id.eq.${attendeeId}`)
+      .maybeSingle();
 
     if (!attendee) {
-      return { success: false, error: 'Attendee not found' };
+      return {
+        success: false,
+        error: 'Attendee profile not found. Confirm the FaceTag and try again.',
+      };
     }
 
     // Create connection
@@ -226,7 +230,7 @@ export async function findAttendeeByFaceTag(
   faceTag: string
 ): Promise<{ success: boolean; attendee?: any; error?: string }> {
   try {
-    const supabase = await createClient();
+    const supabase = createServiceClient();
 
     // Normalize face tag
     let tag = faceTag.trim();
@@ -237,11 +241,14 @@ export async function findAttendeeByFaceTag(
     const { data, error } = await supabase
       .from('attendees')
       .select('id, display_name, face_tag, profile_photo_url')
-      .eq('face_tag', tag)
-      .single();
+      .ilike('face_tag', tag)
+      .maybeSingle();
 
     if (error || !data) {
-      return { success: false, error: 'Attendee not found' };
+      return {
+        success: false,
+        error: 'Attendee profile not found. Confirm the FaceTag and try again.',
+      };
     }
 
     return { success: true, attendee: data };

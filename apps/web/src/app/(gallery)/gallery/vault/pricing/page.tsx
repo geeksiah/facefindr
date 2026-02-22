@@ -42,6 +42,7 @@ export default function VaultPricingPage() {
   const [subscription, setSubscription] = useState<SubscriptionSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [subscribingPlan, setSubscribingPlan] = useState<string | null>(null);
+  const [promoCode, setPromoCode] = useState('');
 
   const activePlans = useMemo(
     () =>
@@ -87,10 +88,15 @@ export default function VaultPricingPage() {
 
     try {
       setSubscribingPlan(planSlug);
+      const normalizedPromoCode = promoCode.trim().toUpperCase();
       const response = await fetch('/api/vault/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planSlug, billingCycle: 'monthly' }),
+        body: JSON.stringify({
+          planSlug,
+          billingCycle: 'monthly',
+          promoCode: normalizedPromoCode || undefined,
+        }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data?.checkoutUrl) {
@@ -153,6 +159,28 @@ export default function VaultPricingPage() {
         <p className="mt-1 text-sm text-secondary">
           Upgrade your vault plan. Current: {subscription?.planSlug || 'free'} ({subscription?.billingCycle || 'monthly'})
         </p>
+      </div>
+
+      <div className="w-full max-w-md rounded-xl border border-border bg-card p-4">
+        <label htmlFor="vault-promo-code" className="text-sm font-medium text-foreground">
+          Promo Code
+        </label>
+        <div className="mt-2 flex gap-2">
+          <input
+            id="vault-promo-code"
+            value={promoCode}
+            onChange={(event) => setPromoCode(event.target.value.toUpperCase())}
+            placeholder="Enter promo code"
+            className="flex-1 rounded-lg border border-input bg-muted px-3 py-2 text-sm text-foreground"
+          />
+          <Button
+            variant="outline"
+            onClick={() => setPromoCode('')}
+            disabled={!promoCode.trim()}
+          >
+            Clear
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
