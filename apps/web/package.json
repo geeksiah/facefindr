@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@aws-sdk/client-rekognition": "^3.967.0",
+    "@aws-sdk/client-s3": "^3.967.0",
+    "@aws-sdk/s3-request-presigner": "^3.967.0",
     "@facefind/shared": "workspace:*",
     "@hookform/resolvers": "^3.3.4",
     "@mediapipe/tasks-vision": "^0.10.32",

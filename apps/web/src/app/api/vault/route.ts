@@ -11,6 +11,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { stripe } from '@/lib/payments/stripe';
+import { copyStorageObject, createStorageSignedUrl, deleteStorageObjects } from '@/lib/storage/provider';
 import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
 function readMetadataFlag(record: Record<string, unknown>, key: string): boolean | null {
@@ -23,6 +24,44 @@ function readMetadataFlag(record: Record<string, unknown>, key: string): boolean
     if (normalized === 'false') return false;
   }
   return null;
+}
+
+function normalizeStoragePath(path: string | null | undefined): string | null {
+  if (!path || typeof path !== 'string') return null;
+  const trimmed = path.trim();
+  if (!trimmed) return null;
+  return trimmed.startsWith('/') ? trimmed.slice(1) : trimmed;
+}
+
+function extractFileExtension(primaryPath: string | null | undefined, fallbackName?: string | null): string {
+  const candidates = [primaryPath || '', fallbackName || ''];
+  for (const candidate of candidates) {
+    const clean = String(candidate).split('?')[0].split('#')[0];
+    const lastDot = clean.lastIndexOf('.');
+    if (lastDot > -1 && lastDot < clean.length - 1) {
+      const ext = clean.slice(lastDot + 1).toLowerCase();
+      if (/^[a-z0-9]{2,8}$/.test(ext)) {
+        return ext;
+      }
+    }
+  }
+  return 'jpg';
+}
+
+function buildVaultObjectPath(
+  userId: string,
+  sourceScope: 'media' | 'dropin',
+  sourceId: string,
+  kind: 'original' | 'thumbnail',
+  extension: string
+): string {
+  return `vault/${userId}/${sourceScope}/${sourceId}/${kind}.${extension}`;
+}
+
+function isUserVaultManagedPath(path: string | null | undefined, userId: string): boolean {
+  const normalized = normalizeStoragePath(path);
+  if (!normalized) return false;
+  return normalized.startsWith(`vault/${userId}/`);
 }
 
 export async function GET(request: NextRequest) {
@@ -122,18 +161,14 @@ export async function GET(request: NextRequest) {
         const filePath = photo.file_path?.startsWith('/') ? photo.file_path.slice(1) : photo.file_path;
 
         const [thumbnailUrl, fileUrl] = await Promise.all([
-          thumbnailPath
-            ? supabase.storage.from('media').createSignedUrl(thumbnailPath, 3600)
-            : Promise.resolve({ data: null }),
-          filePath
-            ? supabase.storage.from('media').createSignedUrl(filePath, 3600)
-            : Promise.resolve({ data: null }),
+          createStorageSignedUrl('media', thumbnailPath, 3600, { supabaseClient: supabase }),
+          createStorageSignedUrl('media', filePath, 3600, { supabaseClient: supabase }),
         ]);
 
         return {
           ...photo,
-          thumbnailUrl: thumbnailUrl?.data?.signedUrl || null,
-          fileUrl: fileUrl?.data?.signedUrl || null,
+          thumbnailUrl: thumbnailUrl || null,
+          fileUrl: fileUrl || null,
         };
       })
     );
@@ -210,19 +245,14 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-
-    // Check if user can add to vault
-    const { data: canAdd } = await supabase.rpc('can_add_to_vault', {
-      p_user_id: user.id,
-      p_file_size_bytes: 0,
-    });
-
-    if (!canAdd) {
+    if (mediaId && dropInPhotoId) {
       return NextResponse.json(
-        { error: 'Storage limit reached. Please upgrade your plan.' },
-        { status: 403 }
+        { error: 'Provide either mediaId or dropInPhotoId, not both.' },
+        { status: 400 }
       );
     }
+
+    const serviceClient = createServiceClient();
 
     // Check if already in vault
     let existing: any = null;
@@ -258,6 +288,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    let sourceFilePath: string | null = null;
+    let sourceThumbnailPath: string | null = null;
+    let sourceOriginalFilename: string | null = null;
+    let sourceFileSizeBytes = 0;
+    let sourceScope: 'media' | 'dropin' | null = null;
+    let sourceIdForPath: string | null = null;
+    let resolvedEventId: string | null = null;
+
     let vaultInsert: any = {
       user_id: user.id,
       album_id: albumId,
@@ -283,15 +321,18 @@ export async function POST(request: NextRequest) {
         ...vaultInsert,
         media_id: mediaId,
         event_id: eventId || media.event_id,
-        file_path: media.storage_path,
-        thumbnail_path: media.thumbnail_path,
-        original_filename: media.original_filename,
-        file_size_bytes: media.file_size || 0,
       };
+
+      sourceFilePath = normalizeStoragePath(media.storage_path);
+      sourceThumbnailPath = normalizeStoragePath(media.thumbnail_path);
+      sourceOriginalFilename = media.original_filename || null;
+      sourceFileSizeBytes = Number(media.file_size || 0);
+      sourceScope = 'media';
+      sourceIdForPath = String(mediaId);
+      resolvedEventId = eventId || media.event_id || null;
     }
 
     if (dropInPhotoId) {
-      const serviceClient = createServiceClient();
       const { data: dropInPhoto } = await serviceClient
         .from('drop_in_photos')
         .select('id, storage_path, thumbnail_path, original_filename, file_size, uploader_id')
@@ -302,11 +343,24 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Drop-in photo not found' }, { status: 404 });
       }
 
+      const sourceFilePathForExisting = normalizeStoragePath(dropInPhoto.storage_path);
+      const sourceFileExt = extractFileExtension(sourceFilePathForExisting, dropInPhoto.original_filename);
+      const deterministicDropInPath = buildVaultObjectPath(
+        user.id,
+        'dropin',
+        String(dropInPhotoId),
+        'original',
+        sourceFileExt
+      );
+
+      const existingDropInPaths = [deterministicDropInPath, sourceFilePathForExisting].filter(
+        (value): value is string => Boolean(value)
+      );
       const { data: existingDropIn } = await supabase
         .from('photo_vault')
         .select('id, is_favorite')
         .eq('user_id', user.id)
-        .eq('file_path', dropInPhoto.storage_path)
+        .in('file_path', existingDropInPaths)
         .single();
 
       if (existingDropIn) {
@@ -344,12 +398,91 @@ export async function POST(request: NextRequest) {
 
       vaultInsert = {
         ...vaultInsert,
-        file_path: dropInPhoto.storage_path,
-        thumbnail_path: dropInPhoto.thumbnail_path,
-        original_filename: dropInPhoto.original_filename,
-        file_size_bytes: dropInPhoto.file_size || 0,
+        event_id: resolvedEventId,
       };
+
+      sourceFilePath = sourceFilePathForExisting;
+      sourceThumbnailPath = normalizeStoragePath(dropInPhoto.thumbnail_path);
+      sourceOriginalFilename = dropInPhoto.original_filename || null;
+      sourceFileSizeBytes = Number(dropInPhoto.file_size || 0);
+      sourceScope = 'dropin';
+      sourceIdForPath = String(dropInPhotoId);
     }
+
+    if (!sourceFilePath || !sourceScope || !sourceIdForPath) {
+      return NextResponse.json(
+        { error: 'Vault source file path is missing' },
+        { status: 400 }
+      );
+    }
+
+    // Check if user can add to vault using real file size.
+    const { data: canAdd } = await supabase.rpc('can_add_to_vault', {
+      p_user_id: user.id,
+      p_file_size_bytes: sourceFileSizeBytes,
+    });
+
+    if (!canAdd) {
+      return NextResponse.json(
+        { error: 'Storage limit reached. Please upgrade your plan.' },
+        { status: 403 }
+      );
+    }
+
+    const fileExt = extractFileExtension(sourceFilePath, sourceOriginalFilename);
+    const destinationFilePath = buildVaultObjectPath(
+      user.id,
+      sourceScope,
+      sourceIdForPath,
+      'original',
+      fileExt
+    );
+    const thumbExt = extractFileExtension(sourceThumbnailPath, sourceOriginalFilename || sourceFilePath);
+    const destinationThumbnailPath = sourceThumbnailPath
+      ? buildVaultObjectPath(user.id, sourceScope, sourceIdForPath, 'thumbnail', thumbExt)
+      : null;
+
+    const pathsToPrepare = [destinationFilePath, destinationThumbnailPath].filter(
+      (value): value is string => Boolean(value)
+    );
+    if (pathsToPrepare.length > 0) {
+      await deleteStorageObjects('media', pathsToPrepare).catch(() => {});
+    }
+
+    const copiedPaths: string[] = [];
+    try {
+      await copyStorageObject('media', sourceFilePath, destinationFilePath);
+    } catch (fileCopyError) {
+      console.error('Vault file copy failed:', fileCopyError);
+      return NextResponse.json(
+        { error: 'Failed to persist photo to vault storage.' },
+        { status: 500 }
+      );
+    }
+    copiedPaths.push(destinationFilePath);
+
+    if (sourceThumbnailPath && destinationThumbnailPath) {
+      try {
+        await copyStorageObject('media', sourceThumbnailPath, destinationThumbnailPath);
+      } catch (thumbnailCopyError) {
+        console.error('Vault thumbnail copy failed:', thumbnailCopyError);
+        await deleteStorageObjects('media', copiedPaths).catch(() => {});
+        return NextResponse.json(
+          { error: 'Failed to persist vault thumbnail.' },
+          { status: 500 }
+        );
+      }
+      copiedPaths.push(destinationThumbnailPath);
+    }
+
+    vaultInsert = {
+      ...vaultInsert,
+      event_id: resolvedEventId,
+      file_path: destinationFilePath,
+      thumbnail_path: destinationThumbnailPath,
+      original_filename: sourceOriginalFilename,
+      file_size_bytes: sourceFileSizeBytes,
+    };
 
     // Add to vault
     const { data: vaultPhoto, error } = await supabase
@@ -360,6 +493,19 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.error('Error adding to vault:', error);
+      const cleanupPaths = [destinationFilePath, destinationThumbnailPath].filter(
+        (value): value is string => Boolean(value)
+      );
+      if (cleanupPaths.length > 0) {
+        await deleteStorageObjects('media', cleanupPaths).catch(() => {});
+      }
+      const rawMessage = String((error as any)?.message || '').toLowerCase();
+      if (rawMessage.includes('vault_storage_limit_exceeded')) {
+        return NextResponse.json(
+          { error: 'Storage limit reached. Please upgrade your plan.' },
+          { status: 403 }
+        );
+      }
       return NextResponse.json(
         { error: 'Failed to add photo to vault' },
         { status: 500 }
@@ -407,6 +553,12 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
+    const { data: existingRows } = await supabase
+      .from('photo_vault')
+      .select('id, file_path, thumbnail_path')
+      .in('id', uniqueIds)
+      .eq('user_id', user.id);
+
     const { error } = await supabase
       .from('photo_vault')
       .delete()
@@ -421,7 +573,28 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ success: true, deletedCount: uniqueIds.length });
+    const vaultPathsToRemove = new Set<string>();
+    for (const row of existingRows || []) {
+      const filePath = normalizeStoragePath(row.file_path);
+      const thumbnailPath = normalizeStoragePath(row.thumbnail_path);
+      if (isUserVaultManagedPath(filePath, user.id) && filePath) {
+        vaultPathsToRemove.add(filePath);
+      }
+      if (isUserVaultManagedPath(thumbnailPath, user.id) && thumbnailPath) {
+        vaultPathsToRemove.add(thumbnailPath);
+      }
+    }
+
+    if (vaultPathsToRemove.size > 0) {
+      await deleteStorageObjects('media', Array.from(vaultPathsToRemove)).catch((removeError) => {
+          console.error('Failed to remove vault-managed storage objects:', removeError);
+      });
+    }
+
+    return NextResponse.json({
+      success: true,
+      deletedCount: (existingRows || []).length,
+    });
   } catch (error) {
     console.error('Vault DELETE error:', error);
     return NextResponse.json(

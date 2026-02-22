@@ -22,6 +22,19 @@ interface EnvConfig {
   AWS_ACCESS_KEY_ID?: string;
   AWS_SECRET_ACCESS_KEY?: string;
   AWS_REGION?: string;
+  
+  // Storage provider switch (supabase | s3)
+  STORAGE_PROVIDER?: string;
+  STORAGE_S3_BUCKET_MEDIA?: string;
+  STORAGE_S3_BUCKET_COVERS?: string;
+  STORAGE_S3_BUCKET_EVENTS?: string;
+  STORAGE_S3_BUCKET_AVATARS?: string;
+  STORAGE_S3_BUCKET_EXPORTS?: string;
+  STORAGE_S3_DEFAULT_BUCKET?: string;
+  STORAGE_S3_BUCKET_PREFIX?: string;
+  STORAGE_S3_ENDPOINT?: string;
+  STORAGE_S3_FORCE_PATH_STYLE?: string;
+  STORAGE_S3_REGION?: string;
 
   // External crawler providers (Drop-In Find Me external search)
   SERPAPI_KEY?: string;
@@ -65,6 +78,17 @@ export function validateEnv(): EnvConfig {
     AWS_ACCESS_KEY_ID: getEnvVar('AWS_ACCESS_KEY_ID'),
     AWS_SECRET_ACCESS_KEY: getEnvVar('AWS_SECRET_ACCESS_KEY'),
     AWS_REGION: getEnvVar('AWS_REGION'),
+    STORAGE_PROVIDER: getEnvVar('STORAGE_PROVIDER'),
+    STORAGE_S3_BUCKET_MEDIA: getEnvVar('STORAGE_S3_BUCKET_MEDIA'),
+    STORAGE_S3_BUCKET_COVERS: getEnvVar('STORAGE_S3_BUCKET_COVERS'),
+    STORAGE_S3_BUCKET_EVENTS: getEnvVar('STORAGE_S3_BUCKET_EVENTS'),
+    STORAGE_S3_BUCKET_AVATARS: getEnvVar('STORAGE_S3_BUCKET_AVATARS'),
+    STORAGE_S3_BUCKET_EXPORTS: getEnvVar('STORAGE_S3_BUCKET_EXPORTS'),
+    STORAGE_S3_DEFAULT_BUCKET: getEnvVar('STORAGE_S3_DEFAULT_BUCKET'),
+    STORAGE_S3_BUCKET_PREFIX: getEnvVar('STORAGE_S3_BUCKET_PREFIX'),
+    STORAGE_S3_ENDPOINT: getEnvVar('STORAGE_S3_ENDPOINT'),
+    STORAGE_S3_FORCE_PATH_STYLE: getEnvVar('STORAGE_S3_FORCE_PATH_STYLE'),
+    STORAGE_S3_REGION: getEnvVar('STORAGE_S3_REGION'),
     SERPAPI_KEY: getEnvVar('SERPAPI_KEY'),
     TAVILY_API_KEY: getEnvVar('TAVILY_API_KEY'),
     EXA_API_KEY: getEnvVar('EXA_API_KEY'),
@@ -86,6 +110,20 @@ export function validateEnv(): EnvConfig {
     
     if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY) {
       warnings.push('AWS credentials not set - face recognition will fail');
+    }
+
+    if ((env.STORAGE_PROVIDER || 'supabase').toLowerCase() === 's3') {
+      const hasMappedBucket =
+        Boolean(env.STORAGE_S3_BUCKET_MEDIA) ||
+        Boolean(env.STORAGE_S3_DEFAULT_BUCKET) ||
+        Boolean(env.STORAGE_S3_BUCKET_PREFIX);
+      if (!hasMappedBucket) {
+        warnings.push('STORAGE_PROVIDER=s3 but no S3 bucket mapping is set - vault storage will fail');
+      }
+      const resolvedRegion = env.AWS_REGION || env.STORAGE_S3_REGION;
+      if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY || !resolvedRegion) {
+        warnings.push('STORAGE_PROVIDER=s3 but AWS credentials/region are missing');
+      }
     }
 
     if (!env.SERPAPI_KEY && !env.TAVILY_API_KEY && !env.EXA_API_KEY && !env.BING_SEARCH_API_KEY) {
