@@ -15,13 +15,24 @@ import {
   type SearchFacesByImageCommandOutput,
 } from '@aws-sdk/client-rekognition';
 
+const resolvedRekognitionRegion =
+  process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1';
+
+const staticCredentials =
+  process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
+    ? {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+        ...(process.env.AWS_SESSION_TOKEN
+          ? { sessionToken: process.env.AWS_SESSION_TOKEN }
+          : {}),
+      }
+    : undefined;
+
 // Initialize Rekognition client
 export const rekognitionClient = new RekognitionClient({
-  region: process.env.AWS_REGION || 'us-east-1',
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-  },
+  region: resolvedRekognitionRegion,
+  ...(staticCredentials ? { credentials: staticCredentials } : {}),
 });
 
 // Collection IDs
@@ -545,10 +556,11 @@ function calculateVariance(values: number[]): number {
  * Check if AWS credentials are configured
  */
 export function isRekognitionConfigured(): boolean {
+  const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
   return !!(
     process.env.AWS_ACCESS_KEY_ID &&
     process.env.AWS_SECRET_ACCESS_KEY &&
-    process.env.AWS_REGION
+    region
   );
 }
 
@@ -558,6 +570,6 @@ export function isRekognitionConfigured(): boolean {
 export function isFaceLivenessAvailable(): boolean {
   // Face Liveness requires specific regions and setup
   const supportedRegions = ['us-east-1', 'us-west-2', 'eu-west-1', 'ap-northeast-1'];
-  const currentRegion = process.env.AWS_REGION || 'us-east-1';
+  const currentRegion = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1';
   return supportedRegions.includes(currentRegion);
 }

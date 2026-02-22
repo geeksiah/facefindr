@@ -8,7 +8,6 @@ import {
   rekognitionClient,
   ATTENDEE_COLLECTION_ID,
   LEGACY_ATTENDEE_COLLECTION_ID,
-  searchEventCollectionWithFallback,
 } from '@/lib/aws/rekognition';
 import { ensureAttendeeCollection } from '@/lib/aws/rekognition-drop-in';
 import { resolveAttendeeProfileByUser } from '@/lib/profiles/ids';
@@ -37,7 +36,8 @@ function mapRekognitionError(error: any): { status: number; error: string; code:
   if (name === 'UnrecognizedClientException' || name === 'InvalidSignatureException') {
     return {
       status: 500,
-      error: 'Face recognition credentials are invalid for AWS Rekognition.',
+      error:
+        'AWS Rekognition credentials or region are invalid. Verify AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION (or AWS_DEFAULT_REGION), and AWS_SESSION_TOKEN for temporary credentials.',
       code: 'REKOGNITION_AUTH_FAILED',
     };
   }
@@ -407,44 +407,11 @@ export async function POST(request: NextRequest) {
       console.warn('Could not update backfill status:', err);
     }
 
-    // Search for matching photos across all events
-    let matchCount = 0;
-    try {
-      // Get all event collections
-      const { data: events } = await serviceClient
-        .from('events')
-        .select('id')
-        .eq('face_recognition_enabled', true);
-
-      if (events && events.length > 0) {
-        // For each event, search for matches
-        for (const event of events) {
-          try {
-            const { response: searchResult } = await searchEventCollectionWithFallback(
-              event.id,
-              imageBuffer,
-              100,
-              90
-            );
-            if (searchResult.FaceMatches) {
-              matchCount += searchResult.FaceMatches.length;
-            }
-          } catch {
-            // Collection might not exist for this event
-            continue;
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error searching for matches:', error);
-      // Don't fail the registration if search fails
-    }
-
     return NextResponse.json({
       success: true,
       faceId: rekognitionFaceId,
       confidence: faceRecord.Face?.Confidence,
-      matchCount,
+      matchCount: 0,
     });
 
   } catch (error) {

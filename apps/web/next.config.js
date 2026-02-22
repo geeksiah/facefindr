@@ -44,7 +44,8 @@ const nextConfig = {
 
   async redirects() {
     return [
-      { source: '/dashboard', destination: '/dashboard/events', permanent: false },
+      { source: '/events', destination: '/dashboard/events', permanent: false },
+      { source: '/events/:path*', destination: '/dashboard/events/:path*', permanent: false },
       { source: '/p/:slug/followers', destination: '/c/:slug/followers', permanent: false },
       { source: '/p/:slug', destination: '/c/:slug', permanent: false },
     ];
