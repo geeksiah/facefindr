@@ -33,6 +33,12 @@ type EventMediaRow = {
   watermarked_path?: string | null;
 };
 
+type ExistingMatchRow = {
+  event_id: string;
+  media_id: string;
+  similarity?: number | null;
+};
+
 type NormalizedMatch = {
   id: string;
   mediaId: string;
@@ -51,17 +57,12 @@ type EventMediaStats = {
   latestMediaCreatedAt: string | null;
 };
 
-type AttendeeEventScanStateRow = {
-  attendee_id: string;
-  event_id: string;
-  last_scan_at: string;
-  last_result_match_count: number;
-  last_media_count_at_scan: number;
-  last_latest_media_created_at_at_scan: string | null;
-};
-
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
 const SIGNED_URL_CHUNK_SIZE = 100;
+const parsedThreshold = Number(process.env.REKOGNITION_EVENT_MATCH_THRESHOLD || 80);
+const FACE_MATCH_THRESHOLD = Number.isFinite(parsedThreshold)
+  ? Math.min(99, Math.max(1, parsedThreshold))
+  : 80;
 
 function cleanStoragePath(path?: string | null): string | null {
   if (!path) return null;
@@ -71,6 +72,15 @@ function cleanStoragePath(path?: string | null): string | null {
 function decodeBase64Image(raw: string): Buffer {
   const base64 = raw.includes('base64,') ? raw.split('base64,')[1] : raw;
   return Buffer.from(base64, 'base64');
+}
+
+function isNoFaceDetectedError(error: any): boolean {
+  const name = String(error?.name || '');
+  const message = String(error?.message || '').toLowerCase();
+  return (
+    name === 'InvalidParameterException' &&
+    (message.includes('no faces') || message.includes('no face'))
+  );
 }
 
 async function createSignedUrlMap(
@@ -139,56 +149,6 @@ async function getEventMediaStats(
     mediaCount: count || 0,
     latestMediaCreatedAt: latestRows?.[0]?.created_at || null,
   };
-}
-
-function hasNewMediaSinceNoMatchScan(
-  scanState: AttendeeEventScanStateRow | null,
-  mediaStats: EventMediaStats
-): boolean {
-  if (!scanState) return true;
-  if ((scanState.last_result_match_count || 0) > 0) return true;
-
-  if (mediaStats.mediaCount > (scanState.last_media_count_at_scan || 0)) {
-    return true;
-  }
-
-  const previousLatest = scanState.last_latest_media_created_at_at_scan;
-  if (!previousLatest) {
-    return Boolean(mediaStats.latestMediaCreatedAt);
-  }
-
-  if (!mediaStats.latestMediaCreatedAt) {
-    return false;
-  }
-
-  return (
-    Date.parse(mediaStats.latestMediaCreatedAt) >
-    Date.parse(previousLatest)
-  );
-}
-
-async function getAttendeeEventScanState(
-  serviceClient: any,
-  attendeeId: string,
-  eventId: string
-): Promise<AttendeeEventScanStateRow | null> {
-  const { data, error } = await serviceClient
-    .from('attendee_event_scan_state')
-    .select(
-      'attendee_id, event_id, last_scan_at, last_result_match_count, last_media_count_at_scan, last_latest_media_created_at_at_scan'
-    )
-    .eq('attendee_id', attendeeId)
-    .eq('event_id', eventId)
-    .maybeSingle();
-
-  if (error) {
-    if (error.code !== '42P01') {
-      console.error('Failed to read attendee scan state:', error);
-    }
-    return null;
-  }
-
-  return (data as AttendeeEventScanStateRow | null) || null;
 }
 
 async function upsertAttendeeEventScanState(
@@ -347,8 +307,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Only attendees can search for face matches' }, { status: 403 });
     }
 
-    let imageBuffer: Buffer;
+    let imageBuffer: Buffer | null = null;
+    let additionalImageBuffers: Buffer[] = [];
     let eventId: string | null = null;
+    let allowProfileOnlySearch = false;
 
     // Check content type to determine how to parse the request
     const contentType = request.headers.get('content-type') || '';
@@ -379,13 +341,29 @@ export async function POST(request: NextRequest) {
       const body = await request.json();
       const { image } = body;
       eventId = body.eventId || null;
+      allowProfileOnlySearch =
+        body?.useFaceProfile === true || body?.searchMode === 'profile_only';
 
-      if (!image) {
+      if (!image && !allowProfileOnlySearch) {
         return NextResponse.json({ error: 'Image data is required' }, { status: 400 });
       }
 
-      // Convert base64 to buffer
-      imageBuffer = decodeBase64Image(String(image));
+      if (image) {
+        imageBuffer = decodeBase64Image(String(image));
+      }
+      additionalImageBuffers = Array.isArray(body.additionalImages)
+        ? body.additionalImages
+            .map((entry: any) => {
+              const raw = typeof entry === 'string' ? entry : entry?.base64;
+              if (!raw || typeof raw !== 'string') return null;
+              try {
+                return decodeBase64Image(raw);
+              } catch {
+                return null;
+              }
+            })
+            .filter((value: Buffer | null): value is Buffer => Boolean(value))
+        : [];
     }
 
     const serviceClient = createServiceClient();
@@ -397,23 +375,8 @@ export async function POST(request: NextRequest) {
     }
 
     if (eventId && events.length > 0) {
-      const [scanState, mediaStats] = await Promise.all([
-        getAttendeeEventScanState(serviceClient, user.id, eventId),
-        getEventMediaStats(serviceClient, eventId),
-      ]);
+      const mediaStats = await getEventMediaStats(serviceClient, eventId);
       scopedEventMediaStats = mediaStats;
-
-      if (!hasNewMediaSinceNoMatchScan(scanState, mediaStats)) {
-        return NextResponse.json(
-          {
-            error:
-              'No new photos have been uploaded since your last scan. Check back after new uploads.',
-            code: 'scan_locked_no_new_uploads',
-            canScan: false,
-          },
-          { status: 409 }
-        );
-      }
     }
 
     if (!events.length) {
@@ -431,37 +394,74 @@ export async function POST(request: NextRequest) {
     const similarityByEventMedia = new Map<string, number>();
     const mediaIdsByEvent = new Map<string, Set<string>>();
 
-    for (const event of events) {
-      try {
-        const { response: searchResult } = await searchEventCollectionWithFallback(
-          event.id,
-          imageBuffer,
-          100,
-          88
-        );
+    const recordFaceMatches = (resolvedEventId: string, faceMatches: any[]) => {
+      if (!faceMatches.length) return;
 
-        const faceMatches = searchResult.FaceMatches || [];
-        if (!faceMatches.length) continue;
+      for (const faceMatch of faceMatches) {
+        const mediaId = faceMatch.Face?.ExternalImageId;
+        if (!mediaId) continue;
 
-        for (const faceMatch of faceMatches) {
-          const mediaId = faceMatch.Face?.ExternalImageId;
-          if (!mediaId) continue;
-
-          const similarity = Number(faceMatch.Similarity || 0);
-          const key = `${event.id}:${mediaId}`;
-          const existing = similarityByEventMedia.get(key) || 0;
-          if (similarity > existing) {
-            similarityByEventMedia.set(key, similarity);
-          }
-
-          if (!mediaIdsByEvent.has(event.id)) {
-            mediaIdsByEvent.set(event.id, new Set<string>());
-          }
-          mediaIdsByEvent.get(event.id)!.add(mediaId);
+        const similarity = Number(faceMatch.Similarity || 0);
+        const key = `${resolvedEventId}:${mediaId}`;
+        const existing = similarityByEventMedia.get(key) || 0;
+        if (similarity > existing) {
+          similarityByEventMedia.set(key, similarity);
         }
-      } catch (error: any) {
-        if (error?.name !== 'ResourceNotFoundException') {
-          console.error('Face search failed for event', event.id, error);
+
+        if (!mediaIdsByEvent.has(resolvedEventId)) {
+          mediaIdsByEvent.set(resolvedEventId, new Set<string>());
+        }
+        mediaIdsByEvent.get(resolvedEventId)!.add(mediaId);
+      }
+    };
+
+    const searchBuffers = imageBuffer ? [imageBuffer, ...additionalImageBuffers] : [];
+
+    if (searchBuffers.length > 0) {
+      for (const event of events) {
+        for (const searchBuffer of searchBuffers) {
+          try {
+            const { response: searchResult } = await searchEventCollectionWithFallback(
+              event.id,
+              searchBuffer,
+              100,
+              FACE_MATCH_THRESHOLD
+            );
+            const faceMatches = searchResult.FaceMatches || [];
+            recordFaceMatches(event.id, faceMatches);
+          } catch (error: any) {
+            if (error?.name === 'ResourceNotFoundException' || isNoFaceDetectedError(error)) {
+              continue;
+            }
+            console.error('Face search failed for event', event.id, error);
+          }
+        }
+      }
+    }
+
+    // Selfie scan should augment the existing face profile reference, not replace it.
+    // Merge already-saved attendee matches for the same scoped events.
+    const scopedEventIds = events.map((event) => event.id);
+    if (scopedEventIds.length > 0) {
+      const { data: existingMatches } = await serviceClient
+        .from('photo_drop_matches')
+        .select('event_id, media_id, similarity')
+        .eq('attendee_id', user.id)
+        .in('event_id', scopedEventIds);
+
+      for (const existingMatch of (existingMatches || []) as ExistingMatchRow[]) {
+        if (!existingMatch.event_id || !existingMatch.media_id) continue;
+
+        if (!mediaIdsByEvent.has(existingMatch.event_id)) {
+          mediaIdsByEvent.set(existingMatch.event_id, new Set<string>());
+        }
+        mediaIdsByEvent.get(existingMatch.event_id)!.add(existingMatch.media_id);
+
+        const key = `${existingMatch.event_id}:${existingMatch.media_id}`;
+        const existingSimilarity = similarityByEventMedia.get(key) || 0;
+        const persistedSimilarity = Number(existingMatch.similarity || 100);
+        if (persistedSimilarity > existingSimilarity) {
+          similarityByEventMedia.set(key, persistedSimilarity);
         }
       }
     }
@@ -593,6 +593,7 @@ export async function POST(request: NextRequest) {
       matches,
       groupedMatches,
       eventsSearched: events.length,
+      searchMode: searchBuffers.length > 0 ? 'selfie_plus_profile' : 'profile_only',
     });
 
   } catch (error) {

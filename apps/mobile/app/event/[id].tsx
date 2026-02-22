@@ -408,6 +408,7 @@ function AttendeeEventView({
   event,
   photos,
   selectedPhotos,
+  hasFaceProfile,
   isRefreshing,
   onRefresh,
   onShare,
@@ -419,6 +420,7 @@ function AttendeeEventView({
   event: Event;
   photos: Photo[];
   selectedPhotos: Set<string>;
+  hasFaceProfile: boolean;
   isRefreshing: boolean;
   onRefresh: () => void;
   onShare: () => void;
@@ -524,7 +526,9 @@ function AttendeeEventView({
               <View style={attendeeStyles.ctaTextContainer}>
                 <Text style={attendeeStyles.ctaTitle}>Find Your Photos</Text>
                 <Text style={attendeeStyles.ctaSubtitle}>
-                  Scan your face to discover all photos of you
+                  {hasFaceProfile
+                    ? 'Use your saved face profile or take a new selfie'
+                    : 'Scan your face to discover all photos of you'}
                 </Text>
               </View>
               <ChevronRight size={24} color="rgba(255,255,255,0.7)" />
@@ -637,6 +641,7 @@ export default function EventDetailScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isOwnEvent, setIsOwnEvent] = useState(false);
+  const [hasFaceProfile, setHasFaceProfile] = useState(false);
   const [eventStats, setEventStats] = useState<EventStats>({
     attendeeCount: 0,
     revenue: 0,
@@ -744,12 +749,21 @@ export default function EventDetailScreen() {
       // Check owned photos for attendees
       let ownedIds = new Set<string>();
       if (userType === 'attendee' && profile?.id) {
-        const { data: ownedData } = await supabase
-          .from('entitlements')
-          .select('media_id')
-          .eq('attendee_id', profile.id)
-          .in('media_id', photosData?.map((p: any) => p.id) || []);
+        const [{ data: ownedData }, { count: faceProfileCount }] = await Promise.all([
+          supabase
+            .from('entitlements')
+            .select('media_id')
+            .eq('attendee_id', profile.id)
+            .in('media_id', photosData?.map((p: any) => p.id) || []),
+          supabase
+            .from('attendee_face_profiles')
+            .select('id', { count: 'exact', head: true })
+            .eq('attendee_id', profile.id),
+        ]);
         ownedIds = new Set(ownedData?.map((e: any) => e.media_id) || []);
+        setHasFaceProfile((faceProfileCount || 0) > 0);
+      } else {
+        setHasFaceProfile(false);
       }
 
       if (photosData) {
@@ -868,6 +882,42 @@ export default function EventDetailScreen() {
     }
   };
 
+  const handleFindMyPhotos = () => {
+    if (!id) return;
+
+    const navigateWithSelfie = () => {
+      router.push({ pathname: '/face-scan', params: { eventId: id } } as any);
+    };
+
+    if (!hasFaceProfile) {
+      navigateWithSelfie();
+      return;
+    }
+
+    Alert.alert(
+      'Find Your Photos',
+      'Choose how you want to search this event.',
+      [
+        {
+          text: 'Use Face Profile',
+          onPress: () =>
+            router.push({
+              pathname: '/face-scan',
+              params: { eventId: id, useFaceProfile: 'true' },
+            } as any),
+        },
+        {
+          text: 'Take New Selfie',
+          onPress: navigateWithSelfie,
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+      ]
+    );
+  };
+
   if (isLoading || !event) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
@@ -901,10 +951,11 @@ export default function EventDetailScreen() {
       event={event}
       photos={photos}
       selectedPhotos={selectedPhotos}
+      hasFaceProfile={hasFaceProfile}
       isRefreshing={isRefreshing}
       onRefresh={handleRefresh}
       onShare={handleShare}
-      onFindMyPhotos={() => router.push({ pathname: '/face-scan', params: { eventId: id } })}
+      onFindMyPhotos={handleFindMyPhotos}
       onPhotoPress={handlePhotoPress}
       onToggleSelection={(photoId) => {
         setSelectedPhotos((prev) => {

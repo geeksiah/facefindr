@@ -16,7 +16,7 @@ import {
   StatusBar,
   Dimensions,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
@@ -34,6 +34,7 @@ import { Camera } from 'expo-camera';
 
 // Button component replaced with custom TouchableOpacity for better control
 import { useAuthStore } from '@/stores/auth-store';
+import { getApiBaseUrl } from '@/lib/api-base';
 import { supabase } from '@/lib/supabase';
 import { formatDateForDisplay } from '@/lib/date';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
@@ -55,8 +56,10 @@ interface Event {
 
 export default function UploadScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ eventId?: string }>();
   const insets = useSafeAreaInsets();
-  const { profile } = useAuthStore();
+  const { profile, session } = useAuthStore();
+  const requestedEventId = Array.isArray(params.eventId) ? params.eventId[0] : params.eventId;
   
   const [events, setEvents] = useState<Event[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
@@ -67,30 +70,93 @@ export default function UploadScreen() {
 
   useEffect(() => {
     const loadEvents = async () => {
-      const { data } = await supabase
-        .from('events')
-        .select('id, name, event_date')
-        .eq('photographer_id', profile?.id)
-        .in('status', ['active', 'draft'])
-        .order('created_at', { ascending: false });
+      const { data: authData } = await supabase.auth.getUser();
+      const creatorId = profile?.id || authData.user?.id;
+      if (!creatorId) {
+        setEvents([]);
+        setSelectedEvent(null);
+        return;
+      }
 
-      if (data) {
-        setEvents(data.map((e: any) => ({
-          id: e.id,
-          name: e.name,
-          eventDate: e.event_date,
-        })));
-        if (data.length > 0) {
-          setSelectedEvent({
-            id: data[0].id,
-            name: data[0].name,
-            eventDate: data[0].event_date,
-          });
+      const [{ data: ownedEvents }, { data: collaboratorRows }] = await Promise.all([
+        supabase
+          .from('events')
+          .select('id, name, event_date')
+          .eq('photographer_id', creatorId)
+          .in('status', ['active', 'draft', 'closed'])
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('event_collaborators')
+          .select('event_id')
+          .eq('photographer_id', creatorId)
+          .eq('status', 'active'),
+      ]);
+
+      const collaboratorEventIds = (collaboratorRows || []).map((row: any) => row.event_id).filter(Boolean);
+      let collaboratorEvents: any[] = [];
+      if (collaboratorEventIds.length > 0) {
+        const { data } = await supabase
+          .from('events')
+          .select('id, name, event_date')
+          .in('id', collaboratorEventIds)
+          .in('status', ['active', 'draft', 'closed'])
+          .order('created_at', { ascending: false });
+        collaboratorEvents = data || [];
+      }
+
+      const eventMap = new Map<string, any>();
+      for (const event of ownedEvents || []) {
+        eventMap.set(event.id, event);
+      }
+      for (const event of collaboratorEvents) {
+        if (!eventMap.has(event.id)) {
+          eventMap.set(event.id, event);
         }
       }
+
+      const combinedEvents = Array.from(eventMap.values()).map((e: any) => ({
+        id: e.id,
+        name: e.name,
+        eventDate: e.event_date,
+      }));
+
+      setEvents(combinedEvents);
+      setSelectedEvent((prev) => {
+        if (requestedEventId) {
+          const requestedEvent = combinedEvents.find((event) => event.id === requestedEventId);
+          if (requestedEvent) {
+            return requestedEvent;
+          }
+        }
+        if (prev && eventMap.has(prev.id)) {
+          return prev;
+        }
+        return combinedEvents[0] || null;
+      });
     };
     loadEvents();
-  }, []);
+  }, [profile?.id, requestedEventId]);
+
+  const triggerMediaFaceProcessing = async (mediaId: string, eventId: string) => {
+    try {
+      const apiUrl = getApiBaseUrl();
+      const response = await fetch(`${apiUrl}/api/media/process`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({ mediaId, eventId }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || payload.message || 'Failed to trigger face processing');
+      }
+    } catch (error) {
+      console.warn('Failed to trigger media face processing:', { mediaId, eventId, error });
+    }
+  };
 
   const handlePickImages = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -181,6 +247,8 @@ export default function UploadScreen() {
     setUploadedCount(0);
 
     try {
+      let successfulUploads = 0;
+
       for (let i = 0; i < selectedImages.length; i++) {
         const image = selectedImages[i];
         
@@ -201,15 +269,19 @@ export default function UploadScreen() {
           continue;
         }
 
-        const { error: insertError } = await supabase.from('media').insert({
-          event_id: selectedEvent.id,
-          uploader_id: profile?.id,
-          storage_path: fileName,
-          original_filename: image.fileName,
-          media_type: 'photo',
-          mime_type: 'image/jpeg',
-          file_size: image.fileSize,
-        });
+        const { data: insertedMedia, error: insertError } = await supabase
+          .from('media')
+          .insert({
+            event_id: selectedEvent.id,
+            uploader_id: profile?.id,
+            storage_path: fileName,
+            original_filename: image.fileName,
+            media_type: 'photo',
+            mime_type: 'image/jpeg',
+            file_size: image.fileSize,
+          })
+          .select('id')
+          .single();
 
         if (insertError) {
           console.error('Database insert error:', insertError);
@@ -217,13 +289,23 @@ export default function UploadScreen() {
           continue;
         }
 
+        successfulUploads += 1;
+        if (insertedMedia?.id) {
+          void triggerMediaFaceProcessing(insertedMedia.id, selectedEvent.id);
+        }
+
         setUploadedCount(i + 1);
         setUploadProgress(((i + 1) / selectedImages.length) * 100);
       }
 
+      if (successfulUploads === 0) {
+        Alert.alert('Upload Failed', 'No photos were uploaded. Please try again.');
+        return;
+      }
+
       Alert.alert(
         'Upload Complete',
-        `Successfully uploaded ${selectedImages.length} photos to ${selectedEvent.name}.`,
+        `Successfully uploaded ${successfulUploads} of ${selectedImages.length} photos to ${selectedEvent.name}. Face indexing has started.`,
         [
           {
             text: 'View Event',

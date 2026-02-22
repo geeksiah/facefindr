@@ -11,6 +11,18 @@ const publicRoutes = ['/login', '/api/auth/login'];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Allow static assets without requiring admin auth (logos, fonts, etc.)
+  const isStaticAssetRequest =
+    pathname.startsWith('/_next/') ||
+    pathname.startsWith('/assets/') ||
+    pathname === '/favicon.ico' ||
+    pathname === '/robots.txt' ||
+    pathname === '/sitemap.xml' ||
+    /\.[a-zA-Z0-9]+$/.test(pathname);
+  if (isStaticAssetRequest) {
+    return NextResponse.next();
+  }
   
   // Allow public routes
   if (publicRoutes.some(route => pathname.startsWith(route))) {
@@ -55,6 +67,6 @@ export const config = {
      * - favicon.ico (favicon file)
      * - public folder
      */
-    '/((?!_next/static|_next/image|favicon.ico|public).*)',
+    '/((?!_next/static|_next/image|favicon.ico).*)',
   ],
 };

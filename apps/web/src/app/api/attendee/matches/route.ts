@@ -48,8 +48,10 @@ async function createSignedUrlMap(serviceClient: any, paths: string[]) {
 // GET ATTENDEE MATCHED PHOTOS
 // ============================================
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const eventIdFilter = searchParams.get('eventId');
     const supabase = createClient();
     const {
       data: { user },
@@ -77,9 +79,10 @@ export async function GET() {
 
     const hasScanned = (embeddings || []).length > 0 || (faceProfiles || []).length > 0;
 
-    const { data: matches } = await serviceClient
+    let matchesQuery = serviceClient
       .from('photo_drop_matches')
-      .select(`
+      .select(
+        `
         event_id,
         matched_at,
         media:media_id (
@@ -100,9 +103,16 @@ export async function GET() {
             display_name
           )
         )
-      `)
+      `
+      )
       .eq('attendee_id', user.id)
       .order('matched_at', { ascending: false });
+
+    if (eventIdFilter) {
+      matchesQuery = matchesQuery.eq('event_id', eventIdFilter);
+    }
+
+    const { data: matches } = await matchesQuery;
 
     const mediaIds = (matches || []).map((match: any) => match.media?.id).filter(Boolean);
     const eventIds = Array.from(new Set((matches || []).map((match: any) => match.event_id).filter(Boolean)));

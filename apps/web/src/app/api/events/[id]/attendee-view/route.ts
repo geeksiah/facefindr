@@ -170,10 +170,10 @@ function computeScanPolicy(
   }
 
   return {
-    canScan: false,
+    canScan: true,
     waitingForNewUploads: true,
     message:
-      "No new photos are available yet since your last scan. We'll notify you when fresh uploads are ready to scan.",
+      'No new uploads detected since your last scan, but you can still rescan now (useful with a fresh selfie).',
     lastScanAt,
     newUploadsSinceLastScan: 0,
   };

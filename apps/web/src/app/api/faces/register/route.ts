@@ -341,54 +341,61 @@ export async function POST(request: NextRequest) {
     // If we have additional images from guided scan, index them too
     // This improves matching accuracy by having multiple angles
     const additionalImages = images.slice(1);
-    for (let i = 0; i < additionalImages.length; i++) {
-      try {
-        const additionalBuffer = Buffer.from(additionalImages[i], 'base64');
+    await Promise.allSettled(
+      additionalImages.map(async (additionalImage, index) => {
+        const additionalBuffer = Buffer.from(additionalImage, 'base64');
         const additionalBytes = new Uint8Array(additionalBuffer);
         const additionalCommand = new IndexFacesCommand({
           CollectionId: attendeeCollectionId,
           Image: { Bytes: additionalBytes },
-          ExternalImageId: `${attendeeId}_angle_${i + 1}`, // Index in global collection for drop-in
+          ExternalImageId: `${attendeeId}_angle_${index + 1}`, // Index in global collection for drop-in
           MaxFaces: 1,
           QualityFilter: 'MEDIUM', // Less strict for angled faces
           DetectionAttributes: ['DEFAULT'],
         });
 
         const additionalResult = await rekognitionClient.send(additionalCommand);
-        
-        if (additionalResult.FaceRecords && additionalResult.FaceRecords.length > 0) {
-          // Store additional face profile (non-primary)
-          await serviceClient
+        if (!additionalResult.FaceRecords || additionalResult.FaceRecords.length === 0) {
+          return;
+        }
+
+        const additionalFaceId = additionalResult.FaceRecords[0].Face?.FaceId || '';
+        const additionalConfidence = additionalResult.FaceRecords[0].Face?.Confidence || 0;
+        await Promise.all([
+          serviceClient
             .from('attendee_face_profiles')
             .insert({
               attendee_id: attendeeId,
-              rekognition_face_id: additionalResult.FaceRecords[0].Face?.FaceId || '',
+              rekognition_face_id: additionalFaceId,
               is_primary: false,
               source: 'initial_scan',
-              confidence: additionalResult.FaceRecords[0].Face?.Confidence || 0,
-            });
-
-          await serviceClient
+              confidence: additionalConfidence,
+            }),
+          serviceClient
             .from('user_face_embeddings')
             .insert({
               user_id: user.id,
               user_type: 'attendee',
-              rekognition_face_id: additionalResult.FaceRecords[0].Face?.FaceId || '',
+              rekognition_face_id: additionalFaceId,
               source: 'initial_scan',
-              confidence: additionalResult.FaceRecords[0].Face?.Confidence || 0,
+              confidence: additionalConfidence,
               is_primary: false,
               is_active: true,
               metadata: {
                 capture_mode: 'guided_5_pose',
-                pose_index: i + 1,
+                pose_index: index + 1,
               },
-            });
+            }),
+        ]);
+      })
+    ).then((results) => {
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          // Continue even if additional images fail
+          console.warn(`Failed to index additional face angle ${index + 1}:`, result.reason);
         }
-      } catch (err) {
-        // Continue even if additional images fail
-        console.warn(`Failed to index additional face angle ${i + 1}:`, err);
-      }
-    }
+      });
+    });
 
     // Mark as indexed in backfill status (if table exists)
     try {

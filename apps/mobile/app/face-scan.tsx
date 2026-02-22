@@ -26,7 +26,6 @@ import * as Asset from 'expo-asset';
 
 import { Button, Card } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
-import { supabase } from '@/lib/supabase';
 import { buttonPress, faceDetected, matchFound, noMatch, error as hapticError, selection } from '@/lib/haptics';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 import { getApiBaseUrl } from '@/lib/api-base';
@@ -184,9 +183,12 @@ type ScanStep = 'consent' | 'capture' | 'processing' | 'results' | 'error';
 
 export default function FaceScanScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ imageUri?: string; eventId?: string }>();
+  const params = useLocalSearchParams<{ imageUri?: string; eventId?: string; useFaceProfile?: string }>();
   const { session } = useAuthStore();
   const cameraRef = useRef<CameraView>(null);
+  const normalizedEventId = Array.isArray(params.eventId) ? params.eventId[0] : params.eventId;
+  const useFaceProfile =
+    (Array.isArray(params.useFaceProfile) ? params.useFaceProfile[0] : params.useFaceProfile) === 'true';
   
   const [permission, requestPermission] = useCameraPermissions();
   const [step, setStep] = useState<ScanStep>('consent');
@@ -211,9 +213,15 @@ export default function FaceScanScreen() {
   useEffect(() => {
     if (params.imageUri) {
       setStep('processing');
-      processSingleImage(params.imageUri);
+      void processSingleImage(params.imageUri);
+      return;
     }
-  }, [params.imageUri]);
+
+    if (useFaceProfile) {
+      setStep('processing');
+      void processUsingFaceProfile(normalizedEventId || null);
+    }
+  }, [normalizedEventId, params.imageUri, useFaceProfile]);
 
   const handleConsent = async () => {
     await buttonPress();
@@ -405,6 +413,70 @@ export default function FaceScanScreen() {
     };
   }, [analyzeCurrentFrame, autoCaptureEnabled, permission?.granted, step, stopAutoCaptureLoop]);
 
+  const navigateToSelfieScan = () => {
+    if (normalizedEventId) {
+      router.replace({ pathname: '/face-scan', params: { eventId: normalizedEventId } } as any);
+      return;
+    }
+    router.replace('/face-scan');
+  };
+
+  const processUsingFaceProfile = async (eventId: string | null) => {
+    setIsProcessing(true);
+    setErrorMessage(null);
+
+    try {
+      const apiUrl = getApiBaseUrl();
+      const response = await fetch(`${apiUrl}/api/faces/search`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({
+          eventId,
+          useFaceProfile: true,
+          searchMode: 'profile_only',
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || data.message || 'Failed to search with your face profile');
+      }
+
+      const profileMatches = Array.isArray(data.matches)
+        ? data.matches.map((match: any) => ({
+            id: match.mediaId || match.id,
+            thumbnailUrl: match.thumbnailUrl || match.thumbnail_path,
+            eventName: match.eventName || 'Event',
+            similarity: Number(match.similarity || 100),
+            price: Number(match.price || 0),
+          }))
+        : [];
+
+      if (profileMatches.length > 0) {
+        await matchFound();
+        setMatchedPhotos(profileMatches);
+        setStep('results');
+        return;
+      }
+
+      await noMatch();
+      setErrorMessage(
+        'No saved face-profile matches found yet. Take a new selfie to improve matching for fresh uploads.'
+      );
+      setStep('error');
+    } catch (err: any) {
+      console.error('Face-profile match loading error:', err);
+      await hapticError();
+      setErrorMessage(err.message || 'Could not search with your face profile.');
+      setStep('error');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const processSingleImage = async (imageUri: string) => {
     setIsProcessing(true);
     setErrorMessage(null);
@@ -424,13 +496,13 @@ export default function FaceScanScreen() {
         },
         body: JSON.stringify({
           image: base64,
-          eventId: params.eventId || null,
+          eventId: normalizedEventId || null,
         }),
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Face matching failed');
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || error.message || 'Face matching failed');
       }
 
       const data = await response.json();
@@ -466,13 +538,13 @@ export default function FaceScanScreen() {
           additionalImages: captures
             .filter(c => c.id !== 'front')
             .map(c => ({ position: c.id, base64: c.base64 })),
-          eventId: params.eventId || null,
+          eventId: normalizedEventId || null,
         }),
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Face matching failed');
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || error.message || 'Face matching failed');
       }
 
       const data = await response.json();
@@ -519,6 +591,17 @@ export default function FaceScanScreen() {
     setAutoCaptureEnabled(true);
     setAutoStatus('Auto-capture active');
     setStep('capture');
+  };
+
+  const retrySearch = () => {
+    if (useFaceProfile) {
+      setMatchedPhotos([]);
+      setErrorMessage(null);
+      setStep('processing');
+      void processUsingFaceProfile(normalizedEventId || null);
+      return;
+    }
+    retryCapture();
   };
 
   const toggleCameraFacing = async () => {
@@ -794,9 +877,13 @@ export default function FaceScanScreen() {
             <Image source={{ uri: capturedPositions[0].uri }} style={styles.processingImage} />
           )}
           <ActivityIndicator size="large" color={colors.accent} style={{ marginTop: spacing.lg }} />
-          <Text style={styles.processingTitle}>Searching for your photos...</Text>
+          <Text style={styles.processingTitle}>
+            {useFaceProfile ? 'Loading saved face-profile matches...' : 'Searching for your photos...'}
+          </Text>
           <Text style={styles.processingText}>
-            Analyzing {capturedPositions.length > 0 ? `${capturedPositions.length} captures` : 'your photo'}
+            {useFaceProfile
+              ? 'Using your saved face profile for this event'
+              : `Analyzing ${capturedPositions.length > 0 ? `${capturedPositions.length} captures` : 'your photo'}`}
           </Text>
           <Pressable
             style={({ pressed }) => [
@@ -833,11 +920,16 @@ export default function FaceScanScreen() {
           </View>
           <Text style={styles.errorTitle}>No Match Found</Text>
           <Text style={styles.errorText}>{errorMessage}</Text>
-          <Button onPress={retryCapture} fullWidth style={{ marginTop: spacing.lg }}>
-            Try Again
+          <Button onPress={retrySearch} fullWidth style={{ marginTop: spacing.lg }}>
+            {useFaceProfile ? 'Retry with Face Profile' : 'Try Again'}
           </Button>
-          <Button variant="ghost" onPress={() => router.back()} fullWidth style={{ marginTop: spacing.sm }}>
-            Go Back
+          <Button
+            variant="ghost"
+            onPress={useFaceProfile ? navigateToSelfieScan : () => router.back()}
+            fullWidth
+            style={{ marginTop: spacing.sm }}
+          >
+            {useFaceProfile ? 'Take New Selfie' : 'Go Back'}
           </Button>
         </View>
       </SafeAreaView>
@@ -864,10 +956,10 @@ export default function FaceScanScreen() {
             Found {matchedPhotos.length} photo{matchedPhotos.length !== 1 ? 's' : ''}
           </Text>
           <Pressable 
-            onPress={retryCapture}
+            onPress={useFaceProfile ? navigateToSelfieScan : retryCapture}
             style={({ pressed }) => pressed && styles.pressed}
           >
-            <Text style={styles.scanAgain}>Scan Again</Text>
+            <Text style={styles.scanAgain}>{useFaceProfile ? 'Take New Selfie' : 'Scan Again'}</Text>
           </Pressable>
         </View>
 
