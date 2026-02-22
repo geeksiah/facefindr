@@ -17,10 +17,16 @@ import { useSSEWithPolling } from '@/hooks';
 interface Notification {
   id: string;
   templateCode: string;
+  category?: string;
+  title?: string | null;
   subject: string | null;
   body: string;
   createdAt: string;
   readAt: string | null;
+  actionUrl?: string | null;
+  details?: Record<string, unknown>;
+  dedupeKey?: string | null;
+  actor?: { id: string } | null;
   metadata?: Record<string, unknown>;
 }
 
@@ -108,12 +114,19 @@ export function NotificationBell() {
       id: string;
       template_code?: string;
       templateCode?: string;
+      category?: string;
+      title?: string | null;
       subject: string | null;
       body: string;
       created_at?: string;
       createdAt?: string;
       read_at?: string | null;
       readAt?: string | null;
+      action_url?: string | null;
+      actionUrl?: string | null;
+      details?: Record<string, unknown>;
+      dedupeKey?: string | null;
+      actor?: { id: string } | null;
       metadata?: Record<string, unknown>;
     }>;
     version?: string;
@@ -133,10 +146,16 @@ export function NotificationBell() {
       const mapped: Notification[] = (payload.notifications || []).map((item) => ({
         id: item.id,
         templateCode: item.templateCode || item.template_code || 'generic',
+        category: item.category,
+        title: item.title || item.subject,
         subject: item.subject,
         body: item.body,
         createdAt: item.createdAt || item.created_at || new Date().toISOString(),
         readAt: item.readAt ?? item.read_at ?? null,
+        actionUrl: item.actionUrl || item.action_url || null,
+        details: item.details || {},
+        dedupeKey: item.dedupeKey || null,
+        actor: item.actor || null,
         metadata: item.metadata,
       }));
 
@@ -279,21 +298,11 @@ export function NotificationBell() {
 
   // Get notification link based on type
   const getNotificationLink = (notification: Notification): string | null => {
-    const meta = notification.metadata as Record<string, string> | undefined;
-    switch (notification.templateCode) {
-      case 'photo_drop':
-        return meta?.event_id ? `/gallery/events/${meta.event_id}` : '/gallery';
-      case 'payout_success':
-        return '/dashboard/billing';
-      case 'order_shipped':
-        return meta?.order_id ? `/gallery/orders/${meta.order_id}` : '/gallery/orders';
-      case 'event_live':
-        return meta?.event_id ? `/events/${meta.event_id}` : '/gallery/events';
-      case 'purchase_complete':
-        return '/gallery/purchases';
-      default:
-        return null;
+    if (notification.actionUrl && notification.actionUrl.startsWith('/')) {
+      return notification.actionUrl;
     }
+    const meta = notification.metadata as Record<string, string> | undefined;
+    return meta?.event_id ? `/gallery/events/${meta.event_id}` : null;
   };
 
   return (
@@ -394,9 +403,9 @@ export function NotificationBell() {
                       
                       <div className="flex items-start gap-3 pl-2">
                         <div className="flex-1 min-w-0">
-                          {notification.subject && (
+                          {(notification.title || notification.subject) && (
                             <p className={`text-sm truncate ${isUnread ? 'font-semibold text-foreground' : 'font-medium text-foreground/80'}`}>
-                              {notification.subject}
+                              {notification.title || notification.subject}
                             </p>
                           )}
                           <p className={`text-sm ${isUnread ? 'text-secondary' : 'text-muted-foreground'} line-clamp-2`}>

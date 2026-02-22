@@ -29,22 +29,28 @@ import { Button } from '@/components/ui';
 interface Notification {
   id: string;
   templateCode: string;
+  category: 'transactions' | 'photos' | 'orders' | 'social' | 'system' | 'marketing';
+  title?: string | null;
   subject: string | null;
   body: string;
   createdAt: string;
   readAt: string | null;
+  actionUrl?: string | null;
+  details?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
 }
 
-type FilterType = 'all' | 'unread' | 'photos' | 'payments' | 'orders' | 'system';
+type FilterType = 'all' | 'unread' | 'photos' | 'transactions' | 'orders' | 'social' | 'system' | 'marketing';
 
 const FILTERS: { value: FilterType; label: string; icon: React.ReactNode }[] = [
   { value: 'all', label: 'All', icon: <Bell className="h-4 w-4" /> },
   { value: 'unread', label: 'Unread', icon: <Check className="h-4 w-4" /> },
   { value: 'photos', label: 'Photos', icon: <Camera className="h-4 w-4" /> },
-  { value: 'payments', label: 'Payments', icon: <DollarSign className="h-4 w-4" /> },
+  { value: 'transactions', label: 'Transactions', icon: <DollarSign className="h-4 w-4" /> },
   { value: 'orders', label: 'Orders', icon: <Package className="h-4 w-4" /> },
+  { value: 'social', label: 'Social', icon: <Bell className="h-4 w-4" /> },
   { value: 'system', label: 'System', icon: <Megaphone className="h-4 w-4" /> },
+  { value: 'marketing', label: 'Marketing', icon: <Megaphone className="h-4 w-4" /> },
 ];
 
 export default function NotificationsPage() {
@@ -78,16 +84,8 @@ export default function NotificationsPage() {
     switch (filter) {
       case 'unread':
         return !n.readAt;
-      case 'photos':
-        return ['photo_drop', 'event_live'].includes(n.templateCode);
-      case 'payments':
-        return ['payout_success', 'purchase_complete'].includes(n.templateCode);
-      case 'orders':
-        return ['order_shipped', 'order_delivered'].includes(n.templateCode);
-      case 'system':
-        return ['verification_otp', 'account_update'].includes(n.templateCode);
       default:
-        return true;
+        return filter === 'all' ? true : n.category === filter;
     }
   });
 
@@ -193,14 +191,11 @@ export default function NotificationsPage() {
 
   const getNotificationIcon = (templateCode: string) => {
     switch (templateCode) {
-      case 'photo_drop':
-      case 'event_live':
+      case 'photos':
         return <Camera className="h-5 w-5 text-blue-500" />;
-      case 'payout_success':
-      case 'purchase_complete':
+      case 'transactions':
         return <DollarSign className="h-5 w-5 text-green-500" />;
-      case 'order_shipped':
-      case 'order_delivered':
+      case 'orders':
         return <Package className="h-5 w-5 text-orange-500" />;
       default:
         return <Bell className="h-5 w-5 text-purple-500" />;
@@ -208,21 +203,11 @@ export default function NotificationsPage() {
   };
 
   const getNotificationLink = (notification: Notification): string | null => {
-    const meta = notification.metadata as Record<string, string> | undefined;
-    switch (notification.templateCode) {
-      case 'photo_drop':
-        return meta?.event_id ? `/gallery/events/${meta.event_id}` : '/gallery';
-      case 'payout_success':
-        return '/dashboard/billing';
-      case 'order_shipped':
-        return meta?.order_id ? `/gallery/orders/${meta.order_id}` : '/gallery/orders';
-      case 'event_live':
-        return meta?.event_id ? `/events/${meta.event_id}` : '/gallery/events';
-      case 'purchase_complete':
-        return '/gallery/purchases';
-      default:
-        return null;
+    if (notification.actionUrl && notification.actionUrl.startsWith('/')) {
+      return notification.actionUrl;
     }
+    const meta = notification.metadata as Record<string, string> | undefined;
+    return meta?.event_id ? `/gallery/events/${meta.event_id}` : null;
   };
 
   if (isLoading) {
@@ -381,15 +366,15 @@ export default function NotificationsPage() {
                     {/* Icon */}
                     <div className="flex-shrink-0 mt-0.5">
                       <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                        {getNotificationIcon(notification.templateCode)}
+                        {getNotificationIcon(notification.category)}
                       </div>
                     </div>
 
                     {/* Content */}
                     <div className="flex-1 min-w-0">
-                      {notification.subject && (
+                      {(notification.title || notification.subject) && (
                         <p className={`font-medium ${isUnread ? 'text-foreground' : 'text-foreground/80'}`}>
-                          {notification.subject}
+                          {notification.title || notification.subject}
                         </p>
                       )}
                       <p className={`text-sm ${isUnread ? 'text-secondary' : 'text-muted-foreground'} mt-1`}>

@@ -477,6 +477,81 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Notification integrity checks (idempotency + policy compliance).
+    let notificationsAudited = 0;
+    try {
+      const { data: notificationRows, error: notificationError } = await supabase
+        .from('notifications')
+        .select('id, user_id, template_code, category, dedupe_key, is_hidden, created_at')
+        .gte('created_at', sinceIso)
+        .order('created_at', { ascending: false })
+        .limit(50000);
+
+      if (notificationError) {
+        warnings.push(`Notification integrity checks skipped: ${notificationError.message}`);
+      } else {
+        const rows = notificationRows || [];
+        notificationsAudited = rows.length;
+
+        const dedupeVisibleCounts = new Map<string, number>();
+        for (const row of rows) {
+          const dedupeKey = String((row as any).dedupe_key || '').trim();
+          if (!dedupeKey || (row as any).is_hidden === true) continue;
+          const key = `${String((row as any).user_id)}|${dedupeKey}`;
+          dedupeVisibleCounts.set(key, (dedupeVisibleCounts.get(key) || 0) + 1);
+        }
+
+        const duplicateVisibleRows = Array.from(dedupeVisibleCounts.entries())
+          .filter(([, count]) => count > 1)
+          .map(([key, count]) => {
+            const [userId, dedupeKey] = key.split('|', 2);
+            return { user_id: userId, dedupe_key: dedupeKey, visible_count: count };
+          });
+
+        pushIssue(issues, {
+          code: 'notification_visible_duplicate_dedupe_key',
+          severity: 'critical',
+          summary: 'Visible notifications contain duplicate (user_id, dedupe_key) keys.',
+          rows: duplicateVisibleRows,
+          sampleLimit,
+        });
+
+        const unfollowVisibleRows = rows
+          .filter((row: any) => row.template_code === 'social_follower_removed' && row.is_hidden !== true)
+          .map((row: any) => ({ id: row.id, user_id: row.user_id, created_at: row.created_at }));
+
+        pushIssue(issues, {
+          code: 'notification_visible_unfollow',
+          severity: 'error',
+          summary: 'Unfollow notifications are visible but must be hidden by policy.',
+          rows: unfollowVisibleRows,
+          sampleLimit,
+        });
+
+        const unknownCategoryRows = rows
+          .filter((row: any) =>
+            !['transactions', 'photos', 'orders', 'social', 'system', 'marketing'].includes(
+              String(row.category || '')
+            )
+          )
+          .map((row: any) => ({
+            id: row.id,
+            template_code: row.template_code,
+            category: row.category,
+          }));
+
+        pushIssue(issues, {
+          code: 'notification_unknown_category',
+          severity: 'warning',
+          summary: 'Notifications with unknown/missing category values.',
+          rows: unknownCategoryRows,
+          sampleLimit,
+        });
+      }
+    } catch (notificationAuditError: any) {
+      warnings.push(`Notification integrity checks failed: ${notificationAuditError?.message || 'unknown error'}`);
+    }
+
     const severityOrder: Record<Severity, number> = {
       critical: 4,
       error: 3,
@@ -509,6 +584,7 @@ export async function GET(request: NextRequest) {
         transactionsAudited: (transactions || []).length,
         payoutsAudited: (payouts || []).length,
         walletsAudited: walletIds.length,
+        notificationsAudited,
         ledgerShadowWritesEnabled: ledgerShadowEnabled,
       },
       totals,

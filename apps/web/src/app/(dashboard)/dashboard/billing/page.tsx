@@ -58,6 +58,7 @@ interface UsageData {
     activeEvents: number;
     totalPhotos: number;
     storageUsedGb: number;
+    storageUsedBytes?: number;
     teamMembers: number;
     faceOpsUsed: number;
   };
@@ -111,6 +112,9 @@ export default function BillingPage() {
   const loadInFlightRef = useRef(false);
   const loadQueuedRef = useRef(false);
   const loadAbortRef = useRef<AbortController | null>(null);
+  const pricingAbortRef = useRef<AbortController | null>(null);
+  const pricingInFlightRef = useRef(false);
+  const pricingLoadedCurrencyRef = useRef<string | null>(null);
   const historyAbortRef = useRef<AbortController | null>(null);
   const historyInFlightRef = useRef(false);
   const mountedRef = useRef(true);
@@ -121,6 +125,16 @@ export default function BillingPage() {
     planId: null,
     planCode: 'free',
   });
+
+  const formatStorageUsed = useCallback((usageGb: number, usageBytes?: number) => {
+    const bytes = Math.max(0, Number(usageBytes ?? usageGb * 1024 * 1024 * 1024));
+    if (bytes <= 0) return '0 B';
+    const mb = bytes / (1024 * 1024);
+    if (mb < 1024) {
+      return `${mb >= 100 ? mb.toFixed(0) : mb.toFixed(1)} MB`;
+    }
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }, []);
 
   const createIdempotencyKey = useCallback((scope: string) => {
     const randomPart =
@@ -180,12 +194,45 @@ export default function BillingPage() {
     }
   }, []);
 
+  const loadPricing = useCallback(async () => {
+    if (pricingInFlightRef.current) return;
+    if (pricingLoadedCurrencyRef.current === currencyCode) return;
+
+    pricingInFlightRef.current = true;
+    pricingAbortRef.current?.abort();
+    const controller = new AbortController();
+    pricingAbortRef.current = controller;
+
+    try {
+      const response = await fetch(`/api/subscriptions/pricing?currency=${currencyCode}`, {
+        signal: controller.signal,
+        cache: 'no-store',
+      });
+      if (!response.ok || controller.signal.aborted || !mountedRef.current) {
+        return;
+      }
+      const data = await response.json().catch(() => ({}));
+      if (!controller.signal.aborted && mountedRef.current) {
+        setPlans(Array.isArray(data?.plans) ? data.plans : []);
+        pricingLoadedCurrencyRef.current = currencyCode;
+      }
+    } catch (error: any) {
+      if (error?.name !== 'AbortError') {
+        console.error('Failed to load pricing:', error);
+      }
+    } finally {
+      if (pricingAbortRef.current === controller) {
+        pricingAbortRef.current = null;
+      }
+      pricingInFlightRef.current = false;
+    }
+  }, [currencyCode]);
+
   // Load subscription and usage data
   const loadData = useCallback(async (options?: { includeHistory?: boolean }) => {
     const includeHistory = options?.includeHistory === true;
     if (loadInFlightRef.current) {
       loadQueuedRef.current = true;
-      loadAbortRef.current?.abort();
       return;
     }
 
@@ -201,11 +248,7 @@ export default function BillingPage() {
         loadAbortRef.current = controller;
 
         try {
-          const [pricingResult, subscriptionResult, usageResult] = await Promise.allSettled([
-            fetch(`/api/subscriptions/pricing?currency=${currencyCode}`, {
-              signal: controller.signal,
-              cache: 'no-store',
-            }),
+          const [subscriptionResult, usageResult] = await Promise.allSettled([
             fetch('/api/creator/subscription?lite=1', {
               signal: controller.signal,
               cache: 'no-store',
@@ -218,13 +261,6 @@ export default function BillingPage() {
 
           if (controller.signal.aborted || !mountedRef.current) {
             continue;
-          }
-
-          if (pricingResult.status === 'fulfilled' && pricingResult.value.ok) {
-            const data = await pricingResult.value.json().catch(() => ({}));
-            if (!controller.signal.aborted && mountedRef.current) {
-              setPlans(Array.isArray(data?.plans) ? data.plans : []);
-            }
           }
 
           if (subscriptionResult.status === 'fulfilled' && subscriptionResult.value.ok) {
@@ -270,7 +306,7 @@ export default function BillingPage() {
         void loadBillingHistory();
       }
     }
-  }, [currencyCode, loadBillingHistory]);
+  }, [loadBillingHistory]);
 
   const requestRefresh = useCallback(
     (includeHistory = false) => {
@@ -298,6 +334,10 @@ export default function BillingPage() {
   useEffect(() => {
     requestRefresh(true);
   }, [requestRefresh]);
+
+  useEffect(() => {
+    void loadPricing();
+  }, [loadPricing]);
 
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
@@ -376,6 +416,8 @@ export default function BillingPage() {
       mountedRef.current = false;
       loadAbortRef.current?.abort();
       loadAbortRef.current = null;
+      pricingAbortRef.current?.abort();
+      pricingAbortRef.current = null;
       historyAbortRef.current?.abort();
       historyAbortRef.current = null;
       if (refreshTimerRef.current) {
@@ -539,7 +581,14 @@ export default function BillingPage() {
     plans.find((plan) => plan.planCode === stableCurrentPlanCode);
   
   // Use real usage data from the enforcement system
-  const usage = usageData?.usage || { activeEvents: 0, totalPhotos: 0, storageUsedGb: 0, teamMembers: 1, faceOpsUsed: 0 };
+  const usage = usageData?.usage || {
+    activeEvents: 0,
+    totalPhotos: 0,
+    storageUsedGb: 0,
+    storageUsedBytes: 0,
+    teamMembers: 1,
+    faceOpsUsed: 0,
+  };
   // Keep current-plan meters aligned with the same plan source used by cards.
   const limitsRaw: any = currentPlanData?.features || usageData?.limits || {
     maxActiveEvents: 1,
@@ -673,7 +722,8 @@ export default function BillingPage() {
           <div>
             <p className="text-sm text-secondary">Storage Used</p>
             <p className="text-lg font-semibold text-foreground">
-              {usage.storageUsedGb.toFixed(2)} GB / {limits.maxStorageGb === -1 ? 'Unlimited' : `${limits.maxStorageGb} GB`}
+              {formatStorageUsed(usage.storageUsedGb, usage.storageUsedBytes)} /{' '}
+              {limits.maxStorageGb === -1 ? 'Unlimited' : `${limits.maxStorageGb} GB`}
             </p>
             <div className="mt-2 h-2 rounded-full bg-muted overflow-hidden">
               <div 

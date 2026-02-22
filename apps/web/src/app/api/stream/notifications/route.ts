@@ -53,11 +53,13 @@ export async function GET(request: Request) {
               .from('notifications')
               .select('id', { count: 'exact', head: true })
               .eq('user_id', user.id)
+              .eq('is_hidden', false)
               .is('read_at', null),
             supabase
               .from('notifications')
-              .select('id, channel, subject, body, status, created_at, read_at')
+              .select('id, channel, template_code, category, subject, body, status, created_at, read_at, action_url, details, dedupe_key, actor_user_id, metadata')
               .eq('user_id', user.id)
+              .eq('is_hidden', false)
               .order('created_at', { ascending: false })
               .limit(20),
           ]);

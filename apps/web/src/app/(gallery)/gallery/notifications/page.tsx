@@ -20,19 +20,23 @@ import { Switch } from '@/components/ui/switch';
 interface Notification {
   id: string;
   type: 'photo_match' | 'new_event' | 'event_update' | 'system';
+  category?: 'transactions' | 'photos' | 'orders' | 'social' | 'system' | 'marketing';
   title: string;
   message: string;
   eventId?: string;
+  actionUrl?: string | null;
+  details?: Record<string, unknown>;
   eventName?: string;
   isRead: boolean;
   createdAt: string;
 }
 
-function mapNotificationType(templateCode?: string): Notification['type'] {
+function mapNotificationType(category?: string, templateCode?: string): Notification['type'] {
+  const cat = (category || '').toLowerCase();
   const code = (templateCode || '').toLowerCase();
-  if (code.includes('photo')) return 'photo_match';
-  if (code.includes('event')) return 'new_event';
-  if (code.includes('update')) return 'event_update';
+  if (cat === 'photos' || code.includes('photo')) return 'photo_match';
+  if (cat === 'social' || code.includes('event')) return 'new_event';
+  if (cat === 'transactions' || cat === 'orders' || code.includes('update')) return 'event_update';
   return 'system';
 }
 
@@ -66,11 +70,20 @@ export default function NotificationsPage() {
           const data = await notifResponse.json();
           const mapped = (data.notifications || []).map((item: any) => ({
             id: item.id,
-            type: mapNotificationType(item.templateCode || item.template_code),
-            title: item.subject || 'Notification',
+            type: mapNotificationType(item.category, item.templateCode || item.template_code),
+            category: item.category,
+            title: item.title || item.subject || 'Notification',
             message: item.body,
-            eventId: item.metadata?.event_id || item.metadata?.eventId,
-            eventName: item.metadata?.event_name || item.metadata?.eventName,
+            eventId:
+              item.details?.eventId ||
+              item.metadata?.event_id ||
+              item.metadata?.eventId,
+            actionUrl: item.actionUrl || item.action_url || null,
+            details: item.details || {},
+            eventName:
+              item.details?.eventName ||
+              item.metadata?.event_name ||
+              item.metadata?.eventName,
             isRead: !!(item.readAt || item.read_at),
             createdAt: item.createdAt || item.created_at || new Date().toISOString(),
           })) as Notification[];
@@ -309,9 +322,9 @@ export default function NotificationsPage() {
                         </span>
                       </div>
 
-                      {notification.eventId && (
+                      {(notification.actionUrl || notification.eventId) && (
                         <Link
-                          href={`/gallery/events/${notification.eventId}`}
+                          href={notification.actionUrl || `/gallery/events/${notification.eventId}`}
                           className="inline-flex items-center gap-1 mt-2 text-sm text-accent hover:text-accent/80 transition-colors"
                           onClick={() => markAsRead(notification.id)}
                         >

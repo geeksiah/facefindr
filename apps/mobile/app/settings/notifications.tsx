@@ -54,17 +54,17 @@ export default function NotificationSettingsScreen() {
   const loadSettings = async () => {
     try {
       const { data } = await supabase
-        .from('notification_preferences')
+        .from('user_notification_preferences')
         .select('*')
         .eq('user_id', profile?.id)
         .single();
 
       if (data) {
         setSettings({
-          photoDrops: data.photo_drops ?? true,
-          purchases: data.purchases ?? true,
-          promotions: data.promotions ?? false,
-          reminders: data.reminders ?? true,
+          photoDrops: data.photo_match_enabled ?? data.photo_drop_enabled ?? true,
+          purchases: data.order_updates_enabled ?? true,
+          promotions: data.marketing_updates_enabled ?? data.marketing_enabled ?? false,
+          reminders: data.event_reminder_enabled ?? data.event_updates_enabled ?? true,
           hapticFeedback: data.haptic_feedback_enabled ?? true,
         });
       }
@@ -77,18 +77,29 @@ export default function NotificationSettingsScreen() {
     setSettings((prev) => ({ ...prev, [key]: value }));
 
     try {
-      // Map camelCase to snake_case for database
-      const dbKey = key === 'hapticFeedback' 
-        ? 'haptic_feedback_enabled'
-        : key.replace(/([A-Z])/g, '_$1').toLowerCase();
-      
+      const payload: Record<string, unknown> = {
+        user_id: profile?.id,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (key === 'photoDrops') {
+        payload.photo_match_enabled = value;
+        payload.photo_drop_enabled = value; // legacy compatibility
+      } else if (key === 'purchases') {
+        payload.order_updates_enabled = value;
+      } else if (key === 'promotions') {
+        payload.marketing_updates_enabled = value;
+        payload.marketing_enabled = value; // legacy compatibility
+      } else if (key === 'reminders') {
+        payload.event_reminder_enabled = value;
+        payload.event_updates_enabled = value; // legacy compatibility
+      } else if (key === 'hapticFeedback') {
+        payload.haptic_feedback_enabled = value;
+      }
+
       await supabase
         .from('user_notification_preferences')
-        .upsert({
-          user_id: profile?.id,
-          [dbKey]: value,
-          updated_at: new Date().toISOString(),
-        });
+        .upsert(payload, { onConflict: 'user_id' });
 
       // Update haptic preference cache if haptic feedback setting changed
       if (key === 'hapticFeedback') {

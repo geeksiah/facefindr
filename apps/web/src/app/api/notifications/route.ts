@@ -26,45 +26,6 @@ async function getAuthClient(request: NextRequest) {
     : createClient();
 }
 
-function deriveNotificationCategory(templateCode: string | null | undefined, body: string | null | undefined) {
-  const key = (templateCode || '').toLowerCase();
-  const text = (body || '').toLowerCase();
-
-  if (
-    key.includes('tip') ||
-    key.includes('payment') ||
-    key.includes('payout') ||
-    key.includes('purchase') ||
-    text.includes('payment') ||
-    text.includes('tip')
-  ) {
-    return 'payments';
-  }
-  if (
-    key.includes('photo') ||
-    key.includes('drop_in') ||
-    key.includes('match') ||
-    text.includes('photo') ||
-    text.includes('match')
-  ) {
-    return 'photos';
-  }
-  if (
-    key.includes('follow') ||
-    key.includes('connection') ||
-    key.includes('collaboration') ||
-    key.includes('rating') ||
-    text.includes('follow') ||
-    text.includes('collaborat')
-  ) {
-    return 'social';
-  }
-  if (key.includes('order') || text.includes('order')) {
-    return 'orders';
-  }
-  return 'general';
-}
-
 // GET - Get user notifications
 export async function GET(request: NextRequest) {
   try {
@@ -91,19 +52,25 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       notifications: notifications.map((notification) => ({
         id: notification.id,
+        templateCode: notification.templateCode,
+        category: notification.category,
+        title: notification.subject || 'Notification',
+        body: notification.body,
+        createdAt: notification.createdAt.toISOString(),
+        readAt: notification.readAt ? notification.readAt.toISOString() : null,
+        actionUrl: notification.actionUrl,
+        details: notification.details || {},
+        dedupeKey: notification.dedupeKey || null,
+        actor: notification.actorUserId ? { id: notification.actorUserId } : null,
+        // Backward-compatible aliases
         channel: notification.channel,
         subject: notification.subject,
-        body: notification.body,
         status: notification.status,
         metadata: notification.metadata,
-        category: deriveNotificationCategory(notification.templateCode, notification.body),
         read_at: notification.readAt ? notification.readAt.toISOString() : null,
         created_at: notification.createdAt.toISOString(),
         template_code: notification.templateCode,
-        // Backward-compatible aliases for existing clients
-        readAt: notification.readAt ? notification.readAt.toISOString() : null,
-        createdAt: notification.createdAt.toISOString(),
-        templateCode: notification.templateCode,
+        action_url: notification.actionUrl,
       })),
       unreadCount,
     });

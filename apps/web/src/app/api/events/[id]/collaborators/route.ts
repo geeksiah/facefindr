@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { dispatchInAppNotification } from '@/lib/notifications/dispatcher';
 import { getPhotographerIdCandidates, resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import { checkLimit } from '@/lib/subscription/enforcement';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
@@ -504,36 +505,34 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Send in-app notification to invited photographer.
     try {
       const inviterName = user.user_metadata?.display_name || user.email?.split('@')[0] || 'A creator';
-      await db
-        .from('notifications')
-        .insert({
-          user_id: targetCreatorId,
-          template_code: 'event_collaboration_invite',
-          channel: 'in_app',
-          subject: `Invitation: ${event.name}`,
-          body: `${inviterName} invited you to collaborate on "${event.name}".`,
-          variables: {
-            eventId,
-            eventName: event.name,
-            role: collaborator.role,
-            inviterId: user.id,
-            inviterName,
+      await dispatchInAppNotification({
+        supabase: db,
+        recipientUserId: targetCreatorId,
+        templateCode: 'event_collaboration_invite',
+        subject: `Invitation: ${event.name}`,
+        body: `${inviterName} invited you to collaborate on "${event.name}".`,
+        dedupeKey: `event_collaboration_invite:${eventId}:${targetCreatorId}`,
+        actionUrl: '/dashboard/collaborations',
+        actorUserId: user.id,
+        details: {
+          eventId,
+          eventName: event.name,
+          role: collaborator.role,
+          inviterId: user.id,
+          inviterName,
+        },
+        metadata: {
+          type: 'event_collaboration_invite',
+          eventId,
+          collaboratorId: collaborator.id,
+          inviterId: user.id,
+          role: collaborator.role,
+          links: {
+            collaborations: '/dashboard/collaborations',
+            event: `/dashboard/events/${eventId}`,
           },
-          status: 'sent',
-          sent_at: new Date().toISOString(),
-          metadata: {
-            type: 'event_collaboration_invite',
-            eventId,
-            collaboratorId: collaborator.id,
-            inviterId: user.id,
-            role: collaborator.role,
-            links: {
-              collaborations: '/dashboard/collaborations',
-              event: `/dashboard/events/${eventId}`,
-            },
-          },
-        })
-        .throwOnError();
+        },
+      });
     } catch (notificationError) {
       console.error('Failed to create collaboration notification:', notificationError);
     }

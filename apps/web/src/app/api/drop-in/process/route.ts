@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { detectFaces } from '@/lib/aws/rekognition';
 import { searchDropInFaces } from '@/lib/aws/rekognition-drop-in';
+import { dispatchInAppNotification } from '@/lib/notifications/dispatcher';
 import { getAttendeeIdCandidates } from '@/lib/profiles/ids';
 import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
@@ -240,25 +241,30 @@ export async function POST(request: NextRequest) {
               is_gifted: dropInPhoto.is_gifted,
             });
 
-          await supabase
-            .from('notifications')
-            .insert({
-              user_id: attendeeId,
-              channel: 'in_app',
-              template_code: 'drop_in_match',
-              subject: 'New drop-in photo match',
-              body: `${uploaderDisplayName} shared a drop-in photo that matched your FaceTag.`,
-              status: 'delivered',
-              sent_at: new Date().toISOString(),
-              delivered_at: new Date().toISOString(),
-              metadata: {
-                dropInPhotoId,
-                dropInMatchId: matchRecord.id,
-                uploaderId: dropInPhoto.uploader_id,
-                requiresPremium: !areContacts && !dropInPhoto.is_gifted && !isRegisteredForEvents,
-                isGifted: !!dropInPhoto.is_gifted,
-              },
-            });
+          await dispatchInAppNotification({
+            supabase,
+            recipientUserId: attendeeId,
+            templateCode: 'drop_in_match',
+            subject: 'New drop-in photo match',
+            body: `${uploaderDisplayName} shared a drop-in photo that matched your FaceTag.`,
+            dedupeKey: `drop_in_match:${matchRecord.id}`,
+            actionUrl: '/gallery/notifications',
+            actorUserId: dropInPhoto.uploader_id,
+            details: {
+              dropInPhotoId,
+              dropInMatchId: matchRecord.id,
+              uploaderId: dropInPhoto.uploader_id,
+              requiresPremium: !areContacts && !dropInPhoto.is_gifted && !isRegisteredForEvents,
+              isGifted: !!dropInPhoto.is_gifted,
+            },
+            metadata: {
+              dropInPhotoId,
+              dropInMatchId: matchRecord.id,
+              uploaderId: dropInPhoto.uploader_id,
+              requiresPremium: !areContacts && !dropInPhoto.is_gifted && !isRegisteredForEvents,
+              isGifted: !!dropInPhoto.is_gifted,
+            },
+          });
         }
       }
     }

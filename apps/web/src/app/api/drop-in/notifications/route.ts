@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { consumeDropInCredits } from '@/lib/drop-in/consume-credits';
 import { resolveDropInCreditRules } from '@/lib/drop-in/credit-rules';
+import { dispatchInAppNotification } from '@/lib/notifications/dispatcher';
 import { getAttendeeIdCandidates } from '@/lib/profiles/ids';
 import { createStorageSignedUrl } from '@/lib/storage/provider';
 import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
@@ -282,15 +283,20 @@ export async function POST(request: NextRequest) {
           { onConflict: 'user_id,contact_id' }
         );
 
-      await supabase.from('notifications').insert({
-        user_id: uploaderId,
-        channel: 'in_app',
-        template_code: 'drop_in_connection_accepted',
+      await dispatchInAppNotification({
+        supabase: serviceClient,
+        recipientUserId: uploaderId,
+        templateCode: 'drop_in_connection_accepted',
         subject: 'Drop-In recipient accepted your connection',
         body: 'A recipient accepted your Drop-In connection request.',
-        status: 'delivered',
-        sent_at: new Date().toISOString(),
-        delivered_at: new Date().toISOString(),
+        dedupeKey: `drop_in_connection_accepted:${notification.id}`,
+        actionUrl: '/gallery/notifications',
+        actorUserId: recipientAttendeeId,
+        details: {
+          dropInNotificationId: notification.id,
+          dropInPhotoId: notification.drop_in_photo_id,
+          recipientAccepted: true,
+        },
         metadata: {
           dropInNotificationId: notification.id,
           dropInPhotoId: notification.drop_in_photo_id,
@@ -308,15 +314,20 @@ export async function POST(request: NextRequest) {
       updates.sender_status = 'recipient_declined';
       updates.sender_notified_at = notification.sender_notified_at || new Date().toISOString();
 
-      await supabase.from('notifications').insert({
-        user_id: uploaderId,
-        channel: 'in_app',
-        template_code: 'drop_in_connection_declined',
+      await dispatchInAppNotification({
+        supabase: serviceClient,
+        recipientUserId: uploaderId,
+        templateCode: 'drop_in_connection_declined',
         subject: 'Drop-In recipient declined connection',
         body: 'A recipient declined your Drop-In connection request.',
-        status: 'delivered',
-        sent_at: new Date().toISOString(),
-        delivered_at: new Date().toISOString(),
+        dedupeKey: `drop_in_connection_declined:${notification.id}`,
+        actionUrl: '/gallery/notifications',
+        actorUserId: recipientAttendeeId,
+        details: {
+          dropInNotificationId: notification.id,
+          dropInPhotoId: notification.drop_in_photo_id,
+          recipientAccepted: false,
+        },
         metadata: {
           dropInNotificationId: notification.id,
           dropInPhotoId: notification.drop_in_photo_id,

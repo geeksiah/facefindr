@@ -7,6 +7,7 @@ import {
   checkLimit,
   checkFeature,
 } from '@/lib/subscription/enforcement';
+import { dispatchInAppNotification } from '@/lib/notifications/dispatcher';
 import { getPhotographerIdCandidates, resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 import {
@@ -428,9 +429,9 @@ export async function updateEventStatus(
           .maybeSingle(),
       ]);
 
-      const followerIds = Array.from(
+      const followerIds: string[] = Array.from(
         new Set((followers || []).map((row: any) => row.follower_id).filter((id: string) => id && id !== user.id))
-      );
+      ) as string[];
 
       if (followerIds.length > 0) {
         const creatorName = creatorProfile?.display_name || 'A creator';
@@ -438,26 +439,33 @@ export async function updateEventStatus(
         const eventPath = existingEvent.public_slug
           ? `/e/${existingEvent.public_slug}`
           : `/e/${eventId}`;
-        const now = new Date().toISOString();
 
-        await service.from('notifications').insert(
-          followerIds.map((followerId) => ({
-            user_id: followerId,
-            template_code: 'creator_new_public_event',
-            channel: 'in_app',
-            subject: `${creatorName} published a new event`,
-            body: `${creatorName} just published: ${eventName}`,
-            status: 'delivered',
-            sent_at: now,
-            delivered_at: now,
-            metadata: {
-              type: 'new_public_event',
-              creatorId: creatorContext.creatorUserId,
-              eventId,
-              eventName,
-              eventPath,
-            },
-          }))
+        await Promise.all(
+          followerIds.map((followerId: string) =>
+            dispatchInAppNotification({
+              supabase: service,
+              recipientUserId: followerId,
+              templateCode: 'creator_new_public_event',
+              subject: `${creatorName} published a new event`,
+              body: `${creatorName} just published: ${eventName}`,
+              dedupeKey: `creator_new_public_event:${eventId}:${followerId}`,
+              actionUrl: eventPath,
+              actorUserId: creatorContext.creatorUserId,
+              details: {
+                creatorId: creatorContext.creatorUserId,
+                eventId,
+                eventName,
+                eventPath,
+              },
+              metadata: {
+                type: 'new_public_event',
+                creatorId: creatorContext.creatorUserId,
+                eventId,
+                eventName,
+                eventPath,
+              },
+            })
+          )
         );
       }
     } catch (notifyError) {

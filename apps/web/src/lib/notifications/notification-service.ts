@@ -7,6 +7,7 @@
 
 import { createServiceClient } from '@/lib/supabase/server';
 import { getUserCountry } from '@/lib/payments/gateway-selector';
+import { getNotificationCatalogEntry, type NotificationCategory } from './catalog';
 
 // ============================================
 // TYPES
@@ -601,6 +602,7 @@ async function createInAppNotification(
   metadata?: Record<string, unknown>
 ): Promise<NotificationResult> {
   const supabase = createServiceClient();
+  const catalog = getNotificationCatalogEntry(template.templateCode);
   
   const subject = template.pushTitle 
     ? renderTemplate(template.pushTitle, variables) 
@@ -614,6 +616,7 @@ async function createInAppNotification(
     .insert({
       user_id: userId,
       template_code: template.templateCode,
+      category: catalog.category,
       channel: 'in_app',
       subject,
       body,
@@ -621,6 +624,23 @@ async function createInAppNotification(
       status: 'delivered',
       sent_at: new Date().toISOString(),
       delivered_at: new Date().toISOString(),
+      dedupe_key:
+        (typeof metadata?.dedupe_key === 'string' && metadata.dedupe_key) ||
+        (typeof metadata?.dedupeKey === 'string' && metadata.dedupeKey) ||
+        null,
+      action_url:
+        typeof metadata?.action_url === 'string'
+          ? metadata.action_url
+          : typeof metadata?.actionUrl === 'string'
+          ? metadata.actionUrl
+          : null,
+      details: (metadata?.details as Record<string, unknown>) || {},
+      actor_user_id:
+        typeof metadata?.actor_user_id === 'string'
+          ? metadata.actor_user_id
+          : typeof metadata?.actorUserId === 'string'
+          ? metadata.actorUserId
+          : null,
       metadata,
     })
     .select('id')
@@ -640,12 +660,17 @@ async function createInAppNotification(
 export interface Notification {
   id: string;
   templateCode: string;
+  category: NotificationCategory;
   channel: NotificationChannel;
   subject: string | null;
   body: string;
   status: NotificationStatus;
   createdAt: Date;
   readAt: Date | null;
+  actionUrl: string | null;
+  details: Record<string, unknown>;
+  dedupeKey: string | null;
+  actorUserId: string | null;
   metadata: Record<string, unknown>;
 }
 
@@ -660,6 +685,7 @@ export async function getUserNotifications(
     .from('notifications')
     .select('*')
     .eq('user_id', userId)
+    .eq('is_hidden', false)
     .in('channel', ['in_app', 'push'])
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -675,12 +701,17 @@ export async function getUserNotifications(
   return data.map(n => ({
     id: n.id,
     templateCode: n.template_code,
+    category: n.category || getNotificationCatalogEntry(n.template_code).category,
     channel: n.channel,
     subject: n.subject,
     body: n.body,
     status: n.status,
     createdAt: new Date(n.created_at),
     readAt: n.read_at ? new Date(n.read_at) : null,
+    actionUrl: n.action_url || null,
+    details: (n.details as Record<string, unknown>) || {},
+    dedupeKey: n.dedupe_key || null,
+    actorUserId: n.actor_user_id || null,
     metadata: n.metadata || {},
   }));
 }
@@ -699,7 +730,8 @@ export async function markNotificationAsRead(
     .from('notifications')
     .update({ status: 'read', read_at: new Date().toISOString() })
     .eq('id', notificationId)
-    .eq('user_id', userId);
+    .eq('user_id', userId)
+    .eq('is_hidden', false);
 
   return !error;
 }
@@ -711,6 +743,7 @@ export async function markAllNotificationsAsRead(userId: string): Promise<number
     .from('notifications')
     .update({ status: 'read', read_at: new Date().toISOString() })
     .eq('user_id', userId)
+    .eq('is_hidden', false)
     .is('read_at', null)
     .select('id');
 
@@ -728,6 +761,7 @@ export async function getUnreadCount(userId: string): Promise<number> {
     .from('notifications')
     .select('id', { count: 'exact' })
     .eq('user_id', userId)
+    .eq('is_hidden', false)
     .in('channel', ['in_app', 'push'])
     .is('read_at', null);
 

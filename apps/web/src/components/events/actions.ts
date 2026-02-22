@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 
 import { deleteFaces } from '@/lib/aws/rekognition';
+import { dispatchInAppNotification } from '@/lib/notifications/dispatcher';
 import { getPhotographerIdCandidates, resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import { checkLimit } from '@/lib/subscription/enforcement';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
@@ -105,66 +106,69 @@ async function notifyEventSubscribersAboutNewPhotos(
 ) {
   if (!event?.id || event.status !== 'active') return;
 
-  const { data: consentRows, error: consentError } = await serviceClient
-    .from('attendee_consents')
-    .select('attendee_id')
-    .eq('event_id', event.id)
-    .eq('consent_type', 'biometric')
-    .is('withdrawn_at', null);
+  const [{ data: consentRows, error: consentError }, { data: entitlementRows, error: entitlementError }] =
+    await Promise.all([
+      serviceClient
+        .from('attendee_consents')
+        .select('attendee_id')
+        .eq('event_id', event.id)
+        .eq('consent_type', 'biometric')
+        .is('withdrawn_at', null),
+      serviceClient
+        .from('entitlements')
+        .select('attendee_id')
+        .eq('event_id', event.id),
+    ]);
 
-  if (consentError) {
-    console.error('Subscriber lookup failed:', consentError);
+  if (consentError || entitlementError) {
+    console.error('Subscriber lookup failed:', consentError || entitlementError);
     return;
   }
 
   const attendeeIds = Array.from(
-    new Set((consentRows || []).map((row: any) => row.attendee_id).filter(Boolean))
+    new Set(
+      [...(consentRows || []), ...(entitlementRows || [])]
+        .map((row: any) => row.attendee_id)
+        .filter(Boolean)
+    )
   ) as string[];
 
   if (!attendeeIds.length) return;
 
-  // Deduplicate per event per hour to prevent notification storms during batch uploads.
-  const hourBucket = new Date().toISOString().slice(0, 13);
-  const dedupeKey = `event_new_photos:${event.id}:${hourBucket}`;
-
-  const { data: existingNotification } = await serviceClient
-    .from('notifications')
-    .select('id')
-    .eq('template_code', 'event_new_photos')
-    .eq('channel', 'in_app')
-    .eq('metadata->>dedupeKey', dedupeKey)
-    .limit(1)
-    .maybeSingle();
-
-  if (existingNotification?.id) return;
-
-  const now = new Date().toISOString();
   const eventName = event.name || 'Your event';
   const eventPath = event.public_slug ? `/e/${event.public_slug}` : `/e/${event.id}`;
+  const dedupeKey = `event_new_photos:${event.id}:${mediaId}`;
 
-  const payload = attendeeIds.map((attendeeId) => ({
-    user_id: attendeeId,
-    template_code: 'event_new_photos',
-    channel: 'in_app',
-    subject: `${eventName}: new photos added`,
-    body: `New photos were posted for ${eventName}.`,
-    status: 'delivered',
-    sent_at: now,
-    delivered_at: now,
-    metadata: {
-      type: 'event_new_photos',
-      dedupeKey,
-      eventId: event.id,
-      eventName,
-      eventPath,
-      mediaId,
-    },
-  }));
-
-  const { error: notificationError } = await serviceClient.from('notifications').insert(payload);
-  if (notificationError) {
-    console.error('Failed to create attendee notifications:', notificationError);
-  }
+  await Promise.all(
+    attendeeIds.map((attendeeId) =>
+      dispatchInAppNotification({
+        supabase: serviceClient,
+        recipientUserId: attendeeId,
+        templateCode: 'event_new_photos',
+        subject: `${eventName}: new photos added`,
+        body: `New photos were posted for ${eventName}.`,
+        dedupeKey,
+        actionUrl: `/gallery/events/${event.id}`,
+        details: {
+          eventId: event.id,
+          eventName,
+          eventPath,
+          mediaId,
+        },
+        metadata: {
+          type: 'event_new_photos',
+          eventId: event.id,
+          eventName,
+          eventPath,
+          mediaId,
+        },
+        eligibilityContext: {
+          eventId: event.id,
+          requireEventParticipant: true,
+        },
+      })
+    )
+  );
 }
 
 // ============================================

@@ -6,6 +6,7 @@ import { verifyTransactionByRef } from '@/lib/payments/flutterwave';
 import { resolvePaystackSecretKey, verifyPaystackTransaction } from '@/lib/payments/paystack';
 import { getOrder } from '@/lib/payments/paypal';
 import { getCheckoutSession } from '@/lib/payments/stripe';
+import { dispatchInAppNotification } from '@/lib/notifications/dispatcher';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 export async function GET(request: Request) {
@@ -129,47 +130,60 @@ export async function GET(request: Request) {
         .maybeSingle();
 
       try {
-        const now = new Date().toISOString();
-        const notifications: any[] = [
-          {
-            user_id: transaction.attendee_id,
-            channel: 'in_app',
-            template_code: 'purchase_completed',
+        const tasks: Promise<any>[] = [
+          dispatchInAppNotification({
+            supabase: serviceClient,
+            recipientUserId: transaction.attendee_id,
+            templateCode: 'purchase_completed',
             subject: 'Purchase completed',
             body: `Your purchase for ${transaction.events?.name || 'this event'} is complete.`,
-            status: 'delivered',
-            sent_at: now,
-            delivered_at: now,
+            dedupeKey: `purchase_completed:${transaction.id}`,
+            actionUrl: transaction.event_id ? `/gallery/events/${transaction.event_id}` : '/gallery',
+            details: {
+              transactionId: transaction.id,
+              eventId: transaction.event_id,
+              amount: transaction.gross_amount,
+              currency: transaction.currency,
+            },
             metadata: {
               transactionId: transaction.id,
               eventId: transaction.event_id,
               amount: transaction.gross_amount,
               currency: transaction.currency,
             },
-          },
+          }),
         ];
 
         if (wallet?.photographer_id) {
-          notifications.push({
-            user_id: wallet.photographer_id,
-            channel: 'in_app',
-            template_code: 'purchase_received',
-            subject: 'New purchase received',
-            body: `A new purchase was completed for ${transaction.events?.name || 'your event'}.`,
-            status: 'delivered',
-            sent_at: now,
-            delivered_at: now,
-            metadata: {
-              transactionId: transaction.id,
-              eventId: transaction.event_id,
-              amount: transaction.gross_amount,
-              currency: transaction.currency,
-              attendeeId: transaction.attendee_id,
-            },
-          });
+          tasks.push(
+            dispatchInAppNotification({
+              supabase: serviceClient,
+              recipientUserId: wallet.photographer_id,
+              templateCode: 'purchase_received',
+              subject: 'New purchase received',
+              body: `A new purchase was completed for ${transaction.events?.name || 'your event'}.`,
+              dedupeKey: `purchase_received:${transaction.id}`,
+              actionUrl: transaction.event_id ? `/dashboard/events/${transaction.event_id}` : '/dashboard/billing',
+              actorUserId: transaction.attendee_id,
+              details: {
+                transactionId: transaction.id,
+                eventId: transaction.event_id,
+                amount: transaction.gross_amount,
+                currency: transaction.currency,
+                attendeeId: transaction.attendee_id,
+              },
+              metadata: {
+                transactionId: transaction.id,
+                eventId: transaction.event_id,
+                amount: transaction.gross_amount,
+                currency: transaction.currency,
+                attendeeId: transaction.attendee_id,
+              },
+            })
+          );
         }
 
-        await serviceClient.from('notifications').insert(notifications);
+        await Promise.all(tasks);
       } catch (notificationError) {
         console.error('Checkout notification fanout failed:', notificationError);
       }

@@ -6,6 +6,7 @@ import { verifyTransactionByRef } from '@/lib/payments/flutterwave';
 import { resolvePaystackSecretKey, verifyPaystackTransaction } from '@/lib/payments/paystack';
 import { getOrder } from '@/lib/payments/paypal';
 import { getCheckoutSession } from '@/lib/payments/stripe';
+import { dispatchInAppNotification } from '@/lib/notifications/dispatcher';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 type TipRecord = {
@@ -172,39 +173,49 @@ export async function GET(request: NextRequest) {
     }
 
     try {
-      const now = new Date().toISOString();
-      await serviceClient.from('notifications').insert([
-        {
-          user_id: user.id,
-          channel: 'in_app',
-          template_code: 'tip_sent',
+      await Promise.all([
+        dispatchInAppNotification({
+          supabase: serviceClient,
+          recipientUserId: user.id,
+          templateCode: 'tip_sent',
           subject: 'Tip sent successfully',
           body: `Your ${tip.currency} ${(tip.amount / 100).toFixed(2)} tip was successful.`,
-          status: 'delivered',
-          sent_at: now,
-          delivered_at: now,
+          dedupeKey: `tip_sent:${tip.id}`,
+          actionUrl: '/gallery/notifications',
+          details: {
+            tipId: tip.id,
+            amount: tip.amount,
+            currency: tip.currency,
+            photographerId: tip.to_photographer_id,
+          },
           metadata: {
             tipId: tip.id,
             amount: tip.amount,
             currency: tip.currency,
           },
-        },
-        {
-          user_id: tip.to_photographer_id,
-          channel: 'in_app',
-          template_code: 'tip_received',
+        }),
+        dispatchInAppNotification({
+          supabase: serviceClient,
+          recipientUserId: tip.to_photographer_id,
+          templateCode: 'tip_received',
           subject: 'You received a tip',
           body: `You received a ${tip.currency} ${(tip.amount / 100).toFixed(2)} tip.`,
-          status: 'delivered',
-          sent_at: now,
-          delivered_at: now,
+          dedupeKey: `tip_received:${tip.id}`,
+          actionUrl: '/dashboard/billing',
+          actorUserId: user.id,
+          details: {
+            tipId: tip.id,
+            amount: tip.amount,
+            currency: tip.currency,
+            fromUserId: user.id,
+          },
           metadata: {
             tipId: tip.id,
             amount: tip.amount,
             currency: tip.currency,
             fromUserId: user.id,
           },
-        },
+        }),
       ]);
     } catch (notificationError) {
       console.error('Tip notification fanout failed:', notificationError);

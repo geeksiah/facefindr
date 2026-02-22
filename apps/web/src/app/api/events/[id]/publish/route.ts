@@ -6,6 +6,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { dispatchInAppNotification } from '@/lib/notifications/dispatcher';
 import { getPhotographerIdCandidates, resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
 import { generateAccessCode } from '@/lib/sharing/share-service';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
@@ -136,32 +137,39 @@ export async function POST(
             .maybeSingle(),
         ]);
 
-        const followerIds = Array.from(
+        const followerIds: string[] = Array.from(
           new Set((followers || []).map((row: any) => row.follower_id).filter((id: string) => id && id !== creatorUserId))
-        );
+        ) as string[];
 
         if (followerIds.length > 0) {
           const creatorName = profile?.display_name || 'A creator';
           const eventPath = updates.public_slug ? `/e/${updates.public_slug}` : `/e/${id}`;
-          const now = new Date().toISOString();
-          await serviceClient.from('notifications').insert(
-            followerIds.map((followerId) => ({
-              user_id: followerId,
-              template_code: 'creator_new_public_event',
-              channel: 'in_app',
-              subject: `${creatorName} published a new event`,
-              body: `${creatorName} just published: ${event.name || 'New Event'}`,
-              status: 'delivered',
-              sent_at: now,
-              delivered_at: now,
-              metadata: {
-                type: 'new_public_event',
-                creatorId: creatorUserId,
-                eventId: id,
-                eventName: event.name || 'New Event',
-                eventPath,
-              },
-            }))
+          await Promise.all(
+            followerIds.map((followerId: string) =>
+              dispatchInAppNotification({
+                supabase: serviceClient,
+                recipientUserId: followerId,
+                templateCode: 'creator_new_public_event',
+                subject: `${creatorName} published a new event`,
+                body: `${creatorName} just published: ${event.name || 'New Event'}`,
+                dedupeKey: `creator_new_public_event:${id}:${followerId}`,
+                actionUrl: eventPath,
+                actorUserId: creatorUserId,
+                details: {
+                  creatorId: creatorUserId,
+                  eventId: id,
+                  eventName: event.name || 'New Event',
+                  eventPath,
+                },
+                metadata: {
+                  type: 'new_public_event',
+                  creatorId: creatorUserId,
+                  eventId: id,
+                  eventName: event.name || 'New Event',
+                  eventPath,
+                },
+              })
+            )
           );
         }
       } catch (notifyError) {

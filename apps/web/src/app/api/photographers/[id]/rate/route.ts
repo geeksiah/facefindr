@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { dispatchInAppNotification } from '@/lib/notifications/dispatcher';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 async function resolvePhotographerByIdentifier(supabase: any, identifier: string) {
@@ -284,20 +285,28 @@ export async function POST(
     }
 
     try {
-      const now = new Date().toISOString();
-      await serviceClient.from('notifications').insert({
-        user_id: photographerUserId,
-        channel: 'in_app',
-        template_code: 'creator_new_rating',
+      await dispatchInAppNotification({
+        supabase: serviceClient,
+        recipientUserId: photographerUserId,
+        templateCode: 'creator_new_rating',
         subject: 'You received a new rating',
         body: `Someone rated your profile ${rating}/5.`,
-        status: 'delivered',
-        sent_at: now,
-        delivered_at: now,
+        dedupeKey: `rating_received:${ratingData.id}`,
+        actionUrl: '/dashboard/notifications',
+        actorUserId: attendeeUserId,
+        details: {
+          photographerId,
+          attendeeId: attendee.id,
+          rating,
+          reviewText: body.reviewText || null,
+          isVerified,
+          eventId,
+        },
         metadata: {
           photographerId,
           attendeeId: attendee.id,
           rating,
+          reviewText: body.reviewText || null,
           isVerified,
           eventId,
         },

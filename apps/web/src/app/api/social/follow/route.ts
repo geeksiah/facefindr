@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { dispatchInAppNotification } from '@/lib/notifications/dispatcher';
 import { normalizeUserType } from '@/lib/user-type';
 import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
@@ -204,31 +205,6 @@ async function getActiveFollowerCount(
   return count || 0;
 }
 
-async function createInAppNotification(
-  supabase: any,
-  userId: string,
-  templateCode: string,
-  subject: string,
-  body: string,
-  metadata: Record<string, unknown>
-) {
-  try {
-    await supabase.from('notifications').insert({
-      user_id: userId,
-      channel: 'in_app',
-      template_code: templateCode,
-      subject,
-      body,
-      status: 'delivered',
-      sent_at: new Date().toISOString(),
-      delivered_at: new Date().toISOString(),
-      metadata,
-    });
-  } catch {
-    // Non-blocking notification fan-out.
-  }
-}
-
 // POST - Follow a creator
 export async function POST(request: NextRequest) {
   try {
@@ -388,18 +364,29 @@ export async function POST(request: NextRequest) {
       }
 
       if (followingUserId && followingUserId !== user.id) {
-        await createInAppNotification(
-          serviceClient,
-          followingUserId,
-          'social_new_follower',
-          'You have a new follower',
-          'Someone started following your profile.',
-          {
+        await dispatchInAppNotification({
+          supabase: serviceClient,
+          recipientUserId: followingUserId,
+          templateCode: 'social_new_follower',
+          subject: 'You have a new follower',
+          body: 'Someone started following your profile.',
+          dedupeKey: `follow_received:${user.id}:${followingUserId}`,
+          actionUrl:
+            resolvedTargetType === 'creator'
+              ? `/p/${resolvedTargetId}`
+              : `/u/${resolvedTargetId}`,
+          actorUserId: user.id,
+          details: {
             followerId: user.id,
             followerType: normalizedFollowerType,
             followingType: resolvedTargetType,
-          }
-        );
+          },
+          metadata: {
+            followerId: user.id,
+            followerType: normalizedFollowerType,
+            followingType: resolvedTargetType,
+          },
+        });
       }
     }
 
@@ -494,20 +481,7 @@ export async function DELETE(request: NextRequest) {
         // Non-blocking audit trail.
       }
 
-      if (followingUserId && followingUserId !== user.id) {
-        await createInAppNotification(
-          serviceClient,
-          followingUserId,
-          'social_follower_removed',
-          'A follower unfollowed you',
-          'Someone stopped following your profile.',
-          {
-            followerId: user.id,
-            followerType: normalizedFollowerType,
-            followingType: resolvedFollowingType,
-          }
-        );
-      }
+      // Product policy: never notify on unfollow.
     }
 
     const activeFollowers = await getActiveFollowerCount(
