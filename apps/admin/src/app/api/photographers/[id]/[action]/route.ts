@@ -26,6 +26,7 @@ export async function POST(
       verify: 'users.verify',
       'reset-password': 'users.verify',
       'send-verification': 'users.verify',
+      'assign-subscription': 'settings.update',
     };
 
     const requiredPermission = permissionMap[action];
@@ -34,6 +35,134 @@ export async function POST(
     }
 
     switch (action) {
+      case 'assign-subscription': {
+        const body = await request.json().catch(() => ({}));
+        const rawPlanId = String(body?.planId || '').trim();
+        const rawPlanCode = String(body?.planCode || '').trim();
+        const rawBillingCycle = String(body?.billingCycle || 'monthly').trim().toLowerCase();
+        const billingCycle = rawBillingCycle === 'annual' || rawBillingCycle === 'yearly' ? 'annual' : 'monthly';
+        const requestedDurationDays = Number(body?.durationDays);
+        const durationDays =
+          Number.isFinite(requestedDurationDays) && requestedDurationDays >= 1 && requestedDurationDays <= 3650
+            ? Math.round(requestedDurationDays)
+            : billingCycle === 'annual'
+            ? 365
+            : 30;
+
+        let planQuery = supabaseAdmin
+          .from('subscription_plans')
+          .select('id, code, name, plan_type, base_price_usd, prices, is_active')
+          .eq('is_active', true)
+          .limit(1);
+
+        if (rawPlanId) {
+          planQuery = planQuery.eq('id', rawPlanId);
+        } else if (rawPlanCode) {
+          planQuery = planQuery.eq('code', rawPlanCode);
+        } else {
+          return NextResponse.json({ error: 'planId or planCode is required' }, { status: 400 });
+        }
+
+        const { data: plan, error: planError } = await planQuery.maybeSingle();
+        if (planError || !plan) {
+          return NextResponse.json({ error: 'Creator plan not found' }, { status: 404 });
+        }
+
+        const normalizedPlanType = String(plan.plan_type || '').toLowerCase();
+        if (normalizedPlanType === 'drop_in' || normalizedPlanType === 'payg') {
+          return NextResponse.json({ error: 'Selected plan is not a creator subscription plan' }, { status: 400 });
+        }
+
+        const prices = (plan.prices as Record<string, number> | null) || {};
+        const currency = String(body?.currency || 'USD').trim().toUpperCase();
+        const fallbackAmount =
+          currency === 'USD'
+            ? Number(plan.base_price_usd || 0)
+            : Number(prices[currency] ?? prices.USD ?? plan.base_price_usd ?? 0);
+        const requestedAmountCents = Number(body?.amountCents);
+        const amountCents = Number.isFinite(requestedAmountCents)
+          ? Math.max(0, Math.round(requestedAmountCents))
+          : Math.max(0, Math.round(fallbackAmount));
+
+        const now = new Date();
+        const periodEnd = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
+        const nowIso = now.toISOString();
+        const periodEndIso = periodEnd.toISOString();
+
+        const { data: existingSub, error: existingSubError } = await supabaseAdmin
+          .from('subscriptions')
+          .select('id')
+          .eq('photographer_id', id)
+          .maybeSingle();
+
+        if (existingSubError && existingSubError.code !== 'PGRST116') {
+          return NextResponse.json({ error: existingSubError.message }, { status: 500 });
+        }
+
+        const subscriptionPayload = {
+          plan_code: plan.code,
+          plan_id: plan.id,
+          status: 'active',
+          current_period_start: nowIso,
+          current_period_end: periodEndIso,
+          cancel_at_period_end: false,
+          canceled_at: null,
+          billing_cycle: billingCycle,
+          currency,
+          amount_cents: amountCents,
+          payment_provider: 'admin_manual',
+          external_subscription_id: null,
+          external_plan_id: null,
+          metadata: {
+            source: 'admin_manual',
+            assigned_by_admin_id: session.adminId,
+            assigned_duration_days: durationDays,
+          },
+          updated_at: nowIso,
+        };
+
+        let writeError: any = null;
+        if (existingSub?.id) {
+          const { error: updateError } = await supabaseAdmin
+            .from('subscriptions')
+            .update(subscriptionPayload)
+            .eq('id', existingSub.id);
+          writeError = updateError;
+        } else {
+          const { error: insertError } = await supabaseAdmin
+            .from('subscriptions')
+            .insert({
+              photographer_id: id,
+              ...subscriptionPayload,
+            });
+          writeError = insertError;
+        }
+
+        if (writeError) {
+          return NextResponse.json({ error: writeError.message }, { status: 500 });
+        }
+
+        await logAction('creator_subscription_assign', 'photographer', id, {
+          plan_id: plan.id,
+          plan_code: plan.code,
+          billing_cycle: billingCycle,
+          duration_days: durationDays,
+          amount_cents: amountCents,
+          currency,
+        });
+
+        return NextResponse.json({
+          success: true,
+          subscription: {
+            planCode: plan.code,
+            currentPeriodEnd: periodEndIso,
+            billingCycle,
+            amountCents,
+            currency,
+          },
+        });
+      }
+
       case 'suspend': {
         await supabaseAdmin
           .from('photographers')

@@ -11,6 +11,7 @@ import {
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
+import { CreatorSubscriptionAssignmentCard } from '@/components/admin/creator-subscription-assignment-card';
 import { supabaseAdmin } from '@/lib/supabase';
 import { formatDate, formatDateTime, formatCurrency, getInitials } from '@/lib/utils';
 
@@ -107,6 +108,17 @@ export default async function CreatorDetailPage({
     balance = walletBalance?.available_balance || 0;
   }
 
+  const { data: creatorPlans } = await supabaseAdmin
+    .from('subscription_plans')
+    .select('id, code, name, plan_type, is_active, base_price_usd')
+    .eq('is_active', true)
+    .order('base_price_usd', { ascending: true });
+
+  const normalizedCreatorPlans = (creatorPlans || []).filter((plan: any) => {
+    const planType = String(plan.plan_type || '').toLowerCase();
+    return planType !== 'drop_in' && planType !== 'payg';
+  });
+
   return (
     <div className="space-y-6">
       {/* Back Button */}
@@ -183,6 +195,16 @@ export default async function CreatorDetailPage({
           value={formatCurrency(balance)}
         />
       </div>
+
+      <CreatorSubscriptionAssignmentCard
+        photographerId={photographer.id}
+        plans={normalizedCreatorPlans.map((plan: any) => ({
+          id: plan.id,
+          code: plan.code,
+          name: plan.name,
+        }))}
+        currentPlanCode={photographer.subscriptions?.plan_code || 'free'}
+      />
 
       {/* Details Grid */}
       <div className="grid gap-6 lg:grid-cols-2">

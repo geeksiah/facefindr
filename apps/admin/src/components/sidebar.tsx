@@ -11,6 +11,7 @@ import {
   Settings,
   FileText,
   Bell,
+  Tag,
   AlertTriangle,
   BarChart3,
   LogOut,
@@ -82,6 +83,7 @@ const navigation: NavGroup[] = [
     label: 'Operations',
     items: [
       { label: 'Announcements', href: '/announcements', icon: Bell },
+      { label: 'Promotions', href: '/promotions', icon: Tag },
       { label: 'Disputes', href: '/disputes', icon: AlertTriangle },
       { label: 'Audit Logs', href: '/audit-logs', icon: FileText },
     ],

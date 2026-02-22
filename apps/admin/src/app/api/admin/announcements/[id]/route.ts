@@ -94,7 +94,7 @@ export async function PATCH(
 
     if (!updates.send_email && !updates.send_push && !updates.send_sms) {
       return NextResponse.json(
-        { error: 'Select at least one channel (email, push, or SMS)' },
+        { error: 'Select at least one channel (system, email, or SMS)' },
         { status: 400 }
       );
     }

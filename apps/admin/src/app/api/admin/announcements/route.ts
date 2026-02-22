@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
 
     if (!send_email && !send_push && !send_sms) {
       return NextResponse.json(
-        { error: 'Select at least one channel (email, push, or SMS)' },
+        { error: 'Select at least one channel (system, email, or SMS)' },
         { status: 400 }
       );
     }

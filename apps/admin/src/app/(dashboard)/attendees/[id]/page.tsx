@@ -14,6 +14,7 @@ import {
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
+import { AttendeeManualAssignmentCard } from '@/components/admin/attendee-manual-assignment-card';
 import { supabaseAdmin } from '@/lib/supabase';
 import { formatDate, formatDateTime, formatCurrency, getInitials } from '@/lib/utils';
 
@@ -149,6 +150,12 @@ export default async function AttendeeDetailPage({
     .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     .slice(0, 10) || [];
 
+  const { data: storagePlans } = await supabaseAdmin
+    .from('storage_plans')
+    .select('id, name, slug, currency, price_monthly, price_yearly, is_active, sort_order')
+    .eq('is_active', true)
+    .order('sort_order', { ascending: true });
+
   return (
     <div className="space-y-6">
       {/* Back Button */}
@@ -223,6 +230,19 @@ export default async function AttendeeDetailPage({
           value={`${attendee.summary.successfulTransactions}/${attendee.summary.totalTransactions}`}
         />
       </div>
+
+      <AttendeeManualAssignmentCard
+        attendeeId={attendee.id}
+        storagePlans={(storagePlans || []).map((plan: any) => ({
+          id: plan.id,
+          name: plan.name,
+          slug: plan.slug,
+          currency: plan.currency,
+          price_monthly: plan.price_monthly,
+          price_yearly: plan.price_yearly,
+        }))}
+        currentCredits={attendee.drop_in_credits}
+      />
 
       {/* Details Grid */}
       <div className="grid gap-6 lg:grid-cols-2">

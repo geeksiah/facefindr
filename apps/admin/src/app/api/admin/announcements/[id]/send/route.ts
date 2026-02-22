@@ -78,41 +78,48 @@ export async function POST(
       )
     ) as string[];
 
-    const { data: regionConfigs } = await supabaseAdmin
-      .from('region_config')
-      .select('region_code, is_active, email_provider, sms_provider, push_provider, email_enabled, sms_enabled, push_enabled')
-      .in('region_code', targetCountry ? [targetCountry] : uniqueCountries);
+    const requiresRegionChecks = Boolean(announcement.send_email || announcement.send_sms);
+    let regionConfigs: any[] = [];
+
+    if (requiresRegionChecks) {
+      const { data } = await supabaseAdmin
+        .from('region_config')
+        .select('region_code, is_active, email_provider, sms_provider, email_enabled, sms_enabled')
+        .in('region_code', targetCountry ? [targetCountry] : uniqueCountries);
+      regionConfigs = data || [];
+    }
 
     const regionMap = new Map(
       (regionConfigs || []).map((region: any) => [region.region_code, region])
     );
 
-    const missingRegionConfig = uniqueCountries.filter((country) => !regionMap.has(country));
-    if (missingRegionConfig.length > 0) {
-      return NextResponse.json(
-        {
-          error: `Missing region configuration for: ${missingRegionConfig.join(', ')}`,
-          failClosed: true,
-        },
-        { status: 503 }
-      );
+    if (requiresRegionChecks) {
+      const missingRegionConfig = uniqueCountries.filter((country) => !regionMap.has(country));
+      if (missingRegionConfig.length > 0) {
+        return NextResponse.json(
+          {
+            error: `Missing region configuration for: ${missingRegionConfig.join(', ')}`,
+            failClosed: true,
+          },
+          { status: 503 }
+        );
+      }
     }
 
     const configErrors: string[] = [];
-    for (const country of uniqueCountries) {
-      const region = regionMap.get(country);
-      if (!region?.is_active) {
-        configErrors.push(`${country}: region disabled`);
-        continue;
-      }
-      if (announcement.send_email && region.email_enabled !== false && !region.email_provider) {
-        configErrors.push(`${country}: email enabled but provider missing`);
-      }
-      if (announcement.send_sms && region.sms_enabled === true && !region.sms_provider) {
-        configErrors.push(`${country}: sms enabled but provider missing`);
-      }
-      if (announcement.send_push && region.push_enabled === true && !region.push_provider) {
-        configErrors.push(`${country}: push enabled but provider missing`);
+    if (requiresRegionChecks) {
+      for (const country of uniqueCountries) {
+        const region = regionMap.get(country);
+        if (!region?.is_active) {
+          configErrors.push(`${country}: region disabled`);
+          continue;
+        }
+        if (announcement.send_email && region.email_enabled !== false && !region.email_provider) {
+          configErrors.push(`${country}: email enabled but provider missing`);
+        }
+        if (announcement.send_sms && region.sms_enabled === true && !region.sms_provider) {
+          configErrors.push(`${country}: sms enabled but provider missing`);
+        }
       }
     }
 
@@ -129,29 +136,62 @@ export async function POST(
 
     const { data: prefs } = await supabaseAdmin
       .from('user_notification_preferences')
-      .select('user_id, email_enabled, sms_enabled, push_enabled, phone_number, phone_verified')
+      .select('user_id, email_enabled, sms_enabled, push_enabled, system_enabled, phone_number, phone_verified')
       .in('user_id', targets.map((user: any) => user.id));
 
     const prefsMap = new Map((prefs || []).map((pref: any) => [pref.user_id, pref]));
 
     const notifications: any[] = [];
+    const nowIso = new Date().toISOString();
 
     for (const user of targets) {
       const userPrefs = prefsMap.get(user.id) || {
         email_enabled: true,
         sms_enabled: false,
         push_enabled: true,
+        system_enabled: true,
         phone_number: null,
         phone_verified: false,
       };
 
       const userCountry = targetCountry || (user.country_code ? String(user.country_code).toUpperCase() : null);
       const region = userCountry ? regionMap.get(userCountry) : null;
-      if (!region || !region.is_active) {
-        continue;
+
+      if (announcement.send_push && userPrefs.system_enabled !== false) {
+        notifications.push({
+          user_id: user.id,
+          template_code: 'platform_announcement',
+          channel: 'in_app',
+          subject: announcement.title,
+          body: announcement.content,
+          variables: { title: announcement.title, content: announcement.content },
+          category: 'system',
+          status: 'delivered',
+          sent_at: nowIso,
+          delivered_at: nowIso,
+          details: {
+            announcement_id: announcement.id,
+            title: announcement.title,
+            content: announcement.content,
+          },
+          metadata: {
+            announcement_id: announcement.id,
+            country_code: userCountry,
+            medium: 'system',
+          },
+        });
       }
 
-      if (announcement.send_email && user.email && userPrefs.email_enabled && region.email_enabled !== false && region.email_provider) {
+      const canUseRegionalChannels = Boolean(region?.is_active);
+
+      if (
+        announcement.send_email &&
+        canUseRegionalChannels &&
+        user.email &&
+        userPrefs.email_enabled &&
+        region.email_enabled !== false &&
+        region.email_provider
+      ) {
         notifications.push({
           user_id: user.id,
           template_code: 'platform_announcement',
@@ -170,6 +210,7 @@ export async function POST(
 
       if (
         announcement.send_sms &&
+        canUseRegionalChannels &&
         userPrefs.sms_enabled &&
         userPrefs.phone_verified &&
         userPrefs.phone_number &&
@@ -192,22 +233,6 @@ export async function POST(
         });
       }
 
-      if (announcement.send_push && userPrefs.push_enabled && region.push_enabled === true && region.push_provider) {
-        notifications.push({
-          user_id: user.id,
-          template_code: 'platform_announcement',
-          channel: 'push',
-          subject: announcement.title,
-          body: announcement.content,
-          variables: { title: announcement.title, content: announcement.content },
-          status: 'pending',
-          provider_used: region.push_provider,
-          metadata: {
-            announcement_id: announcement.id,
-            country_code: userCountry,
-          },
-        });
-      }
     }
 
     const queuedCount = notifications.length;

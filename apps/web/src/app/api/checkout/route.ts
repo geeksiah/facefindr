@@ -56,6 +56,34 @@ function buildCheckoutRequestHash(payload: Record<string, unknown>): string {
   return createHash('sha256').update(stableStringify(payload)).digest('hex');
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function normalizeRecoveryRequestIds(...inputs: unknown[]): string[] {
+  const ids = new Set<string>();
+
+  for (const input of inputs) {
+    if (typeof input === 'string') {
+      const trimmed = input.trim();
+      if (UUID_PATTERN.test(trimmed)) {
+        ids.add(trimmed);
+      }
+      continue;
+    }
+
+    if (Array.isArray(input)) {
+      for (const value of input) {
+        if (typeof value !== 'string') continue;
+        const trimmed = value.trim();
+        if (UUID_PATTERN.test(trimmed)) {
+          ids.add(trimmed);
+        }
+      }
+    }
+  }
+
+  return Array.from(ids);
+}
+
 export async function POST(request: NextRequest) {
   // Rate limiting for checkout
   const clientIP = getClientIP(request);
@@ -91,8 +119,15 @@ export async function POST(request: NextRequest) {
       provider,
       currency,
       customerEmail,
+      mediaRecoveryRequestId,
+      mediaRecoveryRequestIds,
       idempotencyKey: bodyIdempotencyKey, // backward-compat body key
     } = body;
+    const recoveryRequestIds = normalizeRecoveryRequestIds(
+      mediaRecoveryRequestId,
+      mediaRecoveryRequestIds
+    );
+    const isRecoveryCheckout = recoveryRequestIds.length > 0;
 
     const headerIdempotencyKey = request.headers.get('Idempotency-Key') || request.headers.get('idempotency-key');
     const idempotencyKey = String(headerIdempotencyKey || bodyIdempotencyKey || '').trim();
@@ -105,6 +140,7 @@ export async function POST(request: NextRequest) {
       provider: provider || null,
       currency: currency || null,
       customerEmail: customerEmail || null,
+      mediaRecoveryRequestIds: recoveryRequestIds,
       actorId,
     });
     let idempotencyRecordId: string | null = null;
@@ -154,7 +190,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate event exists and get pricing
-    const { data: event, error: eventError } = await supabase
+    let eventQuery = supabase
       .from('events')
       .select(`
         *,
@@ -165,9 +201,11 @@ export async function POST(request: NextRequest) {
           business_name
         )
       `)
-      .eq('id', eventId)
-      .eq('status', 'active')
-      .single();
+      .eq('id', eventId);
+    if (!isRecoveryCheckout) {
+      eventQuery = eventQuery.eq('status', 'active');
+    }
+    const { data: event, error: eventError } = await eventQuery.single();
 
     if (eventError || !event) {
       return NextResponse.json({ error: 'Event not found or not active' }, { status: 404 });
@@ -197,11 +235,13 @@ export async function POST(request: NextRequest) {
     }
 
     const pricing = event.event_pricing?.[0];
-    if (!pricing || pricing.is_free || pricing.pricing_type === 'free') {
-      return NextResponse.json(
-        { error: 'This event does not have paid photos' },
-        { status: 400 }
-      );
+    if (!isRecoveryCheckout) {
+      if (!pricing || pricing.is_free || pricing.pricing_type === 'free') {
+        return NextResponse.json(
+          { error: 'This event does not have paid photos' },
+          { status: 400 }
+        );
+      }
     }
 
     // Determine transaction currency (use attendee's currency preference or event currency)
@@ -279,7 +319,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check for duplicate purchases
-    if (user?.id && mediaIds && mediaIds.length > 0) {
+    if (!isRecoveryCheckout && user?.id && mediaIds && mediaIds.length > 0) {
       const { count: existingCount } = await supabase
         .from('entitlements')
         .select('id', { count: 'exact', head: true })
@@ -295,7 +335,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (user?.id && unlockAll) {
+    if (!isRecoveryCheckout && user?.id && unlockAll) {
       const { count: unlockAllCount } = await supabase
         .from('entitlements')
         .select('id', { count: 'exact', head: true })
@@ -311,10 +351,95 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (isRecoveryCheckout && !user?.id) {
+      return NextResponse.json(
+        { error: 'Authentication is required for media recovery checkout' },
+        { status: 401 }
+      );
+    }
+
     // Calculate gross amount in event currency
     let grossAmountInEventCurrency = 0;
 
-    if (unlockAll) {
+    if (isRecoveryCheckout) {
+      const { data: recoveryRows } = await serviceClient
+        .from('media_recovery_requests')
+        .select(`
+          id,
+          requester_user_id,
+          status,
+          quoted_fee_cents,
+          currency,
+          expires_at,
+          media_retention_records!inner(event_id)
+        `)
+        .in('id', recoveryRequestIds)
+        .eq('requester_user_id', user!.id);
+
+      const rows = recoveryRows || [];
+      if (rows.length !== recoveryRequestIds.length) {
+        return NextResponse.json(
+          { error: 'One or more recovery requests were not found' },
+          { status: 404 }
+        );
+      }
+
+      for (const row of rows as any[]) {
+        const eventIdFromRetention = Array.isArray(row.media_retention_records)
+          ? row.media_retention_records[0]?.event_id
+          : row.media_retention_records?.event_id;
+        if (String(eventIdFromRetention || '') !== String(eventId || '')) {
+          return NextResponse.json(
+            { error: 'Recovery requests must belong to the selected event' },
+            { status: 400 }
+          );
+        }
+
+        if (row.status !== 'pending_payment') {
+          return NextResponse.json(
+            { error: `Recovery request ${row.id} is not awaiting payment` },
+            { status: 409 }
+          );
+        }
+
+        if (row.expires_at && new Date(row.expires_at) <= new Date()) {
+          return NextResponse.json(
+            { error: `Recovery request ${row.id} has expired` },
+            { status: 410 }
+          );
+        }
+      }
+
+      const recoveryCurrency = String((rows[0] as any)?.currency || 'USD').toUpperCase();
+      if (rows.some((row: any) => String(row.currency || 'USD').toUpperCase() !== recoveryCurrency)) {
+        return NextResponse.json(
+          { error: 'All recovery requests in a single checkout must use the same currency' },
+          { status: 400 }
+        );
+      }
+
+      const resolvedCurrency = String(transactionCurrency || recoveryCurrency).toUpperCase();
+      if (resolvedCurrency !== recoveryCurrency) {
+        return NextResponse.json(
+          {
+            error: `Recovery checkout currency must be ${recoveryCurrency}`,
+            requiredCurrency: recoveryCurrency,
+          },
+          { status: 400 }
+        );
+      }
+
+      grossAmountInEventCurrency = rows.reduce((sum: number, row: any) => {
+        return sum + Math.max(0, Number(row.quoted_fee_cents || 0));
+      }, 0);
+
+      if (grossAmountInEventCurrency <= 0) {
+        return NextResponse.json(
+          { error: 'Recovery requests do not require payment' },
+          { status: 400 }
+        );
+      }
+    } else if (unlockAll) {
       if (!pricing.unlock_all_price) {
         return NextResponse.json(
           { error: 'Unlock all pricing is not set for this event' },
@@ -355,7 +480,14 @@ export async function POST(request: NextRequest) {
       mediaIds?: string[];
     }> = [];
 
-    if (unlockAll) {
+    if (isRecoveryCheckout) {
+      items.push({
+        name: `Media Recovery - ${event.name}`,
+        description: `Recover ${recoveryRequestIds.length} archived photo${recoveryRequestIds.length > 1 ? 's' : ''}`,
+        amount: feeCalculation.grossAmount,
+        quantity: 1,
+      });
+    } else if (unlockAll) {
       items.push({
         name: `All Photos - ${event.name}`,
         description: 'Unlock all photos from this event',
@@ -374,6 +506,13 @@ export async function POST(request: NextRequest) {
 
     const baseUrl = getAppUrl();
     const txRef = uuidv4();
+    const recoveryMetadata = isRecoveryCheckout
+      ? {
+          media_recovery_request_id: recoveryRequestIds[0] || null,
+          media_recovery_request_ids: recoveryRequestIds,
+          checkout_type: 'media_recovery',
+        }
+      : {};
 
     // Determine customer email
     const email = customerEmail || user?.email;
@@ -472,11 +611,18 @@ export async function POST(request: NextRequest) {
         cancelUrl: `${baseUrl}/gallery/events/${eventId}?checkout=cancelled`,
         metadata: {
           wallet_id: wallet.id,
-          media_ids: mediaIds?.join(',') || 'all',
+          media_ids: mediaIds?.join(',') || (unlockAll ? 'all' : ''),
           unlock_all: String(unlockAll || false),
           attendee_id: user?.id || '',
           event_currency: eventCurrency,
           exchange_rate: feeCalculation.exchangeRate.toString(),
+          ...(isRecoveryCheckout
+            ? {
+                media_recovery_request_id: recoveryRequestIds[0] || '',
+                media_recovery_request_ids: recoveryRequestIds.join(','),
+                checkout_type: 'media_recovery',
+              }
+            : {}),
         },
       });
 
@@ -504,9 +650,16 @@ export async function POST(request: NextRequest) {
         photographerId: event.photographer_id,
         metadata: {
           wallet_id: wallet.id,
-          media_ids: mediaIds?.join(',') || 'all',
+          media_ids: mediaIds?.join(',') || (unlockAll ? 'all' : ''),
           unlock_all: String(unlockAll || false),
           attendee_id: user?.id || '',
+          ...(isRecoveryCheckout
+            ? {
+                media_recovery_request_id: recoveryRequestIds[0] || '',
+                media_recovery_request_ids: recoveryRequestIds.join(','),
+                checkout_type: 'media_recovery',
+              }
+            : {}),
         },
       });
 
@@ -533,10 +686,17 @@ export async function POST(request: NextRequest) {
         cancelUrl: `${baseUrl}/gallery/events/${eventId}?checkout=cancelled`,
         metadata: {
           wallet_id: wallet.id,
-          media_ids: mediaIds?.join(',') || 'all',
+          media_ids: mediaIds?.join(',') || (unlockAll ? 'all' : ''),
           unlock_all: String(unlockAll || false),
           attendee_id: user?.id || '',
           tx_ref: txRef,
+          ...(isRecoveryCheckout
+            ? {
+                media_recovery_request_id: recoveryRequestIds[0] || '',
+                media_recovery_request_ids: recoveryRequestIds.join(','),
+                checkout_type: 'media_recovery',
+              }
+            : {}),
         },
       });
 
@@ -569,12 +729,19 @@ export async function POST(request: NextRequest) {
         callbackUrl: `${baseUrl}/gallery/checkout/success?reference=${txRef}&provider=paystack`,
         metadata: {
           wallet_id: wallet.id,
-          media_ids: mediaIds?.join(',') || 'all',
+          media_ids: mediaIds?.join(',') || (unlockAll ? 'all' : ''),
           unlock_all: String(unlockAll || false),
           attendee_id: user?.id || '',
           event_id: eventId,
           event_currency: eventCurrency,
           exchange_rate: feeCalculation.exchangeRate,
+          ...(isRecoveryCheckout
+            ? {
+                media_recovery_request_id: recoveryRequestIds[0] || '',
+                media_recovery_request_ids: recoveryRequestIds.join(','),
+                checkout_type: 'media_recovery',
+              }
+            : {}),
         },
         subaccount: (wallet as any).paystack_subaccount_code || undefined,
       }, paystackSecretKey);
@@ -590,7 +757,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate media IDs are not already purchased (prevent double purchase)
-    if (mediaIds && mediaIds.length > 0 && user?.id) {
+    if (!isRecoveryCheckout && mediaIds && mediaIds.length > 0 && user?.id) {
       const { data: existingEntitlements } = await supabase
         .from('entitlements')
         .select('media_id')
@@ -639,6 +806,7 @@ export async function POST(request: NextRequest) {
         items,
         media_ids: mediaIds || [],
         unlock_all: unlockAll || false,
+        ...recoveryMetadata,
         fee_breakdown: feeCalculation.breakdown,
         photographer_plan: subscription.plan_code,
         idempotency_key: idempotencyKey,

@@ -119,6 +119,27 @@ export default async function EventPage({ params }: EventPageProps) {
   const pricing = event.event_pricing?.[0];
   const mediaCount = mediaData.length;
 
+  const [consentAttendeesResult, entitlementAttendeesResult] = await Promise.all([
+    serviceClient
+      .from('attendee_consents')
+      .select('attendee_id')
+      .eq('event_id', event.id)
+      .is('withdrawn_at', null),
+    serviceClient
+      .from('entitlements')
+      .select('attendee_id')
+      .eq('event_id', event.id),
+  ]);
+
+  const attendeeIdSet = new Set<string>();
+  for (const row of consentAttendeesResult.data || []) {
+    if (row?.attendee_id) attendeeIdSet.add(String(row.attendee_id));
+  }
+  for (const row of entitlementAttendeesResult.data || []) {
+    if (row?.attendee_id) attendeeIdSet.add(String(row.attendee_id));
+  }
+  const attendeeCount = attendeeIdSet.size;
+
   const statusColors: Record<string, string> = {
     draft: 'bg-muted text-muted-foreground',
     active: 'bg-success/10 text-success',
@@ -223,7 +244,7 @@ export default async function EventPage({ params }: EventPageProps) {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Attendees</p>
-              <p className="text-2xl font-bold text-foreground">0</p>
+              <p className="text-2xl font-bold text-foreground">{attendeeCount}</p>
             </div>
           </div>
         </div>

@@ -215,7 +215,7 @@ export default function AnnouncementsPage() {
       <div className="rounded-xl border border-border bg-muted/50 p-4">
         <p className="text-sm text-muted-foreground">
           <strong>Note:</strong> Sent announcements are automatically deleted after 24 hours. 
-          Push notifications require FCM/APN configuration, and email notifications require an email provider to be set up in the Regions & Providers settings.
+          System announcements are delivered in-app. Email and SMS require providers configured in Regions & Providers.
         </p>
       </div>
       {submitError && (
@@ -301,7 +301,7 @@ export default function AnnouncementsPage() {
                     onChange={(e) => setFormData({ ...formData, send_push: e.target.checked })}
                     className="rounded"
                   />
-                  <span className="text-sm text-foreground">Push Notification</span>
+                  <span className="text-sm text-foreground">System (In-App)</span>
                 </label>
                 <label className="flex items-center gap-2">
                   <input
@@ -380,7 +380,7 @@ export default function AnnouncementsPage() {
                     <span>
                       Channels:{' '}
                       {[
-                        announcement.send_push && 'Push',
+                        announcement.send_push && 'System',
                         announcement.send_email && 'Email',
                         announcement.send_sms && 'SMS',
                       ]
