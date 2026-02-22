@@ -442,16 +442,12 @@ export default function MyEventsPage() {
                 <div className="relative bg-black">
                   <video
                     ref={videoRef}
-                    className="h-[68vh] min-h-[320px] max-h-[560px] w-full object-cover"
+                    className="h-[52vh] min-h-[260px] max-h-[420px] w-full object-cover"
                     autoPlay
                     playsInline
                     muted
                   />
                   <canvas ref={canvasRef} className="hidden" />
-                  <div className="pointer-events-none absolute inset-0">
-                    <div className="absolute inset-4 rounded-2xl border border-white/35" />
-                    <div className="absolute left-1/2 top-1/2 h-52 w-52 -translate-x-1/2 -translate-y-1/2 rounded-3xl border-2 border-white/60 shadow-[0_0_0_9999px_rgba(0,0,0,0.15)]" />
-                  </div>
                   {isInitializingScanner && (
                     <div className="absolute inset-0 flex items-center justify-center text-white">
                       <div className="h-8 w-8 animate-spin rounded-full border-2 border-white border-t-transparent" />

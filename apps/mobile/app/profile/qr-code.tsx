@@ -19,7 +19,8 @@ import * as Clipboard from 'expo-clipboard';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import { captureRef } from 'react-native-view-shot';
-import Svg, { Rect, SvgXml } from 'react-native-svg';
+import { SvgXml } from 'react-native-svg';
+import QRCode from 'react-native-qrcode-svg';
 
 import { Button, Card } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth-store';
@@ -42,78 +43,24 @@ function QRLogo({ size }: { size: number }) {
 
 // QR Code with logo in center
 function QRCodeWithLogo({ value, size }: { value: string; size: number }) {
-  const cellSize = size / 25; // 25x25 grid for better detail
-  const logoSize = size * 0.32; // Logo takes ~32% of QR code size (increased for better visibility)
+  const safeValue = value?.trim() || 'https://ferchr.com';
+  const quietZone = Math.max(12, Math.round(size * 0.08));
+  const qrSize = Math.max(120, size - quietZone * 2);
+  const logoSize = qrSize * 0.22;
   const logoOffset = (size - logoSize) / 2;
-  
-  // Generate QR pattern (simplified - use react-native-qrcode-svg in production)
-  const pattern = [];
-  const clearZone = { 
-    start: Math.floor(25 * 0.32), 
-    end: Math.ceil(25 * 0.68) 
-  };
-
-  for (let y = 0; y < 25; y++) {
-    for (let x = 0; x < 25; x++) {
-      // Skip center area for logo
-      if (x >= clearZone.start && x <= clearZone.end && 
-          y >= clearZone.start && y <= clearZone.end) {
-        continue;
-      }
-
-      // Position detection patterns (corners) - standard QR format
-      const isFinderPattern =
-        (x < 7 && y < 7) || // Top-left
-        (x >= 18 && y < 7) || // Top-right
-        (x < 7 && y >= 18); // Bottom-left
-
-      if (isFinderPattern) {
-        // Finder pattern logic
-        const isTopLeft = x < 7 && y < 7;
-        const isTopRight = x >= 18 && y < 7;
-        const isBottomLeft = x < 7 && y >= 18;
-
-        let localX = x;
-        let localY = y;
-        if (isTopRight) localX = x - 18;
-        if (isBottomLeft) localY = y - 18;
-
-        // Outer border
-        if (localX === 0 || localX === 6 || localY === 0 || localY === 6) {
-          pattern.push({ x, y });
-        }
-        // Inner square
-        else if (localX >= 2 && localX <= 4 && localY >= 2 && localY <= 4) {
-          pattern.push({ x, y });
-        }
-      } else {
-        // Data area - pseudo-random based on value
-        const seed = value.charCodeAt(x % value.length) + 
-                     value.charCodeAt(y % value.length);
-        const hash = (x * 37 + y * 23 + seed) % 5;
-        if (hash < 2) {
-          pattern.push({ x, y });
-        }
-      }
-    }
-  }
 
   return (
-    <View style={{ width: size, height: size }}>
-      <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        <Rect x={0} y={0} width={size} height={size} fill="#ffffff" rx={8} />
-        {pattern.map((cell, i) => (
-          <Rect
-            key={i}
-            x={cell.x * cellSize + 2}
-            y={cell.y * cellSize + 2}
-            width={cellSize - 1}
-            height={cellSize - 1}
-            rx={2}
-            fill={colors.foreground}
-          />
-        ))}
-      </Svg>
+    <View style={{ width: size, height: size, backgroundColor: '#ffffff', borderRadius: 8 }}>
+      <View style={{ padding: quietZone }}>
+        <QRCode
+          value={safeValue}
+          size={qrSize}
+          ecl="H"
+          quietZone={0}
+          color={colors.foreground}
+          backgroundColor="#ffffff"
+        />
+      </View>
       {/* Logo overlay in center - using qr-logo.svg */}
       <View style={[
         styles.logoContainer,
@@ -124,7 +71,9 @@ function QRCodeWithLogo({ value, size }: { value: string; size: number }) {
           top: logoOffset,
         }
       ]}>
-        <QRLogo size={logoSize * 0.9} />
+        <View style={[styles.logoInner, { borderRadius: logoSize * 0.18 }]}>
+          <QRLogo size={logoSize * 0.76} />
+        </View>
       </View>
     </View>
   );
@@ -370,6 +319,13 @@ const styles = StyleSheet.create({
   },
   logoContainer: {
     position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoInner: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
   },

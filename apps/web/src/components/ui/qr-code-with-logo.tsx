@@ -21,7 +21,9 @@ export const QRCodeWithLogo = React.forwardRef<HTMLDivElement, QRCodeWithLogoPro
   className = ''
 }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const logoSize = useMemo(() => size * 0.32, [size]); // Logo takes 32% of QR size (matching mobile)
+  const quietZoneSize = useMemo(() => Math.max(12, Math.round(size * 0.08)), [size]);
+  const qrMatrixSize = useMemo(() => Math.max(128, size - quietZoneSize * 2), [size, quietZoneSize]);
+  const logoSize = useMemo(() => Math.round(qrMatrixSize * 0.22), [qrMatrixSize]);
   
   // Combine refs
   React.useImperativeHandle(ref, () => containerRef.current!);
@@ -40,20 +42,23 @@ export const QRCodeWithLogo = React.forwardRef<HTMLDivElement, QRCodeWithLogoPro
           borderRadius: '8px',
           width: size,
           height: size,
-          padding: 0
+          padding: 0,
         }}
       >
         {/* QR Code canvas */}
         <QRCodeCanvas
           value={value}
-          size={size}
+          size={qrMatrixSize}
           level="H" // High error correction for logo overlay
           fgColor="#000000"
           bgColor="#FFFFFF"
           includeMargin={false}
           style={{
-            width: size,
-            height: size,
+            width: qrMatrixSize,
+            height: qrMatrixSize,
+            position: 'absolute',
+            top: quietZoneSize,
+            left: quietZoneSize,
           }}
         />
         
@@ -73,18 +78,18 @@ export const QRCodeWithLogo = React.forwardRef<HTMLDivElement, QRCodeWithLogoPro
             style={{
               width: logoSize,
               height: logoSize,
-              padding: logoSize * 0.05, // Small padding around logo
+              padding: logoSize * 0.12,
             }}
           >
             <img
               src="/assets/logos/qr-logo.svg"
               alt="Ferchr Logo"
-              width={Math.round(logoSize * 0.9)}
-              height={Math.round(logoSize * 0.9)}
+              width={Math.round(logoSize * 0.76)}
+              height={Math.round(logoSize * 0.76)}
               className="object-contain"
               style={{
-                width: `${logoSize * 0.9}px`,
-                height: `${logoSize * 0.9}px`,
+                width: `${logoSize * 0.76}px`,
+                height: `${logoSize * 0.76}px`,
               }}
             />
           </div>
@@ -158,8 +163,10 @@ export async function downloadQRCodeWithLogo(
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, exportSize, exportSize);
 
-    // Draw QR matrix from existing canvas.
-    ctx.drawImage(sourceCanvas, 0, 0, exportSize, exportSize);
+    // Draw QR matrix from existing canvas with explicit quiet zone to improve scan reliability.
+    const quietZone = Math.round(exportSize * 0.08);
+    const qrRenderSize = exportSize - quietZone * 2;
+    ctx.drawImage(sourceCanvas, quietZone, quietZone, qrRenderSize, qrRenderSize);
 
     // Draw center white box + logo.
     const logoImageNode = element.querySelector('img[alt="Ferchr Logo"]') as HTMLImageElement | null;
@@ -180,8 +187,8 @@ export async function downloadQRCodeWithLogo(
       }
     }
 
-    const overlaySize = exportSize * 0.32;
-    const overlayPadding = overlaySize * 0.05;
+    const overlaySize = qrRenderSize * 0.22;
+    const overlayPadding = overlaySize * 0.12;
     const logoDrawSize = overlaySize - overlayPadding * 2;
     const overlayX = (exportSize - overlaySize) / 2;
     const overlayY = (exportSize - overlaySize) / 2;

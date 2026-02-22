@@ -58,6 +58,9 @@ const POSE_RELAX_STAGE_2_MS = 3600;
 const POSE_RELAX_DELTA_1 = 0.12;
 const POSE_RELAX_DELTA_2 = 0.22;
 const POSE_EMA_ALPHA = 0.35;
+const SIDE_POSE_YAW_MIN = 0.16;
+const SIDE_POSE_YAW_DOMINANCE_BUFFER = 0.05;
+const SIDE_POSE_STREAK_REQUIRED = 2;
 
 interface GuidedFaceScannerProps {
   onComplete: (captures: string[]) => Promise<void>;
@@ -453,7 +456,8 @@ export function GuidedFaceScanner({ onComplete, onCancel }: GuidedFaceScannerPro
         yawEmaRef.current = smoothedYaw;
         pitchEmaRef.current = smoothedPitch;
 
-        const config = POSITIONS[POSITION_ORDER[currentPositionIndex]];
+        const targetPosition = POSITION_ORDER[currentPositionIndex];
+        const config = POSITIONS[targetPosition];
         const poseElapsedMs = Date.now() - poseEnteredAtRef.current;
         const relaxDelta =
           poseElapsedMs >= POSE_RELAX_STAGE_2_MS
@@ -461,24 +465,42 @@ export function GuidedFaceScanner({ onComplete, onCancel }: GuidedFaceScannerPro
             : poseElapsedMs >= POSE_RELAX_STAGE_1_MS
               ? POSE_RELAX_DELTA_1
               : 0;
-        const yawMin = config.yawRange[0] - relaxDelta;
-        const yawMax = config.yawRange[1] + relaxDelta;
+        let yawMin = config.yawRange[0] - relaxDelta;
+        let yawMax = config.yawRange[1] + relaxDelta;
+        if (targetPosition === 'left') {
+          // Keep side turn strictly side-facing: relax outward only.
+          yawMax = config.yawRange[1];
+        } else if (targetPosition === 'right') {
+          // Keep side turn strictly side-facing: relax outward only.
+          yawMin = config.yawRange[0];
+        }
         const pitchMin = config.pitchRange[0] - relaxDelta;
         const pitchMax = config.pitchRange[1] + relaxDelta;
+        const sideYawStrongEnough =
+          targetPosition === 'left'
+            ? smoothedYaw <= -SIDE_POSE_YAW_MIN
+            : targetPosition === 'right'
+              ? smoothedYaw >= SIDE_POSE_YAW_MIN
+              : true;
+        const sideYawDominant =
+          targetPosition === 'left' || targetPosition === 'right'
+            ? Math.abs(smoothedYaw) >= Math.abs(smoothedPitch) + SIDE_POSE_YAW_DOMINANCE_BUFFER
+            : true;
 
         if (showDebug) {
           setDebugPoseText(
             `yaw ${smoothedYaw.toFixed(2)} [${yawMin.toFixed(2)}..${yawMax.toFixed(2)}], ` +
               `pitch ${smoothedPitch.toFixed(2)} [${pitchMin.toFixed(2)}..${pitchMax.toFixed(2)}], ` +
-              `relax ${relaxDelta.toFixed(2)}`
+              `relax ${relaxDelta.toFixed(2)}, sideStrong ${sideYawStrongEnough ? 'y' : 'n'}, sideDom ${sideYawDominant ? 'y' : 'n'}`
           );
         }
 
-        const isMatch =
+        const isRangeMatch =
           smoothedYaw >= yawMin &&
           smoothedYaw <= yawMax &&
           smoothedPitch >= pitchMin &&
           smoothedPitch <= pitchMax;
+        const isMatch = isRangeMatch && sideYawStrongEnough && sideYawDominant;
 
         if (!isMatch) {
           matchStreakRef.current = 0;
@@ -497,7 +519,11 @@ export function GuidedFaceScanner({ onComplete, onCancel }: GuidedFaceScannerPro
         noMatchFrameCountRef.current = 0;
         setShowManualAssist(false);
         matchStreakRef.current += 1;
-        if (matchStreakRef.current < MATCH_STREAK_REQUIRED) {
+        const requiredStreak =
+          targetPosition === 'left' || targetPosition === 'right'
+            ? SIDE_POSE_STREAK_REQUIRED
+            : MATCH_STREAK_REQUIRED;
+        if (matchStreakRef.current < requiredStreak) {
           animationRef.current = requestAnimationFrame(detect);
           return;
         }

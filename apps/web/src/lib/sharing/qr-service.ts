@@ -17,11 +17,11 @@ interface QROptions {
 
 const DEFAULT_OPTIONS: QROptions = {
   size: 256,
-  margin: 2,
+  margin: 4,
   darkColor: '#000000',
   lightColor: '#FFFFFF',
   transparent: false,
-  errorCorrection: 'M',
+  errorCorrection: 'H',
 };
 
 /**
@@ -63,8 +63,9 @@ export async function generateQRCode(
     color: opts.darkColor?.replace('#', '') || '000000',
     ecc: opts.errorCorrection || 'H', // High error correction for logo overlay
     format: 'png',
-    qzone: '2', // Quiet zone around logo
+    qzone: '4',
     logo: logoUrl,
+    logosize: '20%',
   });
   
   // Only add bgcolor if not transparent
@@ -92,13 +93,13 @@ export async function generateTransparentQRCode(
   const params = new URLSearchParams({
     data: data,
     size: `${size}x${size}`,
-    margin: '2',
+    margin: '4',
     color: '000000',
     format: 'svg',
-    qzone: '3', // Quiet zone around logo (increased)
+    qzone: '4',
     ecc: 'H', // High error correction for logo overlay
     logo: logoUrl,
-    logosize: '30%', // Logo size as percentage (increased for better visibility)
+    logosize: '20%',
   });
   
   return `https://api.qrserver.com/v1/create-qr-code/?${params.toString()}`;

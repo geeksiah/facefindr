@@ -3609,6 +3609,78 @@
   },
   {
     "table_schema": "public",
+    "table_name": "attendee_event_scan_state",
+    "column_name": "id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "attendee_event_scan_state",
+    "column_name": "attendee_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "attendee_event_scan_state",
+    "column_name": "event_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "attendee_event_scan_state",
+    "column_name": "last_scan_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "column_default": "now()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "attendee_event_scan_state",
+    "column_name": "last_result_match_count",
+    "data_type": "integer",
+    "is_nullable": "NO",
+    "column_default": "0"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "attendee_event_scan_state",
+    "column_name": "last_media_count_at_scan",
+    "data_type": "integer",
+    "is_nullable": "NO",
+    "column_default": "0"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "attendee_event_scan_state",
+    "column_name": "last_latest_media_created_at_at_scan",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "attendee_event_scan_state",
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "column_default": "now()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "attendee_event_scan_state",
+    "column_name": "updated_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "column_default": "now()"
+  },
+  {
+    "table_schema": "public",
     "table_name": "attendee_face_profiles",
     "column_name": "id",
     "data_type": "uuid",
@@ -6270,6 +6342,78 @@
     "data_type": "timestamp with time zone",
     "is_nullable": "YES",
     "column_default": "now()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "event_full_access",
+    "column_name": "id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "event_full_access",
+    "column_name": "event_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "event_full_access",
+    "column_name": "user_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "event_full_access",
+    "column_name": "user_type",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "event_full_access",
+    "column_name": "granted_by",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "event_full_access",
+    "column_name": "granted_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "event_full_access",
+    "column_name": "expires_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "event_full_access",
+    "column_name": "notes",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "event_full_access",
+    "column_name": "is_active",
+    "data_type": "boolean",
+    "is_nullable": "YES",
+    "column_default": "true"
   },
   {
     "table_schema": "public",
@@ -11209,6 +11353,54 @@
   },
   {
     "table_schema": "public",
+    "table_name": "platform_announcements",
+    "column_name": "queued_count",
+    "data_type": "integer",
+    "is_nullable": "NO",
+    "column_default": "0"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "platform_announcements",
+    "column_name": "delivered_count",
+    "data_type": "integer",
+    "is_nullable": "NO",
+    "column_default": "0"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "platform_announcements",
+    "column_name": "failed_count",
+    "data_type": "integer",
+    "is_nullable": "NO",
+    "column_default": "0"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "platform_announcements",
+    "column_name": "delivery_summary",
+    "data_type": "jsonb",
+    "is_nullable": "NO",
+    "column_default": "'{}'::jsonb"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "platform_announcements",
+    "column_name": "delivery_synced_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "platform_announcements",
+    "column_name": "delivery_completed_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
     "table_name": "platform_settings",
     "column_name": "id",
     "data_type": "uuid",
@@ -12401,6 +12593,70 @@
   },
   {
     "table_schema": "public",
+    "table_name": "push_tokens",
+    "column_name": "id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "push_tokens",
+    "column_name": "user_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "push_tokens",
+    "column_name": "token",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "push_tokens",
+    "column_name": "platform",
+    "data_type": "character varying",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "push_tokens",
+    "column_name": "device_name",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "push_tokens",
+    "column_name": "last_active",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "push_tokens",
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "push_tokens",
+    "column_name": "updated_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  },
+  {
+    "table_schema": "public",
     "table_name": "refresh_prompts",
     "column_name": "id",
     "data_type": "uuid",
@@ -12742,6 +12998,38 @@
     "data_type": "integer",
     "is_nullable": "YES",
     "column_default": "0"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "region_config",
+    "column_name": "whatsapp_enabled",
+    "data_type": "boolean",
+    "is_nullable": "YES",
+    "column_default": "false"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "region_config",
+    "column_name": "whatsapp_provider",
+    "data_type": "character varying",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "region_config",
+    "column_name": "push_enabled",
+    "data_type": "boolean",
+    "is_nullable": "YES",
+    "column_default": "false"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "region_config",
+    "column_name": "push_provider",
+    "data_type": "character varying",
+    "is_nullable": "YES",
+    "column_default": null
   },
   {
     "table_schema": "public",
@@ -15793,70 +16081,6 @@
   },
   {
     "table_schema": "realtime",
-    "table_name": "messages_2026_02_18",
-    "column_name": "topic",
-    "data_type": "text",
-    "is_nullable": "NO",
-    "column_default": null
-  },
-  {
-    "table_schema": "realtime",
-    "table_name": "messages_2026_02_18",
-    "column_name": "extension",
-    "data_type": "text",
-    "is_nullable": "NO",
-    "column_default": null
-  },
-  {
-    "table_schema": "realtime",
-    "table_name": "messages_2026_02_18",
-    "column_name": "payload",
-    "data_type": "jsonb",
-    "is_nullable": "YES",
-    "column_default": null
-  },
-  {
-    "table_schema": "realtime",
-    "table_name": "messages_2026_02_18",
-    "column_name": "event",
-    "data_type": "text",
-    "is_nullable": "YES",
-    "column_default": null
-  },
-  {
-    "table_schema": "realtime",
-    "table_name": "messages_2026_02_18",
-    "column_name": "private",
-    "data_type": "boolean",
-    "is_nullable": "YES",
-    "column_default": "false"
-  },
-  {
-    "table_schema": "realtime",
-    "table_name": "messages_2026_02_18",
-    "column_name": "updated_at",
-    "data_type": "timestamp without time zone",
-    "is_nullable": "NO",
-    "column_default": "now()"
-  },
-  {
-    "table_schema": "realtime",
-    "table_name": "messages_2026_02_18",
-    "column_name": "inserted_at",
-    "data_type": "timestamp without time zone",
-    "is_nullable": "NO",
-    "column_default": "now()"
-  },
-  {
-    "table_schema": "realtime",
-    "table_name": "messages_2026_02_18",
-    "column_name": "id",
-    "data_type": "uuid",
-    "is_nullable": "NO",
-    "column_default": "gen_random_uuid()"
-  },
-  {
-    "table_schema": "realtime",
     "table_name": "messages_2026_02_19",
     "column_name": "topic",
     "data_type": "text",
@@ -16234,6 +16458,70 @@
   {
     "table_schema": "realtime",
     "table_name": "messages_2026_02_24",
+    "column_name": "id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()"
+  },
+  {
+    "table_schema": "realtime",
+    "table_name": "messages_2026_02_25",
+    "column_name": "topic",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_schema": "realtime",
+    "table_name": "messages_2026_02_25",
+    "column_name": "extension",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_schema": "realtime",
+    "table_name": "messages_2026_02_25",
+    "column_name": "payload",
+    "data_type": "jsonb",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "realtime",
+    "table_name": "messages_2026_02_25",
+    "column_name": "event",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "realtime",
+    "table_name": "messages_2026_02_25",
+    "column_name": "private",
+    "data_type": "boolean",
+    "is_nullable": "YES",
+    "column_default": "false"
+  },
+  {
+    "table_schema": "realtime",
+    "table_name": "messages_2026_02_25",
+    "column_name": "updated_at",
+    "data_type": "timestamp without time zone",
+    "is_nullable": "NO",
+    "column_default": "now()"
+  },
+  {
+    "table_schema": "realtime",
+    "table_name": "messages_2026_02_25",
+    "column_name": "inserted_at",
+    "data_type": "timestamp without time zone",
+    "is_nullable": "NO",
+    "column_default": "now()"
+  },
+  {
+    "table_schema": "realtime",
+    "table_name": "messages_2026_02_25",
     "column_name": "id",
     "data_type": "uuid",
     "is_nullable": "NO",
