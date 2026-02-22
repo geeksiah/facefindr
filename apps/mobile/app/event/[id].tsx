@@ -58,6 +58,7 @@ import { formatPrice } from '@/lib/currency';
 import { getThumbnailUrl, getCoverImageUrl, getSignedUrl } from '@/lib/storage-urls';
 import { useRealtimeSubscription } from '@/hooks/use-realtime';
 import { alertMissingPublicAppUrl, buildPublicUrl } from '@/lib/runtime-config';
+import { getApiBaseUrl } from '@/lib/api-base';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const PHOTO_SIZE = (SCREEN_WIDTH - spacing.lg * 2 - spacing.sm * 2) / 3;
@@ -633,7 +634,7 @@ function AttendeeEventView({
 export default function EventDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { profile, userType } = useAuthStore();
+  const { profile, userType, session } = useAuthStore();
 
   const [event, setEvent] = useState<Event | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -749,19 +750,36 @@ export default function EventDetailScreen() {
       // Check owned photos for attendees
       let ownedIds = new Set<string>();
       if (userType === 'attendee' && profile?.id) {
-        const [{ data: ownedData }, { count: faceProfileCount }] = await Promise.all([
+        const attendeeIdCandidates = Array.from(
+          new Set([profile.id, session?.user?.id].filter((value): value is string => Boolean(value)))
+        );
+
+        const [ownedResult, faceProfileResponse] = await Promise.all([
           supabase
             .from('entitlements')
             .select('media_id')
-            .eq('attendee_id', profile.id)
+            .in('attendee_id', attendeeIdCandidates)
             .in('media_id', photosData?.map((p: any) => p.id) || []),
-          supabase
+          fetch(`${getApiBaseUrl()}/api/attendee/face-profile`, {
+            headers: {
+              ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+            },
+          }).catch(() => null),
+        ]);
+
+        const ownedData = ownedResult.data;
+        ownedIds = new Set(ownedData?.map((e: any) => e.media_id) || []);
+
+        if (faceProfileResponse?.ok) {
+          const payload = await faceProfileResponse.json().catch(() => ({}));
+          setHasFaceProfile(Boolean(payload?.hasFaceProfile));
+        } else {
+          const { count: faceProfileCount } = await supabase
             .from('attendee_face_profiles')
             .select('id', { count: 'exact', head: true })
-            .eq('attendee_id', profile.id),
-        ]);
-        ownedIds = new Set(ownedData?.map((e: any) => e.media_id) || []);
-        setHasFaceProfile((faceProfileCount || 0) > 0);
+            .in('attendee_id', attendeeIdCandidates);
+          setHasFaceProfile((faceProfileCount || 0) > 0);
+        }
       } else {
         setHasFaceProfile(false);
       }

@@ -574,7 +574,11 @@ export default function FaceScanScreen() {
       setStep('results');
     } else {
       await noMatch(); // Haptic feedback for no match
-      setErrorMessage('No photos found matching your face. Try a different angle or event.');
+      const hint =
+        typeof data?.processingHint === 'string' && data.processingHint.trim().length > 0
+          ? data.processingHint
+          : null;
+      setErrorMessage(hint || 'No photos found matching your face. Try a different angle or event.');
       setStep('error');
     }
   };

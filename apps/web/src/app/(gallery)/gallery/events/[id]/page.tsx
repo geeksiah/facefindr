@@ -77,6 +77,7 @@ export default function EventDetailPage() {
   const [isScanning, setIsScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [scanNotice, setScanNotice] = useState<string | null>(null);
+  const [hasFaceProfile, setHasFaceProfile] = useState(false);
 
   const fetchEvent = useCallback(async () => {
     try {
@@ -94,11 +95,22 @@ export default function EventDetailPage() {
     }
   }, [eventId, router]);
 
+  const fetchFaceProfileStatus = useCallback(async () => {
+    try {
+      const response = await fetch('/api/attendee/face-profile');
+      const payload = await response.json().catch(() => ({}));
+      setHasFaceProfile(Boolean(payload?.hasFaceProfile));
+    } catch {
+      setHasFaceProfile(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (eventId) {
       void fetchEvent();
+      void fetchFaceProfileStatus();
     }
-  }, [eventId, fetchEvent]);
+  }, [eventId, fetchEvent, fetchFaceProfileStatus]);
 
   const togglePhotoSelection = (photoId: string) => {
     setSelectedPhotos((prev) => {
@@ -187,7 +199,8 @@ export default function EventDetailPage() {
         );
       } else {
         setScanNotice(
-          "No matches found in current uploads. We'll notify you when new photos are uploaded so you can scan again."
+          payload?.processingHint ||
+            "No matches found in current uploads. We'll notify you when new photos are uploaded so you can scan again."
         );
       }
 
@@ -198,6 +211,45 @@ export default function EventDetailPage() {
       const message = error?.message || 'Failed to scan and search this event.';
       setScanError(message);
       throw error;
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const handleProfileSearch = async () => {
+    setIsScanning(true);
+    setScanError(null);
+    setScanNotice(null);
+    try {
+      const response = await fetch('/api/faces/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventId,
+          useFaceProfile: true,
+          searchMode: 'profile_only',
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || 'Face-profile search failed');
+      }
+
+      const found = Number(payload?.totalMatches || 0);
+      if (found > 0) {
+        setScanNotice(
+          `Loaded ${found} face-profile match${found === 1 ? '' : 'es'}.`
+        );
+      } else {
+        setScanNotice(
+          payload?.processingHint ||
+            'No saved face-profile matches found for this event yet. Try a fresh selfie to improve matching.'
+        );
+      }
+      await fetchEvent();
+    } catch (error: any) {
+      console.error('Event profile search failed:', error);
+      setScanError(error?.message || 'Failed to search with saved face profile.');
     } finally {
       setIsScanning(false);
     }
@@ -368,8 +420,8 @@ export default function EventDetailPage() {
                 </h3>
                 <p className="text-sm text-secondary">
                   {event.matchedPhotos.length > 0
-                    ? 'Take a quick selfie to check for fresh uploads that match you.'
-                    : 'Take a selfie to search this event and save your matches.'}
+                    ? 'Use your saved face profile or take a fresh selfie to check for new uploads.'
+                    : 'Use your face profile or take a selfie to search this event.'}
                 </p>
                 {!event.scanPolicy?.canScan && event.scanPolicy?.message && (
                   <p className="mt-2 text-sm text-warning">{event.scanPolicy.message}</p>
@@ -380,18 +432,29 @@ export default function EventDetailPage() {
                   </p>
                 )}
               </div>
-              <Button
-                variant="primary"
-                onClick={() => {
-                  setScanError(null);
-                  setScanNotice(null);
-                  setShowScanner(true);
-                }}
-                disabled={event.scanPolicy?.canScan === false}
-              >
-                <Scan className="mr-2 h-4 w-4" />
-                {event.matchedPhotos.length > 0 ? 'Scan for New Photos' : 'Scan to Find Photos'}
-              </Button>
+              <div className="flex items-center gap-2">
+                {hasFaceProfile && (
+                  <Button
+                    variant="secondary"
+                    onClick={handleProfileSearch}
+                    disabled={isScanning}
+                  >
+                    {isScanning ? 'Searching...' : 'Use Saved Face Profile'}
+                  </Button>
+                )}
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    setScanError(null);
+                    setScanNotice(null);
+                    setShowScanner(true);
+                  }}
+                  disabled={event.scanPolicy?.canScan === false}
+                >
+                  <Scan className="mr-2 h-4 w-4" />
+                  {event.matchedPhotos.length > 0 ? 'Scan for New Photos' : 'Scan to Find Photos'}
+                </Button>
+              </div>
             </div>
           )}
           {scanNotice && (

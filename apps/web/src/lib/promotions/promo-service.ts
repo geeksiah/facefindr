@@ -54,6 +54,13 @@ function isMissingPromoInfrastructureError(error: unknown): boolean {
   return false;
 }
 
+function isRecoverablePromoValidationRpcError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = String((error as any).code || '');
+  const message = String((error as any).message || '').toLowerCase();
+  return code === '42702' && message.includes('promo_code_id') && message.includes('ambiguous');
+}
+
 function normalizePromoCode(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const code = value.trim().toUpperCase();
@@ -345,7 +352,7 @@ export async function validatePromoCodeForCheckout(
   });
 
   if (error) {
-    if (isMissingPromoInfrastructureError(error)) {
+    if (isMissingPromoInfrastructureError(error) || isRecoverablePromoValidationRpcError(error)) {
       return validatePromoCodeFallback(supabase, input, normalizedCode, appliedAmountCents, baseResult);
     }
     throw error;

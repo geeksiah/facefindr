@@ -63,6 +63,7 @@ const parsedThreshold = Number(process.env.REKOGNITION_EVENT_MATCH_THRESHOLD || 
 const FACE_MATCH_THRESHOLD = Number.isFinite(parsedThreshold)
   ? Math.min(99, Math.max(1, parsedThreshold))
   : 80;
+const EVENT_ID_CHUNK_SIZE = 200;
 
 function cleanStoragePath(path?: string | null): string | null {
   if (!path) return null;
@@ -149,6 +150,39 @@ async function getEventMediaStats(
     mediaCount: count || 0,
     latestMediaCreatedAt: latestRows?.[0]?.created_at || null,
   };
+}
+
+async function getEventsWithIndexedFaces(
+  serviceClient: any,
+  eventIds: string[]
+): Promise<Set<string>> {
+  const readyEventIds = new Set<string>();
+  const uniqueEventIds = Array.from(new Set(eventIds.filter(Boolean)));
+  if (!uniqueEventIds.length) return readyEventIds;
+
+  for (let i = 0; i < uniqueEventIds.length; i += EVENT_ID_CHUNK_SIZE) {
+    const chunk = uniqueEventIds.slice(i, i + EVENT_ID_CHUNK_SIZE);
+    const { data, error } = await serviceClient
+      .from('face_embeddings')
+      .select('event_id')
+      .in('event_id', chunk)
+      .limit(5000);
+
+    if (error) {
+      console.error('Failed to detect indexed-face readiness:', error);
+      // Fail open so search is still possible on older schema/configs.
+      return new Set(uniqueEventIds);
+    }
+
+    for (const row of data || []) {
+      const rowEventId = (row as any)?.event_id;
+      if (typeof rowEventId === 'string' && rowEventId.length > 0) {
+        readyEventIds.add(rowEventId);
+      }
+    }
+  }
+
+  return readyEventIds;
 }
 
 async function upsertAttendeeEventScanState(
@@ -366,8 +400,26 @@ export async function POST(request: NextRequest) {
         : [];
     }
 
+    const searchBuffers = imageBuffer ? [imageBuffer, ...additionalImageBuffers] : [];
+    const searchDiagnostics = {
+      requestMode: searchBuffers.length > 0 ? 'selfie_plus_profile' : 'profile_only',
+      searchBuffersCount: searchBuffers.length,
+      faceMatchThreshold: FACE_MATCH_THRESHOLD,
+      eventsResolved: 0,
+      eventsEligibleForSearch: 0,
+      eventsPendingIndexing: 0,
+      rekognitionCallsAttempted: 0,
+      rekognitionCallsSucceeded: 0,
+      rekognitionCallsNoFaceDetected: 0,
+      rekognitionCallsCollectionMissing: 0,
+      rekognitionCallsFailed: 0,
+      liveMatchesDetected: 0,
+      persistedMatchesMerged: 0,
+    };
+
     const serviceClient = createServiceClient();
     const { events, denied } = await resolveSearchEvents(serviceClient, user.id, eventId);
+    searchDiagnostics.eventsResolved = events.length;
     let scopedEventMediaStats: EventMediaStats | null = null;
 
     if (denied) {
@@ -388,8 +440,24 @@ export async function POST(request: NextRequest) {
         matches: [],
         groupedMatches: {},
         eventsSearched: 0,
+        searchDiagnostics,
       });
     }
+
+    let searchableEvents = events;
+    let eventsPendingIndexing: string[] = [];
+    if (searchBuffers.length > 0) {
+      const indexedReadyEventIds = await getEventsWithIndexedFaces(
+        serviceClient,
+        events.map((event) => event.id)
+      );
+      searchableEvents = events.filter((event) => indexedReadyEventIds.has(event.id));
+      eventsPendingIndexing = events
+        .map((event) => event.id)
+        .filter((candidate) => !indexedReadyEventIds.has(candidate));
+    }
+    searchDiagnostics.eventsEligibleForSearch = searchableEvents.length;
+    searchDiagnostics.eventsPendingIndexing = eventsPendingIndexing.length;
 
     const similarityByEventMedia = new Map<string, number>();
     const mediaIdsByEvent = new Map<string, Set<string>>();
@@ -415,11 +483,10 @@ export async function POST(request: NextRequest) {
       }
     };
 
-    const searchBuffers = imageBuffer ? [imageBuffer, ...additionalImageBuffers] : [];
-
     if (searchBuffers.length > 0) {
-      for (const event of events) {
+      for (const event of searchableEvents) {
         for (const searchBuffer of searchBuffers) {
+          searchDiagnostics.rekognitionCallsAttempted += 1;
           try {
             const { response: searchResult } = await searchEventCollectionWithFallback(
               event.id,
@@ -427,12 +494,20 @@ export async function POST(request: NextRequest) {
               100,
               FACE_MATCH_THRESHOLD
             );
+            searchDiagnostics.rekognitionCallsSucceeded += 1;
             const faceMatches = searchResult.FaceMatches || [];
+            searchDiagnostics.liveMatchesDetected += faceMatches.length;
             recordFaceMatches(event.id, faceMatches);
           } catch (error: any) {
-            if (error?.name === 'ResourceNotFoundException' || isNoFaceDetectedError(error)) {
+            if (error?.name === 'ResourceNotFoundException') {
+              searchDiagnostics.rekognitionCallsCollectionMissing += 1;
               continue;
             }
+            if (isNoFaceDetectedError(error)) {
+              searchDiagnostics.rekognitionCallsNoFaceDetected += 1;
+              continue;
+            }
+            searchDiagnostics.rekognitionCallsFailed += 1;
             console.error('Face search failed for event', event.id, error);
           }
         }
@@ -451,6 +526,7 @@ export async function POST(request: NextRequest) {
 
       for (const existingMatch of (existingMatches || []) as ExistingMatchRow[]) {
         if (!existingMatch.event_id || !existingMatch.media_id) continue;
+        searchDiagnostics.persistedMatchesMerged += 1;
 
         if (!mediaIdsByEvent.has(existingMatch.event_id)) {
           mediaIdsByEvent.set(existingMatch.event_id, new Set<string>());
@@ -484,6 +560,11 @@ export async function POST(request: NextRequest) {
     }
 
     if (!allMediaRows.length) {
+      const processingHint =
+        searchBuffers.length > 0 && eventsPendingIndexing.length > 0
+          ? 'Photos are still being indexed for face search. Please retry shortly.'
+          : null;
+
       if (eventId) {
         const mediaStats =
           scopedEventMediaStats || (await getEventMediaStats(serviceClient, eventId));
@@ -493,7 +574,11 @@ export async function POST(request: NextRequest) {
         totalMatches: 0,
         matches: [],
         groupedMatches: {},
-        eventsSearched: events.length,
+        eventsSearched: searchableEvents.length,
+        eventsEligibleForSearch: searchableEvents.length,
+        eventsPendingIndexing,
+        processingHint,
+        searchDiagnostics,
       });
     }
 
@@ -592,8 +677,11 @@ export async function POST(request: NextRequest) {
       totalMatches: matches.length,
       matches,
       groupedMatches,
-      eventsSearched: events.length,
+      eventsSearched: searchableEvents.length,
+      eventsEligibleForSearch: searchableEvents.length,
+      eventsPendingIndexing,
       searchMode: searchBuffers.length > 0 ? 'selfie_plus_profile' : 'profile_only',
+      searchDiagnostics,
     });
 
   } catch (error) {
