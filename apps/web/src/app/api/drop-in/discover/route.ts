@@ -10,6 +10,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { resolveAttendeeProfileByUser } from '@/lib/profiles/ids';
+import { createStorageSignedUrl } from '@/lib/storage/provider';
 import { normalizeUserType } from '@/lib/user-type';
 import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
@@ -105,16 +106,16 @@ export async function GET(request: NextRequest) {
         const photo = match.drop_in_photos as any;
         const path = photo.thumbnail_path || photo.storage_path;
 
-        const { data: urlData } = await supabase.storage
-          .from('media')
-          .createSignedUrl(path, 3600);
+        const signedUrl = await createStorageSignedUrl('media', path, 3600, {
+          supabaseClient: supabase,
+        });
 
         return {
           matchId: match.id,
           notificationId: notificationByMatchId.get(match.id)?.id || null,
           connectionDecision: notificationByMatchId.get(match.id)?.userAction || null,
           photoId: photo.id,
-          thumbnailUrl: urlData?.signedUrl || null,
+          thumbnailUrl: signedUrl || null,
           confidence: match.confidence,
           uploadedAt: photo.uploaded_at,
           locationName: photo.location_name,

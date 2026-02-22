@@ -16,6 +16,7 @@ import { getAvailableDropInCredits } from '@/lib/drop-in/credits';
 import { resolveDropInCreditRules } from '@/lib/drop-in/credit-rules';
 import { resolveDropInPricingConfig } from '@/lib/drop-in/pricing';
 import { resolveAttendeeProfileByUser } from '@/lib/profiles/ids';
+import { deleteStorageObjects, uploadStorageObject } from '@/lib/storage/provider';
 import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
 function extractMissingColumnName(error: any): string | null {
@@ -289,15 +290,13 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = new Uint8Array(arrayBuffer);
 
-    const { error: uploadError } = await serviceClient.storage
-      .from('media')
-      .upload(storagePath, buffer, {
+    try {
+      await uploadStorageObject('media', storagePath, buffer, {
         contentType: file.type,
         cacheControl: '3600',
         upsert: false,
       });
-
-    if (uploadError) {
+    } catch (uploadError) {
       return NextResponse.json({ error: 'Failed to upload file' }, { status: 500 });
     }
 
@@ -328,7 +327,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (dbError || !dropInPhoto?.id) {
-      await serviceClient.storage.from('media').remove([storagePath]);
+      await deleteStorageObjects('media', [storagePath]).catch(() => {});
       return NextResponse.json(
         {
           error: dbError?.message || 'Failed to create drop-in record',
@@ -354,7 +353,7 @@ export async function POST(request: NextRequest) {
 
     if (!creditConsumption.consumed) {
       await serviceClient.from('drop_in_photos').delete().eq('id', dropInPhoto.id);
-      await serviceClient.storage.from('media').remove([storagePath]);
+      await deleteStorageObjects('media', [storagePath]).catch(() => {});
       return NextResponse.json(
         {
           error: `Insufficient credits (${totalCreditsRequired} required)`,

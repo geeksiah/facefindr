@@ -7,7 +7,28 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getPhotographerIdCandidates } from '@/lib/profiles/ids';
+import { deleteStorageObjects, getStoragePublicUrl, uploadStorageObject } from '@/lib/storage/provider';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
+
+function extractStorageObjectPath(rawValue: string | null | undefined): string | null {
+  if (!rawValue || typeof rawValue !== 'string') return null;
+  const trimmed = rawValue.trim();
+  if (!trimmed) return null;
+
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+    return trimmed.replace(/^\/+/, '');
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    const path = decodeURIComponent(parsed.pathname || '').replace(/^\/+/, '');
+    if (!path) return null;
+    const match = path.match(/(?:covers|events)\/(.+)$/i);
+    return match?.[1] ? match[1].replace(/^\/+/, '') : null;
+  } catch {
+    return null;
+  }
+}
 
 // POST - Upload cover photo
 export async function POST(
@@ -73,10 +94,12 @@ export async function POST(
     // Delete old cover image if exists
     if (event.cover_image_url) {
       try {
-        const oldPath = event.cover_image_url.split('/').slice(-2).join('/');
+        const oldPath = extractStorageObjectPath(event.cover_image_url);
         // Try both buckets in case old covers are in 'events' bucket
-        await serviceClient.storage.from('covers').remove([oldPath]).catch(() => {});
-        await serviceClient.storage.from('events').remove([oldPath]).catch(() => {});
+        if (oldPath) {
+          await deleteStorageObjects('covers', [oldPath]).catch(() => {});
+          await deleteStorageObjects('events', [oldPath]).catch(() => {});
+        }
       } catch (e) {
         // Ignore errors when deleting old file
       }
@@ -88,25 +111,27 @@ export async function POST(
     const arrayBuffer = await file.arrayBuffer();
     const buffer = new Uint8Array(arrayBuffer);
 
-    const { error: uploadError } = await serviceClient.storage
-      .from('covers')
-      .upload(fileName, buffer, {
+    try {
+      await uploadStorageObject('covers', fileName, buffer, {
         contentType: file.type,
         upsert: true,
       });
-
-    if (uploadError) {
+    } catch (uploadError: any) {
       console.error('Cover upload error:', uploadError);
       return NextResponse.json(
-        { error: uploadError.message || 'Failed to upload cover photo to storage' },
+        { error: uploadError?.message || 'Failed to upload cover photo to storage' },
         { status: 500 }
       );
     }
 
-    // Get public URL
-    const { data: { publicUrl } } = serviceClient.storage
-      .from('covers')
-      .getPublicUrl(fileName);
+    const publicUrl = getStoragePublicUrl('covers', fileName);
+    if (!publicUrl) {
+      await deleteStorageObjects('covers', [fileName]).catch(() => {});
+      return NextResponse.json(
+        { error: 'Failed to resolve cover image URL' },
+        { status: 500 }
+      );
+    }
 
     // Update event with new cover URL
     const { error: updateError } = await serviceClient
@@ -117,7 +142,7 @@ export async function POST(
     if (updateError) {
       console.error('Cover update error:', updateError);
       // Try to clean up uploaded file
-      await serviceClient.storage.from('covers').remove([fileName]).catch(() => {});
+      await deleteStorageObjects('covers', [fileName]).catch(() => {});
       return NextResponse.json(
         { error: updateError.message || 'Failed to update event with cover photo' },
         { status: 500 }
@@ -170,10 +195,12 @@ export async function DELETE(
     // Delete from storage if exists
     if (event.cover_image_url) {
       try {
-        const path = event.cover_image_url.split('/').slice(-2).join('/');
+        const path = extractStorageObjectPath(event.cover_image_url);
         // Try both buckets in case old covers are in 'events' bucket
-        await serviceClient.storage.from('covers').remove([path]).catch(() => {});
-        await serviceClient.storage.from('events').remove([path]).catch(() => {});
+        if (path) {
+          await deleteStorageObjects('covers', [path]).catch(() => {});
+          await deleteStorageObjects('events', [path]).catch(() => {});
+        }
       } catch (e) {
         // Ignore errors
       }

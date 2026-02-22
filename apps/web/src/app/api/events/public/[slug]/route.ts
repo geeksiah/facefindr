@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getStoragePublicUrl } from '@/lib/storage/provider';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 function isMissingColumnError(error: any, column?: string): boolean {
@@ -362,7 +363,7 @@ export async function GET(
         const coverImageUrl = coverPath?.startsWith('http')
           ? coverPath
           : coverPath
-          ? serviceClient.storage.from('covers').getPublicUrl(coverPath).data.publicUrl
+          ? getStoragePublicUrl('covers', coverPath) || getStoragePublicUrl('events', coverPath)
           : null;
         return NextResponse.json(
           {
@@ -406,7 +407,7 @@ export async function GET(
     const coverImageUrl = coverPath?.startsWith('http')
       ? coverPath
       : coverPath
-      ? serviceClient.storage.from('covers').getPublicUrl(coverPath).data.publicUrl
+      ? getStoragePublicUrl('covers', coverPath) || getStoragePublicUrl('events', coverPath)
       : null;
 
     // NOTE: Photos are NOT returned in the public event response.

@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getPhotographerIdCandidates } from '@/lib/profiles/ids';
+import { createStorageSignedUrl } from '@/lib/storage/provider';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 interface MediaInput {
@@ -52,9 +53,11 @@ async function getSignedUrlWithFallback(
 
   for (const bucket of buckets) {
     for (const path of paths) {
-      const { data, error } = await serviceClient.storage.from(bucket).createSignedUrl(path, 3600);
-      if (!error && data?.signedUrl) {
-        return data.signedUrl;
+      const signedUrl = await createStorageSignedUrl(bucket, path, 3600, {
+        supabaseClient: serviceClient,
+      });
+      if (signedUrl) {
+        return signedUrl;
       }
     }
   }

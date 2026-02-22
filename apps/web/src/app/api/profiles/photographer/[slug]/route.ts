@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getStoragePublicUrl } from '@/lib/storage/provider';
 import { createServiceClient } from '@/lib/supabase/server';
 
 function isMissingColumnError(error: any): boolean {
@@ -134,8 +135,8 @@ export async function GET(
     const eventsWithCovers = (events || []).map((event: any) => {
       if (event.cover_image_url && !event.cover_image_url.startsWith('http')) {
         const coverPath = event.cover_image_url.replace(/^\/+/, '');
-        const { data } = supabase.storage.from('covers').getPublicUrl(coverPath);
-        return { ...event, cover_image_url: data.publicUrl };
+        const coverUrl = getStoragePublicUrl('covers', coverPath) || getStoragePublicUrl('events', coverPath);
+        return { ...event, cover_image_url: coverUrl || event.cover_image_url };
       }
       return event;
     });

@@ -125,9 +125,9 @@ export async function GET(request: NextRequest) {
     // Get user's storage usage
     const { data: usage } = await supabase
       .from('storage_usage')
-      .select('*')
+      .select('total_photos, total_size_bytes, storage_limit_bytes, photo_limit')
       .eq('user_id', user.id)
-      .single();
+      .maybeSingle();
 
     // Get user's active subscription
     const { data: subscription } = await supabase
@@ -145,7 +145,15 @@ export async function GET(request: NextRequest) {
       `)
       .eq('user_id', user.id)
       .eq('status', 'active')
-      .single();
+      .maybeSingle();
+
+    const { data: freePlan } = await supabase
+      .from('storage_plans')
+      .select('id, storage_limit_mb')
+      .eq('slug', 'free')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     // Get albums
     const { data: albums } = await supabase
@@ -173,6 +181,41 @@ export async function GET(request: NextRequest) {
       })
     );
 
+    const limitFromUsage = Number(usage?.storage_limit_bytes);
+    const limitFromSubscriptionMb = Number(subscription?.storage_plans?.storage_limit_mb);
+    const limitFromFreeMb = Number(freePlan?.storage_limit_mb);
+    const resolvedStorageLimitBytes = Number.isFinite(limitFromSubscriptionMb)
+      ? (limitFromSubscriptionMb === -1 ? -1 : limitFromSubscriptionMb * 1024 * 1024)
+      : Number.isFinite(limitFromFreeMb)
+        ? (limitFromFreeMb === -1 ? -1 : limitFromFreeMb * 1024 * 1024)
+        : Number.isFinite(limitFromUsage)
+          ? limitFromUsage
+          : 500 * 1024 * 1024;
+    const resolvedTotalPhotos = Number(usage?.total_photos ?? 0);
+    const resolvedTotalSizeBytes = Number(usage?.total_size_bytes ?? 0);
+
+    if (
+      !usage ||
+      usage.storage_limit_bytes === null ||
+      usage.storage_limit_bytes === undefined ||
+      Number(usage.storage_limit_bytes) !== resolvedStorageLimitBytes
+    ) {
+      await supabase
+        .from('storage_usage')
+        .upsert(
+          {
+            user_id: user.id,
+            storage_limit_bytes: resolvedStorageLimitBytes,
+            photo_limit: -1,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'user_id' }
+        )
+        .catch((upsertError) => {
+          console.warn('Vault usage row repair failed:', upsertError);
+        });
+    }
+
     const subscriptionMetadata =
       subscription?.metadata && typeof subscription.metadata === 'object'
         ? (subscription.metadata as Record<string, unknown>)
@@ -187,16 +230,16 @@ export async function GET(request: NextRequest) {
       totalPhotos: count || 0,
       page,
       totalPages: Math.ceil((count || 0) / limit),
-      usage: usage ? {
-        totalPhotos: usage.total_photos,
-        totalSizeBytes: usage.total_size_bytes,
-        storageLimitBytes: usage.storage_limit_bytes,
+      usage: {
+        totalPhotos: resolvedTotalPhotos,
+        totalSizeBytes: resolvedTotalSizeBytes,
+        storageLimitBytes: resolvedStorageLimitBytes,
         photoLimit: -1,
-        usagePercent: usage.storage_limit_bytes > 0 
-          ? Math.round((usage.total_size_bytes / usage.storage_limit_bytes) * 100)
+        usagePercent: resolvedStorageLimitBytes > 0
+          ? Math.round((resolvedTotalSizeBytes / resolvedStorageLimitBytes) * 100)
           : 0,
         photosPercent: 0,
-      } : null,
+      },
       subscription: subscription ? {
         planName: subscription.storage_plans?.name,
         planSlug: subscription.storage_plans?.slug,
@@ -536,7 +579,6 @@ export async function DELETE(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-
     const { searchParams } = new URL(request.url);
     const photoId = searchParams.get('id');
     const body = await request.json().catch(() => ({}));

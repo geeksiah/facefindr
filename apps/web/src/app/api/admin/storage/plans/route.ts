@@ -91,14 +91,24 @@ export async function POST(request: NextRequest) {
       name,
       slug,
       description,
-      storageLimitMb,
-      priceMonthly,
-      priceYearly,
+      storageLimitMb: storageLimitMbCamel,
+      storage_limit_mb: storageLimitMbSnake,
+      priceMonthly: priceMonthlyCamel,
+      price_monthly: priceMonthlySnake,
+      priceYearly: priceYearlyCamel,
+      price_yearly: priceYearlySnake,
       currency,
       features,
-      isPopular,
-      sortOrder,
+      isPopular: isPopularCamel,
+      is_popular: isPopularSnake,
+      sortOrder: sortOrderCamel,
+      sort_order: sortOrderSnake,
     } = body;
+    const storageLimitMb = storageLimitMbCamel ?? storageLimitMbSnake;
+    const priceMonthly = priceMonthlyCamel ?? priceMonthlySnake;
+    const priceYearly = priceYearlyCamel ?? priceYearlySnake;
+    const isPopular = isPopularCamel ?? isPopularSnake;
+    const sortOrder = sortOrderCamel ?? sortOrderSnake;
 
     if (!name || !slug) {
       return NextResponse.json(
@@ -173,14 +183,26 @@ export async function PUT(request: NextRequest) {
     const updateData: Record<string, any> = {};
     if (updates.name !== undefined) updateData.name = updates.name;
     if (updates.description !== undefined) updateData.description = updates.description;
-    if (updates.storageLimitMb !== undefined) updateData.storage_limit_mb = updates.storageLimitMb;
-    if (updates.priceMonthly !== undefined) updateData.price_monthly = updates.priceMonthly;
-    if (updates.priceYearly !== undefined) updateData.price_yearly = updates.priceYearly;
+    if (updates.storageLimitMb !== undefined || updates.storage_limit_mb !== undefined) {
+      updateData.storage_limit_mb = updates.storageLimitMb ?? updates.storage_limit_mb;
+    }
+    if (updates.priceMonthly !== undefined || updates.price_monthly !== undefined) {
+      updateData.price_monthly = updates.priceMonthly ?? updates.price_monthly;
+    }
+    if (updates.priceYearly !== undefined || updates.price_yearly !== undefined) {
+      updateData.price_yearly = updates.priceYearly ?? updates.price_yearly;
+    }
     if (updates.currency !== undefined) updateData.currency = updates.currency;
     if (updates.features !== undefined) updateData.features = updates.features;
-    if (updates.isPopular !== undefined) updateData.is_popular = updates.isPopular;
-    if (updates.isActive !== undefined) updateData.is_active = updates.isActive;
-    if (updates.sortOrder !== undefined) updateData.sort_order = updates.sortOrder;
+    if (updates.isPopular !== undefined || updates.is_popular !== undefined) {
+      updateData.is_popular = updates.isPopular ?? updates.is_popular;
+    }
+    if (updates.isActive !== undefined || updates.is_active !== undefined) {
+      updateData.is_active = updates.isActive ?? updates.is_active;
+    }
+    if (updates.sortOrder !== undefined || updates.sort_order !== undefined) {
+      updateData.sort_order = updates.sortOrder ?? updates.sort_order;
+    }
     updateData.updated_at = new Date().toISOString();
     updateData.photo_limit = -1;
 
@@ -197,6 +219,24 @@ export async function PUT(request: NextRequest) {
         { error: 'Failed to update storage plan' },
         { status: 500 }
       );
+    }
+
+    if (updateData.storage_limit_mb !== undefined) {
+      const { data: activeSubscriptions } = await supabase
+        .from('storage_subscriptions')
+        .select('user_id')
+        .eq('plan_id', id)
+        .eq('status', 'active');
+      const activeUserIds = Array.from(
+        new Set((activeSubscriptions || []).map((row: any) => String(row.user_id || '')).filter(Boolean))
+      );
+      if (activeUserIds.length > 0) {
+        await Promise.allSettled(
+          activeUserIds.map((userId) =>
+            supabase.rpc('sync_subscription_limits', { p_user_id: userId })
+          )
+        );
+      }
     }
 
     return NextResponse.json({ plan });

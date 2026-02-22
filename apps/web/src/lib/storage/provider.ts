@@ -1,10 +1,22 @@
-import { CopyObjectCommand, DeleteObjectsCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  CopyObjectCommand,
+  DeleteObjectsCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl as getS3SignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import { createServiceClient } from '@/lib/supabase/server';
 
 export type StorageProvider = 'supabase' | 's3';
 type SignedUrlOptions = { supabaseClient?: any };
+type UploadStorageObjectOptions = {
+  contentType?: string;
+  cacheControl?: string;
+  upsert?: boolean;
+  supabaseClient?: any;
+};
 
 let cachedS3Client: S3Client | null = null;
 
@@ -89,8 +101,69 @@ function toS3CopySource(bucket: string, key: string): string {
   return `${bucket}/${encodedKey}`;
 }
 
+function encodeS3KeyForUrl(key: string): string {
+  return key
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+}
+
+function resolveS3PublicBaseUrl(): string | null {
+  const base = process.env.STORAGE_S3_PUBLIC_BASE_URL || process.env.S3_PUBLIC_BASE_URL;
+  if (base && base.trim()) {
+    return base.trim().replace(/\/+$/, '');
+  }
+
+  const endpoint = process.env.S3_ENDPOINT || process.env.STORAGE_S3_ENDPOINT;
+  if (endpoint && endpoint.trim()) {
+    return endpoint.trim().replace(/\/+$/, '');
+  }
+
+  const region =
+    process.env.AWS_REGION ||
+    process.env.AWS_DEFAULT_REGION ||
+    process.env.S3_REGION ||
+    process.env.STORAGE_S3_REGION;
+  if (!region) return null;
+
+  return `https://s3.${region}.amazonaws.com`;
+}
+
 export function getStorageProvider(): StorageProvider {
   return resolveStorageProvider();
+}
+
+export function getStoragePublicUrl(logicalBucket: string, path: string | null | undefined): string | null {
+  if (!path || typeof path !== 'string') return null;
+  const normalizedPath = normalizeStoragePath(path);
+  if (!normalizedPath) return null;
+
+  const provider = resolveStorageProvider();
+  if (provider === 's3') {
+    try {
+      const bucket = resolveS3Bucket(logicalBucket);
+      const baseUrl = resolveS3PublicBaseUrl();
+      if (!baseUrl) return null;
+      const encodedPath = encodeS3KeyForUrl(normalizedPath);
+
+      if (baseUrl.includes('{bucket}')) {
+        return `${baseUrl.replace('{bucket}', bucket)}/${encodedPath}`;
+      }
+      return `${baseUrl}/${bucket}/${encodedPath}`;
+    } catch (error) {
+      console.error('Failed to resolve S3 public URL:', error);
+      return null;
+    }
+  }
+
+  try {
+    const serviceClient = createServiceClient();
+    const { data } = serviceClient.storage.from(logicalBucket).getPublicUrl(normalizedPath);
+    return data?.publicUrl || null;
+  } catch (error) {
+    console.error('Failed to resolve Supabase public URL:', error);
+    return null;
+  }
 }
 
 export async function createStorageSignedUrl(
@@ -197,5 +270,43 @@ export async function deleteStorageObjects(logicalBucket: string, paths: string[
   const { error } = await serviceClient.storage.from(logicalBucket).remove(normalizedPaths);
   if (error) {
     throw new Error(error.message || 'Supabase remove failed');
+  }
+}
+
+export async function uploadStorageObject(
+  logicalBucket: string,
+  path: string,
+  body: string | Uint8Array | ArrayBuffer | Buffer | Blob,
+  options?: UploadStorageObjectOptions
+): Promise<void> {
+  const normalizedPath = normalizeStoragePath(path);
+  const provider = resolveStorageProvider();
+
+  if (provider === 's3') {
+    const client = getS3Client();
+    const bucket = resolveS3Bucket(logicalBucket);
+    const cacheControl = options?.cacheControl;
+    const contentType = options?.contentType;
+
+    await client.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: normalizedPath,
+        Body: body as any,
+        ContentType: contentType,
+        CacheControl: cacheControl,
+      })
+    );
+    return;
+  }
+
+  const supabaseClient = options?.supabaseClient || createServiceClient();
+  const { error } = await supabaseClient.storage.from(logicalBucket).upload(normalizedPath, body as any, {
+    contentType: options?.contentType,
+    cacheControl: options?.cacheControl,
+    upsert: options?.upsert,
+  });
+  if (error) {
+    throw new Error(error.message || 'Supabase upload failed');
   }
 }

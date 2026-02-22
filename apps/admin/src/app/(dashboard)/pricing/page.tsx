@@ -2535,9 +2535,14 @@ export default function PricingPage() {
                             onChange={(e) => {
                               if (e.target.checked) {
                                 // Add feature with default value
-                                const defaultVal = feature.feature_type === 'boolean' ? true :
-                                                   feature.feature_type === 'limit' ? -1 :
-                                                   feature.default_value || '';
+                                const defaultVal =
+                                  feature.feature_type === 'boolean'
+                                    ? Boolean(feature.default_value ?? false)
+                                    : feature.feature_type === 'limit' || feature.feature_type === 'numeric'
+                                      ? (Number.isFinite(Number(feature.default_value))
+                                          ? Number(feature.default_value)
+                                          : 0)
+                                      : feature.default_value || '';
                                 setSelectedPlanFeatures({
                                   ...selectedPlanFeatures,
                                   [feature.code]: defaultVal,

@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { searchEventCollectionWithFallback } from '@/lib/aws/rekognition';
 import { checkRateLimit, getClientIP, rateLimitHeaders, rateLimits } from '@/lib/rate-limit';
+import { createStorageSignedUrl, getStorageProvider } from '@/lib/storage/provider';
 import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
 // ============================================
@@ -87,25 +88,27 @@ async function createSignedUrlMap(
 
   for (let i = 0; i < uniquePaths.length; i += SIGNED_URL_CHUNK_SIZE) {
     const chunk = uniquePaths.slice(i, i + SIGNED_URL_CHUNK_SIZE);
-    const { data, error } = await serviceClient.storage
-      .from('media')
-      .createSignedUrls(chunk, SIGNED_URL_TTL_SECONDS);
+    if (getStorageProvider() === 'supabase') {
+      const { data, error } = await serviceClient.storage
+        .from('media')
+        .createSignedUrls(chunk, SIGNED_URL_TTL_SECONDS);
 
-    if (error || !Array.isArray(data)) {
-      for (const path of chunk) {
-        const single = await serviceClient.storage
-          .from('media')
-          .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
-        if (single.data?.signedUrl) {
-          signedUrlMap.set(path, single.data.signedUrl);
+      if (!error && Array.isArray(data)) {
+        for (const row of data) {
+          if (!row?.path || !row?.signedUrl) continue;
+          signedUrlMap.set(row.path, row.signedUrl);
         }
       }
-      continue;
     }
 
-    for (const row of data) {
-      if (!row?.path || !row?.signedUrl) continue;
-      signedUrlMap.set(row.path, row.signedUrl);
+    for (const path of chunk) {
+      if (signedUrlMap.has(path)) continue;
+      const single = await createStorageSignedUrl('media', path, SIGNED_URL_TTL_SECONDS, {
+        supabaseClient: serviceClient,
+      });
+      if (single) {
+        signedUrlMap.set(path, single);
+      }
     }
   }
 

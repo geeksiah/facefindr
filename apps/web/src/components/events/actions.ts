@@ -7,6 +7,105 @@ import { getPhotographerIdCandidates, resolvePhotographerProfileByUser } from '@
 import { checkLimit } from '@/lib/subscription/enforcement';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
+const BYTES_PER_GB = 1024 * 1024 * 1024;
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const exp = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / Math.pow(1024, exp);
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[exp]}`;
+}
+
+async function getCreatorStorageLimitBytes(
+  serviceClient: any,
+  photographerId: string
+): Promise<number | null> {
+  const { data, error } = await serviceClient.rpc('get_photographer_limits', {
+    p_photographer_id: photographerId,
+  });
+  if (error) {
+    console.error('Failed to resolve creator storage limits:', error);
+    return null;
+  }
+
+  const storageGb = Number(data?.[0]?.storage_gb);
+  if (!Number.isFinite(storageGb)) return null;
+  if (storageGb === -1) return -1;
+  return Math.max(0, Math.floor(storageGb * BYTES_PER_GB));
+}
+
+async function getCreatorStorageUsedBytes(
+  serviceClient: any,
+  photographerId: string
+): Promise<number> {
+  const { data: usageRow } = await serviceClient
+    .from('photographer_usage')
+    .select('storage_used_bytes')
+    .eq('photographer_id', photographerId)
+    .maybeSingle();
+  const usageBytes = Number(usageRow?.storage_used_bytes);
+  if (Number.isFinite(usageBytes) && usageBytes >= 0) {
+    return usageBytes;
+  }
+
+  const { data: mediaRows, error } = await serviceClient
+    .from('media')
+    .select('file_size, events!inner(photographer_id)')
+    .eq('events.photographer_id', photographerId)
+    .is('deleted_at', null);
+  if (error) {
+    console.error('Failed to compute creator storage usage fallback:', error);
+    return 0;
+  }
+
+  return (mediaRows || []).reduce(
+    (sum: number, row: any) => sum + Math.max(0, Number(row?.file_size || 0)),
+    0
+  );
+}
+
+async function checkCreatorStorageForIncomingUpload(
+  serviceClient: any,
+  photographerId: string,
+  incomingFileSizeBytes: number
+): Promise<{
+  allowed: boolean;
+  usedBytes: number;
+  limitBytes: number;
+  message: string | null;
+}> {
+  const limitBytes = await getCreatorStorageLimitBytes(serviceClient, photographerId);
+  if (limitBytes === null) {
+    return {
+      allowed: true,
+      usedBytes: 0,
+      limitBytes: 0,
+      message: null,
+    };
+  }
+  if (limitBytes === -1) {
+    return {
+      allowed: true,
+      usedBytes: 0,
+      limitBytes: -1,
+      message: null,
+    };
+  }
+
+  const usedBytes = await getCreatorStorageUsedBytes(serviceClient, photographerId);
+  const projectedBytes = usedBytes + Math.max(0, Number(incomingFileSizeBytes || 0));
+  const allowed = projectedBytes <= limitBytes;
+  return {
+    allowed,
+    usedBytes,
+    limitBytes,
+    message: allowed
+      ? null
+      : `Storage limit reached (${formatBytes(usedBytes)} / ${formatBytes(limitBytes)}). Please upgrade your plan or delete some photos.`,
+  };
+}
+
 async function notifyEventSubscribersAboutNewPhotos(
   serviceClient: any,
   event: { id: string; name?: string | null; public_slug?: string | null; status?: string | null },
@@ -138,6 +237,18 @@ export async function uploadPhotos(formData: FormData) {
     return { error: 'You do not have permission to upload to this event' };
   }
 
+  // Validate file type
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/heic', 'image/webp'];
+  if (!allowedTypes.includes(file.type)) {
+    return { error: 'Invalid file type. Only JPEG, PNG, HEIC, and WebP are allowed.' };
+  }
+
+  // Validate file size (50MB max)
+  const maxSize = 50 * 1024 * 1024;
+  if (file.size > maxSize) {
+    return { error: 'File too large. Maximum size is 50MB.' };
+  }
+
   // ENFORCE: Check photo limit using the enforcement system
   const photoLimit = await checkLimit(photographerId, 'photos', eventId);
   if (!photoLimit.allowed) {
@@ -150,28 +261,18 @@ export async function uploadPhotos(formData: FormData) {
     };
   }
 
-  // ENFORCE: Check storage limit
-  const storageLimit = await checkLimit(photographerId, 'storage');
+  // ENFORCE: Check storage limit with precise byte-level guardrail.
+  const storageLimit = await checkCreatorStorageForIncomingUpload(serviceClient, photographerId, file.size);
   if (!storageLimit.allowed) {
     return {
-      error: storageLimit.message || `You've reached your storage limit (${storageLimit.limit}GB). Please upgrade your plan or delete some photos.`,
+      error:
+        storageLimit.message ||
+        "You've reached your storage limit. Please upgrade your plan or delete some photos.",
       code: 'LIMIT_EXCEEDED',
       limitType: 'storage',
-      current: storageLimit.current,
-      limit: storageLimit.limit,
+      current: storageLimit.usedBytes,
+      limit: storageLimit.limitBytes,
     };
-  }
-
-  // Validate file type
-  const allowedTypes = ['image/jpeg', 'image/png', 'image/heic', 'image/webp'];
-  if (!allowedTypes.includes(file.type)) {
-    return { error: 'Invalid file type. Only JPEG, PNG, HEIC, and WebP are allowed.' };
-  }
-
-  // Validate file size (50MB max)
-  const maxSize = 50 * 1024 * 1024;
-  if (file.size > maxSize) {
-    return { error: 'File too large. Maximum size is 50MB.' };
   }
 
   try {

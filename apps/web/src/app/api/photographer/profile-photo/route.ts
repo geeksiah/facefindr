@@ -8,7 +8,28 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { deleteStorageObjects, getStoragePublicUrl, uploadStorageObject } from '@/lib/storage/provider';
 import { createClient } from '@/lib/supabase/server';
+
+function extractStorageObjectPath(rawValue: string | null | undefined): string | null {
+  if (!rawValue || typeof rawValue !== 'string') return null;
+  const trimmed = rawValue.trim();
+  if (!trimmed) return null;
+
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+    return trimmed.replace(/^\/+/, '');
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    const path = decodeURIComponent(parsed.pathname || '').replace(/^\/+/, '');
+    if (!path) return null;
+    const match = path.match(/avatars\/(.+)$/i);
+    return match?.[1] ? match[1].replace(/^\/+/, '') : null;
+  } catch {
+    return null;
+  }
+}
 
 // POST - Upload profile photo
 export async function POST(request: NextRequest) {
@@ -52,14 +73,12 @@ export async function POST(request: NextRequest) {
     const filename = `${user.id}/profile-${Date.now()}.${ext}`;
 
     // Upload to Supabase Storage
-    const { error: uploadError } = await supabase.storage
-      .from('avatars')
-      .upload(filename, file, {
+    try {
+      await uploadStorageObject('avatars', filename, file, {
         cacheControl: '3600',
         upsert: true,
       });
-
-    if (uploadError) {
+    } catch (uploadError: any) {
       console.error('Upload error:', uploadError);
       return NextResponse.json(
         { error: 'Failed to upload photo' },
@@ -67,12 +86,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get public URL
-    const { data: urlData } = supabase.storage
-      .from('avatars')
-      .getPublicUrl(filename);
-
-    const photoUrl = urlData.publicUrl;
+    const photoUrl = getStoragePublicUrl('avatars', filename);
+    if (!photoUrl) {
+      await deleteStorageObjects('avatars', [filename]).catch(() => {});
+      return NextResponse.json(
+        { error: 'Failed to resolve profile photo URL' },
+        { status: 500 }
+      );
+    }
 
     // Update photographer profile
     const { error: updateError } = await supabase
@@ -124,12 +145,12 @@ export async function DELETE() {
 
     if (profile?.profile_photo_url) {
       // Extract filename from URL
-      const url = new URL(profile.profile_photo_url);
-      const pathParts = url.pathname.split('/');
-      const filename = pathParts.slice(-2).join('/');
+      const filename = extractStorageObjectPath(profile.profile_photo_url);
 
       // Delete from storage
-      await supabase.storage.from('avatars').remove([filename]);
+      if (filename) {
+        await deleteStorageObjects('avatars', [filename]);
+      }
     }
 
     // Update profile

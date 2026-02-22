@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 
+import { createStorageSignedUrl, getStorageProvider, getStoragePublicUrl } from '@/lib/storage/provider';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
@@ -16,25 +17,27 @@ async function createSignedUrlMap(serviceClient: any, paths: string[]) {
   const map = new Map<string, string>();
   if (!normalized.length) return map;
 
-  const { data, error } = await serviceClient.storage
-    .from('media')
-    .createSignedUrls(normalized, SIGNED_URL_TTL_SECONDS);
+  if (getStorageProvider() === 'supabase') {
+    const { data, error } = await serviceClient.storage
+      .from('media')
+      .createSignedUrls(normalized, SIGNED_URL_TTL_SECONDS);
 
-  if (!error && Array.isArray(data)) {
-    for (const row of data) {
-      if (!row?.path || !row?.signedUrl) continue;
-      map.set(row.path, row.signedUrl);
+    if (!error && Array.isArray(data)) {
+      for (const row of data) {
+        if (!row?.path || !row?.signedUrl) continue;
+        map.set(row.path, row.signedUrl);
+      }
     }
   }
 
   // Fallback for any path that failed in bulk signing.
   for (const path of normalized) {
     if (map.has(path)) continue;
-    const single = await serviceClient.storage
-      .from('media')
-      .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
-    if (single.data?.signedUrl) {
-      map.set(path, single.data.signedUrl);
+    const single = await createStorageSignedUrl('media', path, SIGNED_URL_TTL_SECONDS, {
+      supabaseClient: serviceClient,
+    });
+    if (single) {
+      map.set(path, single);
     }
   }
 
@@ -129,8 +132,7 @@ export async function GET() {
         const coverImage = coverPath?.startsWith('http')
           ? coverPath
           : coverPath
-          ? serviceClient.storage.from('covers').getPublicUrl(coverPath).data.publicUrl ||
-            serviceClient.storage.from('events').getPublicUrl(coverPath).data.publicUrl
+          ? getStoragePublicUrl('covers', coverPath) || getStoragePublicUrl('events', coverPath)
           : null;
 
         grouped[event.id] = {

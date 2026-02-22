@@ -7,6 +7,7 @@ import { getAvailableDropInCredits } from '@/lib/drop-in/credits';
 import { resolveDropInCreditRules } from '@/lib/drop-in/credit-rules';
 import { crawlExternalPlatforms, hasExternalCrawlerProviderConfigured } from '@/lib/drop-in/external-crawler';
 import { getAttendeeIdCandidates, resolveAttendeeProfileByUser } from '@/lib/profiles/ids';
+import { createStorageSignedUrl } from '@/lib/storage/provider';
 import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
 type SearchType = 'internal' | 'contacts' | 'external';
@@ -87,8 +88,10 @@ export async function GET(request: NextRequest) {
     const signedEntries: Array<readonly [string, string | null]> = await Promise.all(
       mediaPaths.map(async (path) => {
         const cleanPath = path.startsWith('/') ? path.slice(1) : path;
-        const { data } = await serviceClient.storage.from('media').createSignedUrl(cleanPath, 3600);
-        return [path, data?.signedUrl || null] as const;
+        const signedUrl = await createStorageSignedUrl('media', cleanPath, 3600, {
+          supabaseClient: serviceClient,
+        });
+        return [path, signedUrl] as const;
       })
     );
     const signedMap = new Map<string, string | null>(signedEntries);

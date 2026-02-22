@@ -2,8 +2,11 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { createStorageSignedUrl, uploadStorageObject } from '@/lib/storage/provider';
 import { normalizeUserType } from '@/lib/user-type';
 import { createClient, createClientWithAccessToken } from '@/lib/supabase/server';
+
+const EXPORT_SIGNED_URL_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 async function getAuthClient(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
@@ -13,6 +16,44 @@ async function getAuthClient(request: NextRequest) {
   return accessToken
     ? createClientWithAccessToken(accessToken)
     : await createClient();
+}
+
+function normalizeStoragePath(path: string | null | undefined): string | null {
+  if (!path || typeof path !== 'string') return null;
+  const trimmed = path.trim();
+  if (!trimmed) return null;
+  return trimmed.startsWith('/') ? trimmed.slice(1) : trimmed;
+}
+
+function extractExportObjectPath(raw: string | null | undefined): string | null {
+  const normalized = normalizeStoragePath(raw);
+  if (!normalized) return null;
+
+  if (normalized.startsWith('exports/')) {
+    return normalized;
+  }
+
+  if (!normalized.startsWith('http://') && !normalized.startsWith('https://')) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    const pathname = decodeURIComponent(parsed.pathname || '');
+    const publicMatch = pathname.match(/\/storage\/v1\/object\/(?:public|sign)\/exports\/(.+)$/i);
+    if (publicMatch?.[1]) {
+      return `exports/${publicMatch[1].replace(/^\/+/, '')}`;
+    }
+
+    const genericExportsMatch = pathname.match(/\/exports\/(.+)$/i);
+    if (genericExportsMatch?.[1]) {
+      return `exports/${genericExportsMatch[1].replace(/^\/+/, '')}`;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 // POST - Request data export
@@ -116,19 +157,29 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({
-      requests: requests.map((r: any) => ({
-        id: r.id,
-        status: r.status,
-        requestedAt: r.requested_at,
-        processedAt: r.processed_at,
-        completedAt: r.completed_at,
-        expiresAt: r.expires_at,
-        downloadUrl: r.download_url,
-        fileSizeBytes: r.file_size_bytes,
-        errorMessage: r.error_message,
-      })),
-    });
+    const mappedRequests = await Promise.all(
+      (requests || []).map(async (r: any) => {
+        const exportPath = extractExportObjectPath(r.download_url);
+        const signedDownloadUrl =
+          r.status === 'completed' && exportPath
+            ? await createStorageSignedUrl('exports', exportPath, EXPORT_SIGNED_URL_TTL_SECONDS)
+            : null;
+
+        return {
+          id: r.id,
+          status: r.status,
+          requestedAt: r.requested_at,
+          processedAt: r.processed_at,
+          completedAt: r.completed_at,
+          expiresAt: r.expires_at,
+          downloadUrl: signedDownloadUrl,
+          fileSizeBytes: r.file_size_bytes,
+          errorMessage: r.error_message,
+        };
+      })
+    );
+
+    return NextResponse.json({ requests: mappedRequests });
 
   } catch (error) {
     console.error('Export status fetch error:', error);
@@ -247,27 +298,12 @@ async function processDataExport(
     const fileName = `exports/${userId}/${requestId}.json`;
 
     // Upload to storage
-    const { error: uploadError } = await supabase.storage
-      .from('exports')
-      .upload(fileName, jsonData, {
-        contentType: 'application/json',
-        cacheControl: '3600',
-      });
-
-    if (uploadError) {
-      // If exports bucket doesn't exist, mark as completed anyway
-      console.warn('Could not upload export file:', uploadError);
-    }
-
-    // Get public URL (if upload succeeded)
-    let downloadUrl = null;
-    const { data: urlData } = supabase.storage
-      .from('exports')
-      .getPublicUrl(fileName);
-    
-    if (urlData) {
-      downloadUrl = urlData.publicUrl;
-    }
+    await uploadStorageObject('exports', fileName, jsonData, {
+      contentType: 'application/json',
+      cacheControl: '3600',
+      upsert: true,
+      supabaseClient: supabase,
+    });
 
     // Calculate expiry (7 days)
     const expiresAt = new Date();
@@ -280,7 +316,7 @@ async function processDataExport(
         status: 'completed',
         completed_at: new Date().toISOString(),
         expires_at: expiresAt.toISOString(),
-        download_url: downloadUrl,
+        download_url: fileName,
         file_size_bytes: Buffer.byteLength(jsonData, 'utf8'),
       })
       .eq('id', requestId);

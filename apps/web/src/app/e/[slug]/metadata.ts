@@ -1,5 +1,6 @@
 import { Metadata } from 'next';
 
+import { getStoragePublicUrl } from '@/lib/storage/provider';
 import { createServiceClient } from '@/lib/supabase/server';
 
 export async function generateEventMetadata(slug: string): Promise<Metadata> {
@@ -110,8 +111,7 @@ export async function generateEventMetadata(slug: string): Promise<Metadata> {
     const coverImage = coverPath?.startsWith('http')
       ? coverPath
       : coverPath
-      ? supabase.storage.from('covers').getPublicUrl(coverPath).data.publicUrl ||
-        supabase.storage.from('events').getPublicUrl(coverPath).data.publicUrl
+      ? getStoragePublicUrl('covers', coverPath) || getStoragePublicUrl('events', coverPath)
       : `${baseUrl}/assets/logos/og-logo.png`;
     const description = event.description || `Find your photos from ${event.name} on Ferchr`;
     const isRestricted = event.is_public === false || event.is_publicly_listed === false || event.require_access_code === true;

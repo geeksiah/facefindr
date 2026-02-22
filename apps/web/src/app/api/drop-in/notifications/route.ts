@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { consumeDropInCredits } from '@/lib/drop-in/consume-credits';
 import { resolveDropInCreditRules } from '@/lib/drop-in/credit-rules';
 import { getAttendeeIdCandidates } from '@/lib/profiles/ids';
+import { createStorageSignedUrl } from '@/lib/storage/provider';
 import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
 
 // GET - List notifications
@@ -87,15 +88,15 @@ export async function GET(request: NextRequest) {
         
         const path = photo.thumbnail_path || photo.storage_path;
 
-        const { data: urlData } = await supabase.storage
-          .from('media')
-          .createSignedUrl(path, 3600);
+        const signedUrl = await createStorageSignedUrl('media', path, 3600, {
+          supabaseClient: supabase,
+        });
 
         return {
           ...notif,
           photo: {
             ...photo,
-            thumbnailUrl: urlData?.signedUrl || null,
+            thumbnailUrl: signedUrl || null,
           },
         };
       })

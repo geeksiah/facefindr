@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 
 import { formatEventDateDisplay } from '@/lib/events/time';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { getStoragePublicUrl } from '@/lib/storage/provider';
 
 function resolvePhotographerName(photographers: any): string {
   if (Array.isArray(photographers)) {
@@ -174,8 +175,7 @@ export async function GET() {
       const coverImage = coverPath?.startsWith('http')
         ? coverPath
         : coverPath
-        ? serviceClient.storage.from('covers').getPublicUrl(coverPath).data.publicUrl ||
-          serviceClient.storage.from('events').getPublicUrl(coverPath).data.publicUrl
+        ? getStoragePublicUrl('covers', coverPath) || getStoragePublicUrl('events', coverPath)
         : null;
 
       return {

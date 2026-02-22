@@ -35,6 +35,7 @@ interface EnvConfig {
   STORAGE_S3_ENDPOINT?: string;
   STORAGE_S3_FORCE_PATH_STYLE?: string;
   STORAGE_S3_REGION?: string;
+  STORAGE_S3_PUBLIC_BASE_URL?: string;
 
   // External crawler providers (Drop-In Find Me external search)
   SERPAPI_KEY?: string;
@@ -89,6 +90,7 @@ export function validateEnv(): EnvConfig {
     STORAGE_S3_ENDPOINT: getEnvVar('STORAGE_S3_ENDPOINT'),
     STORAGE_S3_FORCE_PATH_STYLE: getEnvVar('STORAGE_S3_FORCE_PATH_STYLE'),
     STORAGE_S3_REGION: getEnvVar('STORAGE_S3_REGION'),
+    STORAGE_S3_PUBLIC_BASE_URL: getEnvVar('STORAGE_S3_PUBLIC_BASE_URL'),
     SERPAPI_KEY: getEnvVar('SERPAPI_KEY'),
     TAVILY_API_KEY: getEnvVar('TAVILY_API_KEY'),
     EXA_API_KEY: getEnvVar('EXA_API_KEY'),
@@ -123,6 +125,9 @@ export function validateEnv(): EnvConfig {
       const resolvedRegion = env.AWS_REGION || env.STORAGE_S3_REGION;
       if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY || !resolvedRegion) {
         warnings.push('STORAGE_PROVIDER=s3 but AWS credentials/region are missing');
+      }
+      if (!env.STORAGE_S3_PUBLIC_BASE_URL) {
+        warnings.push('STORAGE_PROVIDER=s3 without STORAGE_S3_PUBLIC_BASE_URL may break cover/avatar public URLs');
       }
     }
 
