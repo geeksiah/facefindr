@@ -20,39 +20,44 @@ const POSITIONS: Record<FacePosition, PositionConfig> = {
   center: {
     label: 'Look Straight',
     instruction: 'Look directly at the camera',
-    yawRange: [-0.24, 0.24],
-    pitchRange: [-0.24, 0.24],
+    yawRange: [-0.32, 0.32],
+    pitchRange: [-0.32, 0.32],
   },
   left: {
     label: 'Turn Left',
     instruction: 'Turn your head left',
-    yawRange: [-0.9, -0.12],
-    pitchRange: [-0.32, 0.32],
+    yawRange: [-1.2, -0.08],
+    pitchRange: [-0.4, 0.4],
   },
   right: {
     label: 'Turn Right',
     instruction: 'Turn your head right',
-    yawRange: [0.12, 0.9],
-    pitchRange: [-0.32, 0.32],
+    yawRange: [0.08, 1.2],
+    pitchRange: [-0.4, 0.4],
   },
   up: {
     label: 'Tilt Up',
     instruction: 'Tilt your head up',
-    yawRange: [-0.35, 0.35],
-    pitchRange: [-0.9, -0.12],
+    yawRange: [-0.45, 0.45],
+    pitchRange: [-1.1, -0.08],
   },
   down: {
     label: 'Tilt Down',
     instruction: 'Tilt your head down',
-    yawRange: [-0.35, 0.35],
-    pitchRange: [0.12, 0.9],
+    yawRange: [-0.45, 0.45],
+    pitchRange: [0.08, 1.1],
   },
 };
 
 const POSITION_ORDER: FacePosition[] = ['center', 'left', 'right', 'up', 'down'];
-const AUTO_CAPTURE_HOLD_MS = 900;
-const DETECT_INTERVAL_MS = 90;
-const MATCH_STREAK_REQUIRED = 3;
+const AUTO_CAPTURE_HOLD_MS = 650;
+const DETECT_INTERVAL_MS = 65;
+const MATCH_STREAK_REQUIRED = 1;
+const POSE_RELAX_STAGE_1_MS = 1800;
+const POSE_RELAX_STAGE_2_MS = 3600;
+const POSE_RELAX_DELTA_1 = 0.12;
+const POSE_RELAX_DELTA_2 = 0.22;
+const POSE_EMA_ALPHA = 0.35;
 
 interface GuidedFaceScannerProps {
   onComplete: (captures: string[]) => Promise<void>;
@@ -216,6 +221,8 @@ export function GuidedFaceScanner({ onComplete, onCancel }: GuidedFaceScannerPro
   const [error, setError] = useState<string | null>(null);
   const [permissionBlocked, setPermissionBlocked] = useState(false);
   const [cameraMessage, setCameraMessage] = useState<string | null>(null);
+  const [showDebug, setShowDebug] = useState(false);
+  const [debugPoseText, setDebugPoseText] = useState<string | null>(null);
 
   const { confirm, ConfirmDialog } = useConfirm();
 
@@ -229,6 +236,9 @@ export function GuidedFaceScanner({ onComplete, onCancel }: GuidedFaceScannerPro
   const noMatchFrameCountRef = useRef(0);
   const lastDetectAtRef = useRef(0);
   const captureLockedRef = useRef(false);
+  const poseEnteredAtRef = useRef<number>(Date.now());
+  const yawEmaRef = useRef<number | null>(null);
+  const pitchEmaRef = useRef<number | null>(null);
 
   const currentPosition = POSITION_ORDER[currentPositionIndex];
   const positionConfig = POSITIONS[currentPosition];
@@ -238,6 +248,8 @@ export function GuidedFaceScanner({ onComplete, onCancel }: GuidedFaceScannerPro
     matchStreakRef.current = 0;
     setHoldProgress(0);
     setPositionMatch(false);
+    yawEmaRef.current = null;
+    pitchEmaRef.current = null;
   }, []);
 
   const initializeCamera = useCallback(async () => {
@@ -418,6 +430,7 @@ export function GuidedFaceScanner({ onComplete, onCancel }: GuidedFaceScannerPro
         const reading = await detectorRef.current.detectPose(video, ts);
         if (!reading) {
           setFaceDetected(false);
+          if (showDebug) setDebugPoseText(null);
           resetMatchingState();
           noMatchFrameCountRef.current += 1;
           if (noMatchFrameCountRef.current > 70) {
@@ -429,15 +442,43 @@ export function GuidedFaceScanner({ onComplete, onCancel }: GuidedFaceScannerPro
         }
 
         setFaceDetected(true);
-        const yaw = reading.yaw;
-        const pitch = reading.pitch;
+        const smoothedYaw =
+          yawEmaRef.current === null
+            ? reading.yaw
+            : yawEmaRef.current + POSE_EMA_ALPHA * (reading.yaw - yawEmaRef.current);
+        const smoothedPitch =
+          pitchEmaRef.current === null
+            ? reading.pitch
+            : pitchEmaRef.current + POSE_EMA_ALPHA * (reading.pitch - pitchEmaRef.current);
+        yawEmaRef.current = smoothedYaw;
+        pitchEmaRef.current = smoothedPitch;
 
         const config = POSITIONS[POSITION_ORDER[currentPositionIndex]];
+        const poseElapsedMs = Date.now() - poseEnteredAtRef.current;
+        const relaxDelta =
+          poseElapsedMs >= POSE_RELAX_STAGE_2_MS
+            ? POSE_RELAX_DELTA_2
+            : poseElapsedMs >= POSE_RELAX_STAGE_1_MS
+              ? POSE_RELAX_DELTA_1
+              : 0;
+        const yawMin = config.yawRange[0] - relaxDelta;
+        const yawMax = config.yawRange[1] + relaxDelta;
+        const pitchMin = config.pitchRange[0] - relaxDelta;
+        const pitchMax = config.pitchRange[1] + relaxDelta;
+
+        if (showDebug) {
+          setDebugPoseText(
+            `yaw ${smoothedYaw.toFixed(2)} [${yawMin.toFixed(2)}..${yawMax.toFixed(2)}], ` +
+              `pitch ${smoothedPitch.toFixed(2)} [${pitchMin.toFixed(2)}..${pitchMax.toFixed(2)}], ` +
+              `relax ${relaxDelta.toFixed(2)}`
+          );
+        }
+
         const isMatch =
-          yaw >= config.yawRange[0] &&
-          yaw <= config.yawRange[1] &&
-          pitch >= config.pitchRange[0] &&
-          pitch <= config.pitchRange[1];
+          smoothedYaw >= yawMin &&
+          smoothedYaw <= yawMax &&
+          smoothedPitch >= pitchMin &&
+          smoothedPitch <= pitchMax;
 
         if (!isMatch) {
           matchStreakRef.current = 0;
@@ -549,6 +590,22 @@ export function GuidedFaceScanner({ onComplete, onCancel }: GuidedFaceScannerPro
     };
   }, [autoCaptureReady, runDetectionLoop, state]);
 
+  useEffect(() => {
+    poseEnteredAtRef.current = Date.now();
+  }, [currentPositionIndex]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    setShowDebug(params.get('scanDebug') === '1');
+  }, []);
+
+  useEffect(() => {
+    if (!showDebug) {
+      setDebugPoseText(null);
+    }
+  }, [showDebug]);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-center gap-3">
@@ -659,6 +716,9 @@ export function GuidedFaceScanner({ onComplete, onCancel }: GuidedFaceScannerPro
               <p className="mt-1 text-xs text-muted-foreground">Auto capture is loading in the background...</p>
             )}
             {statusMessage && <p className="mt-1 text-xs text-muted-foreground">{statusMessage}</p>}
+            {showDebug && debugPoseText && (
+              <p className="mt-1 font-mono text-[11px] text-muted-foreground">{debugPoseText}</p>
+            )}
           </div>
 
           <div className="flex justify-center">

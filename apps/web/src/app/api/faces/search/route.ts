@@ -44,6 +44,20 @@ type NormalizedMatch = {
   similarity: number;
 };
 
+type EventMediaStats = {
+  mediaCount: number;
+  latestMediaCreatedAt: string | null;
+};
+
+type AttendeeEventScanStateRow = {
+  attendee_id: string;
+  event_id: string;
+  last_scan_at: string;
+  last_result_match_count: number;
+  last_media_count_at_scan: number;
+  last_latest_media_created_at_at_scan: string | null;
+};
+
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
 const SIGNED_URL_CHUNK_SIZE = 100;
 
@@ -96,6 +110,109 @@ async function createSignedUrlMap(
   }
 
   return signedUrlMap;
+}
+
+async function getEventMediaStats(
+  serviceClient: any,
+  eventId: string
+): Promise<EventMediaStats> {
+  const [{ count }, { data: latestRows }] = await Promise.all([
+    serviceClient
+      .from('media')
+      .select('id', { count: 'exact', head: true })
+      .eq('event_id', eventId)
+      .is('deleted_at', null),
+    serviceClient
+      .from('media')
+      .select('created_at')
+      .eq('event_id', eventId)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+      .limit(1),
+  ]);
+
+  return {
+    mediaCount: count || 0,
+    latestMediaCreatedAt: latestRows?.[0]?.created_at || null,
+  };
+}
+
+function hasNewMediaSinceNoMatchScan(
+  scanState: AttendeeEventScanStateRow | null,
+  mediaStats: EventMediaStats
+): boolean {
+  if (!scanState) return true;
+  if ((scanState.last_result_match_count || 0) > 0) return true;
+
+  if (mediaStats.mediaCount > (scanState.last_media_count_at_scan || 0)) {
+    return true;
+  }
+
+  const previousLatest = scanState.last_latest_media_created_at_at_scan;
+  if (!previousLatest) {
+    return Boolean(mediaStats.latestMediaCreatedAt);
+  }
+
+  if (!mediaStats.latestMediaCreatedAt) {
+    return false;
+  }
+
+  return (
+    Date.parse(mediaStats.latestMediaCreatedAt) >
+    Date.parse(previousLatest)
+  );
+}
+
+async function getAttendeeEventScanState(
+  serviceClient: any,
+  attendeeId: string,
+  eventId: string
+): Promise<AttendeeEventScanStateRow | null> {
+  const { data, error } = await serviceClient
+    .from('attendee_event_scan_state')
+    .select(
+      'attendee_id, event_id, last_scan_at, last_result_match_count, last_media_count_at_scan, last_latest_media_created_at_at_scan'
+    )
+    .eq('attendee_id', attendeeId)
+    .eq('event_id', eventId)
+    .maybeSingle();
+
+  if (error) {
+    if (error.code !== '42P01') {
+      console.error('Failed to read attendee scan state:', error);
+    }
+    return null;
+  }
+
+  return (data as AttendeeEventScanStateRow | null) || null;
+}
+
+async function upsertAttendeeEventScanState(
+  serviceClient: any,
+  attendeeId: string,
+  eventId: string,
+  resultMatchCount: number,
+  mediaStats: EventMediaStats
+) {
+  const { error } = await serviceClient
+    .from('attendee_event_scan_state')
+    .upsert(
+      {
+        attendee_id: attendeeId,
+        event_id: eventId,
+        last_scan_at: new Date().toISOString(),
+        last_result_match_count: resultMatchCount,
+        last_media_count_at_scan: mediaStats.mediaCount,
+        last_latest_media_created_at_at_scan: mediaStats.latestMediaCreatedAt,
+      },
+      {
+        onConflict: 'attendee_id,event_id',
+      }
+    );
+
+  if (error && error.code !== '42P01') {
+    console.error('Failed to upsert attendee scan state:', error);
+  }
 }
 
 async function canUserAccessEvent(
@@ -269,12 +386,36 @@ export async function POST(request: NextRequest) {
 
     const serviceClient = createServiceClient();
     const { events, denied } = await resolveSearchEvents(serviceClient, user.id, eventId);
+    let scopedEventMediaStats: EventMediaStats | null = null;
 
     if (denied) {
       return NextResponse.json({ error: 'Access denied for this event' }, { status: 403 });
     }
 
+    if (eventId && events.length > 0) {
+      const [scanState, mediaStats] = await Promise.all([
+        getAttendeeEventScanState(serviceClient, user.id, eventId),
+        getEventMediaStats(serviceClient, eventId),
+      ]);
+      scopedEventMediaStats = mediaStats;
+
+      if (!hasNewMediaSinceNoMatchScan(scanState, mediaStats)) {
+        return NextResponse.json(
+          {
+            error:
+              'No new photos have been uploaded since your last scan. Check back after new uploads.',
+            code: 'scan_locked_no_new_uploads',
+            canScan: false,
+          },
+          { status: 409 }
+        );
+      }
+    }
+
     if (!events.length) {
+      if (eventId && scopedEventMediaStats) {
+        await upsertAttendeeEventScanState(serviceClient, user.id, eventId, 0, scopedEventMediaStats);
+      }
       return NextResponse.json({
         totalMatches: 0,
         matches: [],
@@ -339,6 +480,11 @@ export async function POST(request: NextRequest) {
     }
 
     if (!allMediaRows.length) {
+      if (eventId) {
+        const mediaStats =
+          scopedEventMediaStats || (await getEventMediaStats(serviceClient, eventId));
+        await upsertAttendeeEventScanState(serviceClient, user.id, eventId, 0, mediaStats);
+      }
       return NextResponse.json({
         totalMatches: 0,
         matches: [],
@@ -419,6 +565,12 @@ export async function POST(request: NextRequest) {
       if (upsertError) {
         console.error('Failed to persist face matches:', upsertError);
       }
+    }
+
+    if (eventId) {
+      const mediaStats =
+        scopedEventMediaStats || (await getEventMediaStats(serviceClient, eventId));
+      await upsertAttendeeEventScanState(serviceClient, user.id, eventId, matches.length, mediaStats);
     }
 
     matches.sort((a, b) => b.similarity - a.similarity);

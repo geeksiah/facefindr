@@ -5,6 +5,7 @@ import {
   Calendar,
   MapPin,
   Camera,
+  Scan,
   Download,
   Share2,
   Heart,
@@ -16,8 +17,9 @@ import {
 import Image from 'next/image';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
+import { FaceScanner } from '@/components/face-scan';
 import { RatingsDisplay } from '@/components/photographer/ratings-display';
 import { FollowButton } from '@/components/social/follow-button';
 import { PhotoReactions } from '@/components/social/photo-reactions';
@@ -51,6 +53,13 @@ interface EventDetails {
     currency: string;
     isFree: boolean;
   };
+  scanPolicy?: {
+    canScan: boolean;
+    waitingForNewUploads: boolean;
+    message?: string | null;
+    lastScanAt?: string | null;
+    newUploadsSinceLastScan?: number;
+  };
 }
 
 export default function EventDetailPage() {
@@ -64,28 +73,32 @@ export default function EventDetailPage() {
   const [viewingPhoto, setViewingPhoto] = useState<EventPhoto | null>(null);
   const [showTipModal, setShowTipModal] = useState(false);
   const [downloadedPhoto, setDownloadedPhoto] = useState<EventPhoto | null>(null);
+  const [showScanner, setShowScanner] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [scanNotice, setScanNotice] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchEvent = async () => {
-      try {
-        const response = await fetch(`/api/events/${eventId}/attendee-view`);
-        if (response.ok) {
-          const data = await response.json();
-          setEvent(data);
-        } else {
-          router.push('/gallery/events');
-        }
-      } catch (error) {
-        console.error('Failed to fetch event:', error);
-      } finally {
-        setIsLoading(false);
+  const fetchEvent = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/events/${eventId}/attendee-view`);
+      if (response.ok) {
+        const data = await response.json();
+        setEvent(data);
+      } else {
+        router.push('/gallery/events');
       }
-    };
-
-    if (eventId) {
-      fetchEvent();
+    } catch (error) {
+      console.error('Failed to fetch event:', error);
+    } finally {
+      setIsLoading(false);
     }
   }, [eventId, router]);
+
+  useEffect(() => {
+    if (eventId) {
+      void fetchEvent();
+    }
+  }, [eventId, fetchEvent]);
 
   const togglePhotoSelection = (photoId: string) => {
     setSelectedPhotos((prev) => {
@@ -124,6 +137,72 @@ export default function EventDetailPage() {
     }, 0);
   };
 
+  const formatScanTime = (iso?: string | null) => {
+    if (!iso) return null;
+    const timestamp = Date.parse(iso);
+    if (Number.isNaN(timestamp)) return null;
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(new Date(timestamp));
+  };
+
+  const handleScanCapture = async (imageData: string) => {
+    setIsScanning(true);
+    setScanError(null);
+    setScanNotice(null);
+
+    try {
+      const imageBase64 = imageData.includes('base64,') ? imageData.split('base64,')[1] : imageData;
+      const response = await fetch('/api/faces/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: imageBase64,
+          eventId,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        if (response.status === 409 && payload?.code === 'scan_locked_no_new_uploads') {
+          setScanNotice(
+            payload?.error ||
+              "No new photos are available yet. We'll notify you when fresh uploads are ready."
+          );
+          setShowScanner(false);
+          await fetchEvent();
+          return;
+        }
+
+        throw new Error(payload?.error || 'Face search failed');
+      }
+
+      const found = Number(payload?.totalMatches || 0);
+      if (found > 0) {
+        setScanNotice(
+          `Found ${found} matching photo${found === 1 ? '' : 's'}. Your gallery has been refreshed.`
+        );
+      } else {
+        setScanNotice(
+          "No matches found in current uploads. We'll notify you when new photos are uploaded so you can scan again."
+        );
+      }
+
+      setShowScanner(false);
+      await fetchEvent();
+    } catch (error: any) {
+      console.error('Event detail scan failed:', error);
+      const message = error?.message || 'Failed to scan and search this event.';
+      setScanError(message);
+      throw error;
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
@@ -142,6 +221,13 @@ export default function EventDetailPage() {
       </div>
     );
   }
+
+  const creatorCardClass = event.coverImage
+    ? 'bg-black/35 border border-white/20 backdrop-blur-sm text-white'
+    : 'bg-muted/40 border border-border text-foreground';
+  const creatorSubtleTextClass = event.coverImage ? 'text-white/75' : 'text-secondary';
+  const creatorFollowClass = event.coverImage ? 'text-white hover:text-white' : '';
+  const creatorInitial = (event.photographerName || 'C').charAt(0).toUpperCase();
 
   return (
     <div className="space-y-6">
@@ -191,7 +277,7 @@ export default function EventDetailPage() {
             </div>
 
             {/* Creator Info */}
-            <div className="flex items-center gap-3 bg-white/10 backdrop-blur-sm rounded-xl px-4 py-2">
+            <div className={`flex items-center gap-3 w-full sm:w-auto rounded-xl px-4 py-3 ${creatorCardClass}`}>
               {event.photographerAvatar ? (
                 <Image
                   src={event.photographerAvatar}
@@ -202,14 +288,14 @@ export default function EventDetailPage() {
                 />
               ) : (
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent text-white font-medium">
-                  {event.photographerName.charAt(0)}
+                  {creatorInitial}
                 </div>
               )}
               <div className="flex-1">
-                <p className={`text-sm ${event.coverImage ? 'text-white/60' : 'text-secondary'}`}>
+                <p className={`text-sm ${creatorSubtleTextClass}`}>
                   Photographed by
                 </p>
-                <p className={`font-medium ${event.coverImage ? 'text-white' : 'text-foreground'}`}>
+                <p className="font-medium">
                   {event.photographerName}
                 </p>
                 {event.photographerId && (
@@ -227,12 +313,12 @@ export default function EventDetailPage() {
                         photographerName={event.photographerName}
                         variant="ghost"
                         size="sm"
-                        className={event.coverImage ? 'text-white/80 hover:text-white' : ''}
+                        className={creatorFollowClass}
                       />
                     </div>
                     <div className="mt-2">
                       <Button
-                        variant="outline"
+                        variant={event.coverImage ? 'secondary' : 'outline'}
                         size="sm"
                         onClick={() => {
                           const suggestedPhoto = event.matchedPhotos.find((photo) => photo.isPurchased) || event.matchedPhotos[0] || null;
@@ -260,6 +346,66 @@ export default function EventDetailPage() {
 
       {/* Photos Section */}
       <div className="space-y-4">
+        {/* Scan panel */}
+        <div className="rounded-2xl border border-border bg-card p-4 sm:p-5">
+          {showScanner ? (
+            <FaceScanner
+              onCapture={handleScanCapture}
+              onCancel={() => {
+                setShowScanner(false);
+                setScanError(null);
+              }}
+              isProcessing={isScanning}
+              processingText="Finding photos in this event..."
+            />
+          ) : (
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="font-semibold text-foreground">
+                  {event.matchedPhotos.length > 0
+                    ? 'Look for newly uploaded photos'
+                    : 'Find your photos in this event'}
+                </h3>
+                <p className="text-sm text-secondary">
+                  {event.matchedPhotos.length > 0
+                    ? 'Take a quick selfie to check for fresh uploads that match you.'
+                    : 'Take a selfie to search this event and save your matches.'}
+                </p>
+                {!event.scanPolicy?.canScan && event.scanPolicy?.message && (
+                  <p className="mt-2 text-sm text-warning">{event.scanPolicy.message}</p>
+                )}
+                {event.scanPolicy?.lastScanAt && !event.scanPolicy?.canScan && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Last scan: {formatScanTime(event.scanPolicy.lastScanAt)}
+                  </p>
+                )}
+              </div>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setScanError(null);
+                  setScanNotice(null);
+                  setShowScanner(true);
+                }}
+                disabled={event.scanPolicy?.canScan === false}
+              >
+                <Scan className="mr-2 h-4 w-4" />
+                {event.matchedPhotos.length > 0 ? 'Scan for New Photos' : 'Scan to Find Photos'}
+              </Button>
+            </div>
+          )}
+          {scanNotice && (
+            <div className="mt-3 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm text-foreground">
+              {scanNotice}
+            </div>
+          )}
+          {scanError && (
+            <div className="mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {scanError}
+            </div>
+          )}
+        </div>
+
         {/* Section Header */}
         <div className="flex items-center justify-between">
           <div>

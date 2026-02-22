@@ -44,7 +44,10 @@ export default function MyEventsPage() {
   const [qrScannerError, setQrScannerError] = useState<string | null>(null);
   const [isInitializingScanner, setIsInitializingScanner] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const scannerControlsRef = useRef<{ stop: () => void } | null>(null);
+  const jsQrTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const jsQrBusyRef = useRef(false);
   const scannerHandledResultRef = useRef(false);
 
   const refreshEvents = useCallback(async () => {
@@ -140,8 +143,13 @@ export default function MyEventsPage() {
       scannerControlsRef.current.stop();
       scannerControlsRef.current = null;
     }
+    if (jsQrTimerRef.current !== null) {
+      clearInterval(jsQrTimerRef.current);
+      jsQrTimerRef.current = null;
+    }
 
     scannerHandledResultRef.current = false;
+    jsQrBusyRef.current = false;
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
@@ -308,6 +316,81 @@ export default function MyEventsPage() {
         }
 
         scannerControlsRef.current = controls;
+
+        const jsQrModule = await import('jsqr').catch(() => null);
+        const jsQR: any = jsQrModule && ((jsQrModule as any).default || jsQrModule);
+        if (typeof jsQR === 'function' && canvasRef.current) {
+          const canvas = canvasRef.current;
+          const context = canvas.getContext('2d', { willReadFrequently: true });
+
+          if (context) {
+            const detectWithJsQr = async () => {
+              if (isCancelled || scannerHandledResultRef.current || jsQrBusyRef.current) return;
+              if (!videoRef.current) return;
+              const streamVideo = videoRef.current;
+              if (
+                streamVideo.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
+                streamVideo.videoWidth < 80 ||
+                streamVideo.videoHeight < 80
+              ) {
+                return;
+              }
+
+              jsQrBusyRef.current = true;
+              try {
+                const sourceW = streamVideo.videoWidth;
+                const sourceH = streamVideo.videoHeight;
+                const scales = [1, 0.75, 0.5, 0.35];
+
+                for (const scale of scales) {
+                  if (scannerHandledResultRef.current) break;
+
+                  const width = Math.max(240, Math.round(sourceW * scale));
+                  const height = Math.max(240, Math.round(sourceH * scale));
+                  canvas.width = width;
+                  canvas.height = height;
+                  context.drawImage(streamVideo, 0, 0, width, height);
+
+                  const decodeRegion = (sx: number, sy: number, sw: number, sh: number): string | null => {
+                    if (sw < 120 || sh < 120) return null;
+                    const imageData = context.getImageData(sx, sy, sw, sh);
+                    const decoded = jsQR(imageData.data, sw, sh, { inversionAttempts: 'attemptBoth' });
+                    return decoded?.data || null;
+                  };
+
+                  const fullFrame = decodeRegion(0, 0, width, height);
+                  if (fullFrame) {
+                    scannerHandledResultRef.current = true;
+                    await handleQrPayload(fullFrame);
+                    break;
+                  }
+
+                  const cropRatios = [0.9, 0.72, 0.55];
+                  for (const ratio of cropRatios) {
+                    const cropW = Math.floor(width * ratio);
+                    const cropH = Math.floor(height * ratio);
+                    const startX = Math.floor((width - cropW) / 2);
+                    const startY = Math.floor((height - cropH) / 2);
+                    const centered = decodeRegion(startX, startY, cropW, cropH);
+                    if (centered) {
+                      scannerHandledResultRef.current = true;
+                      await handleQrPayload(centered);
+                      break;
+                    }
+                  }
+                }
+              } catch {
+                // Keep fallback loop resilient to intermittent frame decode failures.
+              } finally {
+                jsQrBusyRef.current = false;
+              }
+            };
+
+            jsQrTimerRef.current = setInterval(() => {
+              void detectWithJsQr();
+            }, 180);
+          }
+        }
       } catch (error: any) {
         console.error('QR scanner initialization failed:', error);
         setQrScannerError(error?.message || 'Failed to start QR scanner.');
@@ -359,11 +442,16 @@ export default function MyEventsPage() {
                 <div className="relative bg-black">
                   <video
                     ref={videoRef}
-                    className="h-[52vh] min-h-[260px] max-h-[420px] w-full object-cover"
+                    className="h-[68vh] min-h-[320px] max-h-[560px] w-full object-cover"
                     autoPlay
                     playsInline
                     muted
                   />
+                  <canvas ref={canvasRef} className="hidden" />
+                  <div className="pointer-events-none absolute inset-0">
+                    <div className="absolute inset-4 rounded-2xl border border-white/35" />
+                    <div className="absolute left-1/2 top-1/2 h-52 w-52 -translate-x-1/2 -translate-y-1/2 rounded-3xl border-2 border-white/60 shadow-[0_0_0_9999px_rgba(0,0,0,0.15)]" />
+                  </div>
                   {isInitializingScanner && (
                     <div className="absolute inset-0 flex items-center justify-center text-white">
                       <div className="h-8 w-8 animate-spin rounded-full border-2 border-white border-t-transparent" />

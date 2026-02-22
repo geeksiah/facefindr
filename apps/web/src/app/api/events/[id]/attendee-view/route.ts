@@ -7,6 +7,20 @@ import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
 
+type EventMediaStats = {
+  mediaCount: number;
+  latestMediaCreatedAt: string | null;
+};
+
+type AttendeeEventScanStateRow = {
+  attendee_id: string;
+  event_id: string;
+  last_scan_at: string;
+  last_result_match_count: number;
+  last_media_count_at_scan: number;
+  last_latest_media_created_at_at_scan: string | null;
+};
+
 function cleanStoragePath(path?: string | null) {
   if (!path) return null;
   return path.startsWith('/') ? path.slice(1) : path;
@@ -39,6 +53,127 @@ async function createSignedUrlMap(serviceClient: any, rawPaths: string[]) {
   }
 
   return map;
+}
+
+function normalizePhotographer(photographers: any) {
+  if (Array.isArray(photographers)) {
+    return photographers.find((row: any) => row && typeof row === 'object') || null;
+  }
+  if (photographers && typeof photographers === 'object') {
+    return photographers;
+  }
+  return null;
+}
+
+async function getEventMediaStats(
+  serviceClient: any,
+  eventId: string
+): Promise<EventMediaStats> {
+  const [{ count }, { data: latestRows }] = await Promise.all([
+    serviceClient
+      .from('media')
+      .select('id', { count: 'exact', head: true })
+      .eq('event_id', eventId)
+      .is('deleted_at', null),
+    serviceClient
+      .from('media')
+      .select('created_at')
+      .eq('event_id', eventId)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+      .limit(1),
+  ]);
+
+  return {
+    mediaCount: count || 0,
+    latestMediaCreatedAt: latestRows?.[0]?.created_at || null,
+  };
+}
+
+async function getAttendeeEventScanState(
+  serviceClient: any,
+  attendeeId: string,
+  eventId: string
+): Promise<AttendeeEventScanStateRow | null> {
+  const { data, error } = await serviceClient
+    .from('attendee_event_scan_state')
+    .select(
+      'attendee_id, event_id, last_scan_at, last_result_match_count, last_media_count_at_scan, last_latest_media_created_at_at_scan'
+    )
+    .eq('attendee_id', attendeeId)
+    .eq('event_id', eventId)
+    .maybeSingle();
+
+  if (error) {
+    if (error.code !== '42P01') {
+      console.error('Failed to read attendee event scan state:', error);
+    }
+    return null;
+  }
+
+  return (data as AttendeeEventScanStateRow | null) || null;
+}
+
+function computeScanPolicy(
+  scanState: AttendeeEventScanStateRow | null,
+  mediaStats: EventMediaStats
+) {
+  if (!scanState) {
+    return {
+      canScan: true,
+      waitingForNewUploads: false,
+      message: null as string | null,
+      lastScanAt: null as string | null,
+      newUploadsSinceLastScan: mediaStats.mediaCount,
+    };
+  }
+
+  const lastScanAt = scanState.last_scan_at || null;
+  const lastMatchCount = Number(scanState.last_result_match_count || 0);
+
+  if (lastMatchCount > 0) {
+    return {
+      canScan: true,
+      waitingForNewUploads: false,
+      message: null as string | null,
+      lastScanAt,
+      newUploadsSinceLastScan: Math.max(
+        0,
+        mediaStats.mediaCount - Number(scanState.last_media_count_at_scan || 0)
+      ),
+    };
+  }
+
+  const countIncreased =
+    mediaStats.mediaCount > Number(scanState.last_media_count_at_scan || 0);
+  const lastLatest = scanState.last_latest_media_created_at_at_scan;
+  const latestAdvanced =
+    Boolean(mediaStats.latestMediaCreatedAt) &&
+    (!lastLatest ||
+      Date.parse(mediaStats.latestMediaCreatedAt as string) > Date.parse(lastLatest));
+  const hasNewUploads = countIncreased || latestAdvanced;
+
+  if (hasNewUploads) {
+    return {
+      canScan: true,
+      waitingForNewUploads: false,
+      message: null as string | null,
+      lastScanAt,
+      newUploadsSinceLastScan: Math.max(
+        0,
+        mediaStats.mediaCount - Number(scanState.last_media_count_at_scan || 0)
+      ),
+    };
+  }
+
+  return {
+    canScan: false,
+    waitingForNewUploads: true,
+    message:
+      "No new photos are available yet since your last scan. We'll notify you when fresh uploads are ready to scan.",
+    lastScanAt,
+    newUploadsSinceLastScan: 0,
+  };
 }
 
 // ============================================
@@ -241,13 +376,23 @@ export async function GET(
     ) as string[];
 
     const signedPathMap = await createSignedUrlMap(serviceClient, uniquePaths);
-    const photographer = event.photographers as any;
+    let photographer = normalizePhotographer(event.photographers);
 
-    const { count: totalPhotos } = await serviceClient
-      .from('media')
-      .select('id', { count: 'exact', head: true })
-      .eq('event_id', eventId)
-      .is('deleted_at', null);
+    if (!photographer && event.photographer_id) {
+      const { data: fallbackPhotographer } = await serviceClient
+        .from('photographers')
+        .select('id, display_name, profile_photo_url')
+        .eq('id', event.photographer_id)
+        .maybeSingle();
+      photographer = fallbackPhotographer || null;
+    }
+
+    const [mediaStats, scanState] = await Promise.all([
+      getEventMediaStats(serviceClient, eventId),
+      getAttendeeEventScanState(serviceClient, user.id, eventId),
+    ]);
+    const totalPhotos = mediaStats.mediaCount;
+    const scanPolicy = computeScanPolicy(scanState, mediaStats);
 
     const coverPath = event.cover_image_url?.startsWith('/')
       ? event.cover_image_url.slice(1)
@@ -316,6 +461,7 @@ export async function GET(
         currency: pricing?.currency || 'USD',
         isFree: pricing?.is_free || false,
       },
+      scanPolicy,
     });
 
   } catch (error) {

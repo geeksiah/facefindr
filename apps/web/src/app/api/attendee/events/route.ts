@@ -5,6 +5,23 @@ import { NextResponse } from 'next/server';
 import { formatEventDateDisplay } from '@/lib/events/time';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
+function resolvePhotographerName(photographers: any): string {
+  if (Array.isArray(photographers)) {
+    const first = photographers.find((row: any) => row && typeof row === 'object');
+    const candidate = first?.display_name || first?.name;
+    return typeof candidate === 'string' && candidate.trim() ? candidate.trim() : 'Unknown Creator';
+  }
+
+  if (photographers && typeof photographers === 'object') {
+    const candidate = photographers.display_name || photographers.name;
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return 'Unknown Creator';
+}
+
 // ============================================
 // GET ATTENDEE'S EVENTS
 // Events where the attendee has matched photos or consents
@@ -178,7 +195,7 @@ export async function GET() {
         eventStartAtUtc: event.event_start_at_utc || null,
         location: event.location,
         coverImage: coverImage,
-        photographerName: event.photographers?.display_name || 'Unknown',
+        photographerName: resolvePhotographerName(event.photographers),
         totalPhotos: totalCountMap.get(event.id) || 0,
         matchedPhotos: matchCounts.get(event.id) || 0,
         status: event.status === 'active' ? 'active' : event.status === 'closed' ? 'closed' : 'expired',
