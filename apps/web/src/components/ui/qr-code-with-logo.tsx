@@ -23,7 +23,7 @@ export const QRCodeWithLogo = React.forwardRef<HTMLDivElement, QRCodeWithLogoPro
   const containerRef = useRef<HTMLDivElement>(null);
   const quietZoneSize = useMemo(() => Math.max(12, Math.round(size * 0.08)), [size]);
   const qrMatrixSize = useMemo(() => Math.max(128, size - quietZoneSize * 2), [size, quietZoneSize]);
-  const logoSize = useMemo(() => Math.round(qrMatrixSize * 0.26), [qrMatrixSize]);
+  const logoSize = useMemo(() => Math.round(qrMatrixSize * 0.32), [qrMatrixSize]);
   
   // Combine refs
   React.useImperativeHandle(ref, () => containerRef.current!);
@@ -78,18 +78,18 @@ export const QRCodeWithLogo = React.forwardRef<HTMLDivElement, QRCodeWithLogoPro
             style={{
               width: logoSize,
               height: logoSize,
-              padding: logoSize * 0.09,
+              padding: logoSize * 0.05,
             }}
           >
             <img
               src="/assets/logos/qr-logo.svg"
               alt="Ferchr Logo"
-              width={Math.round(logoSize * 0.8)}
-              height={Math.round(logoSize * 0.8)}
+              width={Math.round(logoSize * 0.9)}
+              height={Math.round(logoSize * 0.9)}
               className="object-contain"
               style={{
-                width: `${logoSize * 0.8}px`,
-                height: `${logoSize * 0.8}px`,
+                width: `${logoSize * 0.9}px`,
+                height: `${logoSize * 0.9}px`,
               }}
             />
           </div>
@@ -149,7 +149,7 @@ export async function downloadQRCodeWithLogo(
     const rawWidth = sourceCanvas.width || 256;
     const rawHeight = sourceCanvas.height || 256;
     const baseSize = Math.max(rawWidth, rawHeight, 256);
-    const qrScaleFactor = 8;
+    const qrScaleFactor = 14;
     const qrRenderSize = baseSize * qrScaleFactor;
     const quietZone = Math.round(qrRenderSize * 0.08);
     const exportSize = qrRenderSize + quietZone * 2;
@@ -169,6 +169,17 @@ export async function downloadQRCodeWithLogo(
 
     // Draw QR matrix from existing canvas with explicit quiet zone to improve scan reliability.
     ctx.drawImage(sourceCanvas, quietZone, quietZone, qrRenderSize, qrRenderSize);
+    const qrImageData = ctx.getImageData(quietZone, quietZone, qrRenderSize, qrRenderSize);
+    const qrPixels = qrImageData.data;
+    for (let i = 0; i < qrPixels.length; i += 4) {
+      const luminance = (qrPixels[i] + qrPixels[i + 1] + qrPixels[i + 2]) / 3;
+      const monochrome = luminance > 200 ? 255 : 0;
+      qrPixels[i] = monochrome;
+      qrPixels[i + 1] = monochrome;
+      qrPixels[i + 2] = monochrome;
+      qrPixels[i + 3] = 255;
+    }
+    ctx.putImageData(qrImageData, quietZone, quietZone);
 
     // Draw center white box + logo.
     const logoImageNode = element.querySelector('img[alt="Ferchr Logo"]') as HTMLImageElement | null;
@@ -189,8 +200,8 @@ export async function downloadQRCodeWithLogo(
       }
     }
 
-    const overlaySize = qrRenderSize * 0.26;
-    const overlayPadding = overlaySize * 0.09;
+    const overlaySize = qrRenderSize * 0.32;
+    const overlayPadding = overlaySize * 0.05;
     const logoDrawSize = overlaySize - overlayPadding * 2;
     const overlayX = (exportSize - overlaySize) / 2;
     const overlayY = (exportSize - overlaySize) / 2;

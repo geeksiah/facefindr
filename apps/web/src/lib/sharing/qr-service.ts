@@ -65,7 +65,7 @@ export async function generateQRCode(
     format: 'png',
     qzone: '4',
     logo: logoUrl,
-    logosize: '24%',
+    logosize: '30%',
   });
   
   // Only add bgcolor if not transparent
@@ -99,7 +99,7 @@ export async function generateTransparentQRCode(
     qzone: '4',
     ecc: 'H', // High error correction for logo overlay
     logo: logoUrl,
-    logosize: '24%',
+    logosize: '30%',
   });
   
   return `https://api.qrserver.com/v1/create-qr-code/?${params.toString()}`;

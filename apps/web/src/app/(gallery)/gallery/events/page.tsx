@@ -32,6 +32,78 @@ interface Event {
   status: 'active' | 'closed' | 'expired';
 }
 
+function isIOSSafariBrowser(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  const isIOS = /iP(hone|ad|od)/i.test(ua);
+  const isSafari = /Safari/i.test(ua) && !/CriOS|FxiOS|EdgiOS|OPiOS|GSA/i.test(ua);
+  return isIOS && isSafari;
+}
+
+function scoreRearCameraLabel(label: string): number {
+  const normalized = label.toLowerCase();
+  let score = 0;
+  if (normalized.includes('back') || normalized.includes('rear') || normalized.includes('environment')) {
+    score += 80;
+  }
+  if (normalized.includes('camera')) score += 15;
+  if (normalized.includes('wide')) score += 20;
+
+  // Prefer default back camera over ultra-wide/tele variants on iPhone Safari.
+  if (normalized.includes('ultra') || normalized.includes('0.5') || normalized.includes('wide angle')) {
+    score -= 70;
+  }
+  if (normalized.includes('tele') || normalized.includes('3x') || normalized.includes('2x')) {
+    score -= 35;
+  }
+  if (normalized.includes('front') || normalized.includes('user') || normalized.includes('facetime')) {
+    score -= 120;
+  }
+
+  return score;
+}
+
+async function getPreferredRearCameraDeviceId(): Promise<string | null> {
+  if (!navigator.mediaDevices?.enumerateDevices || !navigator.mediaDevices?.getUserMedia) {
+    return null;
+  }
+
+  let bootstrapStream: MediaStream | null = null;
+  try {
+    // Prompt/refresh permission so iOS Safari exposes readable device labels.
+    bootstrapStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } },
+      audio: false,
+    });
+  } catch {
+    // Continue without bootstrap stream; labels may still be available.
+  }
+
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const candidates = devices.filter((device) => device.kind === 'videoinput');
+    if (!candidates.length) return null;
+
+    let best: MediaDeviceInfo | null = null;
+    let bestScore = Number.NEGATIVE_INFINITY;
+    for (const candidate of candidates) {
+      const score = scoreRearCameraLabel(candidate.label || '');
+      if (score > bestScore) {
+        bestScore = score;
+        best = candidate;
+      }
+    }
+
+    return best?.deviceId || null;
+  } catch {
+    return null;
+  } finally {
+    if (bootstrapStream) {
+      bootstrapStream.getTracks().forEach((track) => track.stop());
+    }
+  }
+}
+
 export default function MyEventsPage() {
   const [events, setEvents] = useState<Event[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -51,6 +123,8 @@ export default function MyEventsPage() {
   const jsQrTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const jsQrBusyRef = useRef(false);
   const scannerHandledResultRef = useRef(false);
+  const detectedCandidateRef = useRef<string | null>(null);
+  const detectedCandidateCountRef = useRef(0);
 
   const refreshEvents = useCallback(async () => {
     try {
@@ -152,6 +226,8 @@ export default function MyEventsPage() {
 
     scannerHandledResultRef.current = false;
     jsQrBusyRef.current = false;
+    detectedCandidateRef.current = null;
+    detectedCandidateCountRef.current = 0;
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
@@ -161,7 +237,21 @@ export default function MyEventsPage() {
     (rawValue: string) => {
       const trimmed = rawValue.trim();
       if (!trimmed || scannerHandledResultRef.current) return;
+
+      // Require two consecutive identical reads before locking to improve UX.
+      if (detectedCandidateRef.current === trimmed) {
+        detectedCandidateCountRef.current += 1;
+      } else {
+        detectedCandidateRef.current = trimmed;
+        detectedCandidateCountRef.current = 1;
+      }
+      if (detectedCandidateCountRef.current < 2) {
+        return;
+      }
+
       scannerHandledResultRef.current = true;
+      detectedCandidateRef.current = null;
+      detectedCandidateCountRef.current = 0;
       stopQrScanner();
       setPendingQrPayload(trimmed);
       setQrScannerError(null);
@@ -286,23 +376,40 @@ export default function MyEventsPage() {
         }
         const zxing = await import('@zxing/browser');
         const reader = new zxing.BrowserQRCodeReader(undefined, {
-          delayBetweenScanAttempts: 140,
+          delayBetweenScanAttempts: 220,
         });
 
+        const isiOSSafari = isIOSSafariBrowser();
+        const preferredRearDeviceId = isiOSSafari
+          ? await getPreferredRearCameraDeviceId()
+          : null;
+
         const constraintsCandidates: MediaStreamConstraints[] = [
-          {
-            video: {
-              facingMode: { exact: 'environment' },
-              width: { ideal: 1920 },
-              height: { ideal: 1080 },
-            },
-            audio: false,
-          },
+          ...(preferredRearDeviceId
+            ? [
+                {
+                  video: {
+                    deviceId: { exact: preferredRearDeviceId },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    aspectRatio: { ideal: 1.7777778 },
+                  },
+                  audio: false,
+                } satisfies MediaStreamConstraints,
+              ]
+            : []),
           {
             video: {
               facingMode: { ideal: 'environment' },
               width: { ideal: 1280 },
               height: { ideal: 720 },
+              aspectRatio: { ideal: 1.7777778 },
+            },
+            audio: false,
+          },
+          {
+            video: {
+              facingMode: { exact: 'environment' },
             },
             audio: false,
           },
@@ -339,6 +446,38 @@ export default function MyEventsPage() {
 
         scannerControlsRef.current = controls;
 
+        if (isiOSSafari && video.srcObject instanceof MediaStream) {
+          const track = video.srcObject.getVideoTracks()[0];
+          if (track) {
+            const capabilities = (track.getCapabilities?.() || {}) as any;
+            const advanced: any[] = [];
+
+            if (
+              capabilities.zoom &&
+              typeof capabilities.zoom.min === 'number' &&
+              typeof capabilities.zoom.max === 'number'
+            ) {
+              const desiredZoom = Math.min(Math.max(1, capabilities.zoom.min), capabilities.zoom.max);
+              advanced.push({ zoom: desiredZoom });
+            }
+
+            if (
+              Array.isArray(capabilities.focusMode) &&
+              capabilities.focusMode.includes('continuous')
+            ) {
+              advanced.push({ focusMode: 'continuous' });
+            }
+
+            if (advanced.length > 0) {
+              try {
+                await track.applyConstraints({ advanced });
+              } catch {
+                // Some Safari builds reject advanced constraints; safe to ignore.
+              }
+            }
+          }
+        }
+
         const jsQrModule = await import('jsqr').catch(() => null);
         const jsQR: any = jsQrModule && ((jsQrModule as any).default || jsQrModule);
         if (typeof jsQR === 'function' && canvasRef.current) {
@@ -362,7 +501,7 @@ export default function MyEventsPage() {
               try {
                 const sourceW = streamVideo.videoWidth;
                 const sourceH = streamVideo.videoHeight;
-                const scales = [1, 0.75, 0.5, 0.35];
+                const scales = [0.85, 0.65];
 
                 for (const scale of scales) {
                   if (scannerHandledResultRef.current) break;
@@ -386,7 +525,7 @@ export default function MyEventsPage() {
                     break;
                   }
 
-                  const cropRatios = [0.9, 0.72, 0.55];
+                  const cropRatios = [1, 0.78];
                   for (const ratio of cropRatios) {
                     const cropW = Math.floor(width * ratio);
                     const cropH = Math.floor(height * ratio);
@@ -408,7 +547,7 @@ export default function MyEventsPage() {
 
             jsQrTimerRef.current = setInterval(() => {
               void detectWithJsQr();
-            }, 180);
+            }, 320);
           }
         }
       } catch (error: any) {
@@ -463,7 +602,7 @@ export default function MyEventsPage() {
                 <div className="relative bg-black">
                   <video
                     ref={videoRef}
-                    className="h-[52vh] min-h-[260px] max-h-[420px] w-full object-cover"
+                    className="h-[52vh] min-h-[260px] max-h-[420px] w-full object-contain"
                     autoPlay
                     playsInline
                     muted
@@ -491,13 +630,15 @@ export default function MyEventsPage() {
                       <Button
                         variant="secondary"
                         className="flex-1"
-                        onClick={() => {
-                          setPendingQrPayload(null);
-                          setQrScannerError(null);
-                          scannerHandledResultRef.current = false;
-                          setScannerCycle((prev) => prev + 1);
-                        }}
-                      >
+                      onClick={() => {
+                        setPendingQrPayload(null);
+                        setQrScannerError(null);
+                        scannerHandledResultRef.current = false;
+                        detectedCandidateRef.current = null;
+                        detectedCandidateCountRef.current = 0;
+                        setScannerCycle((prev) => prev + 1);
+                      }}
+                    >
                         Scan Again
                       </Button>
                       <Button
@@ -549,6 +690,8 @@ export default function MyEventsPage() {
               setPendingQrPayload(null);
               setQrScannerError(null);
               scannerHandledResultRef.current = false;
+              detectedCandidateRef.current = null;
+              detectedCandidateCountRef.current = 0;
               setScannerCycle((prev) => prev + 1);
               setShowQrScanner(true);
             }}
