@@ -24,6 +24,7 @@ import {
   markWebhookFailed,
   markWebhookProcessed,
 } from '@/lib/payments/webhook-ledger';
+import { restoreMediaRecoveryRequestsFromTransaction } from '@/lib/media/recovery-service';
 import { creditWalletFromTransaction } from '@/lib/payments/wallet-balance';
 import { createServiceClient } from '@/lib/supabase/server';
 
@@ -324,6 +325,17 @@ async function handleChargeCompleted(
     console.error('Failed to update transaction:', updateError);
     return;
   }
+
+  await restoreMediaRecoveryRequestsFromTransaction(
+    {
+      ...(transaction as any),
+      flutterwave_tx_ref: data.tx_ref,
+      payment_provider: (transaction as any).payment_provider || 'flutterwave',
+    },
+    { provider: 'flutterwave', supabase }
+  ).catch((restoreError) => {
+    console.error('[flutterwave webhook] recovery fulfillment failed:', restoreError);
+  });
 
   // Create entitlements
   await createEntitlements(supabase, transaction);

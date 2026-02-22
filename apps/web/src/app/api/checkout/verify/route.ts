@@ -6,6 +6,7 @@ import { verifyTransactionByRef } from '@/lib/payments/flutterwave';
 import { resolvePaystackSecretKey, verifyPaystackTransaction } from '@/lib/payments/paystack';
 import { getOrder } from '@/lib/payments/paypal';
 import { getCheckoutSession } from '@/lib/payments/stripe';
+import { restoreMediaRecoveryRequestsFromTransaction } from '@/lib/media/recovery-service';
 import { dispatchInAppNotification } from '@/lib/notifications/dispatcher';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
@@ -193,7 +194,29 @@ export async function GET(request: Request) {
     const metadata = transaction.metadata as {
       media_ids?: string[];
       unlock_all?: boolean;
+      media_recovery_request_id?: string;
+      media_recovery_request_ids?: string[];
     };
+
+    let recovery: {
+      scanned: number;
+      restored: number;
+      paymentRequired: number;
+      skipped: number;
+      failed: number;
+    } | null = null;
+
+    try {
+      const recoveryResult = await restoreMediaRecoveryRequestsFromTransaction(
+        transaction as any,
+        { provider, supabase: serviceClient }
+      );
+      if (recoveryResult.scanned > 0) {
+        recovery = recoveryResult;
+      }
+    } catch (recoveryError) {
+      console.error('Checkout recovery fulfillment failed:', recoveryError);
+    }
 
     return NextResponse.json({
       eventId: transaction.event_id,
@@ -202,6 +225,7 @@ export async function GET(request: Request) {
       totalAmount: transaction.gross_amount,
       currency: transaction.currency,
       isUnlockAll: metadata?.unlock_all || false,
+      recovery,
     });
   } catch (error) {
     console.error('Checkout verification error:', error);

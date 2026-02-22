@@ -26,6 +26,7 @@ import {
   markWebhookFailed,
   markWebhookProcessed,
 } from '@/lib/payments/webhook-ledger';
+import { restoreMediaRecoveryRequestsFromTransaction } from '@/lib/media/recovery-service';
 import { creditWalletFromTransaction } from '@/lib/payments/wallet-balance';
 import { createServiceClient } from '@/lib/supabase/server';
 
@@ -272,6 +273,17 @@ async function handleChargeSuccess(
     console.error('Failed to update paystack transaction:', updateError);
     return;
   }
+
+  await restoreMediaRecoveryRequestsFromTransaction(
+    {
+      ...(transaction as any),
+      paystack_reference: reference,
+      payment_provider: (transaction as any).payment_provider || 'paystack',
+    },
+    { provider: 'paystack', supabase }
+  ).catch((restoreError) => {
+    console.error('[paystack webhook] recovery fulfillment failed:', restoreError);
+  });
 
   await createEntitlements(supabase, transaction);
 }

@@ -9,6 +9,7 @@ import {
   markWebhookFailed,
   markWebhookProcessed,
 } from '@/lib/payments/webhook-ledger';
+import { restoreMediaRecoveryRequestsFromTransaction } from '@/lib/media/recovery-service';
 import { incrementDropInCredits } from '@/lib/drop-in/credits';
 import { emitFinancialInAppNotification } from '@/lib/payments/financial-notifications';
 import {
@@ -228,6 +229,30 @@ async function handleCheckoutComplete(
     return;
   }
 
+  const { data: settledTransaction } = await supabase
+    .from('transactions')
+    .select(`
+      id,
+      payment_provider,
+      stripe_payment_intent_id,
+      stripe_checkout_session_id,
+      flutterwave_tx_ref,
+      paypal_order_id,
+      paystack_reference,
+      metadata
+    `)
+    .eq('stripe_checkout_session_id', session.id)
+    .maybeSingle();
+
+  if (settledTransaction?.id) {
+    await restoreMediaRecoveryRequestsFromTransaction(settledTransaction as any, {
+      provider: 'stripe',
+      supabase,
+    }).catch((restoreError) => {
+      console.error('[stripe webhook] recovery fulfillment failed:', restoreError);
+    });
+  }
+
   // Create entitlements for purchased photos
   await createEntitlements(supabase, session.id, metadata);
 }
@@ -285,11 +310,27 @@ async function handlePaymentSuccess(
 
   const { data: transaction } = await supabase
     .from('transactions')
-    .select('id')
+    .select(`
+      id,
+      payment_provider,
+      stripe_payment_intent_id,
+      stripe_checkout_session_id,
+      flutterwave_tx_ref,
+      paypal_order_id,
+      paystack_reference,
+      metadata
+    `)
     .eq('stripe_payment_intent_id', paymentIntent.id)
     .maybeSingle();
 
   if (transaction?.id) {
+    await restoreMediaRecoveryRequestsFromTransaction(transaction as any, {
+      provider: 'stripe',
+      supabase,
+    }).catch((restoreError) => {
+      console.error('[stripe webhook] recovery fulfillment failed:', restoreError);
+    });
+
     await recordSettlementJournalForTransaction(supabase, {
       transactionId: transaction.id,
       flowType: 'photo_purchase',

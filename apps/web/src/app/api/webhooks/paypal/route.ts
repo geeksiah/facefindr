@@ -25,6 +25,7 @@ import {
   markWebhookFailed,
   markWebhookProcessed,
 } from '@/lib/payments/webhook-ledger';
+import { restoreMediaRecoveryRequestsFromTransaction } from '@/lib/media/recovery-service';
 import { creditWalletFromTransaction } from '@/lib/payments/wallet-balance';
 import { createServiceClient } from '@/lib/supabase/server';
 
@@ -310,6 +311,17 @@ async function processSuccessfulPayment(
     console.error('Failed to update transaction:', updateError);
     return;
   }
+
+  await restoreMediaRecoveryRequestsFromTransaction(
+    {
+      ...(transaction as any),
+      paypal_order_id: resource.id,
+      payment_provider: 'paypal',
+    },
+    { provider: 'paypal', supabase }
+  ).catch((restoreError) => {
+    console.error('[paypal webhook] recovery fulfillment failed:', restoreError);
+  });
 
   await creditWalletFromTransaction(supabase, transaction.id);
 

@@ -7,6 +7,7 @@ import {
   createClientWithAccessToken,
   createServiceClient,
 } from '@/lib/supabase/server';
+import { restoreMediaRecoveryRequest } from '@/lib/media/recovery-service';
 
 const ACTIVE_REQUEST_STATUSES = ['pending_payment', 'paid', 'restoring'] as const;
 
@@ -193,6 +194,16 @@ export async function POST(request: NextRequest) {
     if (existing?.id) {
       const expiresAt = toIso(existing.expires_at);
       if (!expiresAt || new Date(expiresAt) > new Date()) {
+        let restoreResult: any = null;
+        if (existing.status === 'paid' || existing.status === 'restoring' || existing.status === 'failed') {
+          restoreResult = await restoreMediaRecoveryRequest({
+            requestId: existing.id,
+            requesterUserId: user.id,
+            confirmPayment: existing.status !== 'pending_payment',
+            supabase: serviceClient,
+          });
+        }
+
         return NextResponse.json({
           success: true,
           request: {
@@ -203,6 +214,7 @@ export async function POST(request: NextRequest) {
             expiresAt,
           },
           quote: quote.data,
+          restore: restoreResult,
         });
       }
     }
@@ -229,6 +241,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    let restoreResult: any = null;
+    if (initialStatus === 'paid') {
+      restoreResult = await restoreMediaRecoveryRequest({
+        requestId: inserted.id,
+        requesterUserId: user.id,
+        confirmPayment: true,
+        supabase: serviceClient,
+      });
+    }
+
     return NextResponse.json({
       success: true,
       request: {
@@ -239,6 +261,7 @@ export async function POST(request: NextRequest) {
         expiresAt: toIso(inserted.expires_at),
       },
       quote: quote.data,
+      restore: restoreResult,
     });
   } catch (error) {
     console.error('Media recovery request error:', error);

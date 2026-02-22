@@ -9553,6 +9553,54 @@
   },
   {
     "table_schema": "public",
+    "table_name": "notifications",
+    "column_name": "category",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "column_default": "'system'::text"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "notifications",
+    "column_name": "dedupe_key",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "notifications",
+    "column_name": "action_url",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "notifications",
+    "column_name": "details",
+    "data_type": "jsonb",
+    "is_nullable": "NO",
+    "column_default": "'{}'::jsonb"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "notifications",
+    "column_name": "actor_user_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_schema": "public",
+    "table_name": "notifications",
+    "column_name": "is_hidden",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "column_default": "false"
+  },
+  {
+    "table_schema": "public",
     "table_name": "payment_methods",
     "column_name": "id",
     "data_type": "uuid",
@@ -15246,6 +15294,118 @@
     "data_type": "boolean",
     "is_nullable": "YES",
     "column_default": "true"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "user_notification_preferences",
+    "column_name": "new_photo_sale_enabled",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "column_default": "true"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "user_notification_preferences",
+    "column_name": "payout_completed_enabled",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "column_default": "true"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "user_notification_preferences",
+    "column_name": "new_event_view_enabled",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "column_default": "false"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "user_notification_preferences",
+    "column_name": "weekly_digest_enabled",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "column_default": "true"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "user_notification_preferences",
+    "column_name": "monthly_report_enabled",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "column_default": "true"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "user_notification_preferences",
+    "column_name": "new_follower_enabled",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "column_default": "true"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "user_notification_preferences",
+    "column_name": "event_reminder_enabled",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "column_default": "true"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "user_notification_preferences",
+    "column_name": "low_balance_enabled",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "column_default": "true"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "user_notification_preferences",
+    "column_name": "subscription_reminder_enabled",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "column_default": "true"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "user_notification_preferences",
+    "column_name": "tip_received_enabled",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "column_default": "true"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "user_notification_preferences",
+    "column_name": "rating_received_enabled",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "column_default": "true"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "user_notification_preferences",
+    "column_name": "photo_match_enabled",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "column_default": "true"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "user_notification_preferences",
+    "column_name": "system_enabled",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "column_default": "true"
+  },
+  {
+    "table_schema": "public",
+    "table_name": "user_notification_preferences",
+    "column_name": "marketing_updates_enabled",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "column_default": "false"
   },
   {
     "table_schema": "public",
