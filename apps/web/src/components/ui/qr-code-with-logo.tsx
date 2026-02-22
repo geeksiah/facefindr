@@ -23,7 +23,7 @@ export const QRCodeWithLogo = React.forwardRef<HTMLDivElement, QRCodeWithLogoPro
   const containerRef = useRef<HTMLDivElement>(null);
   const quietZoneSize = useMemo(() => Math.max(12, Math.round(size * 0.08)), [size]);
   const qrMatrixSize = useMemo(() => Math.max(128, size - quietZoneSize * 2), [size, quietZoneSize]);
-  const logoSize = useMemo(() => Math.round(qrMatrixSize * 0.22), [qrMatrixSize]);
+  const logoSize = useMemo(() => Math.round(qrMatrixSize * 0.26), [qrMatrixSize]);
   
   // Combine refs
   React.useImperativeHandle(ref, () => containerRef.current!);
@@ -78,18 +78,18 @@ export const QRCodeWithLogo = React.forwardRef<HTMLDivElement, QRCodeWithLogoPro
             style={{
               width: logoSize,
               height: logoSize,
-              padding: logoSize * 0.12,
+              padding: logoSize * 0.09,
             }}
           >
             <img
               src="/assets/logos/qr-logo.svg"
               alt="Ferchr Logo"
-              width={Math.round(logoSize * 0.76)}
-              height={Math.round(logoSize * 0.76)}
+              width={Math.round(logoSize * 0.8)}
+              height={Math.round(logoSize * 0.8)}
               className="object-contain"
               style={{
-                width: `${logoSize * 0.76}px`,
-                height: `${logoSize * 0.76}px`,
+                width: `${logoSize * 0.8}px`,
+                height: `${logoSize * 0.8}px`,
               }}
             />
           </div>
@@ -149,7 +149,10 @@ export async function downloadQRCodeWithLogo(
     const rawWidth = sourceCanvas.width || 256;
     const rawHeight = sourceCanvas.height || 256;
     const baseSize = Math.max(rawWidth, rawHeight, 256);
-    const exportSize = baseSize * 4;
+    const qrScaleFactor = 8;
+    const qrRenderSize = baseSize * qrScaleFactor;
+    const quietZone = Math.round(qrRenderSize * 0.08);
+    const exportSize = qrRenderSize + quietZone * 2;
 
     const canvas = document.createElement('canvas');
     canvas.width = exportSize;
@@ -162,10 +165,9 @@ export async function downloadQRCodeWithLogo(
     // Base white background.
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, exportSize, exportSize);
+    ctx.imageSmoothingEnabled = false;
 
     // Draw QR matrix from existing canvas with explicit quiet zone to improve scan reliability.
-    const quietZone = Math.round(exportSize * 0.08);
-    const qrRenderSize = exportSize - quietZone * 2;
     ctx.drawImage(sourceCanvas, quietZone, quietZone, qrRenderSize, qrRenderSize);
 
     // Draw center white box + logo.
@@ -187,8 +189,8 @@ export async function downloadQRCodeWithLogo(
       }
     }
 
-    const overlaySize = qrRenderSize * 0.22;
-    const overlayPadding = overlaySize * 0.12;
+    const overlaySize = qrRenderSize * 0.26;
+    const overlayPadding = overlaySize * 0.09;
     const logoDrawSize = overlaySize - overlayPadding * 2;
     const overlayX = (exportSize - overlaySize) / 2;
     const overlayY = (exportSize - overlaySize) / 2;

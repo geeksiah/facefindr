@@ -43,6 +43,8 @@ export default function MyEventsPage() {
   const [showQrScanner, setShowQrScanner] = useState(false);
   const [qrScannerError, setQrScannerError] = useState<string | null>(null);
   const [isInitializingScanner, setIsInitializingScanner] = useState(false);
+  const [pendingQrPayload, setPendingQrPayload] = useState<string | null>(null);
+  const [scannerCycle, setScannerCycle] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const scannerControlsRef = useRef<{ stop: () => void } | null>(null);
@@ -155,6 +157,18 @@ export default function MyEventsPage() {
     }
   }, []);
 
+  const queueDetectedQrPayload = useCallback(
+    (rawValue: string) => {
+      const trimmed = rawValue.trim();
+      if (!trimmed || scannerHandledResultRef.current) return;
+      scannerHandledResultRef.current = true;
+      stopQrScanner();
+      setPendingQrPayload(trimmed);
+      setQrScannerError(null);
+    },
+    [stopQrScanner]
+  );
+
   const handleQrPayload = useCallback(
     async (rawValue: string) => {
       const trimmed = rawValue.trim();
@@ -162,6 +176,7 @@ export default function MyEventsPage() {
 
       stopQrScanner();
       setShowQrScanner(false);
+      setPendingQrPayload(null);
       setQrScannerError(null);
 
       const directCode = trimmed.replace(/[^A-Z0-9]/gi, '').toUpperCase();
@@ -251,6 +266,14 @@ export default function MyEventsPage() {
     const originalBodyOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
+    if (pendingQrPayload) {
+      setIsInitializingScanner(false);
+      return () => {
+        document.body.style.overflow = originalBodyOverflow;
+        stopQrScanner();
+      };
+    }
+
     const initScanner = async () => {
       try {
         if (!navigator.mediaDevices?.getUserMedia) {
@@ -297,8 +320,7 @@ export default function MyEventsPage() {
             controls = await reader.decodeFromConstraints(constraints, video, (result) => {
               if (isCancelled || scannerHandledResultRef.current) return;
               if (!result) return;
-              scannerHandledResultRef.current = true;
-              void handleQrPayload(result.getText());
+              queueDetectedQrPayload(result.getText());
             });
             break;
           } catch (error) {
@@ -360,8 +382,7 @@ export default function MyEventsPage() {
 
                   const fullFrame = decodeRegion(0, 0, width, height);
                   if (fullFrame) {
-                    scannerHandledResultRef.current = true;
-                    await handleQrPayload(fullFrame);
+                    queueDetectedQrPayload(fullFrame);
                     break;
                   }
 
@@ -373,8 +394,7 @@ export default function MyEventsPage() {
                     const startY = Math.floor((height - cropH) / 2);
                     const centered = decodeRegion(startX, startY, cropW, cropH);
                     if (centered) {
-                      scannerHandledResultRef.current = true;
-                      await handleQrPayload(centered);
+                      queueDetectedQrPayload(centered);
                       break;
                     }
                   }
@@ -406,7 +426,7 @@ export default function MyEventsPage() {
       document.body.style.overflow = originalBodyOverflow;
       stopQrScanner();
     };
-  }, [showQrScanner, handleQrPayload, stopQrScanner]);
+  }, [showQrScanner, pendingQrPayload, scannerCycle, queueDetectedQrPayload, stopQrScanner]);
 
   const filteredEvents = events.filter(
     (event) =>
@@ -431,6 +451,7 @@ export default function MyEventsPage() {
                   <button
                     onClick={() => {
                       stopQrScanner();
+                      setPendingQrPayload(null);
                       setShowQrScanner(false);
                     }}
                     className="rounded-lg p-2 hover:bg-muted"
@@ -459,6 +480,37 @@ export default function MyEventsPage() {
                   <div className="flex items-center gap-2 border-t border-border px-4 py-3 text-sm text-destructive">
                     <AlertCircle className="h-4 w-4" />
                     <span>{qrScannerError}</span>
+                  </div>
+                )}
+
+                {pendingQrPayload && (
+                  <div className="border-t border-border px-4 py-3">
+                    <p className="text-sm font-medium text-foreground">QR detected</p>
+                    <p className="mt-1 truncate text-xs text-secondary">{pendingQrPayload}</p>
+                    <div className="mt-3 flex gap-2">
+                      <Button
+                        variant="secondary"
+                        className="flex-1"
+                        onClick={() => {
+                          setPendingQrPayload(null);
+                          setQrScannerError(null);
+                          scannerHandledResultRef.current = false;
+                          setScannerCycle((prev) => prev + 1);
+                        }}
+                      >
+                        Scan Again
+                      </Button>
+                      <Button
+                        variant="primary"
+                        className="flex-1"
+                        onClick={() => {
+                          if (!pendingQrPayload) return;
+                          void handleQrPayload(pendingQrPayload);
+                        }}
+                      >
+                        Continue
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -493,7 +545,13 @@ export default function MyEventsPage() {
         <div className="grid grid-cols-1 gap-2 sm:flex">
           <Button
             variant="secondary"
-            onClick={() => setShowQrScanner(true)}
+            onClick={() => {
+              setPendingQrPayload(null);
+              setQrScannerError(null);
+              scannerHandledResultRef.current = false;
+              setScannerCycle((prev) => prev + 1);
+              setShowQrScanner(true);
+            }}
             className="w-full sm:w-auto"
           >
             <ScanLine className="mr-2 h-4 w-4" />
