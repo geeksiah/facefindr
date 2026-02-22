@@ -6,6 +6,7 @@ import { searchEventCollectionWithFallback } from '@/lib/aws/rekognition';
 import { checkRateLimit, getClientIP, rateLimitHeaders, rateLimits } from '@/lib/rate-limit';
 import { createStorageSignedUrl, getStorageProvider } from '@/lib/storage/provider';
 import { createClient, createClientWithAccessToken, createServiceClient } from '@/lib/supabase/server';
+import { normalizeUserType } from '@/lib/user-type';
 
 // ============================================
 // FACE SEARCH API
@@ -342,7 +343,7 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    if (user.user_metadata?.user_type !== 'attendee') {
+    if (normalizeUserType(user.user_metadata?.user_type) !== 'attendee') {
       return NextResponse.json({ error: 'Only attendees can search for face matches' }, { status: 403 });
     }
 

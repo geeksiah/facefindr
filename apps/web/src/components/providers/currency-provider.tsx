@@ -85,8 +85,27 @@ export function CurrencyProvider({ children }: CurrencyProviderProps) {
   const loadQueuedRef = useRef(false);
   const loadAbortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
+  const retryStateRef = useRef({
+    failureCount: 0,
+    nextRetryAt: 0,
+    lastLoggedAt: 0,
+  });
+
+  const isOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false;
 
   const loadCurrencies = useCallback(async () => {
+    if (isOffline()) {
+      if (mountedRef.current) {
+        setIsLoading(false);
+      }
+      return;
+    }
+
+    const now = Date.now();
+    if (now < retryStateRef.current.nextRetryAt) {
+      return;
+    }
+
     if (loadInFlightRef.current) {
       loadQueuedRef.current = true;
       loadAbortRef.current?.abort();
@@ -127,9 +146,19 @@ export function CurrencyProvider({ children }: CurrencyProviderProps) {
             (c: Currency) => c.code === effectiveCode
           ) || DEFAULT_CURRENCY;
           setCurrencyObj(currencyObj);
+          retryStateRef.current.failureCount = 0;
+          retryStateRef.current.nextRetryAt = 0;
         } catch (error: any) {
           if (error?.name !== 'AbortError') {
-            console.error('Failed to load currencies:', error);
+            const failedAt = Date.now();
+            const nextCount = Math.min(retryStateRef.current.failureCount + 1, 6);
+            const backoffMs = Math.min(30000, 1000 * Math.pow(2, nextCount - 1));
+            retryStateRef.current.failureCount = nextCount;
+            retryStateRef.current.nextRetryAt = failedAt + backoffMs;
+            if (failedAt - retryStateRef.current.lastLoggedAt > 30000) {
+              retryStateRef.current.lastLoggedAt = failedAt;
+              console.error('Failed to load currencies:', error);
+            }
           }
         } finally {
           if (loadAbortRef.current === controller) {
@@ -161,6 +190,17 @@ export function CurrencyProvider({ children }: CurrencyProviderProps) {
       loadAbortRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      retryStateRef.current.failureCount = 0;
+      retryStateRef.current.nextRetryAt = 0;
+      void loadCurrencies();
+    };
+
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [loadCurrencies]);
 
   useSSEWithPolling<{ version?: string }>({
     url: '/api/stream/runtime-config',

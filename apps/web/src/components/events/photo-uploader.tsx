@@ -24,6 +24,14 @@ interface UploadFile {
   error?: string;
 }
 
+function mapUploadErrorMessage(result: any, fallbackFileName: string): string {
+  const code = String(result?.code || '');
+  if (code === 'EVENT_NOT_FOUND') return 'This event is no longer available.';
+  if (code === 'NOT_AUTHORIZED') return "You don't have upload permission for this event.";
+  if (code === 'UPSTREAM_UNAVAILABLE') return 'Connection issue. Retrying usually fixes this.';
+  return result?.error || `Failed to upload ${fallbackFileName}`;
+}
+
 export function PhotoUploader({ eventId, onUploadComplete }: PhotoUploaderProps) {
   const toast = useToast();
   const [files, setFiles] = useState<UploadFile[]>([]);
@@ -84,14 +92,15 @@ export function PhotoUploader({ eventId, onUploadComplete }: PhotoUploaderProps)
         const result = await uploadPhotos(formData);
 
         if (result.error) {
+          const friendlyMessage = mapUploadErrorMessage(result, uploadFile.file.name);
           setFiles((prev) =>
             prev.map((f) =>
               f.id === uploadFile.id
-                ? { ...f, status: 'error', error: result.error }
+                ? { ...f, status: 'error', error: friendlyMessage }
                 : f
             )
           );
-          toast.error('Upload Failed', result.error || `Failed to upload ${uploadFile.file.name}`);
+          toast.error('Upload Failed', friendlyMessage);
         } else {
           setFiles((prev) =>
             prev.map((f) =>

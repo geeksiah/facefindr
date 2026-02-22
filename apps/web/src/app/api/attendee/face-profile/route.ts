@@ -4,6 +4,7 @@ import { DeleteFacesCommand } from '@aws-sdk/client-rekognition';
 import { NextResponse } from 'next/server';
 
 import { rekognitionClient, ATTENDEE_COLLECTION_ID } from '@/lib/aws/rekognition';
+import { resolveAttendeeProfileByUser } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 // ============================================
@@ -13,16 +14,27 @@ import { createClient, createServiceClient } from '@/lib/supabase/server';
 export async function GET() {
   try {
     const supabase = createClient();
+    const serviceClient = createServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const { data: attendeeProfile } = await resolveAttendeeProfileByUser(
+      serviceClient,
+      user.id,
+      user.email
+    );
+    const attendeeId = attendeeProfile?.id as string | undefined;
+    if (!attendeeId) {
+      return NextResponse.json({ hasFaceProfile: false });
+    }
+
     const { data: faceProfiles, error } = await supabase
       .from('attendee_face_profiles')
       .select('*')
-      .eq('attendee_id', user.id);
+      .eq('attendee_id', attendeeId);
 
     if (error) {
       return NextResponse.json({ error: 'Failed to get face profile' }, { status: 500 });
@@ -67,11 +79,21 @@ export async function DELETE() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const { data: attendeeProfile } = await resolveAttendeeProfileByUser(
+      serviceClient,
+      user.id,
+      user.email
+    );
+    const attendeeId = attendeeProfile?.id as string | undefined;
+    if (!attendeeId) {
+      return NextResponse.json({ success: true });
+    }
+
     // Get all face profiles for this user
     const { data: faceProfiles, error: fetchError } = await supabase
       .from('attendee_face_profiles')
       .select('rekognition_face_id')
-      .eq('attendee_id', user.id);
+      .eq('attendee_id', attendeeId);
 
     if (fetchError) {
       console.error('Failed to fetch face profiles:', fetchError);
@@ -99,7 +121,7 @@ export async function DELETE() {
     const { error: deleteError } = await serviceClient
       .from('attendee_face_profiles')
       .delete()
-      .eq('attendee_id', user.id);
+      .eq('attendee_id', attendeeId);
 
     if (deleteError) {
       console.error('Failed to delete face profiles from database:', deleteError);
@@ -110,7 +132,7 @@ export async function DELETE() {
     await serviceClient
       .from('attendees')
       .update({ last_face_refresh: null })
-      .eq('id', user.id);
+      .eq('id', attendeeId);
 
     return NextResponse.json({ success: true });
 

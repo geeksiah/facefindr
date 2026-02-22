@@ -28,7 +28,11 @@ interface RealtimeOptions {
 export function useRealtimeSubscription(options: RealtimeOptions) {
   const [isConnected, setIsConnected] = useState(false);
   const [channel, setChannel] = useState<RealtimeChannel | null>(null);
+  const [reconnectNonce, setReconnectNonce] = useState(0);
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const lastErrorLogAtRef = useRef(0);
 
   // Store callbacks in refs to avoid dependency issues
   const callbacksRef = useRef(options);
@@ -39,6 +43,36 @@ export function useRealtimeSubscription(options: RealtimeOptions) {
   useEffect(() => {
     const { table, event = '*', filter } = options;
     const supabase = createClient();
+    const logCooldownMs = 30000;
+
+    const logWithCooldown = (message: string, error?: unknown) => {
+      const now = Date.now();
+      if (now - lastErrorLogAtRef.current < logCooldownMs) return;
+      lastErrorLogAtRef.current = now;
+      if (error) {
+        console.error(message, error);
+      } else {
+        console.error(message);
+      }
+    };
+
+    const clearReconnectTimer = () => {
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+    };
+
+    const scheduleReconnect = () => {
+      if (reconnectTimerRef.current) return;
+      const nextAttempt = Math.min(reconnectAttemptsRef.current + 1, 6);
+      reconnectAttemptsRef.current = nextAttempt;
+      const delayMs = Math.min(30000, Math.pow(2, nextAttempt - 1) * 1000);
+      reconnectTimerRef.current = setTimeout(() => {
+        reconnectTimerRef.current = null;
+        setReconnectNonce((value) => value + 1);
+      }, delayMs);
+    };
 
     const channelConfig = {
       event,
@@ -48,6 +82,21 @@ export function useRealtimeSubscription(options: RealtimeOptions) {
     };
 
     let isMounted = true;
+
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setIsConnected(false);
+      const handleOnline = () => {
+        if (!isMounted) return;
+        reconnectAttemptsRef.current = 0;
+        setReconnectNonce((value) => value + 1);
+      };
+      window.addEventListener('online', handleOnline);
+      return () => {
+        isMounted = false;
+        window.removeEventListener('online', handleOnline);
+        clearReconnectTimer();
+      };
+    }
 
     try {
       const newChannel = supabase
@@ -83,7 +132,25 @@ export function useRealtimeSubscription(options: RealtimeOptions) {
         })
         .subscribe((status) => {
           if (isMounted) {
-            setIsConnected(status === 'SUBSCRIBED');
+            if (status === 'SUBSCRIBED') {
+              reconnectAttemptsRef.current = 0;
+              setIsConnected(true);
+              return;
+            }
+
+            setIsConnected(false);
+            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+              if (channelRef.current === newChannel) {
+                try {
+                  supabase.removeChannel(newChannel);
+                } catch {
+                  // ignore cleanup errors
+                }
+                channelRef.current = null;
+                setChannel(null);
+              }
+              scheduleReconnect();
+            }
           }
         });
 
@@ -97,11 +164,13 @@ export function useRealtimeSubscription(options: RealtimeOptions) {
       if (err instanceof DOMException && err.name === 'AbortError') {
         return;
       }
-      console.error('Realtime subscription error:', err);
+      logWithCooldown('Realtime subscription error:', err);
+      scheduleReconnect();
     }
 
     return () => {
       isMounted = false;
+      clearReconnectTimer();
       if (channelRef.current) {
         try {
           supabase.removeChannel(channelRef.current);
@@ -112,7 +181,7 @@ export function useRealtimeSubscription(options: RealtimeOptions) {
         setChannel(null);
       }
     };
-  }, [options.table, options.filter, options.event]);
+  }, [options.table, options.filter, options.event, reconnectNonce]);
 
   return { isConnected, channel };
 }

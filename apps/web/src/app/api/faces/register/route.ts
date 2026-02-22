@@ -3,15 +3,72 @@ export const dynamic = 'force-dynamic';
 import { DeleteFacesCommand, IndexFacesCommand } from '@aws-sdk/client-rekognition';
 import { NextRequest, NextResponse } from 'next/server';
 
-import { rekognitionClient, ATTENDEE_COLLECTION_ID, searchEventCollectionWithFallback } from '@/lib/aws/rekognition';
+import { isRekognitionConfigured, rekognitionClient, ATTENDEE_COLLECTION_ID, searchEventCollectionWithFallback } from '@/lib/aws/rekognition';
+import { ensureAttendeeCollection } from '@/lib/aws/rekognition-drop-in';
+import { resolveAttendeeProfileByUser } from '@/lib/profiles/ids';
 import { checkRateLimit, getClientIP, rateLimitHeaders, rateLimits } from '@/lib/rate-limit';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { normalizeUserType } from '@/lib/user-type';
 
 // ============================================
 // FACE REGISTRATION API
 // Registers an attendee's face for photo matching
 // Supports multiple images from guided scan for better accuracy
 // ============================================
+
+function mapRekognitionError(error: any): { status: number; error: string; code: string } | null {
+  const name = String(error?.name || '');
+  const message = String(error?.message || '');
+  const messageLower = message.toLowerCase();
+
+  if (name === 'ResourceNotFoundException') {
+    return {
+      status: 503,
+      error: 'Face recognition collection is not ready yet. Please retry in a few seconds.',
+      code: 'REKOGNITION_COLLECTION_UNAVAILABLE',
+    };
+  }
+  if (
+    name === 'UnrecognizedClientException' ||
+    name === 'InvalidSignatureException' ||
+    name === 'AccessDeniedException'
+  ) {
+    return {
+      status: 500,
+      error: 'Face recognition credentials are invalid or missing required permissions.',
+      code: 'REKOGNITION_AUTH_FAILED',
+    };
+  }
+  if (name === 'InvalidImageFormatException') {
+    return {
+      status: 400,
+      error: 'Unsupported image format. Please try again with a clearer camera capture.',
+      code: 'REKOGNITION_INVALID_IMAGE',
+    };
+  }
+  if (name === 'ImageTooLargeException') {
+    return {
+      status: 400,
+      error: 'Captured image is too large to process. Please retake the scan.',
+      code: 'REKOGNITION_IMAGE_TOO_LARGE',
+    };
+  }
+  if (name === 'InvalidParameterException' && messageLower.includes('no faces')) {
+    return {
+      status: 400,
+      error: 'No face detected. Please ensure your face is clearly visible.',
+      code: 'REKOGNITION_NO_FACE_DETECTED',
+    };
+  }
+  if (name === 'ThrottlingException' || name === 'ProvisionedThroughputExceededException') {
+    return {
+      status: 429,
+      error: 'Face recognition is busy. Please retry in a moment.',
+      code: 'REKOGNITION_THROTTLED',
+    };
+  }
+  return null;
+}
 
 export async function POST(request: NextRequest) {
   // Rate limiting for face operations
@@ -25,6 +82,13 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    if (!isRekognitionConfigured()) {
+      return NextResponse.json(
+        { error: 'Face recognition is temporarily unavailable. Please try again later.', code: 'REKOGNITION_NOT_CONFIGURED' },
+        { status: 503 }
+      );
+    }
+
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
@@ -33,13 +97,27 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify user is an attendee
-    const userType = user.user_metadata?.user_type;
+    const userType = normalizeUserType(user.user_metadata?.user_type);
     if (userType !== 'attendee') {
       return NextResponse.json(
         { error: 'Only attendees can register face profiles' },
         { status: 403 }
       );
     }
+
+    const serviceClient = createServiceClient();
+    const { data: attendeeProfile } = await resolveAttendeeProfileByUser(
+      serviceClient,
+      user.id,
+      user.email
+    );
+    if (!attendeeProfile?.id) {
+      return NextResponse.json(
+        { error: 'Attendee profile not found. Please complete attendee setup first.' },
+        { status: 404 }
+      );
+    }
+    const attendeeId = attendeeProfile.id as string;
 
     const body = await request.json();
     
@@ -61,18 +139,42 @@ export async function POST(request: NextRequest) {
     const imageBuffer = Buffer.from(primaryImage, 'base64');
     const imageBytes = new Uint8Array(imageBuffer);
 
+    const ensureCollection = await ensureAttendeeCollection();
+    if (!ensureCollection.success) {
+      return NextResponse.json(
+        {
+          error: 'Face recognition service is warming up. Please retry in a few seconds.',
+          code: 'REKOGNITION_COLLECTION_UNAVAILABLE',
+        },
+        { status: 503 }
+      );
+    }
+
     // Index face in global collection for drop-in matching
     // This ensures the face can be found by drop-in photos
     const indexCommand = new IndexFacesCommand({
       CollectionId: ATTENDEE_COLLECTION_ID,
       Image: { Bytes: imageBytes },
-      ExternalImageId: user.id, // Use user ID as external ID for easy lookup
+      ExternalImageId: attendeeId, // Use attendee profile ID as external ID for consistency
       MaxFaces: 1,
       QualityFilter: 'HIGH',
       DetectionAttributes: ['ALL'],
     });
 
-    const indexResult = await rekognitionClient.send(indexCommand);
+    let indexResult;
+    try {
+      indexResult = await rekognitionClient.send(indexCommand);
+    } catch (indexError: any) {
+      console.error('Face registration index error:', indexError);
+      const mappedError = mapRekognitionError(indexError);
+      if (mappedError) {
+        return NextResponse.json(
+          { error: mappedError.error, code: mappedError.code },
+          { status: mappedError.status }
+        );
+      }
+      throw indexError;
+    }
 
     if (!indexResult.FaceRecords || indexResult.FaceRecords.length === 0) {
       return NextResponse.json(
@@ -92,8 +194,6 @@ export async function POST(request: NextRequest) {
     }
 
     // Store face profile in database
-    const serviceClient = createServiceClient();
-
     // Replace any existing active profile to avoid stale identity linkage.
     const [{ data: existingEmbeddings }, { data: existingLegacyProfiles }] = await Promise.all([
       serviceClient
@@ -104,7 +204,7 @@ export async function POST(request: NextRequest) {
       serviceClient
         .from('attendee_face_profiles')
         .select('rekognition_face_id')
-        .eq('attendee_id', user.id),
+        .eq('attendee_id', attendeeId),
     ]);
 
     const existingFaceIds = Array.from(
@@ -138,13 +238,13 @@ export async function POST(request: NextRequest) {
     await serviceClient
       .from('attendee_face_profiles')
       .delete()
-      .eq('attendee_id', user.id);
+      .eq('attendee_id', attendeeId);
 
     // Insert new face profile
     const { error: insertError } = await serviceClient
       .from('attendee_face_profiles')
       .insert({
-        attendee_id: user.id,
+        attendee_id: attendeeId,
         rekognition_face_id: rekognitionFaceId,
         is_primary: true,
         source: 'initial_scan',
@@ -182,7 +282,7 @@ export async function POST(request: NextRequest) {
     await serviceClient
       .from('attendees')
       .update({ last_face_refresh: new Date().toISOString() })
-      .eq('id', user.id);
+      .eq('id', attendeeId);
 
     // If we have additional images from guided scan, index them too
     // This improves matching accuracy by having multiple angles
@@ -194,7 +294,7 @@ export async function POST(request: NextRequest) {
         const additionalCommand = new IndexFacesCommand({
           CollectionId: ATTENDEE_COLLECTION_ID,
           Image: { Bytes: additionalBytes },
-          ExternalImageId: `${user.id}_angle_${i + 1}`, // Index in global collection for drop-in
+          ExternalImageId: `${attendeeId}_angle_${i + 1}`, // Index in global collection for drop-in
           MaxFaces: 1,
           QualityFilter: 'MEDIUM', // Less strict for angled faces
           DetectionAttributes: ['DEFAULT'],
@@ -207,7 +307,7 @@ export async function POST(request: NextRequest) {
           await serviceClient
             .from('attendee_face_profiles')
             .insert({
-              attendee_id: user.id,
+              attendee_id: attendeeId,
               rekognition_face_id: additionalResult.FaceRecords[0].Face?.FaceId || '',
               is_primary: false,
               source: 'initial_scan',
@@ -241,7 +341,7 @@ export async function POST(request: NextRequest) {
       await serviceClient
         .from('face_indexing_backfill_status')
         .upsert({
-          attendee_id: user.id,
+          attendee_id: attendeeId,
           rekognition_face_id: rekognitionFaceId,
           indexed_in_global_collection: true,
           indexed_at: new Date().toISOString(),
@@ -295,6 +395,20 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('Face registration error:', error);
+    const mappedError = mapRekognitionError(error);
+    if (mappedError) {
+      return NextResponse.json(
+        { error: mappedError.error, code: mappedError.code },
+        { status: mappedError.status }
+      );
+    }
+    const message = String((error as any)?.message || '');
+    if (message.toLowerCase().includes('supabase service role key')) {
+      return NextResponse.json(
+        { error: 'Server configuration is incomplete for face registration.', code: 'SERVER_CONFIG_MISSING' },
+        { status: 500 }
+      );
+    }
     return NextResponse.json(
       { error: 'Failed to register face. Please try again.' },
       { status: 500 }

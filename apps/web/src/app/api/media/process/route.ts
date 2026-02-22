@@ -6,7 +6,27 @@ import { indexFacesFromImage, isRekognitionConfigured } from '@/lib/aws/rekognit
 import { getPhotographerIdCandidates } from '@/lib/profiles/ids';
 import { downloadStorageObject } from '@/lib/storage/provider';
 import { checkLimit, checkFeature, incrementFaceOps } from '@/lib/subscription/enforcement';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
+
+function isSupabaseNotFound(error: any): boolean {
+  return error?.code === 'PGRST116';
+}
+
+function isUpstreamFailure(error: any): boolean {
+  if (!error) return false;
+  const code = String(error?.code || '').toUpperCase();
+  const message = String(error?.message || '').toLowerCase();
+  const details = String(error?.details || '').toLowerCase();
+  return (
+    code.startsWith('08') ||
+    code === '57014' ||
+    message.includes('network') ||
+    message.includes('fetch failed') ||
+    message.includes('connection') ||
+    message.includes('name_not_resolved') ||
+    details.includes('network')
+  );
+}
 
 /**
  * POST /api/media/process
@@ -23,24 +43,47 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
+    const authClient = await createClient();
+    const serviceClient = createServiceClient();
 
     // Verify authentication
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user } } = await authClient.auth.getUser();
     if (!user) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
       );
     }
-    const photographerIdCandidates = await getPhotographerIdCandidates(supabase, user.id, user.email);
+    const photographerIdCandidates = await getPhotographerIdCandidates(serviceClient, user.id, user.email);
 
     // Verify event access and face recognition is enabled
-    const { data: event } = await supabase
+    const { data: event, error: eventError } = await serviceClient
       .from('events')
       .select('photographer_id, face_recognition_enabled, face_ops_used')
       .eq('id', eventId)
-      .single();
+      .maybeSingle();
+
+    if (eventError) {
+      console.error('Failed to resolve event during media processing:', {
+        eventId,
+        mediaId,
+        userId: user.id,
+        error: eventError,
+      });
+      if (isSupabaseNotFound(eventError)) {
+        return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+      }
+      if (isUpstreamFailure(eventError)) {
+        return NextResponse.json(
+          { error: 'Temporary upstream failure while loading event', code: 'UPSTREAM_UNAVAILABLE' },
+          { status: 503 }
+        );
+      }
+      return NextResponse.json(
+        { error: eventError.message || 'Failed to load event' },
+        { status: 500 }
+      );
+    }
 
     if (!event) {
       return NextResponse.json(
@@ -50,13 +93,31 @@ export async function POST(request: NextRequest) {
     }
     let hasEventAccess = photographerIdCandidates.includes(event.photographer_id);
     if (!hasEventAccess && photographerIdCandidates.length > 0) {
-      const { data: collaborator } = await supabase
+      const { data: collaborator, error: collaboratorError } = await serviceClient
         .from('event_collaborators')
         .select('id')
         .eq('event_id', eventId)
         .in('photographer_id', photographerIdCandidates)
         .eq('status', 'active')
         .maybeSingle();
+
+      if (collaboratorError && !isSupabaseNotFound(collaboratorError)) {
+        console.error('Collaborator access lookup failed during media processing:', {
+          eventId,
+          userId: user.id,
+          error: collaboratorError,
+        });
+        if (isUpstreamFailure(collaboratorError)) {
+          return NextResponse.json(
+            { error: 'Temporary upstream failure while checking permissions', code: 'UPSTREAM_UNAVAILABLE' },
+            { status: 503 }
+          );
+        }
+        return NextResponse.json(
+          { error: collaboratorError.message || 'Failed to verify collaborator access' },
+          { status: 500 }
+        );
+      }
       hasEventAccess = Boolean(collaborator?.id);
     }
 
@@ -113,12 +174,33 @@ export async function POST(request: NextRequest) {
     }
 
     // Get the media record
-    const { data: media } = await supabase
+    const { data: media, error: mediaError } = await serviceClient
       .from('media')
       .select('storage_path, faces_indexed')
       .eq('id', mediaId)
       .eq('event_id', eventId)
-      .single();
+      .maybeSingle();
+
+    if (mediaError) {
+      console.error('Failed to load media record for processing:', {
+        mediaId,
+        eventId,
+        error: mediaError,
+      });
+      if (isSupabaseNotFound(mediaError)) {
+        return NextResponse.json({ error: 'Media not found' }, { status: 404 });
+      }
+      if (isUpstreamFailure(mediaError)) {
+        return NextResponse.json(
+          { error: 'Temporary upstream failure while loading media', code: 'UPSTREAM_UNAVAILABLE' },
+          { status: 503 }
+        );
+      }
+      return NextResponse.json(
+        { error: mediaError.message || 'Failed to load media record' },
+        { status: 500 }
+      );
+    }
 
     if (!media) {
       return NextResponse.json(
@@ -139,7 +221,7 @@ export async function POST(request: NextRequest) {
     let imageBytes: Uint8Array;
     try {
       imageBytes = await downloadStorageObject('media', media.storage_path, {
-        supabaseClient: supabase,
+        supabaseClient: serviceClient,
       });
     } catch (downloadError: any) {
       console.error('Error downloading file:', downloadError);
@@ -175,7 +257,7 @@ export async function POST(request: NextRequest) {
         confidence: face.confidence,
       }));
 
-      const { error: insertError } = await supabase
+      const { error: insertError } = await serviceClient
         .from('face_embeddings')
         .insert(faceRecords);
 
@@ -185,7 +267,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Update media record
-    await supabase
+    await serviceClient
       .from('media')
       .update({
         faces_detected: facesDetected,

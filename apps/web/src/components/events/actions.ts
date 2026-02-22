@@ -99,6 +99,27 @@ async function checkCreatorStorageForIncomingUpload(
   };
 }
 
+function isSupabaseNotFound(error: any): boolean {
+  return error?.code === 'PGRST116';
+}
+
+function isSupabaseTransportOrUpstreamError(error: any): boolean {
+  if (!error) return false;
+  const code = String(error?.code || '').toUpperCase();
+  const message = String(error?.message || '').toLowerCase();
+  const details = String(error?.details || '').toLowerCase();
+
+  return (
+    code.startsWith('08') ||
+    code === '57014' ||
+    message.includes('network') ||
+    message.includes('fetch failed') ||
+    message.includes('name_not_resolved') ||
+    message.includes('connection') ||
+    details.includes('network')
+  );
+}
+
 async function notifyEventSubscribersAboutNewPhotos(
   serviceClient: any,
   event: { id: string; name?: string | null; public_slug?: string | null; status?: string | null },
@@ -181,7 +202,7 @@ export async function uploadPhotos(formData: FormData) {
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
-    return { error: 'Not authenticated' };
+    return { success: false, error: 'Not authenticated' };
   }
   const photographerIdCandidates = await getPhotographerIdCandidates(supabase, user.id, user.email);
   const { data: actorPhotographerProfile } = await resolvePhotographerProfileByUser(
@@ -190,7 +211,7 @@ export async function uploadPhotos(formData: FormData) {
     user.email
   );
   if (!actorPhotographerProfile?.id) {
-    return { error: 'Creator profile not found' };
+    return { success: false, error: 'Creator profile not found' };
   }
   const actorPhotographerId = actorPhotographerProfile.id as string;
 
@@ -198,18 +219,45 @@ export async function uploadPhotos(formData: FormData) {
   const eventId = formData.get('eventId') as string;
 
   if (!file || !eventId) {
-    return { error: 'Missing file or event ID' };
+    return { success: false, error: 'Missing file or event ID' };
   }
 
   // Verify event access - either owner or collaborator with upload permission
-  const { data: event } = await supabase
+  const { data: event, error: eventError } = await serviceClient
     .from('events')
       .select('id, name, public_slug, status, photographer_id, face_recognition_enabled, watermark_enabled')
       .eq('id', eventId)
-      .single();
+      .maybeSingle();
+
+  if (eventError) {
+    console.error('Event lookup failed during upload:', { eventId, userId: user.id, error: eventError });
+    if (isSupabaseNotFound(eventError)) {
+      return {
+        success: false,
+        error: 'This event is no longer available.',
+        code: 'EVENT_NOT_FOUND',
+      };
+    }
+    if (isSupabaseTransportOrUpstreamError(eventError)) {
+      return {
+        success: false,
+        error: 'Connection issue. Retrying usually fixes this.',
+        code: 'UPSTREAM_UNAVAILABLE',
+      };
+    }
+    return {
+      success: false,
+      error: eventError.message || 'Failed to load event details for upload.',
+      code: 'UPLOAD_FAILED',
+    };
+  }
 
   if (!event) {
-    return { error: 'Event not found' };
+    return {
+      success: false,
+      error: 'This event is no longer available.',
+      code: 'EVENT_NOT_FOUND',
+    };
   }
 
   // Check if user is owner or collaborator with upload permission
@@ -218,37 +266,66 @@ export async function uploadPhotos(formData: FormData) {
   
   if (!canUpload) {
     // Check collaborator permissions
-    const { data: collaborator } = await supabase
+    const { data: collaborator, error: collaboratorError } = await serviceClient
       .from('event_collaborators')
       .select('can_upload')
       .eq('event_id', eventId)
       .in('photographer_id', photographerIdCandidates)
       .eq('status', 'active')
-      .single();
+      .maybeSingle();
+
+    if (collaboratorError && !isSupabaseNotFound(collaboratorError)) {
+      console.error('Collaborator upload permission lookup failed:', {
+        eventId,
+        userId: user.id,
+        error: collaboratorError,
+      });
+      if (isSupabaseTransportOrUpstreamError(collaboratorError)) {
+        return {
+          success: false,
+          error: 'Connection issue. Retrying usually fixes this.',
+          code: 'UPSTREAM_UNAVAILABLE',
+        };
+      }
+      return {
+        success: false,
+        error: collaboratorError.message || 'Failed to verify upload permissions.',
+        code: 'UPLOAD_FAILED',
+      };
+    }
     
     canUpload = collaborator?.can_upload === true;
   }
 
   if (!canUpload) {
-    return { error: 'You do not have permission to upload to this event' };
+    return {
+      success: false,
+      error: 'You do not have permission to upload to this event.',
+      code: 'NOT_AUTHORIZED',
+    };
   }
 
   // Validate file type
   const allowedTypes = ['image/jpeg', 'image/png', 'image/heic', 'image/webp'];
   if (!allowedTypes.includes(file.type)) {
-    return { error: 'Invalid file type. Only JPEG, PNG, HEIC, and WebP are allowed.' };
+    return {
+      success: false,
+      error: 'Invalid file type. Only JPEG, PNG, HEIC, and WebP are allowed.',
+      code: 'UPLOAD_FAILED',
+    };
   }
 
   // Validate file size (50MB max)
   const maxSize = 50 * 1024 * 1024;
   if (file.size > maxSize) {
-    return { error: 'File too large. Maximum size is 50MB.' };
+    return { success: false, error: 'File too large. Maximum size is 50MB.', code: 'UPLOAD_FAILED' };
   }
 
   // ENFORCE: Check photo limit using the enforcement system
   const photoLimit = await checkLimit(photographerId, 'photos', eventId);
   if (!photoLimit.allowed) {
     return {
+      success: false,
       error: photoLimit.message || `You've reached your photo limit for this event (${photoLimit.limit} photos). Please upgrade your plan.`,
       code: 'LIMIT_EXCEEDED',
       limitType: 'photos',
@@ -261,6 +338,7 @@ export async function uploadPhotos(formData: FormData) {
   const storageLimit = await checkCreatorStorageForIncomingUpload(serviceClient, photographerId, file.size);
   if (!storageLimit.allowed) {
     return {
+      success: false,
       error:
         storageLimit.message ||
         "You've reached your storage limit. Please upgrade your plan or delete some photos.",
@@ -294,7 +372,9 @@ export async function uploadPhotos(formData: FormData) {
     if (uploadError) {
       console.error('Storage upload error:', uploadError);
       return { 
-        error: uploadError.message || 'Failed to upload file to storage. Please check your storage configuration.' 
+        success: false,
+        error: uploadError.message || 'Failed to upload file to storage. Please check your storage configuration.',
+        code: 'UPLOAD_FAILED',
       };
     }
 
@@ -328,7 +408,9 @@ export async function uploadPhotos(formData: FormData) {
           console.error('Failed to cleanup uploaded file:', cleanupError);
         }
       return { 
-        error: dbError.message || 'Failed to save media record to database' 
+        success: false,
+        error: dbError.message || 'Failed to save media record to database',
+        code: 'UPLOAD_FAILED',
       };
     }
 
@@ -339,7 +421,7 @@ export async function uploadPhotos(formData: FormData) {
       } catch (cleanupError) {
         console.error('Failed to cleanup uploaded file:', cleanupError);
       }
-      return { error: 'Failed to create media record' };
+      return { success: false, error: 'Failed to create media record', code: 'UPLOAD_FAILED' };
     }
 
     const priority = (await checkFeature(event.photographer_id, 'priority_processing')) ? 'high' : 'normal';
@@ -390,8 +472,14 @@ export async function uploadPhotos(formData: FormData) {
     };
   } catch (error: any) {
     console.error('Upload error:', error);
+    const isUpstream = isSupabaseTransportOrUpstreamError(error);
     return { 
-      error: error?.message || 'An unexpected error occurred during upload. Please try again.' 
+      success: false,
+      error:
+        isUpstream
+          ? 'Connection issue. Retrying usually fixes this.'
+          : error?.message || 'An unexpected error occurred during upload. Please try again.',
+      code: isUpstream ? 'UPSTREAM_UNAVAILABLE' : 'UPLOAD_FAILED',
     };
   }
 }
@@ -423,6 +511,7 @@ async function processFacesAsync(mediaId: string, eventId: string) {
 
 export async function processMediaFaces(mediaId: string, eventId: string) {
   const supabase = await createClient();
+  const serviceClient = createServiceClient();
   const [{ data: { user } }, { data: { session } }] = await Promise.all([
     supabase.auth.getUser(),
     supabase.auth.getSession(),
@@ -434,14 +523,49 @@ export async function processMediaFaces(mediaId: string, eventId: string) {
   const photographerIdCandidates = await getPhotographerIdCandidates(supabase, user.id, user.email);
 
   // Verify event ownership
-  const { data: event } = await supabase
+  const { data: event, error: eventError } = await serviceClient
     .from('events')
     .select('photographer_id')
     .eq('id', eventId)
-    .single();
+    .maybeSingle();
 
-  if (!event || !photographerIdCandidates.includes(event.photographer_id)) {
+  if (eventError && !isSupabaseNotFound(eventError)) {
+    console.error('Failed to verify event access for media processing:', {
+      eventId,
+      mediaId,
+      userId: user.id,
+      error: eventError,
+    });
+    return { error: eventError.message || 'Failed to verify event access' };
+  }
+
+  if (!event) {
     return { error: 'Event not found' };
+  }
+
+  let canProcess = photographerIdCandidates.includes(event.photographer_id);
+  if (!canProcess) {
+    const { data: collaborator, error: collaboratorError } = await serviceClient
+      .from('event_collaborators')
+      .select('can_upload')
+      .eq('event_id', eventId)
+      .in('photographer_id', photographerIdCandidates)
+      .eq('status', 'active')
+      .maybeSingle();
+
+    if (collaboratorError && !isSupabaseNotFound(collaboratorError)) {
+      console.error('Collaborator lookup failed for media processing:', {
+        eventId,
+        userId: user.id,
+        error: collaboratorError,
+      });
+      return { error: collaboratorError.message || 'Failed to verify upload permissions' };
+    }
+    canProcess = collaborator?.can_upload === true;
+  }
+
+  if (!canProcess) {
+    return { error: 'You do not have permission to process this event' };
   }
 
   try {
@@ -502,11 +626,21 @@ export async function deletePhoto(mediaId: string, eventId: string) {
 
   // Check if user can delete this photo
   // Either: event owner, or uploader with delete permission
-  const { data: event } = await supabase
+  const { data: event, error: eventError } = await serviceClient
     .from('events')
     .select('photographer_id')
     .eq('id', eventId)
-    .single();
+    .maybeSingle();
+
+  if (eventError && !isSupabaseNotFound(eventError)) {
+    console.error('Failed to verify event access for delete:', {
+      eventId,
+      mediaId,
+      userId: user.id,
+      error: eventError,
+    });
+    return { error: eventError.message || 'Failed to verify event access' };
+  }
 
   if (!event) {
     return { error: 'Event not found' };
@@ -516,13 +650,13 @@ export async function deletePhoto(mediaId: string, eventId: string) {
   
   if (!canDelete && actorPhotographerId && media.uploader_id === actorPhotographerId) {
     // Check if collaborator can delete own photos
-    const { data: collaborator } = await supabase
+    const { data: collaborator } = await serviceClient
       .from('event_collaborators')
       .select('can_delete_own_photos')
       .eq('event_id', eventId)
       .in('photographer_id', photographerIdCandidates)
       .eq('status', 'active')
-      .single();
+      .maybeSingle();
     
     canDelete = collaborator?.can_delete_own_photos === true;
   }

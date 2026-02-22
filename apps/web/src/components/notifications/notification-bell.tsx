@@ -43,9 +43,28 @@ export function NotificationBell() {
   const fetchQueuedRef = useRef(false);
   const fetchAbortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
+  const retryStateRef = useRef({
+    failureCount: 0,
+    nextRetryAt: 0,
+    lastLoggedAt: 0,
+  });
+
+  const isOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false;
 
   // Fetch notifications
   const fetchNotifications = useCallback(async () => {
+    if (isOffline()) {
+      if (mountedRef.current) {
+        setIsLoading(false);
+      }
+      return;
+    }
+
+    const now = Date.now();
+    if (now < retryStateRef.current.nextRetryAt) {
+      return;
+    }
+
     if (fetchInFlightRef.current) {
       fetchQueuedRef.current = true;
       fetchAbortRef.current?.abort();
@@ -72,10 +91,20 @@ export function NotificationBell() {
             const data = await response.json();
             setNotifications(data.notifications || []);
             setUnreadCount(data.unreadCount || 0);
+            retryStateRef.current.failureCount = 0;
+            retryStateRef.current.nextRetryAt = 0;
           }
         } catch (error: any) {
           if (error?.name !== 'AbortError') {
-            console.error('Failed to fetch notifications:', error);
+            const failedAt = Date.now();
+            const nextCount = Math.min(retryStateRef.current.failureCount + 1, 6);
+            const backoffMs = Math.min(30000, 1000 * Math.pow(2, nextCount - 1));
+            retryStateRef.current.failureCount = nextCount;
+            retryStateRef.current.nextRetryAt = failedAt + backoffMs;
+            if (failedAt - retryStateRef.current.lastLoggedAt > 30000) {
+              retryStateRef.current.lastLoggedAt = failedAt;
+              console.error('Failed to fetch notifications:', error);
+            }
           }
         } finally {
           if (fetchAbortRef.current === controller) {
@@ -107,6 +136,17 @@ export function NotificationBell() {
       fetchAbortRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      retryStateRef.current.failureCount = 0;
+      retryStateRef.current.nextRetryAt = 0;
+      void fetchNotifications();
+    };
+
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [fetchNotifications]);
 
   useSSEWithPolling<{
     unreadCount: number;
