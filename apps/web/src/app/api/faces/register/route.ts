@@ -1,6 +1,6 @@
 export const dynamic = 'force-dynamic';
 
-import { IndexFacesCommand } from '@aws-sdk/client-rekognition';
+import { DeleteFacesCommand, IndexFacesCommand } from '@aws-sdk/client-rekognition';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { rekognitionClient, ATTENDEE_COLLECTION_ID, searchEventCollectionWithFallback } from '@/lib/aws/rekognition';
@@ -50,6 +50,12 @@ export async function POST(request: NextRequest) {
     if (!primaryImage) {
       return NextResponse.json({ error: 'Image data is required' }, { status: 400 });
     }
+    if (images.length < 5) {
+      return NextResponse.json(
+        { error: 'Face profile setup requires 5 guided captures (center, left, right, up, down).' },
+        { status: 400 }
+      );
+    }
 
     // Convert base64 to buffer (use primary image for initial registration)
     const imageBuffer = Buffer.from(primaryImage, 'base64');
@@ -88,6 +94,46 @@ export async function POST(request: NextRequest) {
     // Store face profile in database
     const serviceClient = createServiceClient();
 
+    // Replace any existing active profile to avoid stale identity linkage.
+    const [{ data: existingEmbeddings }, { data: existingLegacyProfiles }] = await Promise.all([
+      serviceClient
+        .from('user_face_embeddings')
+        .select('rekognition_face_id')
+        .eq('user_id', user.id)
+        .eq('is_active', true),
+      serviceClient
+        .from('attendee_face_profiles')
+        .select('rekognition_face_id')
+        .eq('attendee_id', user.id),
+    ]);
+
+    const existingFaceIds = Array.from(
+      new Set(
+        [...(existingEmbeddings || []), ...(existingLegacyProfiles || [])]
+          .map((row: any) => row?.rekognition_face_id)
+          .filter((id): id is string => Boolean(id))
+      )
+    );
+
+    if (existingFaceIds.length > 0) {
+      try {
+        await rekognitionClient.send(
+          new DeleteFacesCommand({
+            CollectionId: ATTENDEE_COLLECTION_ID,
+            FaceIds: existingFaceIds,
+          })
+        );
+      } catch (deleteError) {
+        console.warn('Failed to delete old attendee faces from Rekognition:', deleteError);
+      }
+    }
+
+    await serviceClient
+      .from('user_face_embeddings')
+      .update({ is_active: false, is_primary: false })
+      .eq('user_id', user.id)
+      .eq('user_type', 'attendee');
+
     // Remove any existing face profiles (we keep only one primary)
     await serviceClient
       .from('attendee_face_profiles')
@@ -111,6 +157,25 @@ export async function POST(request: NextRequest) {
         { error: 'Failed to save face profile' },
         { status: 500 }
       );
+    }
+
+    const { error: insertEmbeddingError } = await serviceClient
+      .from('user_face_embeddings')
+      .insert({
+        user_id: user.id,
+        user_type: 'attendee',
+        rekognition_face_id: rekognitionFaceId,
+        source: 'initial_scan',
+        confidence: faceRecord.Face?.Confidence || 0,
+        is_primary: true,
+        is_active: true,
+        metadata: {
+          capture_mode: 'guided_5_pose',
+          pose_index: 0,
+        },
+      });
+    if (insertEmbeddingError) {
+      console.error('Failed to store primary user face embedding:', insertEmbeddingError);
     }
 
     // Update attendee's last_face_refresh timestamp
@@ -147,6 +212,22 @@ export async function POST(request: NextRequest) {
               is_primary: false,
               source: 'initial_scan',
               confidence: additionalResult.FaceRecords[0].Face?.Confidence || 0,
+            });
+
+          await serviceClient
+            .from('user_face_embeddings')
+            .insert({
+              user_id: user.id,
+              user_type: 'attendee',
+              rekognition_face_id: additionalResult.FaceRecords[0].Face?.FaceId || '',
+              source: 'initial_scan',
+              confidence: additionalResult.FaceRecords[0].Face?.Confidence || 0,
+              is_primary: false,
+              is_active: true,
+              metadata: {
+                capture_mode: 'guided_5_pose',
+                pose_index: i + 1,
+              },
             });
         }
       } catch (err) {

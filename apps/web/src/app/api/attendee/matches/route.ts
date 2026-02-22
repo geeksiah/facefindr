@@ -4,6 +4,43 @@ import { NextResponse } from 'next/server';
 
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
+const SIGNED_URL_TTL_SECONDS = 60 * 60;
+
+function cleanStoragePath(path?: string | null) {
+  if (!path) return null;
+  return path.startsWith('/') ? path.slice(1) : path;
+}
+
+async function createSignedUrlMap(serviceClient: any, paths: string[]) {
+  const normalized = Array.from(new Set(paths.map((path) => cleanStoragePath(path)).filter(Boolean))) as string[];
+  const map = new Map<string, string>();
+  if (!normalized.length) return map;
+
+  const { data, error } = await serviceClient.storage
+    .from('media')
+    .createSignedUrls(normalized, SIGNED_URL_TTL_SECONDS);
+
+  if (!error && Array.isArray(data)) {
+    for (const row of data) {
+      if (!row?.path || !row?.signedUrl) continue;
+      map.set(row.path, row.signedUrl);
+    }
+  }
+
+  // Fallback for any path that failed in bulk signing.
+  for (const path of normalized) {
+    if (map.has(path)) continue;
+    const single = await serviceClient.storage
+      .from('media')
+      .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+    if (single.data?.signedUrl) {
+      map.set(path, single.data.signedUrl);
+    }
+  }
+
+  return map;
+}
+
 // ============================================
 // GET ATTENDEE MATCHED PHOTOS
 // ============================================
@@ -21,13 +58,21 @@ export async function GET() {
 
     const serviceClient = createServiceClient();
 
-    const { data: embeddings } = await supabase
+    const [{ data: embeddings }, { data: faceProfiles }] = await Promise.all([
+      supabase
       .from('user_face_embeddings')
       .select('id')
       .eq('user_id', user.id)
-      .limit(1);
+      .eq('is_active', true)
+      .limit(1),
+      supabase
+      .from('attendee_face_profiles')
+      .select('id')
+      .eq('attendee_id', user.id)
+      .limit(1),
+    ]);
 
-    const hasScanned = (embeddings || []).length > 0;
+    const hasScanned = (embeddings || []).length > 0 || (faceProfiles || []).length > 0;
 
     const { data: matches } = await serviceClient
       .from('photo_drop_matches')
@@ -38,12 +83,14 @@ export async function GET() {
           id,
           storage_path,
           thumbnail_path,
+          watermarked_path,
           created_at
         ),
         events:event_id (
           id,
           name,
           event_date,
+          event_start_at_utc,
           location,
           cover_image_url,
           photographers (
@@ -104,8 +151,8 @@ export async function GET() {
         continue;
       }
 
-      const rawThumbnailPath = media.thumbnail_path || media.storage_path;
-      const thumbnailPath = rawThumbnailPath?.startsWith('/') ? rawThumbnailPath.slice(1) : rawThumbnailPath;
+      const rawThumbnailPath = media.thumbnail_path || media.watermarked_path || media.storage_path;
+      const thumbnailPath = cleanStoragePath(rawThumbnailPath);
 
       grouped[event.id].photos.push({
         id: media.id,
@@ -131,21 +178,13 @@ export async function GET() {
       )
     );
 
-    const signedUrlEntries = await Promise.all(
-      previewPaths.map(async (path) => {
-        if (typeof path !== 'string') return [String(path), null] as const;
-        const cleanPath = path.startsWith('/') ? path.slice(1) : path;
-        const { data } = await serviceClient.storage.from('media').createSignedUrl(cleanPath, 3600);
-        return [path, data?.signedUrl || null] as const;
-      })
-    );
-    const signedUrlMap = new Map<string, string | null>(signedUrlEntries);
+    const signedUrlMap = await createSignedUrlMap(serviceClient, previewPaths);
 
     const eventGroups = Object.values(grouped).map((group: any) => ({
       ...group,
       photos: group.photos
         .map((photo: any) => {
-        const signedThumbnail = photo.thumbnailPath ? signedUrlMap.get(photo.thumbnailPath) : null;
+        const signedThumbnail = photo.thumbnailPath ? signedUrlMap.get(cleanStoragePath(photo.thumbnailPath) || '') : null;
 
         if (!signedThumbnail) {
           return null;

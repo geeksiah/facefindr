@@ -9,12 +9,13 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 
-import { GuidedFaceScanner, ConsentModal, MatchResults } from '@/components/face-scan';
+import { FaceScanner, GuidedFaceScanner, ConsentModal, MatchResults } from '@/components/face-scan';
 import { Button } from '@/components/ui/button';
 
 type ScanStage = 'intro' | 'consent' | 'scan' | 'processing' | 'results';
+type ScanMode = 'selfie_search' | 'profile_setup';
 
 interface EventMatch {
   eventId: string;
@@ -33,9 +34,30 @@ interface EventMatch {
 export default function FaceScanPage() {
   const router = useRouter();
   const [stage, setStage] = useState<ScanStage>('intro');
+  const [scanMode, setScanMode] = useState<ScanMode>('profile_setup');
+  const [hasFaceProfile, setHasFaceProfile] = useState(false);
+  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   const [matches, setMatches] = useState<EventMatch[]>([]);
   const [totalMatches, setTotalMatches] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadFaceProfileStatus = async () => {
+      try {
+        const response = await fetch('/api/attendee/face-profile');
+        const payload = await response.json().catch(() => ({}));
+        const hasProfile = Boolean(payload?.hasFaceProfile);
+        setHasFaceProfile(hasProfile);
+        setScanMode(hasProfile ? 'selfie_search' : 'profile_setup');
+      } catch {
+        setHasFaceProfile(false);
+        setScanMode('profile_setup');
+      } finally {
+        setIsLoadingProfile(false);
+      }
+    };
+    void loadFaceProfileStatus();
+  }, []);
 
   const handleConsentAccept = () => {
     setStage('scan');
@@ -45,62 +67,92 @@ export default function FaceScanPage() {
     setStage('intro');
   };
 
-  const handleScanComplete = useCallback(async (captures: string[]) => {
+  const runFaceSearch = useCallback(async (imageBase64: string) => {
+    const searchResponse = await fetch('/api/faces/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: imageBase64 }),
+    });
+
+    if (!searchResponse.ok) {
+      const result = await searchResponse.json().catch(() => ({}));
+      throw new Error(result.error || 'Failed to search for matches');
+    }
+
+    const searchResult = await searchResponse.json();
+    const groupedMatches = searchResult.groupedMatches || {};
+    const eventMatches: EventMatch[] = Object.entries(groupedMatches).map(
+      ([eventId, photos]) => ({
+        eventId,
+        eventName: (photos as any[])[0]?.eventName || 'Unknown Event',
+        eventDate: (photos as any[])[0]?.eventDate || undefined,
+        eventLocation: (photos as any[])[0]?.eventLocation || undefined,
+        photos: (photos as any[]).map((p) => ({
+          mediaId: p.mediaId || p.id,
+          thumbnailUrl: p.thumbnailUrl || p.thumbnail_path,
+          similarity: Number(p.similarity || 0),
+        })),
+      })
+    );
+
+    setMatches(eventMatches);
+    setTotalMatches(searchResult.totalMatches || 0);
+    setStage('results');
+  }, []);
+
+  const handleGuidedScanComplete = useCallback(async (captures: string[]) => {
     setError(null);
     setStage('processing');
 
     try {
-      const images = captures.map((capture) => capture.split(',')[1]);
-
-      const registerResponse = await fetch('/api/faces/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          images,
-          primaryImage: images[0],
-        }),
-      });
-
-      if (!registerResponse.ok) {
-        const result = await registerResponse.json();
-        throw new Error(result.error || 'Failed to register face');
+      const images = captures.map((capture) => capture.split(',')[1]).filter(Boolean);
+      if (!images.length) {
+        throw new Error('No captures were provided.');
       }
 
-      const searchResponse = await fetch('/api/faces/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: images[0] }),
-      });
+      const shouldSetupOrRefreshProfile = scanMode === 'profile_setup';
+      if (shouldSetupOrRefreshProfile) {
+        const registerResponse = await fetch('/api/faces/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            images,
+            primaryImage: images[0],
+          }),
+        });
 
-      if (!searchResponse.ok) {
-        const result = await searchResponse.json();
-        throw new Error(result.error || 'Failed to search for matches');
+        if (!registerResponse.ok) {
+          const result = await registerResponse.json().catch(() => ({}));
+          throw new Error(result.error || 'Failed to register face profile');
+        }
+
+        setHasFaceProfile(true);
+        setScanMode('selfie_search');
       }
 
-      const searchResult = await searchResponse.json();
-
-      const groupedMatches = searchResult.groupedMatches || {};
-      const eventMatches: EventMatch[] = Object.entries(groupedMatches).map(
-        ([eventId, photos]) => ({
-          eventId,
-          eventName: (photos as any[])[0]?.eventName || 'Unknown Event',
-          photos: (photos as any[]).map((p) => ({
-            mediaId: p.mediaId,
-            thumbnailUrl: p.thumbnailUrl,
-            similarity: p.similarity,
-          })),
-        })
-      );
-
-      setMatches(eventMatches);
-      setTotalMatches(searchResult.totalMatches || 0);
-      setStage('results');
+      await runFaceSearch(images[0]);
     } catch (err) {
-      console.error('Scan error:', err);
+      console.error('Guided scan error:', err);
       setError(err instanceof Error ? err.message : 'Failed to process scan');
       setStage('scan');
     }
-  }, []);
+  }, [runFaceSearch, scanMode]);
+
+  const handleSelfieCapture = useCallback(async (imageData: string) => {
+    setError(null);
+    setStage('processing');
+
+    try {
+      const imageBase64 = imageData.includes('base64,') ? imageData.split('base64,')[1] : imageData;
+      await runFaceSearch(imageBase64);
+    } catch (err) {
+      console.error('Selfie search error:', err);
+      const message = err instanceof Error ? err.message : 'Failed to process selfie';
+      setError(message);
+      setStage('scan');
+      throw err;
+    }
+  }, [runFaceSearch]);
 
   const handleViewEvent = (eventId: string) => {
     router.push(`/gallery/events/${eventId}`);
@@ -119,11 +171,11 @@ export default function FaceScanPage() {
     setMatches([]);
     setTotalMatches(0);
     setError(null);
+    setScanMode(hasFaceProfile ? 'selfie_search' : 'profile_setup');
   };
 
   return (
     <div className="mx-auto max-w-2xl">
-      {/* Back Button - Not on intro */}
       {stage !== 'intro' && stage !== 'results' && (
         <Link
           href="/gallery"
@@ -134,10 +186,8 @@ export default function FaceScanPage() {
         </Link>
       )}
 
-      {/* Intro Stage - Compact, CTA-focused */}
       {stage === 'intro' && (
         <div className="flex flex-col min-h-[calc(100vh-12rem)] lg:min-h-0">
-          {/* Hero - Compact */}
           <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-accent/10 via-accent/5 to-transparent border border-accent/20 p-6 text-center">
             <div className="absolute top-0 right-0 w-32 h-32 bg-accent/10 rounded-full blur-2xl -translate-y-1/2 translate-x-1/2" />
             <div className="relative z-10">
@@ -146,19 +196,30 @@ export default function FaceScanPage() {
               </div>
               <h1 className="text-xl font-bold text-foreground">Find Your Photos</h1>
               <p className="text-sm text-secondary mt-1 max-w-xs mx-auto">
-                5-angle face scan for the most accurate photo matching
+                {hasFaceProfile
+                  ? 'Your face profile is active. Use one selfie to find new photos.'
+                  : 'Set up your face profile with a 5-angle scan for best accuracy.'}
               </p>
             </div>
           </div>
 
-          {/* Features - Inline compact list */}
           <div className="mt-4 space-y-2">
             {[
-              { label: 'Multi-angle capture for accuracy', icon: Check },
-              { label: 'Auto-capture when position matches', icon: Check },
-              { label: 'Encrypted & deletable anytime', icon: Shield },
+              {
+                label: hasFaceProfile
+                  ? 'Single-selfie search for faster event matching'
+                  : 'Multi-angle capture for stronger face profile quality',
+                icon: Check,
+              },
+              {
+                label: hasFaceProfile
+                  ? 'Optional 5-angle refresh if your appearance changes'
+                  : 'Auto-capture when your head position matches',
+                icon: Check,
+              },
+              { label: 'Encrypted and deletable anytime', icon: Shield },
             ].map((item, index) => (
-              <div 
+              <div
                 key={index}
                 className="flex items-center gap-3 rounded-xl bg-card border border-border px-4 py-3"
               >
@@ -170,35 +231,54 @@ export default function FaceScanPage() {
             ))}
           </div>
 
-          {/* Spacer for mobile to push CTA down but keep it visible */}
           <div className="flex-1 min-h-4" />
 
-          {/* CTA Section - Always visible */}
           <div className="mt-4 pt-4 border-t border-border">
             <Button
               variant="primary"
               size="lg"
+              disabled={isLoadingProfile}
               onClick={() => setStage('consent')}
               className="w-full h-14 text-base"
             >
-              Start Face Scan
+              {isLoadingProfile
+                ? 'Loading...'
+                : scanMode === 'profile_setup'
+                ? 'Start 5-Angle Scan'
+                : 'Take Selfie to Search'}
               <ChevronRight className="h-5 w-5" />
             </Button>
+            {hasFaceProfile && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full mt-2"
+                onClick={() =>
+                  setScanMode((current) =>
+                    current === 'profile_setup' ? 'selfie_search' : 'profile_setup'
+                  )
+                }
+              >
+                {scanMode === 'profile_setup'
+                  ? 'Use quick selfie search instead'
+                  : 'Update face profile with 5-angle scan'}
+              </Button>
+            )}
             <p className="text-center text-xs text-muted-foreground mt-3">
-              ~30 seconds · Camera required
+              {scanMode === 'profile_setup'
+                ? '~30 seconds, 5 captures'
+                : '~10 seconds, 1 selfie capture'}
             </p>
           </div>
         </div>
       )}
 
-      {/* Consent Modal */}
       <ConsentModal
         isOpen={stage === 'consent'}
         onAccept={handleConsentAccept}
         onDecline={handleConsentDecline}
       />
 
-      {/* Scan Stage */}
       {stage === 'scan' && (
         <div className="space-y-4">
           {error && (
@@ -208,15 +288,21 @@ export default function FaceScanPage() {
           )}
 
           <div className="rounded-2xl border border-border bg-card p-4">
-            <GuidedFaceScanner
-              onComplete={handleScanComplete}
-              onCancel={() => setStage('intro')}
-            />
+            {scanMode === 'profile_setup' ? (
+              <GuidedFaceScanner
+                onComplete={handleGuidedScanComplete}
+                onCancel={() => setStage('intro')}
+              />
+            ) : (
+              <FaceScanner
+                onCapture={handleSelfieCapture}
+                onCancel={() => setStage('intro')}
+              />
+            )}
           </div>
         </div>
       )}
 
-      {/* Processing Stage */}
       {stage === 'processing' && (
         <div className="rounded-2xl border border-border bg-card p-12 text-center">
           <div className="relative mx-auto h-16 w-16">
@@ -225,12 +311,13 @@ export default function FaceScanPage() {
           </div>
           <h2 className="mt-6 text-lg font-semibold text-foreground">Processing</h2>
           <p className="mt-1 text-sm text-secondary">
-            Registering your face and finding matches...
+            {scanMode === 'profile_setup'
+              ? 'Updating your face profile and finding matches...'
+              : 'Finding your matches...'}
           </p>
         </div>
       )}
 
-      {/* Results Stage */}
       {stage === 'results' && (
         <div className="space-y-6">
           <div className="flex items-center justify-between">

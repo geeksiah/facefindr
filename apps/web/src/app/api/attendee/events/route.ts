@@ -19,8 +19,10 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Get events from explicit attendee registration signals.
-    const [{ data: consents }, { data: entitlements }] = await Promise.all([
+    const serviceClient = createServiceClient();
+
+    // Get events from explicit attendee registration signals and existing face matches.
+    const [{ data: consents }, { data: entitlements }, { data: matchedEventRows }] = await Promise.all([
       supabase
       .from('attendee_consents')
       .select(`
@@ -56,19 +58,23 @@ export async function GET() {
         )
       `)
       .eq('attendee_id', user.id),
+      serviceClient
+      .from('photo_drop_matches')
+      .select('event_id')
+      .eq('attendee_id', user.id),
     ]);
 
     // Combine and deduplicate events while tracking registration source.
     const eventMap = new Map<string, any>();
-    const sourceMap = new Map<string, Set<'consent' | 'entitlement'>>();
+    const sourceMap = new Map<string, Set<'consent' | 'entitlement' | 'match'>>();
 
-    const addEvent = (item: any, source: 'consent' | 'entitlement') => {
+    const addEvent = (item: any, source: 'consent' | 'entitlement' | 'match') => {
       if (!item?.event_id || !item?.events) return;
       const event = item.events;
       if (!eventMap.has(item.event_id)) {
         eventMap.set(item.event_id, event);
       }
-      const current = sourceMap.get(item.event_id) || new Set<'consent' | 'entitlement'>();
+      const current = sourceMap.get(item.event_id) || new Set<'consent' | 'entitlement' | 'match'>();
       current.add(source);
       sourceMap.set(item.event_id, current);
     };
@@ -76,7 +82,36 @@ export async function GET() {
     (consents || []).forEach((item: any) => addEvent(item, 'consent'));
     (entitlements || []).forEach((item: any) => addEvent(item, 'entitlement'));
 
-    const serviceClient = createServiceClient();
+    const matchedEventIds: string[] = Array.from(
+      new Set(
+        (matchedEventRows || [])
+          .map((row: any) => row?.event_id)
+          .filter((id): id is string => Boolean(id))
+      )
+    );
+    const missingMatchedEventIds = matchedEventIds.filter((eventId) => !eventMap.has(eventId));
+
+    if (missingMatchedEventIds.length > 0) {
+      const { data: matchedEvents } = await serviceClient
+        .from('events')
+        .select(`
+          id,
+          name,
+          event_date,
+          location,
+          cover_image_url,
+          status,
+          photographers (
+            display_name
+          )
+        `)
+        .in('id', missingMatchedEventIds);
+
+      (matchedEvents || []).forEach((event: any) =>
+        addEvent({ event_id: event.id, events: event }, 'match')
+      );
+    }
+
     const attendeeId = user.id;
     const matchesRes = await serviceClient
       .from('photo_drop_matches')
@@ -107,9 +142,15 @@ export async function GET() {
 
     // Format events
     const events = rawEvents.map((event: any) => {
-      const sources = sourceMap.get(event.id) || new Set<'consent' | 'entitlement'>();
+      const sources = sourceMap.get(event.id) || new Set<'consent' | 'entitlement' | 'match'>();
       const registrationSource =
-        sources.size === 2 ? 'both' : sources.has('entitlement') ? 'entitlement' : 'consent';
+        sources.has('consent') && sources.has('entitlement')
+          ? 'both'
+          : sources.has('entitlement')
+          ? 'entitlement'
+          : sources.has('consent')
+          ? 'consent'
+          : 'match';
       const coverPath = event.cover_image_url?.startsWith('/')
         ? event.cover_image_url.slice(1)
         : event.cover_image_url;

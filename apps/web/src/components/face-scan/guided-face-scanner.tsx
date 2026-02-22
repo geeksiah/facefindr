@@ -83,6 +83,8 @@ export function GuidedFaceScanner({
   const [modelLoaded, setModelLoaded] = useState(false);
   const [permissionBlocked, setPermissionBlocked] = useState(false);
   const [cameraMessage, setCameraMessage] = useState<string | null>(null);
+  const [autoStatusMessage, setAutoStatusMessage] = useState<string | null>(null);
+  const [showManualAssist, setShowManualAssist] = useState(false);
 
   const { confirm, ConfirmDialog } = useConfirm();
 
@@ -92,9 +94,26 @@ export function GuidedFaceScanner({
   const detectorRef = useRef<any>(null);
   const animationRef = useRef<number | null>(null);
   const holdStartRef = useRef<number | null>(null);
+  const noMatchFrameCountRef = useRef(0);
 
   const currentPosition = POSITION_ORDER[currentPositionIndex];
   const positionConfig = POSITIONS[currentPosition];
+
+  const pickKeypoint = useCallback((keypoints: any[], name: string, fallbackIndexes: number[]) => {
+    const named = keypoints.find((k: any) => k?.name === name);
+    if (named && typeof named.x === 'number' && typeof named.y === 'number') {
+      return named;
+    }
+
+    for (const index of fallbackIndexes) {
+      const point = keypoints[index];
+      if (point && typeof point.x === 'number' && typeof point.y === 'number') {
+        return point;
+      }
+    }
+
+    return null;
+  }, []);
 
   // Initialize camera
   const initializeCamera = useCallback(async () => {
@@ -183,6 +202,7 @@ export function GuidedFaceScanner({
     } catch (err) {
       console.warn('Face detection model failed to load, using manual capture mode:', err);
       setUseAutoCapture(false);
+       setAutoStatusMessage('Auto-capture is unavailable on this device. Use manual shutter.');
       return false;
     }
   }, []);
@@ -192,6 +212,9 @@ export function GuidedFaceScanner({
     setState('initializing');
     setError(null);
     setUseAutoCapture(false); // Start in manual mode, upgrade if model loads
+    setShowManualAssist(false);
+    setAutoStatusMessage('Loading auto-capture...');
+    noMatchFrameCountRef.current = 0;
 
     const cameraReady = await initializeCamera();
     if (!cameraReady) {
@@ -202,11 +225,15 @@ export function GuidedFaceScanner({
 
     // Camera is ready - show it immediately in manual mode
     setState('ready');
+    setAutoStatusMessage('Loading auto-capture...');
 
     // Load face detection model in background for auto-capture
     initializeDetector().then((loaded) => {
       if (loaded) {
         setUseAutoCapture(true);
+        setAutoStatusMessage('Auto-capture active');
+      } else {
+        setShowManualAssist(true);
       }
     });
   }, [initializeCamera, initializeDetector]);
@@ -239,31 +266,55 @@ export function GuidedFaceScanner({
           const face = faces[0];
           const keypoints = face.keypoints;
 
-          const noseTip = keypoints.find((k: any) => k.name === 'noseTip');
-          const leftEye = keypoints.find((k: any) => k.name === 'leftEye');
-          const rightEye = keypoints.find((k: any) => k.name === 'rightEye');
+          const noseTip = pickKeypoint(keypoints, 'noseTip', [1, 4, 168]);
+          const leftEyeOuter = pickKeypoint(keypoints, 'leftEye', [33, 133]);
+          const rightEyeOuter = pickKeypoint(keypoints, 'rightEye', [263, 362]);
 
-          if (noseTip && leftEye && rightEye) {
+          if (noseTip && leftEyeOuter && rightEyeOuter) {
             const eyeCenter = {
-              x: (leftEye.x + rightEye.x) / 2,
-              y: (leftEye.y + rightEye.y) / 2,
+              x: (leftEyeOuter.x + rightEyeOuter.x) / 2,
+              y: (leftEyeOuter.y + rightEyeOuter.y) / 2,
             };
-            const eyeWidth = Math.abs(rightEye.x - leftEye.x);
+            const eyeWidth = Math.abs(rightEyeOuter.x - leftEyeOuter.x);
             const yaw = (noseTip.x - eyeCenter.x) / (eyeWidth * 2);
             const pitch = (noseTip.y - eyeCenter.y) / (eyeWidth * 1.5);
 
             const config = POSITIONS[POSITION_ORDER[currentPositionIndex]];
             const yawMatch = yaw >= config.yawRange[0] && yaw <= config.yawRange[1];
             const pitchMatch = pitch >= config.pitchRange[0] && pitch <= config.pitchRange[1];
-
-            setPositionMatch(yawMatch && pitchMatch);
+            const match = yawMatch && pitchMatch;
+            setPositionMatch(match);
+            if (match) {
+              noMatchFrameCountRef.current = 0;
+              setShowManualAssist(false);
+              setAutoStatusMessage('Great, hold still for auto-capture');
+            } else {
+              noMatchFrameCountRef.current += 1;
+              if (noMatchFrameCountRef.current > 140) {
+                setShowManualAssist(true);
+                setAutoStatusMessage('Having trouble auto-matching. Use manual shutter below.');
+              }
+            }
+          } else {
+            noMatchFrameCountRef.current += 1;
+            setPositionMatch(false);
           }
         } else if (isRunning) {
           setFaceDetected(false);
           setPositionMatch(false);
+          noMatchFrameCountRef.current += 1;
+          if (noMatchFrameCountRef.current > 140) {
+            setShowManualAssist(true);
+            setAutoStatusMessage('Face not detected consistently. Use manual shutter below.');
+          }
         }
       } catch {
         // Silently handle detection errors
+        noMatchFrameCountRef.current += 1;
+        if (noMatchFrameCountRef.current > 140) {
+          setShowManualAssist(true);
+          setAutoStatusMessage('Auto-detection is unstable. Switch to manual capture.');
+        }
       }
 
       if (isRunning) {
@@ -279,7 +330,7 @@ export function GuidedFaceScanner({
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [state, useAutoCapture, modelLoaded, currentPositionIndex]);
+  }, [state, useAutoCapture, modelLoaded, currentPositionIndex, pickKeypoint]);
 
   // Auto-capture hold timer
   useEffect(() => {
@@ -305,6 +356,7 @@ export function GuidedFaceScanner({
       if (progress >= 1) {
         captureCurrentPosition();
         clearInterval(interval);
+        setAutoStatusMessage('Captured. Move to next pose.');
       }
     }, 50);
 
@@ -338,6 +390,8 @@ export function GuidedFaceScanner({
       const newCaptures = [...captures, imageData];
       setCaptures(newCaptures);
       setError(null);
+      noMatchFrameCountRef.current = 0;
+      setAutoStatusMessage(useAutoCapture ? 'Auto-capture active' : 'Manual shutter active');
 
       // Reset for next position
       setPositionMatch(false);
@@ -350,7 +404,7 @@ export function GuidedFaceScanner({
         void handleComplete(newCaptures);
       }
     }
-  }, [captures, currentPositionIndex, useAutoCapture, modelLoaded, positionMatch, positionConfig.label]);
+  }, [captures, currentPositionIndex, useAutoCapture, modelLoaded, positionMatch]);
 
   // Handle completion
   const handleComplete = async (allCaptures: string[]) => {
@@ -390,6 +444,8 @@ export function GuidedFaceScanner({
     setHoldProgress(0);
     setError(null);
     holdStartRef.current = null;
+    setAutoStatusMessage(null);
+    setShowManualAssist(false);
     void initialize();
   };
 
@@ -499,9 +555,9 @@ export function GuidedFaceScanner({
         )}
 
         {/* Status Bar */}
-        {state === 'ready' && (
-          <div className="absolute bottom-4 left-4 right-4">
-            <div
+      {state === 'ready' && (
+        <div className="absolute bottom-4 left-4 right-4">
+          <div
               className={`rounded-xl px-4 py-3 backdrop-blur-md transition-all ${
                 positionMatch
                   ? 'bg-success/90'
@@ -516,6 +572,9 @@ export function GuidedFaceScanner({
                   : positionConfig.instruction}
               </p>
             </div>
+            {autoStatusMessage && (
+              <p className="mt-2 text-xs text-white/90 text-center">{autoStatusMessage}</p>
+            )}
           </div>
         )}
 
@@ -596,15 +655,16 @@ export function GuidedFaceScanner({
       )}
 
       {/* Mode toggle */}
-      {state === 'ready' && modelLoaded && (
+      {state === 'ready' && (
         <div className="flex items-center justify-center gap-3 text-sm">
           <span className={!useAutoCapture ? 'text-foreground font-medium' : 'text-muted-foreground'}>
             Manual
           </span>
           <button
+            disabled={!modelLoaded}
             onClick={() => setUseAutoCapture(!useAutoCapture)}
             className={`relative h-6 w-11 rounded-full transition-colors ${
-              useAutoCapture ? 'bg-accent' : 'bg-muted'
+              !modelLoaded ? 'bg-muted/50 cursor-not-allowed' : useAutoCapture ? 'bg-accent' : 'bg-muted'
             }`}
           >
             <div
@@ -616,6 +676,11 @@ export function GuidedFaceScanner({
           <span className={useAutoCapture ? 'text-foreground font-medium' : 'text-muted-foreground'}>
             Auto-capture
           </span>
+        </div>
+      )}
+      {state === 'ready' && showManualAssist && (
+        <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-foreground text-center">
+          Auto-capture is taking too long for this pose. Use the shutter button below to continue.
         </div>
       )}
 

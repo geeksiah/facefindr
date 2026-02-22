@@ -12,6 +12,192 @@ import { createClient, createClientWithAccessToken, createServiceClient } from '
 // Supports both JSON and FormData formats
 // ============================================
 
+type SearchableEvent = {
+  id: string;
+  name: string;
+  event_date?: string | null;
+  location?: string | null;
+  status?: string | null;
+  is_public?: boolean | null;
+  allow_anonymous_scan?: boolean | null;
+  face_recognition_enabled?: boolean | null;
+};
+
+type EventMediaRow = {
+  id: string;
+  event_id: string;
+  thumbnail_path?: string | null;
+  storage_path?: string | null;
+  watermarked_path?: string | null;
+};
+
+type NormalizedMatch = {
+  id: string;
+  mediaId: string;
+  eventId: string;
+  eventName: string;
+  eventDate: string | null;
+  eventLocation: string | null;
+  thumbnailUrl: string;
+  thumbnail_path: string;
+  storage_path: string;
+  similarity: number;
+};
+
+const SIGNED_URL_TTL_SECONDS = 60 * 60;
+const SIGNED_URL_CHUNK_SIZE = 100;
+
+function cleanStoragePath(path?: string | null): string | null {
+  if (!path) return null;
+  return path.startsWith('/') ? path.slice(1) : path;
+}
+
+function decodeBase64Image(raw: string): Buffer {
+  const base64 = raw.includes('base64,') ? raw.split('base64,')[1] : raw;
+  return Buffer.from(base64, 'base64');
+}
+
+async function createSignedUrlMap(
+  serviceClient: any,
+  rawPaths: string[]
+): Promise<Map<string, string>> {
+  const uniquePaths = Array.from(
+    new Set(
+      rawPaths
+        .map((path) => cleanStoragePath(path))
+        .filter((path): path is string => Boolean(path))
+    )
+  );
+  const signedUrlMap = new Map<string, string>();
+  if (!uniquePaths.length) return signedUrlMap;
+
+  for (let i = 0; i < uniquePaths.length; i += SIGNED_URL_CHUNK_SIZE) {
+    const chunk = uniquePaths.slice(i, i + SIGNED_URL_CHUNK_SIZE);
+    const { data, error } = await serviceClient.storage
+      .from('media')
+      .createSignedUrls(chunk, SIGNED_URL_TTL_SECONDS);
+
+    if (error || !Array.isArray(data)) {
+      for (const path of chunk) {
+        const single = await serviceClient.storage
+          .from('media')
+          .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+        if (single.data?.signedUrl) {
+          signedUrlMap.set(path, single.data.signedUrl);
+        }
+      }
+      continue;
+    }
+
+    for (const row of data) {
+      if (!row?.path || !row?.signedUrl) continue;
+      signedUrlMap.set(row.path, row.signedUrl);
+    }
+  }
+
+  return signedUrlMap;
+}
+
+async function canUserAccessEvent(
+  serviceClient: any,
+  userId: string,
+  event: SearchableEvent
+): Promise<boolean> {
+  const isPublic = Boolean(event.is_public);
+  const allowAnonymousScan = event.allow_anonymous_scan !== false;
+
+  if (isPublic || allowAnonymousScan) {
+    return true;
+  }
+
+  const [{ data: consent }, { data: entitlement }] = await Promise.all([
+    serviceClient
+      .from('attendee_consents')
+      .select('id')
+      .eq('attendee_id', userId)
+      .eq('event_id', event.id)
+      .is('withdrawn_at', null)
+      .maybeSingle(),
+    serviceClient
+      .from('entitlements')
+      .select('id')
+      .eq('attendee_id', userId)
+      .eq('event_id', event.id)
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  return Boolean(consent?.id || entitlement?.id);
+}
+
+async function resolveSearchEvents(
+  serviceClient: any,
+  userId: string,
+  eventId: string | null
+): Promise<{ events: SearchableEvent[]; denied?: boolean }> {
+  if (eventId) {
+    const { data: event, error } = await serviceClient
+      .from('events')
+      .select(
+        'id, name, event_date, location, status, is_public, allow_anonymous_scan, face_recognition_enabled'
+      )
+      .eq('id', eventId)
+      .maybeSingle();
+
+    if (error || !event) {
+      return { events: [] };
+    }
+    if (event.face_recognition_enabled === false) {
+      return { events: [] };
+    }
+    if (event.status && !['active', 'closed'].includes(String(event.status))) {
+      return { events: [] };
+    }
+
+    const allowed = await canUserAccessEvent(serviceClient, userId, event as SearchableEvent);
+    if (!allowed) {
+      return { events: [], denied: true };
+    }
+
+    return { events: [event as SearchableEvent] };
+  }
+
+  const [{ data: consents }, { data: entitlements }] = await Promise.all([
+    serviceClient
+      .from('attendee_consents')
+      .select('event_id')
+      .eq('attendee_id', userId)
+      .is('withdrawn_at', null),
+    serviceClient
+      .from('entitlements')
+      .select('event_id')
+      .eq('attendee_id', userId),
+  ]);
+
+  const eventIds = Array.from(
+    new Set(
+      [...(consents || []), ...(entitlements || [])]
+        .map((row: any) => row?.event_id)
+        .filter((id): id is string => Boolean(id))
+    )
+  );
+
+  if (!eventIds.length) {
+    return { events: [] };
+  }
+
+  const { data: events } = await serviceClient
+    .from('events')
+    .select(
+      'id, name, event_date, location, status, is_public, allow_anonymous_scan, face_recognition_enabled'
+    )
+    .in('id', eventIds)
+    .eq('face_recognition_enabled', true)
+    .in('status', ['active', 'closed']);
+
+  return { events: (events || []) as SearchableEvent[] };
+}
+
 export async function POST(request: NextRequest) {
   // Rate limiting for face operations
   const clientIP = getClientIP(request);
@@ -35,6 +221,9 @@ export async function POST(request: NextRequest) {
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    if (user.user_metadata?.user_type !== 'attendee') {
+      return NextResponse.json({ error: 'Only attendees can search for face matches' }, { status: 403 });
     }
 
     let imageBuffer: Buffer;
@@ -75,117 +264,163 @@ export async function POST(request: NextRequest) {
       }
 
       // Convert base64 to buffer
-      imageBuffer = Buffer.from(image, 'base64');
+      imageBuffer = decodeBase64Image(String(image));
     }
 
     const serviceClient = createServiceClient();
-    const matches: Array<{
-      eventId: string;
-      eventName: string;
-      mediaId: string;
-      thumbnailUrl: string;
-      similarity: number;
-    }> = [];
+    const { events, denied } = await resolveSearchEvents(serviceClient, user.id, eventId);
 
-    // If specific event ID provided, search only that event
-    if (eventId) {
+    if (denied) {
+      return NextResponse.json({ error: 'Access denied for this event' }, { status: 403 });
+    }
+
+    if (!events.length) {
+      return NextResponse.json({
+        totalMatches: 0,
+        matches: [],
+        groupedMatches: {},
+        eventsSearched: 0,
+      });
+    }
+
+    const similarityByEventMedia = new Map<string, number>();
+    const mediaIdsByEvent = new Map<string, Set<string>>();
+
+    for (const event of events) {
       try {
         const { response: searchResult } = await searchEventCollectionWithFallback(
-          eventId,
+          event.id,
           imageBuffer,
           100,
-          80
+          88
         );
 
-        if (searchResult.FaceMatches && searchResult.FaceMatches.length > 0) {
-          // Get event details
-          const { data: event } = await supabase
-            .from('events')
-            .select('name')
-            .eq('id', eventId)
-            .single();
+        const faceMatches = searchResult.FaceMatches || [];
+        if (!faceMatches.length) continue;
 
-          // Get media details for matches
-          const mediaIds = searchResult.FaceMatches.map(m => m.Face?.ExternalImageId).filter(Boolean);
-          
-          const { data: mediaItems } = await serviceClient
-            .from('media')
-            .select('id, thumbnail_path, storage_path')
-            .in('id', mediaIds);
+        for (const faceMatch of faceMatches) {
+          const mediaId = faceMatch.Face?.ExternalImageId;
+          if (!mediaId) continue;
 
-          const mediaMap = new Map<string, any>((mediaItems as any[] | undefined)?.map((m: any) => [m.id, m]) || []);
-
-          for (const match of searchResult.FaceMatches) {
-            const mediaItem = mediaMap.get(match.Face?.ExternalImageId || '');
-            if (mediaItem) {
-              matches.push({
-                eventId,
-                eventName: event?.name || 'Unknown Event',
-                mediaId: mediaItem.id,
-                thumbnailUrl: mediaItem.thumbnail_path || mediaItem.storage_path,
-                similarity: match.Similarity || 0,
-              });
-            }
+          const similarity = Number(faceMatch.Similarity || 0);
+          const key = `${event.id}:${mediaId}`;
+          const existing = similarityByEventMedia.get(key) || 0;
+          if (similarity > existing) {
+            similarityByEventMedia.set(key, similarity);
           }
+
+          if (!mediaIdsByEvent.has(event.id)) {
+            mediaIdsByEvent.set(event.id, new Set<string>());
+          }
+          mediaIdsByEvent.get(event.id)!.add(mediaId);
         }
       } catch (error: any) {
-        if (error.name !== 'ResourceNotFoundException') {
-          console.error('Search error:', error);
-        }
-      }
-    } else {
-      // Search across all events with face recognition enabled
-      const { data: events } = await supabase
-        .from('events')
-        .select('id, name')
-        .eq('face_recognition_enabled', true)
-        .eq('status', 'active');
-
-      if (events && events.length > 0) {
-        for (const event of events) {
-          try {
-            const { response: searchResult } = await searchEventCollectionWithFallback(
-              event.id,
-              imageBuffer,
-              50,
-              80
-            );
-
-            if (searchResult.FaceMatches && searchResult.FaceMatches.length > 0) {
-              const mediaIds = searchResult.FaceMatches.map(m => m.Face?.ExternalImageId).filter(Boolean);
-              
-              const { data: mediaItems } = await serviceClient
-                .from('media')
-                .select('id, thumbnail_path, storage_path')
-                .in('id', mediaIds);
-
-              const mediaMap = new Map<string, any>((mediaItems as any[] | undefined)?.map((m: any) => [m.id, m]) || []);
-
-              for (const match of searchResult.FaceMatches) {
-                const mediaItem = mediaMap.get(match.Face?.ExternalImageId || '');
-                if (mediaItem) {
-                  matches.push({
-                    eventId: event.id,
-                    eventName: event.name,
-                    mediaId: mediaItem.id,
-                    thumbnailUrl: mediaItem.thumbnail_path || mediaItem.storage_path,
-                    similarity: match.Similarity || 0,
-                  });
-                }
-              }
-            }
-          } catch (error: any) {
-            // Collection might not exist for this event
-            if (error.name !== 'ResourceNotFoundException') {
-              console.error('Search error for event:', event.id, error);
-            }
-            continue;
-          }
+        if (error?.name !== 'ResourceNotFoundException') {
+          console.error('Face search failed for event', event.id, error);
         }
       }
     }
 
-    // Sort by similarity
+    const allMediaRows: EventMediaRow[] = [];
+    for (const event of events) {
+      const eventMediaIds = Array.from(mediaIdsByEvent.get(event.id) || []);
+      if (!eventMediaIds.length) continue;
+
+      const { data: mediaRows } = await serviceClient
+        .from('media')
+        .select('id, event_id, thumbnail_path, storage_path, watermarked_path')
+        .eq('event_id', event.id)
+        .in('id', eventMediaIds)
+        .is('deleted_at', null);
+
+      if (mediaRows?.length) {
+        allMediaRows.push(...(mediaRows as EventMediaRow[]));
+      }
+    }
+
+    if (!allMediaRows.length) {
+      return NextResponse.json({
+        totalMatches: 0,
+        matches: [],
+        groupedMatches: {},
+        eventsSearched: events.length,
+      });
+    }
+
+    const signedUrlMap = await createSignedUrlMap(
+      serviceClient,
+      allMediaRows
+        .flatMap((media) => [media.thumbnail_path || null, media.watermarked_path || null, media.storage_path || null])
+        .filter((path): path is string => typeof path === 'string' && path.length > 0)
+    );
+    const eventMap = new Map<string, SearchableEvent>(events.map((event) => [event.id, event]));
+
+    const matches: NormalizedMatch[] = [];
+    const upsertRows: Array<{
+      event_id: string;
+      media_id: string;
+      attendee_id: string;
+      similarity: number;
+      notified: boolean;
+    }> = [];
+
+    for (const media of allMediaRows) {
+      const event = eventMap.get(media.event_id);
+      if (!event) continue;
+
+      const similarity = similarityByEventMedia.get(`${media.event_id}:${media.id}`);
+      if (!similarity || similarity <= 0) continue;
+
+      const thumbnailPath =
+        cleanStoragePath(media.thumbnail_path) ||
+        cleanStoragePath(media.watermarked_path) ||
+        cleanStoragePath(media.storage_path);
+      const previewPath =
+        cleanStoragePath(media.watermarked_path) ||
+        cleanStoragePath(media.storage_path) ||
+        thumbnailPath;
+
+      if (!thumbnailPath || !previewPath) continue;
+
+      const thumbnailUrl = signedUrlMap.get(thumbnailPath);
+      const previewUrl = signedUrlMap.get(previewPath);
+      if (!thumbnailUrl || !previewUrl) continue;
+
+      matches.push({
+        id: media.id,
+        mediaId: media.id,
+        eventId: event.id,
+        eventName: event.name || 'Unknown Event',
+        eventDate: event.event_date || null,
+        eventLocation: event.location || null,
+        thumbnailUrl,
+        thumbnail_path: thumbnailUrl,
+        storage_path: previewUrl,
+        similarity: Math.round(similarity * 100) / 100,
+      });
+
+      upsertRows.push({
+        event_id: event.id,
+        media_id: media.id,
+        attendee_id: user.id,
+        similarity: Math.round(similarity * 100) / 100,
+        notified: false,
+      });
+    }
+
+    if (upsertRows.length > 0) {
+      const { error: upsertError } = await serviceClient
+        .from('photo_drop_matches')
+        .upsert(upsertRows, {
+          onConflict: 'event_id,media_id,attendee_id',
+          ignoreDuplicates: true,
+        });
+
+      if (upsertError) {
+        console.error('Failed to persist face matches:', upsertError);
+      }
+    }
+
     matches.sort((a, b) => b.similarity - a.similarity);
 
     // Group by event
@@ -201,6 +436,7 @@ export async function POST(request: NextRequest) {
       totalMatches: matches.length,
       matches,
       groupedMatches,
+      eventsSearched: events.length,
     });
 
   } catch (error) {

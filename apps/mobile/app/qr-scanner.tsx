@@ -41,7 +41,10 @@ export default function ScanScreen() {
   const [scanned, setScanned] = useState(false);
   const [flashEnabled, setFlashEnabled] = useState(false);
   const [showError, setShowError] = useState(false);
+  const [isResolvingScan, setIsResolvingScan] = useState(false);
+  const [scanStatus, setScanStatus] = useState('Point camera at an event QR code');
   const isHandlingScanRef = useRef(false);
+  const lastScanAtRef = useRef(0);
 
   useEffect(() => {
     (async () => {
@@ -78,11 +81,14 @@ export default function ScanScreen() {
     await buttonPress();
     setShowError(false);
     setScanned(false);
+    setIsResolvingScan(false);
+    setScanStatus('Point camera at an event QR code');
   };
 
   const handleCancel = async () => {
     await buttonPress();
     setShowError(false);
+    setIsResolvingScan(false);
     // Use setTimeout to ensure modal is closed before navigation
     setTimeout(() => {
       goBack();
@@ -166,9 +172,13 @@ export default function ScanScreen() {
   );
 
   const handleBarCodeScanned = async ({ data }: { type: string; data: string }) => {
-    if (scanned || isHandlingScanRef.current) return;
+    if (showError || isResolvingScan || isHandlingScanRef.current) return;
+    if (Date.now() - lastScanAtRef.current < 900) return;
+    lastScanAtRef.current = Date.now();
     isHandlingScanRef.current = true;
     setScanned(true);
+    setIsResolvingScan(true);
+    setScanStatus('QR detected. Validating...');
 
     // Parse the QR code data
     // Expected formats:
@@ -194,6 +204,7 @@ export default function ScanScreen() {
           ? parsedJson.token
           : null;
         if (jsonCode && ACCESS_CODE_PATTERN.test(jsonCode)) {
+          setScanStatus('Joining event...');
           const joined = await joinAndNavigate(jsonCode);
           if (joined) return;
         }
@@ -206,6 +217,7 @@ export default function ScanScreen() {
           ? parsedJson.slug
           : null;
         if (jsonEventKey) {
+          setScanStatus('Resolving event...');
           const ok = await navigateFromEventKey(jsonEventKey, jsonCode || undefined);
           if (ok) return;
         }
@@ -216,6 +228,7 @@ export default function ScanScreen() {
           ? parsedJson.link
           : null;
         if (jsonUrl) {
+          setScanStatus('Resolving event...');
           const ok = await navigateFromEventKey(jsonUrl, jsonCode || undefined);
           if (ok) return;
         }
@@ -225,6 +238,7 @@ export default function ScanScreen() {
 
       // Direct access code payload.
       if (ACCESS_CODE_PATTERN.test(payload)) {
+        setScanStatus('Joining event...');
         const joined = await joinAndNavigate(payload);
         if (joined) return;
       }
@@ -236,6 +250,7 @@ export default function ScanScreen() {
       const code = url.searchParams.get('code') || undefined;
 
       if (code && ACCESS_CODE_PATTERN.test(code)) {
+        setScanStatus('Joining event...');
         const joined = await joinAndNavigate(code);
         if (joined) return;
       }
@@ -297,6 +312,7 @@ export default function ScanScreen() {
       try {
         // Secondary fallback for plain slugs or short codes that are not valid URLs.
         const plainPayload = (data || '').trim();
+        setScanStatus('Trying fallback...');
         const ok = await navigateFromEventKey(plainPayload);
         if (ok) {
           return;
@@ -307,8 +323,13 @@ export default function ScanScreen() {
 
       await hapticError(); // Haptic feedback for error
       setShowError(true);
+      setScanStatus('Invalid QR. Try again.');
     } finally {
       isHandlingScanRef.current = false;
+      setIsResolvingScan(false);
+      if (!showError) {
+        setScanned(false);
+      }
     }
   };
 
@@ -344,9 +365,9 @@ export default function ScanScreen() {
         autofocus="on"
         enableTorch={flashEnabled}
         barcodeScannerSettings={{
-          barcodeTypes: ['qr'],
+          barcodeTypes: ['qr', 'pdf417', 'aztec'],
         }}
-        onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+        onBarcodeScanned={handleBarCodeScanned}
       />
 
       {/* Overlay */}
@@ -370,8 +391,14 @@ export default function ScanScreen() {
         {/* Bottom */}
         <View style={styles.overlaySection}>
           <Text style={styles.instructionText}>
-            Point your camera at an event QR code
+            {isResolvingScan ? 'Processing QR code...' : scanStatus}
           </Text>
+          <TouchableOpacity
+            style={styles.manualFallbackButton}
+            onPress={() => router.push('/enter-code')}
+          >
+            <Text style={styles.manualFallbackText}>Enter code manually</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -504,6 +531,18 @@ const styles = StyleSheet.create({
     fontSize: fontSize.base,
     textAlign: 'center',
     marginTop: spacing.lg,
+  },
+  manualFallbackButton: {
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.lg,
+    backgroundColor: 'rgba(255, 255, 255, 0.14)',
+  },
+  manualFallbackText: {
+    color: '#fff',
+    fontSize: fontSize.sm,
+    fontWeight: '600',
   },
   header: {
     position: 'absolute',

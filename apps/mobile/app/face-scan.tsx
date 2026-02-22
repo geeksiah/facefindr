@@ -4,7 +4,7 @@
  * Camera-based face scanning with 5-position guided capture.
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -53,6 +53,9 @@ const HEAD_POSITIONS = [
   { id: 'up', label: 'Up', instruction: 'Tilt head up slightly' },
   { id: 'down', label: 'Down', instruction: 'Tilt head down slightly' },
 ];
+
+const AUTO_CAPTURE_INTERVAL_MS = 900;
+const AUTO_CAPTURE_STABLE_FRAMES = 2;
 
 // Component to render SVG illustration for face position
 function FacePositionIllustration({ positionId }: { positionId: string }) {
@@ -172,6 +175,11 @@ interface CapturedPosition {
   base64: string;
 }
 
+interface FacePose {
+  yaw: number;
+  pitch: number;
+}
+
 type ScanStep = 'consent' | 'capture' | 'processing' | 'results' | 'error';
 
 export default function FaceScanScreen() {
@@ -188,6 +196,16 @@ export default function FaceScanScreen() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [facing, setFacing] = useState<'front' | 'back'>('front');
+  const [autoCaptureEnabled, setAutoCaptureEnabled] = useState(true);
+  const [autoStatus, setAutoStatus] = useState('Auto-capture active');
+  const [isAnalyzingFrame, setIsAnalyzingFrame] = useState(false);
+
+  const autoCaptureTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const analysisInFlightRef = useRef(false);
+  const captureInFlightRef = useRef(false);
+  const stableFrameCountRef = useRef(0);
+  const baselinePoseRef = useRef<FacePose | null>(null);
+  const lastCapturedPoseRef = useRef<FacePose | null>(null);
 
   // If image was passed in, skip to processing
   useEffect(() => {
@@ -204,18 +222,70 @@ export default function FaceScanScreen() {
 
   const currentPosition = HEAD_POSITIONS[currentPositionIndex];
 
-  const takePicture = async () => {
-    if (!cameraRef.current) return;
+  const stopAutoCaptureLoop = useCallback(() => {
+    if (autoCaptureTimerRef.current) {
+      clearInterval(autoCaptureTimerRef.current);
+      autoCaptureTimerRef.current = null;
+    }
+    analysisInFlightRef.current = false;
+    stableFrameCountRef.current = 0;
+  }, []);
+
+  const isPoseMatchingPosition = useCallback(
+    (positionId: string, pose: FacePose) => {
+      if (positionId === 'front') {
+        return Math.abs(pose.yaw) <= 14 && Math.abs(pose.pitch) <= 14;
+      }
+
+      const baseline = baselinePoseRef.current;
+      if (!baseline) {
+        return false;
+      }
+
+      const yawDeltaFromBaseline = Math.abs(pose.yaw - baseline.yaw);
+      const pitchDeltaFromBaseline = Math.abs(pose.pitch - baseline.pitch);
+      const previousPose = lastCapturedPoseRef.current;
+
+      if (positionId === 'left' || positionId === 'right') {
+        if (yawDeltaFromBaseline < 10) return false;
+        if (previousPose && Math.abs(pose.yaw - previousPose.yaw) < 7) return false;
+        return true;
+      }
+
+      if (positionId === 'up' || positionId === 'down') {
+        if (pitchDeltaFromBaseline < 8) return false;
+        if (previousPose && Math.abs(pose.pitch - previousPose.pitch) < 6) return false;
+        return true;
+      }
+
+      return false;
+    },
+    []
+  );
+
+  const takePicture = async (autoTriggered = false, analyzedPose?: FacePose) => {
+    if (!cameraRef.current || captureInFlightRef.current) return;
+    captureInFlightRef.current = true;
 
     try {
-      const photo = await cameraRef.current.takePictureAsync({
+      const photo: any = await cameraRef.current.takePictureAsync({
         quality: 0.8,
         base64: true,
-      });
+      } as any);
 
       if (photo?.uri && photo?.base64) {
-        await faceDetected(); // Haptic feedback when face is detected/captured
-        
+        await faceDetected();
+        if (!autoTriggered) {
+          await selection();
+        }
+
+        if (currentPosition.id === 'front' && analyzedPose) {
+          baselinePoseRef.current = analyzedPose;
+        }
+        if (analyzedPose) {
+          lastCapturedPoseRef.current = analyzedPose;
+        }
+
         const newCapture: CapturedPosition = {
           id: currentPosition.id,
           uri: photo.uri,
@@ -224,12 +294,12 @@ export default function FaceScanScreen() {
 
         const updatedCaptures = [...capturedPositions, newCapture];
         setCapturedPositions(updatedCaptures);
+        stableFrameCountRef.current = 0;
+        setAutoStatus(autoCaptureEnabled ? 'Auto-capture active' : 'Manual mode');
 
-        // Move to next position or process
         if (currentPositionIndex < HEAD_POSITIONS.length - 1) {
           setCurrentPositionIndex(currentPositionIndex + 1);
         } else {
-          // All positions captured, process
           setStep('processing');
           await processAllImages(updatedCaptures);
         }
@@ -238,8 +308,102 @@ export default function FaceScanScreen() {
       console.error('Error taking picture:', err);
       await hapticError();
       Alert.alert('Error', 'Failed to capture photo. Please try again.');
+    } finally {
+      captureInFlightRef.current = false;
     }
   };
+
+  const analyzeCurrentFrame = useCallback(async () => {
+    if (!cameraRef.current || analysisInFlightRef.current || captureInFlightRef.current) return;
+    analysisInFlightRef.current = true;
+    setIsAnalyzingFrame(true);
+    let frameUriToDelete: string | null = null;
+
+    try {
+      const frame: any = await cameraRef.current.takePictureAsync({
+        quality: 0.35,
+        base64: true,
+        skipProcessing: true,
+      } as any);
+      frameUriToDelete = frame?.uri || null;
+
+      if (!frame?.base64) {
+        stableFrameCountRef.current = 0;
+        setAutoStatus('Align your face inside the guide');
+        return;
+      }
+
+      const response = await fetch(`${getApiBaseUrl()}/api/faces/analyze`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({ image: frame.base64 }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      const primary = payload?.primaryFace;
+      const confidence = Number(primary?.confidence || 0);
+      const hasFace = Boolean(payload?.faceDetected) && confidence >= 85;
+
+      if (!hasFace) {
+        stableFrameCountRef.current = 0;
+        setAutoStatus('No clear face detected. Keep your face in frame.');
+        return;
+      }
+
+      const pose: FacePose = {
+        yaw: Number(primary?.pose?.yaw || 0),
+        pitch: Number(primary?.pose?.pitch || 0),
+      };
+      const positionMatch = isPoseMatchingPosition(currentPosition.id, pose);
+      if (!positionMatch) {
+        stableFrameCountRef.current = 0;
+        setAutoStatus(`Hold the ${currentPosition.label.toLowerCase()} pose`);
+        return;
+      }
+
+      stableFrameCountRef.current += 1;
+      const remaining = AUTO_CAPTURE_STABLE_FRAMES - stableFrameCountRef.current;
+      if (remaining > 0) {
+        setAutoStatus(`Hold still... ${remaining}`);
+        return;
+      }
+
+      stableFrameCountRef.current = 0;
+      setAutoStatus('Captured automatically');
+      await takePicture(true, pose);
+    } catch (error) {
+      console.error('Auto capture analyze error:', error);
+      stableFrameCountRef.current = 0;
+      setAutoStatus('Auto-capture unavailable. Use manual shutter.');
+      setAutoCaptureEnabled(false);
+    } finally {
+      if (frameUriToDelete) {
+        void FileSystem.deleteAsync(frameUriToDelete, { idempotent: true }).catch(() => {});
+      }
+      setIsAnalyzingFrame(false);
+      analysisInFlightRef.current = false;
+    }
+  }, [currentPosition.id, currentPosition.label, isPoseMatchingPosition, session?.access_token]);
+
+  useEffect(() => {
+    stopAutoCaptureLoop();
+
+    if (step !== 'capture' || !autoCaptureEnabled || !permission?.granted) {
+      return;
+    }
+
+    setAutoStatus('Auto-capture active');
+    autoCaptureTimerRef.current = setInterval(() => {
+      void analyzeCurrentFrame();
+    }, AUTO_CAPTURE_INTERVAL_MS);
+
+    return () => {
+      stopAutoCaptureLoop();
+    };
+  }, [analyzeCurrentFrame, autoCaptureEnabled, permission?.granted, step, stopAutoCaptureLoop]);
 
   const processSingleImage = async (imageUri: string) => {
     setIsProcessing(true);
@@ -344,10 +508,16 @@ export default function FaceScanScreen() {
   };
 
   const retryCapture = () => {
+    stopAutoCaptureLoop();
     setCapturedPositions([]);
     setCurrentPositionIndex(0);
     setMatchedPhotos([]);
     setErrorMessage(null);
+    baselinePoseRef.current = null;
+    lastCapturedPoseRef.current = null;
+    stableFrameCountRef.current = 0;
+    setAutoCaptureEnabled(true);
+    setAutoStatus('Auto-capture active');
     setStep('capture');
   };
 
@@ -356,7 +526,17 @@ export default function FaceScanScreen() {
     setFacing((current) => (current === 'front' ? 'back' : 'front'));
   };
 
+  const toggleAutoCapture = async () => {
+    await selection();
+    setAutoCaptureEnabled((current) => {
+      const next = !current;
+      setAutoStatus(next ? 'Auto-capture active' : 'Manual mode');
+      return next;
+    });
+  };
+
   const handleCancelCapture = () => {
+    stopAutoCaptureLoop();
     Alert.alert(
       'Cancel Scan?',
       'Are you sure you want to cancel? Your progress will be lost.',
@@ -372,6 +552,7 @@ export default function FaceScanScreen() {
   };
 
   const handleCancelSearch = () => {
+    stopAutoCaptureLoop();
     Alert.alert(
       'Cancel Search?',
       'Are you sure you want to stop searching? You can always try again later.',
@@ -528,6 +709,29 @@ export default function FaceScanScreen() {
               ))}
             </View>
 
+            <View style={styles.autoCaptureBar}>
+              <Text style={styles.autoCaptureStatus}>
+                {isAnalyzingFrame ? 'Analyzing face...' : autoStatus}
+              </Text>
+              <Pressable
+                onPress={toggleAutoCapture}
+                style={({ pressed }) => [
+                  styles.autoCaptureToggle,
+                  autoCaptureEnabled && styles.autoCaptureToggleActive,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.autoCaptureToggleText,
+                    autoCaptureEnabled && styles.autoCaptureToggleTextActive,
+                  ]}
+                >
+                  {autoCaptureEnabled ? 'Auto: ON' : 'Manual'}
+                </Text>
+              </Pressable>
+            </View>
+
             {/* Face guide */}
             <View style={styles.faceGuideContainer}>
               <View style={styles.faceGuide}>
@@ -559,7 +763,9 @@ export default function FaceScanScreen() {
             {/* Capture button */}
             <View style={styles.captureContainer}>
               <Pressable 
-                onPress={takePicture} 
+                onPress={() => {
+                  void takePicture(false);
+                }}
                 style={({ pressed }) => [
                   styles.captureButton,
                   pressed && styles.captureButtonPressed,
@@ -567,6 +773,11 @@ export default function FaceScanScreen() {
               >
                 <View style={styles.captureButtonInner} />
               </Pressable>
+              <Text style={styles.captureHint}>
+                {autoCaptureEnabled
+                  ? 'Auto-capture will shutter when pose is stable. Tap manually anytime.'
+                  : 'Manual mode: tap the shutter for each pose.'}
+              </Text>
             </View>
           </SafeAreaView>
         </CameraView>
@@ -856,6 +1067,40 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: spacing.md,
   },
+  autoCaptureBar: {
+    marginTop: spacing.sm,
+    marginHorizontal: spacing.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.lg,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  autoCaptureStatus: {
+    flex: 1,
+    color: '#fff',
+    fontSize: fontSize.xs,
+  },
+  autoCaptureToggle: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.full,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  autoCaptureToggleActive: {
+    backgroundColor: colors.accent,
+  },
+  autoCaptureToggleText: {
+    color: '#fff',
+    fontSize: fontSize.xs,
+    fontWeight: '600',
+  },
+  autoCaptureToggleTextActive: {
+    color: '#fff',
+  },
   positionDot: {
     width: 10,
     height: 10,
@@ -935,6 +1180,13 @@ const styles = StyleSheet.create({
     height: 64,
     borderRadius: 32,
     backgroundColor: '#fff',
+  },
+  captureHint: {
+    marginTop: spacing.sm,
+    color: '#fff',
+    fontSize: fontSize.xs,
+    textAlign: 'center',
+    paddingHorizontal: spacing.lg,
   },
   processingContainer: {
     flex: 1,

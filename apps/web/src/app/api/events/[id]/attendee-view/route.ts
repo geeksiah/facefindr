@@ -5,6 +5,42 @@ import { NextRequest, NextResponse } from 'next/server';
 import { formatEventDateDisplay } from '@/lib/events/time';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
+const SIGNED_URL_TTL_SECONDS = 60 * 60;
+
+function cleanStoragePath(path?: string | null) {
+  if (!path) return null;
+  return path.startsWith('/') ? path.slice(1) : path;
+}
+
+async function createSignedUrlMap(serviceClient: any, rawPaths: string[]) {
+  const paths = Array.from(new Set(rawPaths.map((path) => cleanStoragePath(path)).filter(Boolean))) as string[];
+  const map = new Map<string, string>();
+  if (!paths.length) return map;
+
+  const { data, error } = await serviceClient.storage
+    .from('media')
+    .createSignedUrls(paths, SIGNED_URL_TTL_SECONDS);
+
+  if (!error && Array.isArray(data)) {
+    for (const row of data) {
+      if (!row?.path || !row?.signedUrl) continue;
+      map.set(row.path, row.signedUrl);
+    }
+  }
+
+  for (const path of paths) {
+    if (map.has(path)) continue;
+    const single = await serviceClient.storage
+      .from('media')
+      .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+    if (single.data?.signedUrl) {
+      map.set(path, single.data.signedUrl);
+    }
+  }
+
+  return map;
+}
+
 // ============================================
 // GET EVENT DETAILS FOR ATTENDEE VIEW
 // ============================================
@@ -119,7 +155,7 @@ export async function GET(
     // Event must be active and either:
     // 1. Public (is_public = true), OR
     // 2. User has consent for this event
-    if (event.status !== 'active') {
+    if (!['active', 'closed', 'expired'].includes(String(event.status || '').toLowerCase())) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 });
     }
 
@@ -175,18 +211,15 @@ export async function GET(
       .eq('event_id', eventId);
     const purchasedMediaIds = new Set(entitlements?.map((entry) => entry.media_id) || []);
 
-    const toCleanPath = (path: string | null | undefined) =>
-      path ? (path.startsWith('/') ? path.slice(1) : path) : null;
-
     const resolveThumbnailPath = (media: any) =>
-      toCleanPath(media.thumbnail_path) ||
-      toCleanPath(media.watermarked_path) ||
-      toCleanPath(media.storage_path);
+      cleanStoragePath(media.thumbnail_path) ||
+      cleanStoragePath(media.watermarked_path) ||
+      cleanStoragePath(media.storage_path);
 
     const resolvePreviewPath = (media: any, isPurchased: boolean) => {
-      const originalPath = toCleanPath(media.storage_path);
-      const watermarkPath = toCleanPath(media.watermarked_path);
-      const thumbnailPath = toCleanPath(media.thumbnail_path);
+      const originalPath = cleanStoragePath(media.storage_path);
+      const watermarkPath = cleanStoragePath(media.watermarked_path);
+      const thumbnailPath = cleanStoragePath(media.thumbnail_path);
 
       if (pricingIsFree || isPurchased) {
         return originalPath || watermarkPath || thumbnailPath;
@@ -207,13 +240,7 @@ export async function GET(
       )
     ) as string[];
 
-    const signedPathEntries = await Promise.all(
-      uniquePaths.map(async (path) => {
-        const { data } = await serviceClient.storage.from('media').createSignedUrl(path, 3600);
-        return [path, data?.signedUrl || null] as const;
-      })
-    );
-    const signedPathMap = new Map<string, string | null>(signedPathEntries);
+    const signedPathMap = await createSignedUrlMap(serviceClient, uniquePaths);
     const photographer = event.photographers as any;
 
     const { count: totalPhotos } = await serviceClient

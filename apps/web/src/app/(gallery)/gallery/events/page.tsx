@@ -48,6 +48,8 @@ export default function MyEventsPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const scanTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scanInFlightRef = useRef(false);
+  const barcodeDetectorRef = useRef<any>(null);
+  const lastDecodedAtRef = useRef(0);
 
   const refreshEvents = useCallback(async () => {
     try {
@@ -144,6 +146,8 @@ export default function MyEventsPage() {
     }
 
     scanInFlightRef.current = false;
+    barcodeDetectorRef.current = null;
+    lastDecodedAtRef.current = 0;
 
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
@@ -275,9 +279,30 @@ export default function MyEventsPage() {
         video.setAttribute('playsinline', 'true');
         await video.play();
 
-        const jsQR = (await import('jsqr')).default;
-        if (typeof jsQR !== 'function') {
-          throw new Error('QR scanner engine failed to load.');
+        let jsQR: any = null;
+        try {
+          const jsQrModule: any = await import('jsqr');
+          jsQR = jsQrModule?.default || jsQrModule;
+        } catch {
+          jsQR = null;
+        }
+
+        const maybeBarcodeDetector = (window as any).BarcodeDetector;
+        if (typeof maybeBarcodeDetector === 'function') {
+          try {
+            const supportedFormats: string[] = await maybeBarcodeDetector.getSupportedFormats?.();
+            const canScanQr =
+              !Array.isArray(supportedFormats) || supportedFormats.includes('qr_code');
+            if (canScanQr) {
+              barcodeDetectorRef.current = new maybeBarcodeDetector({ formats: ['qr_code'] });
+            }
+          } catch {
+            barcodeDetectorRef.current = null;
+          }
+        }
+
+        if (typeof jsQR !== 'function' && !barcodeDetectorRef.current) {
+          throw new Error('No QR scanner engine is available in this browser.');
         }
 
         const context = canvas.getContext('2d', { willReadFrequently: true });
@@ -308,13 +333,30 @@ export default function MyEventsPage() {
             context.drawImage(video, 0, 0, width, height);
 
             const tryDecode = (sx: number, sy: number, sw: number, sh: number): string | null => {
+              if (typeof jsQR !== 'function') return null;
               if (sw < 80 || sh < 80) return null;
               const imageData = context.getImageData(sx, sy, sw, sh);
               const result = jsQR(imageData.data, sw, sh, { inversionAttempts: 'attemptBoth' });
               return result?.data || null;
             };
 
-            let qrValue = tryDecode(0, 0, width, height);
+            if (Date.now() - lastDecodedAtRef.current < 1200) {
+              return;
+            }
+
+            let qrValue: string | null = null;
+            if (barcodeDetectorRef.current) {
+              try {
+                const barcodes = await barcodeDetectorRef.current.detect(video);
+                qrValue = barcodes?.[0]?.rawValue || null;
+              } catch {
+                qrValue = null;
+              }
+            }
+
+            if (!qrValue) {
+              qrValue = tryDecode(0, 0, width, height);
+            }
             if (!qrValue) {
               const cropRatios = [0.85, 0.7, 0.55];
               for (const ratio of cropRatios) {
@@ -328,6 +370,7 @@ export default function MyEventsPage() {
             }
 
             if (qrValue) {
+              lastDecodedAtRef.current = Date.now();
               await handleQrPayload(qrValue);
             }
           } finally {
