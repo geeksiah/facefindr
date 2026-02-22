@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { deleteFaces } from '@/lib/aws/rekognition';
 import { dispatchInAppNotification } from '@/lib/notifications/dispatcher';
 import { getPhotographerIdCandidates, resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
-import { checkLimit } from '@/lib/subscription/enforcement';
+import { checkFeature, checkLimit } from '@/lib/subscription/enforcement';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 const BYTES_PER_GB = 1024 * 1024 * 1024;
@@ -204,9 +204,9 @@ export async function uploadPhotos(formData: FormData) {
   // Verify event access - either owner or collaborator with upload permission
   const { data: event } = await supabase
     .from('events')
-    .select('id, name, public_slug, status, photographer_id, face_recognition_enabled')
-    .eq('id', eventId)
-    .single();
+      .select('id, name, public_slug, status, photographer_id, face_recognition_enabled, watermark_enabled')
+      .eq('id', eventId)
+      .single();
 
   if (!event) {
     return { error: 'Event not found' };
@@ -342,13 +342,38 @@ export async function uploadPhotos(formData: FormData) {
       return { error: 'Failed to create media record' };
     }
 
-    // Trigger face processing in background (non-blocking)
+    const priority = (await checkFeature(event.photographer_id, 'priority_processing')) ? 'high' : 'normal';
+
     if (event.face_recognition_enabled) {
-      // We'll call the API route to process faces
-      // This happens async so upload doesn't wait
-      processFacesAsync(media.id, eventId).catch((err) => {
-        console.error('Background face processing error:', err);
-      });
+      serviceClient
+        .rpc('enqueue_media_processing_job', {
+          p_media_id: media.id,
+          p_job_type: 'face_index',
+          p_priority: priority,
+          p_payload: { source: 'event_upload' },
+        })
+        .catch((err) => {
+          console.error('Failed to enqueue face-index job, falling back to direct processing:', err);
+          processFacesAsync(media.id, eventId).catch((fallbackErr) => {
+            console.error('Background face processing fallback error:', fallbackErr);
+          });
+        });
+    }
+
+    if (event.watermark_enabled) {
+      const canUseCustomWatermark = await checkFeature(event.photographer_id, 'custom_watermark');
+      if (canUseCustomWatermark) {
+        serviceClient
+          .rpc('enqueue_media_processing_job', {
+            p_media_id: media.id,
+            p_job_type: 'watermark_generate',
+            p_priority: priority,
+            p_payload: { source: 'event_upload' },
+          })
+          .catch((err) => {
+            console.error('Failed to enqueue watermark job:', err);
+          });
+      }
     }
 
     notifyEventSubscribersAboutNewPhotos(serviceClient, event as any, media.id).catch((err) => {

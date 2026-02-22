@@ -39,20 +39,43 @@ const API_URL = getApiBaseUrl();
 
 interface Notification {
   id: string;
-  type: string;
+  templateCode: string;
+  category: 'transactions' | 'photos' | 'orders' | 'social' | 'system' | 'marketing';
   title: string;
   message: string;
+  actionUrl: string | null;
+  details: Record<string, any>;
   isRead: boolean;
   createdAt: string;
   data?: Record<string, any>;
 }
 
 const NOTIFICATION_ICONS: Record<string, { icon: React.ComponentType<any>; color: string; bg: string }> = {
-  photo_drop: { icon: ImageIcon, color: colors.accent, bg: colors.accent + '15' },
-  purchase: { icon: ShoppingBag, color: '#10b981', bg: '#10b98115' },
-  promo: { icon: Tag, color: '#f59e0b', bg: '#f59e0b15' },
+  photos: { icon: ImageIcon, color: colors.accent, bg: colors.accent + '15' },
+  orders: { icon: ShoppingBag, color: '#10b981', bg: '#10b98115' },
+  transactions: { icon: ShoppingBag, color: '#10b981', bg: '#10b98115' },
+  marketing: { icon: Tag, color: '#f59e0b', bg: '#f59e0b15' },
+  social: { icon: Bell, color: '#8b5cf6', bg: '#8b5cf615' },
   system: { icon: Bell, color: '#8b5cf6', bg: '#8b5cf615' },
 };
+
+function mapActionUrlToMobileRoute(actionUrl: string | null, details: Record<string, any>): string | null {
+  const eventId = details?.eventId || details?.event_id || null;
+  if (eventId) return `/event/${eventId}`;
+  if (!actionUrl) return null;
+
+  if (actionUrl.startsWith('/gallery/events/')) {
+    const id = actionUrl.split('/').pop();
+    return id ? `/event/${id}` : null;
+  }
+  if (actionUrl.startsWith('/dashboard/events/')) {
+    const id = actionUrl.split('/').pop();
+    return id ? `/event/${id}` : null;
+  }
+  if (actionUrl === '/dashboard/billing') return '/settings/billing';
+  if (actionUrl.startsWith('/p/') || actionUrl.startsWith('/u/')) return actionUrl;
+  return null;
+}
 
 export default function NotificationsScreen() {
   const router = useRouter();
@@ -79,9 +102,12 @@ export default function NotificationsScreen() {
       setNotifications(
         (payload.notifications || []).map((item: any) => ({
           id: item.id,
-          type: item.template_code || item.templateCode || item.channel || 'system',
-          title: item.subject || 'Notification',
+          templateCode: item.templateCode || item.template_code || 'system',
+          category: (item.category || 'system') as Notification['category'],
+          title: item.title || item.subject || 'Notification',
           message: item.body || '',
+          actionUrl: item.actionUrl || item.action_url || null,
+          details: item.details || {},
           isRead: Boolean(item.read_at || item.readAt),
           createdAt: item.created_at || item.createdAt || new Date().toISOString(),
           data: item.metadata || {},
@@ -116,9 +142,12 @@ export default function NotificationsScreen() {
           // Add new notification at the top
           const newNotification: Notification = {
             id: payload.new.id,
-            type: payload.new.template_code || payload.new.type || payload.new.channel || 'system',
+            templateCode: payload.new.template_code || 'system',
+            category: (payload.new.category || 'system') as Notification['category'],
             title: payload.new.subject || payload.new.title || 'Notification',
             message: payload.new.body || payload.new.message || '',
+            actionUrl: payload.new.action_url || null,
+            details: payload.new.details || {},
             isRead: Boolean(payload.new.read_at),
             createdAt: payload.new.created_at,
             data: payload.new.metadata || payload.new.data,
@@ -227,19 +256,35 @@ export default function NotificationsScreen() {
   };
 
   const handleNotificationPress = (notification: Notification) => {
-    markAsRead(notification.id);
+    void markAsRead(notification.id);
 
-    if (notification.type === 'photo_drop' && notification.data?.eventId) {
-      router.push(`/event/${notification.data.eventId}` as any);
-    } else if (notification.type === 'purchase' && notification.data?.orderId) {
-      router.push(`/order/${notification.data.orderId}` as any);
+    const route = mapActionUrlToMobileRoute(notification.actionUrl, notification.details);
+    if (route) {
+      router.push(route as any);
+      return;
     }
+
+    const amount = notification.details?.amount || null;
+    const reference =
+      notification.details?.transactionId ||
+      notification.details?.transaction_id ||
+      notification.details?.orderId ||
+      notification.details?.order_id ||
+      null;
+    const summary = [
+      amount ? `Amount: ${amount}` : null,
+      reference ? `Reference: ${reference}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    Alert.alert(notification.title, summary || notification.message);
   };
 
   const unreadCount = notifications.filter((n) => !n.isRead).length;
 
   const renderNotification = useCallback(({ item, index }: { item: Notification; index: number }) => {
-    const config = NOTIFICATION_ICONS[item.type] || NOTIFICATION_ICONS.system;
+    const config = NOTIFICATION_ICONS[item.category] || NOTIFICATION_ICONS.system;
     const Icon = config.icon;
 
     return (

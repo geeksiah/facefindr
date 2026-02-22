@@ -68,6 +68,11 @@ export default async function DashboardLayout({
     subscriptions?.find((row: any) => String(row.plan_code || '').toLowerCase() !== 'free') ||
     subscriptions?.[0];
   const planCode = toSidebarPlan((selectedSubscription as any)?.plan_code);
+  const { data: advancedAnalyticsFlag } = await supabase.rpc('check_feature', {
+    p_photographer_id: creatorId,
+    p_feature: 'advanced_analytics',
+  });
+  const advancedAnalyticsEnabled = advancedAnalyticsFlag === true;
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
@@ -79,6 +84,7 @@ export default async function DashboardLayout({
           profilePhotoUrl: profile?.profile_photo_url,
           faceTag: profile?.face_tag,
           plan: planCode,
+          advancedAnalyticsEnabled,
         }}
       />
 

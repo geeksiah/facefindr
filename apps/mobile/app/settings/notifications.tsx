@@ -21,8 +21,11 @@ import { Button, Card } from '@/components/ui';
 import { usePushNotifications } from '@/hooks';
 import { useAuthStore } from '@/stores/auth-store';
 import { supabase } from '@/lib/supabase';
+import { getApiBaseUrl } from '@/lib/api-base';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 import { updateHapticPreferenceCache } from '@/lib/haptics';
+
+const API_URL = getApiBaseUrl();
 
 interface NotificationSettings {
   photoDrops: boolean;
@@ -35,7 +38,7 @@ interface NotificationSettings {
 export default function NotificationSettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { profile } = useAuthStore();
+  const { profile, session } = useAuthStore();
   const { isRegistered, expoPushToken, error: pushError } = usePushNotifications();
   
   const [settings, setSettings] = useState<NotificationSettings>({
@@ -48,25 +51,55 @@ export default function NotificationSettingsScreen() {
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    loadSettings();
+    void loadSettings();
   }, []);
+
+  const isCreator = profile?.userType === 'creator';
+  const settingsEndpoint = isCreator ? '/api/creator/notification-settings' : '/api/attendee/notification-settings';
 
   const loadSettings = async () => {
     try {
-      const { data } = await supabase
-        .from('user_notification_preferences')
-        .select('*')
-        .eq('user_id', profile?.id)
-        .single();
+      if (!session?.access_token || !API_URL) return;
 
-      if (data) {
-        setSettings({
-          photoDrops: data.photo_match_enabled ?? data.photo_drop_enabled ?? true,
-          purchases: data.order_updates_enabled ?? true,
-          promotions: data.marketing_updates_enabled ?? data.marketing_enabled ?? false,
-          reminders: data.event_reminder_enabled ?? data.event_updates_enabled ?? true,
-          hapticFeedback: data.haptic_feedback_enabled ?? true,
-        });
+      const response = await fetch(`${API_URL}${settingsEndpoint}`, {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || 'Failed to load notification settings');
+      }
+
+      const data = payload?.settings || payload;
+      if (isCreator) {
+        setSettings((prev) => ({
+          ...prev,
+          photoDrops: data.newPhotoSale ?? prev.photoDrops,
+          purchases: data.payoutCompleted ?? prev.purchases,
+          promotions: data.marketingEmails ?? prev.promotions,
+          reminders: data.eventReminder ?? prev.reminders,
+        }));
+      } else {
+        setSettings((prev) => ({
+          ...prev,
+          photoDrops: data.photoMatches ?? prev.photoDrops,
+          purchases: data.eventUpdates ?? prev.purchases,
+          promotions: prev.promotions,
+          reminders: data.eventUpdates ?? prev.reminders,
+        }));
+      }
+
+      const { data: localPrefs } = await supabase
+        .from('user_notification_preferences')
+        .select('haptic_feedback_enabled')
+        .eq('user_id', profile?.id)
+        .maybeSingle();
+      if (localPrefs) {
+        setSettings((prev) => ({
+          ...prev,
+          hapticFeedback: localPrefs.haptic_feedback_enabled ?? prev.hapticFeedback,
+        }));
       }
     } catch (err) {
       console.error('Error loading notification settings:', err);
@@ -77,29 +110,49 @@ export default function NotificationSettingsScreen() {
     setSettings((prev) => ({ ...prev, [key]: value }));
 
     try {
-      const payload: Record<string, unknown> = {
-        user_id: profile?.id,
-        updated_at: new Date().toISOString(),
-      };
+      if (key !== 'hapticFeedback' && session?.access_token && API_URL) {
+        let apiBody: Record<string, unknown> = {};
+        if (isCreator) {
+          if (key === 'photoDrops') apiBody = { newPhotoSale: value };
+          if (key === 'purchases') apiBody = { payoutCompleted: value };
+          if (key === 'promotions') apiBody = { marketingEmails: value };
+          if (key === 'reminders') apiBody = { eventReminder: value };
+        } else {
+          if (key === 'photoDrops') apiBody = { photoMatches: value };
+          if (key === 'purchases') apiBody = { eventUpdates: value };
+          if (key === 'promotions') apiBody = {};
+          if (key === 'reminders') apiBody = { eventUpdates: value };
+        }
 
-      if (key === 'photoDrops') {
-        payload.photo_match_enabled = value;
-        payload.photo_drop_enabled = value; // legacy compatibility
-      } else if (key === 'purchases') {
-        payload.order_updates_enabled = value;
-      } else if (key === 'promotions') {
-        payload.marketing_updates_enabled = value;
-        payload.marketing_enabled = value; // legacy compatibility
-      } else if (key === 'reminders') {
-        payload.event_reminder_enabled = value;
-        payload.event_updates_enabled = value; // legacy compatibility
-      } else if (key === 'hapticFeedback') {
-        payload.haptic_feedback_enabled = value;
+        if (Object.keys(apiBody).length > 0) {
+          const method = isCreator ? 'PUT' : 'PATCH';
+          const response = await fetch(`${API_URL}${settingsEndpoint}`, {
+            method,
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify(apiBody),
+          });
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.error || 'Failed to save notification settings');
+          }
+        }
       }
 
-      await supabase
-        .from('user_notification_preferences')
-        .upsert(payload, { onConflict: 'user_id' });
+      if (key === 'hapticFeedback') {
+        await supabase
+          .from('user_notification_preferences')
+          .upsert(
+            {
+              user_id: profile?.id,
+              haptic_feedback_enabled: value,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'user_id' }
+          );
+      }
 
       // Update haptic preference cache if haptic feedback setting changed
       if (key === 'hapticFeedback') {

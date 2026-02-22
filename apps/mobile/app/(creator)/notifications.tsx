@@ -33,7 +33,6 @@ import {
 
 import { useAuthStore } from '@/stores/auth-store';
 import { useNotificationsStore } from '@/stores/notifications-store';
-import { openProfile } from '@/lib/open-profile';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
 import { getApiBaseUrl } from '@/lib/api-base';
@@ -42,21 +41,44 @@ const API_URL = getApiBaseUrl();
 
 interface Notification {
   id: string;
-  type: string;
+  templateCode: string;
+  category: 'transactions' | 'photos' | 'orders' | 'social' | 'system' | 'marketing';
   title: string;
   message: string;
+  actionUrl: string | null;
+  details: Record<string, any>;
   isRead: boolean;
   createdAt: string;
   data?: Record<string, any>;
 }
 
 const NOTIFICATION_ICONS: Record<string, { icon: React.ComponentType<any>; color: string; bg: string }> = {
-  sale: { icon: DollarSign, color: '#10b981', bg: '#10b98115' },
-  follower: { icon: UserPlus, color: colors.accent, bg: colors.accent + '15' },
-  view_milestone: { icon: Eye, color: '#8b5cf6', bg: '#8b5cf615' },
-  event: { icon: Calendar, color: '#f59e0b', bg: '#f59e0b15' },
+  transactions: { icon: DollarSign, color: '#10b981', bg: '#10b98115' },
+  orders: { icon: DollarSign, color: '#10b981', bg: '#10b98115' },
+  photos: { icon: Camera, color: '#8b5cf6', bg: '#8b5cf615' },
+  social: { icon: UserPlus, color: colors.accent, bg: colors.accent + '15' },
+  marketing: { icon: Calendar, color: '#f59e0b', bg: '#f59e0b15' },
   system: { icon: Bell, color: colors.secondary, bg: colors.muted },
 };
+
+function mapActionUrlToMobileRoute(actionUrl: string | null, details: Record<string, any>): string | null {
+  const eventId = details?.eventId || details?.event_id || null;
+  if (eventId) return `/event/${eventId}`;
+  if (!actionUrl) return null;
+
+  if (actionUrl.startsWith('/dashboard/events/')) {
+    const id = actionUrl.split('/').pop();
+    return id ? `/event/${id}` : null;
+  }
+  if (actionUrl.startsWith('/gallery/events/')) {
+    const id = actionUrl.split('/').pop();
+    return id ? `/event/${id}` : null;
+  }
+  if (actionUrl === '/dashboard/billing') return '/settings/billing';
+  if (actionUrl === '/dashboard/collaborations') return '/(creator)/collaborations';
+  if (actionUrl.startsWith('/p/') || actionUrl.startsWith('/u/')) return actionUrl;
+  return null;
+}
 
 export default function NotificationsScreen() {
   const router = useRouter();
@@ -83,9 +105,12 @@ export default function NotificationsScreen() {
       setNotifications(
         (payload.notifications || []).map((item: any) => ({
           id: item.id,
-          type: item.template_code || item.templateCode || item.channel || 'system',
-          title: item.subject || 'Notification',
+          templateCode: item.templateCode || item.template_code || 'system',
+          category: (item.category || 'system') as Notification['category'],
+          title: item.title || item.subject || 'Notification',
           message: item.body || '',
+          actionUrl: item.actionUrl || item.action_url || null,
+          details: item.details || {},
           isRead: Boolean(item.read_at || item.readAt),
           createdAt: item.created_at || item.createdAt || new Date().toISOString(),
           data: item.metadata || {},
@@ -120,9 +145,12 @@ export default function NotificationsScreen() {
           // Add new notification at the top
           const newNotification: Notification = {
             id: payload.new.id,
-            type: payload.new.template_code || payload.new.type || payload.new.channel || 'system',
+            templateCode: payload.new.template_code || 'system',
+            category: (payload.new.category || 'system') as Notification['category'],
             title: payload.new.subject || payload.new.title || 'Notification',
             message: payload.new.body || payload.new.message || '',
+            actionUrl: payload.new.action_url || null,
+            details: payload.new.details || {},
             isRead: Boolean(payload.new.read_at),
             createdAt: payload.new.created_at,
             data: payload.new.metadata || payload.new.data,
@@ -231,23 +259,30 @@ export default function NotificationsScreen() {
   };
 
   const handleNotificationPress = (notification: Notification) => {
-    markAsRead(notification.id);
+    void markAsRead(notification.id);
 
-    if (notification.type === 'sale' && notification.data?.orderId) {
-      router.push('/settings/billing');
-    } else if (notification.type === 'event' && notification.data?.eventId) {
-      router.push(`/event/${notification.data.eventId}`);
-    } else if (notification.type === 'follower' && notification.data?.userId) {
-      openProfile(router, notification.data.userId);
-    } else if (notification.type.toLowerCase().includes('collaboration')) {
-      router.push('/(creator)/collaborations' as any);
+    const route = mapActionUrlToMobileRoute(notification.actionUrl, notification.details);
+    if (route) {
+      router.push(route as any);
+      return;
     }
+
+    const rating = notification.details?.rating || null;
+    const message = notification.details?.message || notification.details?.tipMessage || null;
+    const summary = [
+      rating ? `Rating: ${rating}` : null,
+      message ? `Message: ${message}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    Alert.alert(notification.title, summary || notification.message);
   };
 
   const unreadCount = notifications.filter((n) => !n.isRead).length;
 
   const renderNotification = useCallback(({ item, index }: { item: Notification; index: number }) => {
-    const config = NOTIFICATION_ICONS[item.type] || NOTIFICATION_ICONS.system;
+    const config = NOTIFICATION_ICONS[item.category] || NOTIFICATION_ICONS.system;
     const Icon = config.icon;
 
     return (

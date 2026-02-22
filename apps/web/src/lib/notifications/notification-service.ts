@@ -8,6 +8,7 @@
 import { createServiceClient } from '@/lib/supabase/server';
 import { getUserCountry } from '@/lib/payments/gateway-selector';
 import { getNotificationCatalogEntry, type NotificationCategory } from './catalog';
+import { dispatchInAppNotification } from './dispatcher';
 
 // ============================================
 // TYPES
@@ -602,8 +603,7 @@ async function createInAppNotification(
   metadata?: Record<string, unknown>
 ): Promise<NotificationResult> {
   const supabase = createServiceClient();
-  const catalog = getNotificationCatalogEntry(template.templateCode);
-  
+
   const subject = template.pushTitle 
     ? renderTemplate(template.pushTitle, variables) 
     : template.templateName;
@@ -611,46 +611,54 @@ async function createInAppNotification(
     ? renderTemplate(template.pushBody, variables)
     : renderTemplate(template.emailBody || '', variables);
 
-  const { data: notification, error } = await supabase
-    .from('notifications')
-    .insert({
-      user_id: userId,
-      template_code: template.templateCode,
-      category: catalog.category,
-      channel: 'in_app',
-      subject,
-      body,
-      variables,
-      status: 'delivered',
-      sent_at: new Date().toISOString(),
-      delivered_at: new Date().toISOString(),
-      dedupe_key:
-        (typeof metadata?.dedupe_key === 'string' && metadata.dedupe_key) ||
-        (typeof metadata?.dedupeKey === 'string' && metadata.dedupeKey) ||
-        null,
-      action_url:
-        typeof metadata?.action_url === 'string'
-          ? metadata.action_url
-          : typeof metadata?.actionUrl === 'string'
-          ? metadata.actionUrl
-          : null,
-      details: (metadata?.details as Record<string, unknown>) || {},
-      actor_user_id:
-        typeof metadata?.actor_user_id === 'string'
-          ? metadata.actor_user_id
-          : typeof metadata?.actorUserId === 'string'
-          ? metadata.actorUserId
-          : null,
-      metadata,
-    })
-    .select('id')
-    .single();
+  const dedupeKey =
+    (typeof metadata?.dedupe_key === 'string' && metadata.dedupe_key) ||
+    (typeof metadata?.dedupeKey === 'string' && metadata.dedupeKey) ||
+    null;
 
-  if (error) {
-    return { success: false, channel: 'in_app', error: error.message };
+  const actionUrl =
+    typeof metadata?.action_url === 'string'
+      ? metadata.action_url
+      : typeof metadata?.actionUrl === 'string'
+      ? metadata.actionUrl
+      : null;
+
+  const actorUserId =
+    typeof metadata?.actor_user_id === 'string'
+      ? metadata.actor_user_id
+      : typeof metadata?.actorUserId === 'string'
+      ? metadata.actorUserId
+      : null;
+
+  const dispatchResult = await dispatchInAppNotification({
+    supabase,
+    recipientUserId: userId,
+    templateCode: template.templateCode,
+    subject,
+    body,
+    dedupeKey,
+    actionUrl,
+    details: (metadata?.details as Record<string, unknown>) || {},
+    actorUserId,
+    metadata: {
+      ...(metadata || {}),
+      variables,
+    },
+  });
+
+  if (!dispatchResult.sent || !dispatchResult.notificationId) {
+    return {
+      success: false,
+      channel: 'in_app',
+      error: dispatchResult.reason || 'In-app dispatch failed',
+    };
   }
 
-  return { success: true, channel: 'in_app', notificationId: notification.id };
+  return {
+    success: true,
+    channel: 'in_app',
+    notificationId: dispatchResult.notificationId,
+  };
 }
 
 // ============================================

@@ -15,9 +15,15 @@ const API_URL = getApiBaseUrl();
 export interface Notification {
   id: string;
   type: string;
+  templateCode: string;
+  category: 'transactions' | 'photos' | 'orders' | 'social' | 'system' | 'marketing';
   title: string;
   message: string;
   data?: Record<string, unknown>;
+  details: Record<string, unknown>;
+  actionUrl: string | null;
+  dedupeKey: string | null;
+  actor?: { id?: string | null } | null;
   read: boolean;
   createdAt: string;
   channel?: string;
@@ -71,10 +77,16 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
 
       const notifications: Notification[] = (payload.notifications || []).map((n: any) => ({
         id: n.id,
-        type: n.template_code || n.templateCode || n.channel || 'system',
-        title: n.subject || 'Notification',
+        type: n.templateCode || n.template_code || n.category || n.channel || 'system',
+        templateCode: n.templateCode || n.template_code || 'system',
+        category: (n.category || 'system') as Notification['category'],
+        title: n.title || n.subject || 'Notification',
         message: n.body || '',
         data: n.metadata || {},
+        details: n.details || {},
+        actionUrl: n.actionUrl || n.action_url || null,
+        dedupeKey: n.dedupeKey || n.dedupe_key || null,
+        actor: n.actor || (n.actor_user_id ? { id: n.actor_user_id } : null),
         read: Boolean(n.read_at || n.readAt),
         createdAt: n.created_at || n.createdAt || new Date().toISOString(),
         channel: n.channel,
@@ -258,9 +270,15 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
           const newNotification: Notification = {
             id: payload.new.id,
             type: payload.new.template_code || payload.new.type || payload.new.channel || 'system',
+            templateCode: payload.new.template_code || 'system',
+            category: (payload.new.category || 'system') as Notification['category'],
             title: payload.new.subject || payload.new.title || 'Notification',
             message: payload.new.body || payload.new.message || '',
             data: payload.new.metadata || payload.new.data,
+            details: payload.new.details || {},
+            actionUrl: payload.new.action_url || null,
+            dedupeKey: payload.new.dedupe_key || null,
+            actor: payload.new.actor_user_id ? { id: payload.new.actor_user_id } : null,
             read: Boolean(payload.new.read_at),
             createdAt: payload.new.created_at,
             channel: payload.new.channel,

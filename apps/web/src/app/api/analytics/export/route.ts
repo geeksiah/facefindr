@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { checkFeature } from '@/lib/subscription/enforcement';
 import { createClient } from '@/lib/supabase/server';
 
 function parseDateForDisplay(value: string): Date {
@@ -32,6 +33,30 @@ export async function POST(request: NextRequest) {
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { data: photographer } = await supabase
+      .from('photographers')
+      .select('id')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (!photographer) {
+      return NextResponse.json({ error: 'Not a photographer' }, { status: 403 });
+    }
+
+    const hasAdvancedAnalytics = await checkFeature(user.id, 'advanced_analytics');
+    if (!hasAdvancedAnalytics) {
+      return NextResponse.json(
+        {
+          error: 'FEATURE_NOT_ENABLED',
+          code: 'FEATURE_NOT_ENABLED',
+          feature: 'advanced_analytics',
+          message:
+            'Advanced Analytics is not available on your current plan. Upgrade to unlock exports.',
+        },
+        { status: 403 }
+      );
     }
 
     const body = await request.json();

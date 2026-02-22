@@ -53,6 +53,32 @@ export interface DispatchInAppNotificationResult {
     | 'insert_failed';
 }
 
+type DispatchOutcome =
+  | 'delivered'
+  | 'skipped_preference'
+  | 'skipped_privacy'
+  | 'skipped_eligibility'
+  | 'duplicate_dropped'
+  | 'insert_failed'
+  | 'disabled_template'
+  | 'missing_recipient';
+
+function logDispatchOutcome(
+  outcome: DispatchOutcome,
+  input: DispatchInAppNotificationInput,
+  extra?: Record<string, unknown>
+) {
+  console.info('[notifications.dispatch]', {
+    outcome,
+    templateCode: input.templateCode,
+    recipientUserId: input.recipientUserId,
+    dedupeKey: input.dedupeKey || null,
+    eventId: input.eligibilityContext?.eventId || null,
+    requireEventParticipant: Boolean(input.eligibilityContext?.requireEventParticipant),
+    ...extra,
+  });
+}
+
 async function getUserPreferences(
   supabase: ServiceClient,
   userId: string
@@ -151,11 +177,13 @@ export async function dispatchInAppNotification(
   input: DispatchInAppNotificationInput
 ): Promise<DispatchInAppNotificationResult> {
   if (!input.recipientUserId) {
+    logDispatchOutcome('missing_recipient', input);
     return { sent: false, reason: 'missing_recipient' };
   }
 
   // Explicit policy: never emit unfollow notifications.
   if (input.templateCode === 'social_follower_removed') {
+    logDispatchOutcome('disabled_template', input);
     return { sent: false, reason: 'disabled_template' };
   }
 
@@ -164,11 +192,13 @@ export async function dispatchInAppNotification(
   const prefs = await getUserPreferences(supabase, input.recipientUserId);
 
   if (prefs[catalog.preferenceKey] === false) {
+    logDispatchOutcome('skipped_preference', input, { preferenceKey: catalog.preferenceKey });
     return { sent: false, reason: 'skipped_preference' };
   }
 
   const privacyAllowed = await isAllowedByPrivacy(supabase, input.recipientUserId, input.templateCode);
   if (!privacyAllowed) {
+    logDispatchOutcome('skipped_privacy', input);
     return { sent: false, reason: 'skipped_privacy' };
   }
 
@@ -176,6 +206,7 @@ export async function dispatchInAppNotification(
   if (eventId && input.eligibilityContext?.requireEventParticipant) {
     const eligible = await isEventParticipant(supabase, input.recipientUserId, eventId);
     if (!eligible) {
+      logDispatchOutcome('skipped_eligibility', input, { eventId });
       return { sent: false, reason: 'skipped_eligibility' };
     }
   }
@@ -213,6 +244,7 @@ export async function dispatchInAppNotification(
 
   if (error) {
     if (error.code === '23505') {
+      logDispatchOutcome('duplicate_dropped', input);
       return { sent: false, reason: 'duplicate_dropped' };
     }
     console.error('dispatchInAppNotification insert failed', {
@@ -220,9 +252,10 @@ export async function dispatchInAppNotification(
       recipientUserId: input.recipientUserId,
       error,
     });
+    logDispatchOutcome('insert_failed', input, { errorCode: error.code || null });
     return { sent: false, reason: 'insert_failed' };
   }
 
+  logDispatchOutcome('delivered', input, { notificationId: data?.id || null });
   return { sent: true, notificationId: data?.id };
 }
-

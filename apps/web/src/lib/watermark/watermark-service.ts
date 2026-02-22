@@ -2,9 +2,10 @@
  * Watermark Service
  * 
  * Handles watermark generation for preview images.
- * Uses Sharp for server-side image processing.
+ * Delegates rendering to an async watermark worker (Edge Function).
  */
 
+import { createStorageSignedUrl } from '@/lib/storage/provider';
 import { createServiceClient } from '@/lib/supabase/server';
 
 // ============================================
@@ -171,40 +172,95 @@ export interface GeneratePreviewOptions {
   mediaId: string;
 }
 
+function hasTextWatermark(settings: WatermarkSettings): boolean {
+  return typeof settings.textContent === 'string' && settings.textContent.trim().length > 0;
+}
+
+function normalizeStorageLikePath(value: string | null | undefined): string | null {
+  if (!value || typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed)) return null;
+  return trimmed.replace(/^\/+/, '');
+}
+
+async function resolveLogoInput(logoUrl: string | null): Promise<string | null> {
+  if (!logoUrl || typeof logoUrl !== 'string') return null;
+  const trimmed = logoUrl.trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+
+  const logoPath = normalizeStorageLikePath(trimmed);
+  if (!logoPath) return null;
+  return createStorageSignedUrl('branding', logoPath, 60 * 15);
+}
+
 export async function generateWatermarkedPreview(
   options: GeneratePreviewOptions
 ): Promise<WatermarkResult> {
   const { photographerId, mediaId } = options;
-  
-  // Get watermark settings
+
   const settings = await getWatermarkSettings(photographerId);
-  
-  if (!settings || (!settings.textContent && !settings.logoUrl)) {
-    // No watermark configured - use default Ferchr watermark
+  if (!settings) {
+    return { success: true };
+  }
+
+  const hasText = hasTextWatermark(settings);
+  const hasLogo = Boolean(settings.logoUrl);
+  const shouldApply =
+    (settings.watermarkType === 'text' && hasText) ||
+    (settings.watermarkType === 'logo' && hasLogo) ||
+    (settings.watermarkType === 'both' && (hasText || hasLogo));
+
+  if (!shouldApply) {
+    return { success: true };
+  }
+
+  const supabase = createServiceClient();
+  const { data: media, error: mediaError } = await supabase
+    .from('media')
+    .select('id, storage_path')
+    .eq('id', mediaId)
+    .maybeSingle();
+
+  if (mediaError || !media?.storage_path) {
     return {
-      success: true,
-      previewUrl: options.originalUrl, // For now, return original
+      success: false,
+      error: mediaError?.message || 'Source media path not found',
     };
   }
 
-  // In production, this would:
-  // 1. Download the original image
-  // 2. Resize to previewMaxDimension
-  // 3. Apply watermark based on settings
-  // 4. Upload to storage
-  // 5. Return the new URL
-  
-  // For now, return the original URL
-  // The actual watermarking would be done by:
-  // - Supabase Edge Function with Sharp/Jimp
-  // - AWS Lambda with Sharp
-  // - Cloudflare Workers with photon
-  
-  console.log(`[Watermark] Would generate preview for media ${mediaId}`);
-  
+  const resolvedLogoUrl = await resolveLogoInput(settings.logoUrl);
+  const workerSettings: WatermarkSettings = {
+    ...settings,
+    logoUrl: resolvedLogoUrl || settings.logoUrl,
+  };
+
+  const response = await callWatermarkFunction({
+    mediaId,
+    photographerId,
+    originalPath: media.storage_path,
+    settings: workerSettings,
+  });
+
+  if (!response.success) {
+    return {
+      success: false,
+      error: response.error || 'Watermark processor failed',
+    };
+  }
+
+  if (!response.previewPath && !response.thumbnailPath) {
+    return {
+      success: false,
+      error: 'Watermark processor did not return preview outputs',
+    };
+  }
+
   return {
     success: true,
-    previewUrl: options.originalUrl,
+    previewUrl: response.previewPath,
+    thumbnailUrl: response.thumbnailPath,
   };
 }
 
@@ -240,9 +296,10 @@ export async function callWatermarkFunction(
   request: WatermarkRequest
 ): Promise<WatermarkResponse> {
   const supabase = createServiceClient();
+  const functionName = process.env.WATERMARK_FUNCTION_NAME || 'generate-watermark';
   
   try {
-    const { data, error } = await supabase.functions.invoke('generate-watermark', {
+    const { data, error } = await supabase.functions.invoke(functionName, {
       body: request,
     });
 
@@ -315,16 +372,20 @@ export async function batchGeneratePreviews(
   
   for (const media of mediaList) {
     try {
-      // Generate preview
-      // In production, this would call the Edge Function
-      // For now, just mark as completed
-      
-      await supabase
-        .from('media')
-        .update({
-          // watermarked_path would be set by the watermark processor in production
-        })
-        .eq('id', media.id);
+      const result = await generateWatermarkedPreview({
+        originalUrl: media.storage_path,
+        photographerId,
+        mediaId: media.id,
+      });
+
+      if (!result.success || (!result.previewUrl && !result.thumbnailUrl)) {
+        failed++;
+        continue;
+      }
+
+      const previewPath = result.previewUrl || media.storage_path;
+      const thumbnailPath = result.thumbnailUrl || result.previewUrl || media.storage_path;
+      await updateMediaPreviews(media.id, previewPath, thumbnailPath);
 
       processed++;
     } catch {

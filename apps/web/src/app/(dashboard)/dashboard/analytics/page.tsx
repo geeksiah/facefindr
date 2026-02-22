@@ -73,6 +73,10 @@ export default function AnalyticsPage() {
   const [timeRange, setTimeRange] = useState<TimeRange>('30d');
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [accessBlocked, setAccessBlocked] = useState<{
+    feature: string;
+    message: string;
+  } | null>(null);
   
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [timeSeries, setTimeSeries] = useState<TimeSeriesData[]>([]);
@@ -87,14 +91,35 @@ export default function AnalyticsPage() {
 
     try {
       const response = await fetch(`/api/analytics?type=dashboard&range=${timeRange}`);
-      if (response.ok) {
-        const data = await response.json();
-        setStats(data.stats);
-        setTimeSeries(data.timeSeries || []);
-        setTopEvents(data.topEvents || []);
-        setDevices(data.devices || { mobile: 0, desktop: 0, tablet: 0 });
-        setTraffic(data.traffic || []);
+      if (response.status === 403) {
+        const payload = await response.json().catch(() => ({}));
+        if (payload?.code === 'FEATURE_NOT_ENABLED') {
+          setAccessBlocked({
+            feature: payload.feature || 'advanced_analytics',
+            message:
+              payload.message ||
+              'Advanced analytics is not available on your current plan.',
+          });
+          setStats(null);
+          setTimeSeries([]);
+          setTopEvents([]);
+          setDevices({ mobile: 0, desktop: 0, tablet: 0 });
+          setTraffic([]);
+          return;
+        }
       }
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch analytics data');
+      }
+
+      const data = await response.json();
+      setAccessBlocked(null);
+      setStats(data.stats);
+      setTimeSeries(data.timeSeries || []);
+      setTopEvents(data.topEvents || []);
+      setDevices(data.devices || { mobile: 0, desktop: 0, tablet: 0 });
+      setTraffic(data.traffic || []);
     } catch (error) {
       console.error('Failed to fetch analytics:', error);
     } finally {
@@ -124,6 +149,7 @@ export default function AnalyticsPage() {
 
   // Export functions
   const exportToCSV = () => {
+    if (accessBlocked) return;
     if (!stats || !timeSeries.length) return;
 
     const csvRows = [
@@ -158,6 +184,7 @@ export default function AnalyticsPage() {
   };
 
   const exportToPDF = async () => {
+    if (accessBlocked) return;
     if (!stats || !timeSeries.length) return;
 
     try {
@@ -250,6 +277,26 @@ export default function AnalyticsPage() {
         <div className="grid gap-6 lg:grid-cols-2">
           <div className="h-80 animate-pulse rounded-2xl border border-border bg-card" />
           <div className="h-80 animate-pulse rounded-2xl border border-border bg-card" />
+        </div>
+      </div>
+    );
+  }
+
+  if (accessBlocked) {
+    return (
+      <div className="space-y-8">
+        <DashboardBanner />
+        <div className="rounded-2xl border border-border bg-card p-8">
+          <h1 className="text-2xl font-bold text-foreground">Analytics</h1>
+          <p className="mt-2 text-secondary">{accessBlocked.message}</p>
+          <div className="mt-6">
+            <a
+              href="/dashboard/billing"
+              className="inline-flex items-center rounded-xl bg-foreground px-4 py-2 text-sm font-semibold text-background hover:opacity-90"
+            >
+              Upgrade Plan
+            </a>
+          </div>
         </div>
       </div>
     );

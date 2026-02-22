@@ -52,10 +52,18 @@ export interface PlanLimits {
   customWatermark: boolean;
   liveEventMode: boolean;
   apiAccess: boolean;
+  advancedAnalytics: boolean;
+  priorityProcessing: boolean;
 }
 
 export type LimitType = 'events' | 'photos' | 'face_ops' | 'storage' | 'team_members';
-export type FeatureType = 'face_recognition' | 'custom_watermark' | 'live_event_mode' | 'api_access';
+export type FeatureType =
+  | 'face_recognition'
+  | 'custom_watermark'
+  | 'live_event_mode'
+  | 'api_access'
+  | 'advanced_analytics'
+  | 'priority_processing';
 
 // ============================================
 // LIMIT CHECKING
@@ -151,6 +159,8 @@ export async function getPlanLimits(photographerId: string): Promise<PlanLimits 
     customWatermark: row.custom_watermark,
     liveEventMode: row.live_event_mode,
     apiAccess: row.api_access,
+    advancedAnalytics: row.advanced_analytics ?? false,
+    priorityProcessing: row.priority_processing ?? row.priority_support ?? false,
   };
 }
 
@@ -317,6 +327,28 @@ export async function enforceApiAccess(photographerId: string): Promise<void> {
   }
 }
 
+/**
+ * Enforce advanced analytics feature
+ */
+export async function enforceAdvancedAnalytics(photographerId: string): Promise<void> {
+  const enabled = await checkFeature(photographerId, 'advanced_analytics');
+
+  if (!enabled) {
+    throw new FeatureNotEnabledError('advanced_analytics');
+  }
+}
+
+/**
+ * Enforce priority processing feature
+ */
+export async function enforcePriorityProcessing(photographerId: string): Promise<void> {
+  const enabled = await checkFeature(photographerId, 'priority_processing');
+
+  if (!enabled) {
+    throw new FeatureNotEnabledError('priority_processing');
+  }
+}
+
 // ============================================
 // CUSTOM ERRORS
 // ============================================
@@ -355,6 +387,8 @@ export class FeatureNotEnabledError extends Error {
       custom_watermark: 'Custom Watermark',
       live_event_mode: 'Live Event Mode',
       api_access: 'API Access',
+      advanced_analytics: 'Advanced Analytics',
+      priority_processing: 'Priority Processing',
     };
     
     super(`${featureNames[feature]} is not available on your current plan. Please upgrade to access this feature.`);

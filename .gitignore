@@ -91,3 +91,9 @@ supabase/migrations/069_free_creator_plan_guardrails.sql
 .gitignore
 .gitignore
 supabase/migrations/074_creator_trial_controls.sql
+supabase/migrations/076_vault_storage_hard_guardrails.sql
+supabase/migrations/077_storage_exports_private_and_bucket_backfill.sql
+supabase/migrations/078_creator_and_vault_storage_guardrails.sql
+supabase/migrations/079_drop_in_credit_increment_atomic.sql
+supabase/migrations/080_finance_reconcile_subscription_and_storage_usage_fix.sql
+supabase/migrations/081_notifications_privacy_idempotency_hardening.sql

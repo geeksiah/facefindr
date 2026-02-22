@@ -34,6 +34,7 @@ interface SidebarUser {
   profilePhotoUrl?: string | null;
   faceTag?: string | null;
   plan: 'free' | 'starter' | 'pro' | 'studio';
+  advancedAnalyticsEnabled?: boolean;
 }
 
 interface NavItem {
@@ -42,6 +43,7 @@ interface NavItem {
   icon: React.ElementType;
   exact?: boolean;
   badge?: string;
+  locked?: boolean;
 }
 
 interface DashboardSidebarProps {
@@ -159,6 +161,17 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
     return safePathname === item.href || safePathname.startsWith(`${item.href}/`);
   };
 
+  const resolvedMainNavigation: NavItem[] = mainNavigation.map((item) => {
+    if (item.href === '/dashboard/analytics' && user.advancedAnalyticsEnabled === false) {
+      return {
+        ...item,
+        badge: 'Locked',
+        locked: true,
+      };
+    }
+    return item;
+  });
+
   const NavLink = ({ item }: { item: NavItem }) => {
     const active = isActive(item);
 
@@ -170,7 +183,8 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
           'group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
           active
             ? 'bg-foreground text-background'
-            : 'text-secondary hover:bg-muted hover:text-foreground'
+            : 'text-secondary hover:bg-muted hover:text-foreground',
+          item.locked && !active ? 'opacity-80' : ''
         )}
       >
         <item.icon
@@ -239,7 +253,7 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
           Main
         </p>
         <div className="space-y-1">
-          {mainNavigation.map((item) => (
+          {resolvedMainNavigation.map((item) => (
             <NavLink key={item.href} item={item} />
           ))}
         </div>

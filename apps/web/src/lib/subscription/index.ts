@@ -443,7 +443,7 @@ function extractCapabilities(featureValues: PlanFeatureValue[], plan: any): Full
     liveEventMode: getBool('live_event_mode', false),
     advancedAnalytics: getBool('advanced_analytics', false),
     apiAccess: getBool('api_access', false),
-    prioritySupport: getBool('priority_support', false),
+    prioritySupport: getBool('priority_processing', getBool('priority_support', false)),
     whiteLabel: getBool('white_label', false),
     printProducts: getBool('print_products_enabled', true),
     // Drop-in specific

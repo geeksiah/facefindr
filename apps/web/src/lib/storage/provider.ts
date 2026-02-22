@@ -211,6 +211,65 @@ export async function createStorageSignedUrl(
   }
 }
 
+export async function downloadStorageObject(
+  logicalBucket: string,
+  path: string | null | undefined,
+  options?: { supabaseClient?: any }
+): Promise<Uint8Array> {
+  if (!path || typeof path !== 'string') {
+    throw new Error('Storage path is required');
+  }
+
+  const normalizedPath = normalizeStoragePath(path);
+  if (!normalizedPath) {
+    throw new Error('Storage path is required');
+  }
+
+  const provider = resolveStorageProvider();
+  if (provider === 's3') {
+    const client = getS3Client();
+    const bucket = resolveS3Bucket(logicalBucket);
+    const response = await client.send(
+      new GetObjectCommand({
+        Bucket: bucket,
+        Key: normalizedPath,
+      })
+    );
+
+    const body: any = response.Body;
+    if (!body) {
+      throw new Error('S3 object body is empty');
+    }
+
+    if (typeof body.transformToByteArray === 'function') {
+      return await body.transformToByteArray();
+    }
+
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of body) {
+      chunks.push(chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk));
+    }
+    const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    const bytes = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return bytes;
+  }
+
+  const supabaseClient = options?.supabaseClient || createServiceClient();
+  const { data, error } = await supabaseClient.storage
+    .from(logicalBucket)
+    .download(normalizedPath);
+  if (error || !data) {
+    throw new Error(error?.message || 'Supabase download failed');
+  }
+
+  return new Uint8Array(await data.arrayBuffer());
+}
+
 export async function copyStorageObject(
   logicalBucket: string,
   sourcePath: string,
@@ -240,6 +299,56 @@ export async function copyStorageObject(
 
   if (error) {
     throw new Error(error.message || 'Supabase copy failed');
+  }
+}
+
+export async function copyStorageObjectBetweenBuckets(
+  sourceLogicalBucket: string,
+  sourcePath: string,
+  destinationLogicalBucket: string,
+  destinationPath: string
+): Promise<void> {
+  const normalizedSourcePath = normalizeStoragePath(sourcePath);
+  const normalizedDestinationPath = normalizeStoragePath(destinationPath);
+
+  if (sourceLogicalBucket === destinationLogicalBucket) {
+    await copyStorageObject(sourceLogicalBucket, normalizedSourcePath, normalizedDestinationPath);
+    return;
+  }
+
+  const provider = resolveStorageProvider();
+  if (provider === 's3') {
+    const client = getS3Client();
+    const sourceBucket = resolveS3Bucket(sourceLogicalBucket);
+    const destinationBucket = resolveS3Bucket(destinationLogicalBucket);
+
+    await client.send(
+      new CopyObjectCommand({
+        Bucket: destinationBucket,
+        Key: normalizedDestinationPath,
+        CopySource: toS3CopySource(sourceBucket, normalizedSourcePath),
+      })
+    );
+    return;
+  }
+
+  const serviceClient = createServiceClient();
+  const { data, error } = await serviceClient.storage
+    .from(sourceLogicalBucket)
+    .download(normalizedSourcePath);
+  if (error || !data) {
+    throw new Error(error?.message || 'Supabase download failed');
+  }
+
+  const { error: uploadError } = await serviceClient.storage
+    .from(destinationLogicalBucket)
+    .upload(normalizedDestinationPath, data as any, {
+      contentType: data.type || undefined,
+      upsert: true,
+    });
+
+  if (uploadError) {
+    throw new Error(uploadError.message || 'Supabase upload failed');
   }
 }
 

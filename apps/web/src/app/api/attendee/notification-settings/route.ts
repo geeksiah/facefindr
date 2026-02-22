@@ -39,9 +39,9 @@ async function getAuthClient(request: NextRequest) {
 function mapFromPreferences(row: any): AttendeeNotificationSettings {
   const defaults = defaultSettings();
   return {
-    photoMatches: asBoolean(row?.photo_match_enabled ?? row?.photo_drop_enabled, defaults.photoMatches),
-    newEvents: asBoolean(row?.new_event_view_enabled ?? row?.event_updates_enabled, defaults.newEvents),
-    eventUpdates: asBoolean(row?.event_reminder_enabled ?? row?.event_updates_enabled, defaults.eventUpdates),
+    photoMatches: asBoolean(row?.photo_match_enabled, defaults.photoMatches),
+    newEvents: asBoolean(row?.new_event_view_enabled, defaults.newEvents),
+    eventUpdates: asBoolean(row?.event_reminder_enabled, defaults.eventUpdates),
     emailNotifications: asBoolean(row?.email_enabled, defaults.emailNotifications),
     pushNotifications: asBoolean(row?.push_enabled, defaults.pushNotifications),
   };
@@ -67,9 +67,7 @@ export async function GET(request: NextRequest) {
         push_enabled,
         photo_match_enabled,
         new_event_view_enabled,
-        event_reminder_enabled,
-        photo_drop_enabled,
-        event_updates_enabled
+        event_reminder_enabled
       `)
       .eq('user_id', user.id)
       .maybeSingle();
@@ -93,9 +91,6 @@ export async function GET(request: NextRequest) {
           photo_match_enabled: defaults.photoMatches,
           new_event_view_enabled: defaults.newEvents,
           event_reminder_enabled: defaults.eventUpdates,
-          // Legacy compatibility columns
-          photo_drop_enabled: defaults.photoMatches,
-          event_updates_enabled: defaults.newEvents,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'user_id' });
       return NextResponse.json(defaults);
@@ -151,9 +146,6 @@ export async function PATCH(request: NextRequest) {
         photo_match_enabled: next.photoMatches,
         new_event_view_enabled: next.newEvents,
         event_reminder_enabled: next.eventUpdates,
-        // Legacy compatibility columns
-        photo_drop_enabled: next.photoMatches,
-        event_updates_enabled: next.newEvents,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'user_id' });
 

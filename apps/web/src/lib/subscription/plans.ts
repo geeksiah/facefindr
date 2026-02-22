@@ -179,7 +179,7 @@ export async function getAllPlanFeatures(): Promise<Record<PlanCode, PlanFeature
           liveEventMode: row.live_event_mode,
           advancedAnalytics: row.advanced_analytics,
           apiAccess: row.api_access,
-          prioritySupport: row.priority_support,
+          prioritySupport: row.priority_processing ?? row.priority_support,
           teamMembers: row.team_members,
           whiteLabel: row.white_label,
           printProductsEnabled: row.print_products_enabled,

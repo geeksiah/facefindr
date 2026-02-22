@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { indexFacesFromImage, isRekognitionConfigured } from '@/lib/aws/rekognition';
 import { getPhotographerIdCandidates } from '@/lib/profiles/ids';
+import { downloadStorageObject } from '@/lib/storage/provider';
 import { checkLimit, checkFeature, incrementFaceOps } from '@/lib/subscription/enforcement';
 import { createClient } from '@/lib/supabase/server';
 
@@ -135,22 +136,18 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Download the image from storage
-    const { data: fileData, error: downloadError } = await supabase.storage
-      .from('media')
-      .download(media.storage_path);
-
-    if (downloadError || !fileData) {
+    let imageBytes: Uint8Array;
+    try {
+      imageBytes = await downloadStorageObject('media', media.storage_path, {
+        supabaseClient: supabase,
+      });
+    } catch (downloadError: any) {
       console.error('Error downloading file:', downloadError);
       return NextResponse.json(
-        { error: 'Failed to download image' },
+        { error: downloadError?.message || 'Failed to download image' },
         { status: 500 }
       );
     }
-
-    // Convert to Uint8Array for Rekognition
-    const arrayBuffer = await fileData.arrayBuffer();
-    const imageBytes = new Uint8Array(arrayBuffer);
 
     // Index faces in the image
     const { indexedFaces, facesDetected, error: indexError } = await indexFacesFromImage(

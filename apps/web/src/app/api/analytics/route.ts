@@ -18,6 +18,7 @@ import {
   getRealtimeStats,
   TimeRange,
 } from '@/lib/analytics';
+import { checkFeature } from '@/lib/subscription/enforcement';
 import { createClient } from '@/lib/supabase/server';
 
 // GET - Get analytics data
@@ -39,6 +40,20 @@ export async function GET(request: NextRequest) {
 
     if (!photographer) {
       return NextResponse.json({ error: 'Not a photographer' }, { status: 403 });
+    }
+
+    const hasAdvancedAnalytics = await checkFeature(user.id, 'advanced_analytics');
+    if (!hasAdvancedAnalytics) {
+      return NextResponse.json(
+        {
+          error: 'FEATURE_NOT_ENABLED',
+          code: 'FEATURE_NOT_ENABLED',
+          feature: 'advanced_analytics',
+          message:
+            'Advanced Analytics is not available on your current plan. Upgrade to unlock this module.',
+        },
+        { status: 403 }
+      );
     }
 
     const { searchParams } = new URL(request.url);

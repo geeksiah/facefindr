@@ -70,15 +70,17 @@ function mapFromRow(row: any): CreatorNotificationSettings {
 async function resolveStudioSmsPermission(supabase: any, userId: string, wantsSms: boolean) {
   if (!wantsSms) return false;
 
-  const { data: subscription } = await supabase
-    .from('user_subscriptions')
-    .select('plan_id, subscription_plans(name)')
-    .eq('user_id', userId)
-    .eq('status', 'active')
-    .maybeSingle();
+  const { data, error } = await supabase.rpc('get_photographer_limits', {
+    p_photographer_id: userId,
+  });
 
-  const planName = (subscription?.subscription_plans as { name?: string } | null)?.name?.toLowerCase();
-  return planName === 'studio';
+  if (error) {
+    console.error('Failed to resolve creator plan for SMS gating:', error);
+    return false;
+  }
+
+  const planCode = String(data?.[0]?.plan_code || '').toLowerCase();
+  return planCode === 'studio';
 }
 
 // GET - Get notification settings
@@ -174,11 +176,6 @@ export async function PUT(request: NextRequest) {
           low_balance_enabled: next.lowBalance,
           subscription_reminder_enabled: next.subscriptionReminder,
           marketing_updates_enabled: next.marketingEmails,
-          // Legacy compatibility columns
-          photo_drop_enabled: next.newPhotoSale,
-          event_updates_enabled: next.newEventView,
-          payout_updates_enabled: next.payoutCompleted,
-          marketing_enabled: next.marketingEmails,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'user_id' }
