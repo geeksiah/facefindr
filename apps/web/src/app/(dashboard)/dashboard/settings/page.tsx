@@ -76,6 +76,7 @@ export default function SettingsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isSwitchingToAttendee, setIsSwitchingToAttendee] = useState(false);
+  const [isLoggingOutAllDevices, setIsLoggingOutAllDevices] = useState(false);
   
   // Profile state
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -349,6 +350,32 @@ export default function SettingsPage() {
       toast.error('Error', 'Failed to change password');
     } finally {
       setIsChangingPassword(false);
+    }
+  };
+
+  const handleLogoutAllDevices = async () => {
+    if (isLoggingOutAllDevices) return;
+    setIsLoggingOutAllDevices(true);
+    try {
+      const response = await fetch('/api/auth/logout-all', {
+        method: 'POST',
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || 'Failed to sign out all devices');
+      }
+      try {
+        const channel = new BroadcastChannel('auth');
+        channel.postMessage({ type: 'signed_out' });
+        channel.close();
+      } catch {}
+      toast.success('Security updated', 'Signed out from all devices');
+      router.replace(payload.redirectTo || '/login');
+      router.refresh();
+    } catch (error: any) {
+      toast.error('Error', error?.message || 'Failed to sign out all devices');
+    } finally {
+      setIsLoggingOutAllDevices(false);
     }
   };
 
@@ -783,6 +810,20 @@ export default function SettingsPage() {
                 </div>
                 <span className="text-xs text-success font-medium">Active now</span>
               </div>
+              <Button
+                variant="outline"
+                onClick={handleLogoutAllDevices}
+                disabled={isLoggingOutAllDevices}
+              >
+                {isLoggingOutAllDevices ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Signing out...
+                  </>
+                ) : (
+                  'Log Out All Devices'
+                )}
+              </Button>
             </div>
           </div>
         </div>

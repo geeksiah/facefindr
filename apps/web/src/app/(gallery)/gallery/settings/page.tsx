@@ -35,6 +35,7 @@ export default function SettingsPage() {
   const [showDeleteAccount, setShowDeleteAccount] = useState(false);
   const [showDeleteFace, setShowDeleteFace] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isLoggingOutAllDevices, setIsLoggingOutAllDevices] = useState(false);
   const [isSwitchingToCreator, setIsSwitchingToCreator] = useState(false);
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
   const [privacySettings, setPrivacySettings] = useState<PrivacySettingsState | null>(null);
@@ -130,6 +131,30 @@ export default function SettingsPage() {
       console.error('Failed to delete account:', error);
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleLogoutAllDevices = async () => {
+    if (isLoggingOutAllDevices) return;
+    setIsLoggingOutAllDevices(true);
+    try {
+      const response = await fetch('/api/auth/logout-all', { method: 'POST' });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || 'Failed to sign out all devices');
+      }
+      try {
+        const channel = new BroadcastChannel('auth');
+        channel.postMessage({ type: 'signed_out' });
+        channel.close();
+      } catch {}
+      toast.success('Signed out from all devices', 'Your other sessions were revoked.');
+      router.replace(payload.redirectTo || '/login');
+      router.refresh();
+    } catch (error: any) {
+      toast.error('Error', error?.message || 'Failed to sign out all devices');
+    } finally {
+      setIsLoggingOutAllDevices(false);
     }
   };
 
@@ -376,6 +401,21 @@ export default function SettingsPage() {
           >
             <LogOut className="h-5 w-5 text-secondary" />
             <span className="font-medium text-foreground">Sign Out</span>
+          </button>
+          <button
+            onClick={handleLogoutAllDevices}
+            disabled={isLoggingOutAllDevices}
+            className="flex w-full items-center justify-between gap-3 p-4 transition-colors hover:bg-muted/50 disabled:opacity-60"
+          >
+            <div className="flex items-center gap-3">
+              <LogOut className="h-5 w-5 text-secondary" />
+              <span className="font-medium text-foreground">Log Out All Devices</span>
+            </div>
+            {isLoggingOutAllDevices ? (
+              <Loader2 className="h-4 w-4 animate-spin text-secondary" />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-secondary" />
+            )}
           </button>
           <button
             onClick={() => setShowDeleteAccount(true)}

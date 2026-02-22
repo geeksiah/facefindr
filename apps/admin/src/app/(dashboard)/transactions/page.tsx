@@ -12,37 +12,20 @@ interface SearchParams {
   page?: string;
 }
 
-function deriveDropInProvider(paymentIntentId: string | null): string {
-  const value = String(paymentIntentId || '').toLowerCase();
-  if (!value) return 'unknown';
-  if (value.startsWith('cs_')) return 'stripe';
-  if (value.startsWith('dropincredits_')) return 'paystack';
-  return 'unknown';
-}
-
-function mapDropInPurchaseStatus(status: string | null): string {
-  const normalized = String(status || '').toLowerCase();
-  if (normalized === 'active' || normalized === 'exhausted') return 'succeeded';
-  if (normalized === 'pending') return 'pending';
-  if (normalized === 'failed') return 'failed';
-  return 'pending';
-}
-
 async function getTransactions(searchParams: SearchParams) {
   const page = parseInt(searchParams.page || '1');
   const limit = 20;
   const offset = (page - 1) * limit;
 
   let transactionQuery = supabaseAdmin
-    .from('transactions')
-    .select(`
-      *,
-      events (id, name),
-      photographers:events(photographer_id, photographers(display_name, email))
-    `, { count: 'exact' });
+    .from('admin_transaction_feed')
+    .select('*', { count: 'exact' });
 
   if (searchParams.search) {
-    transactionQuery = transactionQuery.ilike('id', `%${searchParams.search}%`);
+    const search = searchParams.search.trim();
+    transactionQuery = transactionQuery.or(
+      `feed_id.ilike.%${search}%,payment_reference.ilike.%${search}%`
+    );
   }
 
   if (searchParams.status) {
@@ -55,80 +38,35 @@ async function getTransactions(searchParams: SearchParams) {
 
   transactionQuery = transactionQuery
     .order('created_at', { ascending: false })
-    .limit(500);
+    .range(offset, offset + limit - 1);
 
-  const { data: transactionRows, error } = await transactionQuery;
+  const { data: transactionRows, error, count } = await transactionQuery;
 
   if (error) {
     console.error('Error fetching transactions:', error);
     return { transactions: [], total: 0, page, limit };
   }
-
-  let creditRows: any[] = [];
-  let creditQuery = supabaseAdmin
-    .from('drop_in_credit_purchases')
-    .select('id, attendee_id, credits_purchased, amount_paid, currency, status, payment_intent_id, created_at');
-
-  if (searchParams.search) {
-    creditQuery = creditQuery.ilike('id', `%${searchParams.search}%`);
-  }
-  if (searchParams.status) {
-    const requested = searchParams.status;
-    if (requested === 'succeeded') {
-      creditQuery = creditQuery.in('status', ['active', 'exhausted']);
-    } else if (requested === 'pending') {
-      creditQuery = creditQuery.eq('status', 'pending');
-    } else if (requested === 'failed') {
-      creditQuery = creditQuery.eq('status', 'failed');
-    } else if (requested === 'refunded') {
-      creditQuery = creditQuery.eq('status', '__none__');
-    }
-  }
-
-  const { data: dropInPurchases, error: dropInPurchaseError } = await creditQuery
-    .order('created_at', { ascending: false })
-    .limit(500);
-
-  if (dropInPurchaseError) {
-    console.error('Error fetching drop-in credit purchases for transaction list:', dropInPurchaseError);
-  } else {
-    creditRows = (dropInPurchases || [])
-      .map((purchase) => {
-        const provider = deriveDropInProvider(purchase.payment_intent_id);
-        if (searchParams.provider && provider !== searchParams.provider) {
-          return null;
-        }
-        return {
-          id: purchase.id,
-          gross_amount: Number(purchase.amount_paid || 0),
-          net_amount: Number(purchase.amount_paid || 0),
-          platform_fee: 0,
-          provider_fee: 0,
-          currency: purchase.currency || 'USD',
-          status: mapDropInPurchaseStatus(purchase.status),
-          payment_provider: provider,
-          stripe_payment_intent_id: purchase.payment_intent_id || null,
-          created_at: purchase.created_at,
-          events: null,
-          transaction_type: 'drop_in_credit_purchase',
-          metadata: {
-            type: 'drop_in_credit_purchase',
-            credits_purchased: Number(purchase.credits_purchased || 0),
-            attendee_id: purchase.attendee_id || null,
-          },
-        };
-      })
-      .filter(Boolean) as any[];
-  }
-
-  const merged = [...(transactionRows || []), ...creditRows].sort(
-    (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  );
-  const paginated = merged.slice(offset, offset + limit);
+  const normalizedRows = (transactionRows || []).map((row: any) => ({
+    id: row.source_id,
+    source_type: row.source_type,
+    feed_id: row.feed_id,
+    gross_amount: Number(row.gross_amount || 0),
+    net_amount: Number(row.net_amount || 0),
+    platform_fee: Number(row.platform_fee || 0),
+    provider_fee: Number(row.provider_fee || 0),
+    currency: row.currency || 'USD',
+    status: row.status || 'pending',
+    payment_provider: row.payment_provider || 'unknown',
+    stripe_payment_intent_id: row.payment_reference || null,
+    created_at: row.created_at,
+    event_name: row.event_name || null,
+    transaction_type: row.transaction_type || null,
+    metadata: row.metadata || null,
+  }));
 
   return {
-    transactions: paginated,
-    total: merged.length,
+    transactions: normalizedRows,
+    total: count || 0,
     page,
     limit,
   };

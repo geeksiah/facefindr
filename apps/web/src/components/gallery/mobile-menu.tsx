@@ -64,6 +64,7 @@ export function MobileMenu({ profileInitial, profilePhotoUrl, faceTag, displayNa
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [isSwitchingToCreator, setIsSwitchingToCreator] = useState(false);
   const [mounted, setMounted] = useState(false);
   const trimmedQuery = query.trim();
   const abortRef = useRef<AbortController | null>(null);
@@ -280,6 +281,37 @@ export function MobileMenu({ profileInitial, profilePhotoUrl, faceTag, displayNa
 
       {/* Logout */}
       <div className="p-4 border-t border-border">
+        <button
+          onClick={async () => {
+            if (isSwitchingToCreator) return;
+            setIsSwitchingToCreator(true);
+            try {
+              const response = await fetch('/api/account/view-mode', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  targetView: 'creator',
+                  switchView: true,
+                }),
+              });
+              const payload = await response.json().catch(() => ({}));
+              if (!response.ok) {
+                throw new Error(payload.error || 'Unable to switch to creator view');
+              }
+              router.replace(payload.redirectPath || '/dashboard');
+              router.refresh();
+            } catch (error) {
+              console.error('Switch to creator view error:', error);
+            } finally {
+              setIsSwitchingToCreator(false);
+            }
+          }}
+          className="mb-2 flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-secondary hover:bg-muted w-full transition-colors disabled:opacity-60"
+          disabled={isSwitchingToCreator}
+        >
+          <Users className="h-5 w-5" />
+          {isSwitchingToCreator ? 'Switching...' : 'Switch to Creator View'}
+        </button>
         <button
           onClick={async () => {
             const controller = new AbortController();

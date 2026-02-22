@@ -5,13 +5,17 @@ import {
   Calendar,
   TrendingUp,
   TrendingDown,
-  ArrowUpRight,
   Loader2,
 } from 'lucide-react';
 import { Suspense } from 'react';
 
+import {
+  convertToBaseAmount,
+  loadUsdRates,
+  resolvePlatformBaseCurrency,
+} from '@/lib/finance/currency';
 import { supabaseAdmin } from '@/lib/supabase';
-import { formatCurrency, formatNumber, formatDateTime } from '@/lib/utils';
+import { formatCurrency, formatNumber } from '@/lib/utils';
 
 import { RealtimeStats } from './realtime-stats';
 import { RecentActivity } from './recent-activity';
@@ -21,13 +25,16 @@ async function getStats() {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+  const baseCurrency = await resolvePlatformBaseCurrency();
 
   // Get all stats in parallel
   const [
     totalRevenueResult,
+    totalCreditRevenueResult,
     monthlyRevenueResult,
+    monthlyCreditRevenueResult,
     lastMonthRevenueResult,
+    lastMonthCreditRevenueResult,
     photographersResult,
     newCreatorsResult,
     attendeesResult,
@@ -35,27 +42,49 @@ async function getStats() {
     pendingPayoutsResult,
     activeEventsResult,
     todayTransactionsResult,
+    todayCreditPurchasesResult,
   ] = await Promise.all([
     // Total revenue all time
     supabaseAdmin
       .from('transactions')
-      .select('gross_amount')
+      .select('gross_amount, currency')
       .eq('status', 'succeeded'),
+
+    // Total drop-in credit purchases all time
+    supabaseAdmin
+      .from('drop_in_credit_purchases')
+      .select('amount_paid, currency')
+      .in('status', ['active', 'exhausted']),
     
     // This month's revenue
     supabaseAdmin
       .from('transactions')
-      .select('gross_amount')
+      .select('gross_amount, currency')
       .eq('status', 'succeeded')
+      .gte('created_at', thisMonth.toISOString()),
+
+    // This month's drop-in purchases
+    supabaseAdmin
+      .from('drop_in_credit_purchases')
+      .select('amount_paid, currency')
+      .in('status', ['active', 'exhausted'])
       .gte('created_at', thisMonth.toISOString()),
     
     // Last month's revenue
     supabaseAdmin
       .from('transactions')
-      .select('gross_amount')
+      .select('gross_amount, currency')
       .eq('status', 'succeeded')
       .gte('created_at', lastMonth.toISOString())
-      .lt('created_at', lastMonthEnd.toISOString()),
+      .lt('created_at', thisMonth.toISOString()),
+
+    // Last month's drop-in purchases
+    supabaseAdmin
+      .from('drop_in_credit_purchases')
+      .select('amount_paid, currency')
+      .in('status', ['active', 'exhausted'])
+      .gte('created_at', lastMonth.toISOString())
+      .lt('created_at', thisMonth.toISOString()),
     
     // Total photographers
     supabaseAdmin
@@ -82,7 +111,7 @@ async function getStats() {
     // Pending payouts
     supabaseAdmin
       .from('wallet_balances')
-      .select('available_balance'),
+      .select('available_balance, currency'),
     
     // Active events
     supabaseAdmin
@@ -95,20 +124,47 @@ async function getStats() {
       .from('transactions')
       .select('id', { count: 'exact', head: true })
       .gte('created_at', today.toISOString()),
+
+    // Today's drop-in purchases
+    supabaseAdmin
+      .from('drop_in_credit_purchases')
+      .select('id', { count: 'exact', head: true })
+      .in('status', ['active', 'exhausted'])
+      .gte('created_at', today.toISOString()),
   ]);
 
-  // Calculate totals
-  const totalRevenue = totalRevenueResult.data?.reduce((sum, t) => sum + (t.gross_amount || 0), 0) || 0;
-  const monthlyRevenue = monthlyRevenueResult.data?.reduce((sum, t) => sum + (t.gross_amount || 0), 0) || 0;
-  const lastMonthRevenue = lastMonthRevenueResult.data?.reduce((sum, t) => sum + (t.gross_amount || 0), 0) || 0;
+  const allCurrencies = new Set<string>([baseCurrency]);
+  for (const row of totalRevenueResult.data || []) allCurrencies.add(String((row as any).currency || baseCurrency).toUpperCase());
+  for (const row of totalCreditRevenueResult.data || []) allCurrencies.add(String((row as any).currency || baseCurrency).toUpperCase());
+  for (const row of pendingPayoutsResult.data || []) allCurrencies.add(String((row as any).currency || baseCurrency).toUpperCase());
+  const usdRates = await loadUsdRates(Array.from(allCurrencies));
+
+  const sumConverted = (rows: any[] | null | undefined, amountKey: string) =>
+    (rows || []).reduce((sum, row) => {
+      const amount = Number((row as any)[amountKey] || 0);
+      const currency = String((row as any).currency || baseCurrency).toUpperCase();
+      return sum + convertToBaseAmount(amount, currency, baseCurrency, usdRates);
+    }, 0);
+
+  // Calculate totals in platform base currency
+  const totalRevenue =
+    sumConverted(totalRevenueResult.data, 'gross_amount') +
+    sumConverted(totalCreditRevenueResult.data, 'amount_paid');
+  const monthlyRevenue =
+    sumConverted(monthlyRevenueResult.data, 'gross_amount') +
+    sumConverted(monthlyCreditRevenueResult.data, 'amount_paid');
+  const lastMonthRevenue =
+    sumConverted(lastMonthRevenueResult.data, 'gross_amount') +
+    sumConverted(lastMonthCreditRevenueResult.data, 'amount_paid');
   const revenueChange = lastMonthRevenue > 0 
     ? ((monthlyRevenue - lastMonthRevenue) / lastMonthRevenue * 100).toFixed(1)
     : '0';
 
-  const pendingPayoutsTotal = pendingPayoutsResult.data?.reduce(
-    (sum, b) => sum + (b.available_balance || 0), 
-    0
-  ) || 0;
+  const pendingPayoutsTotal = (pendingPayoutsResult.data || []).reduce((sum, balanceRow) => {
+    const amount = Number((balanceRow as any).available_balance || 0);
+    const currency = String((balanceRow as any).currency || baseCurrency).toUpperCase();
+    return sum + convertToBaseAmount(amount, currency, baseCurrency, usdRates);
+  }, 0);
 
   return {
     totalRevenue,
@@ -120,7 +176,8 @@ async function getStats() {
     newAttendees: newAttendeesResult.count || 0,
     pendingPayouts: pendingPayoutsTotal,
     activeEvents: activeEventsResult.count || 0,
-    todayTransactions: todayTransactionsResult.count || 0,
+    todayTransactions: (todayTransactionsResult.count || 0) + (todayCreditPurchasesResult.count || 0),
+    baseCurrency,
   };
 }
 
@@ -200,7 +257,7 @@ export default async function DashboardPage() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Total Revenue"
-          value={formatCurrency(stats.totalRevenue)}
+          value={formatCurrency(stats.totalRevenue, stats.baseCurrency)}
           change={stats.revenueChange}
           changeLabel="vs last month"
           icon={DollarSign}
@@ -217,7 +274,7 @@ export default async function DashboardPage() {
         />
         <StatCard
           title="Pending Payouts"
-          value={formatCurrency(stats.pendingPayouts)}
+          value={formatCurrency(stats.pendingPayouts, stats.baseCurrency)}
           subtitle={`${stats.todayTransactions} transactions today`}
           icon={CreditCard}
           iconColor="text-orange-500"

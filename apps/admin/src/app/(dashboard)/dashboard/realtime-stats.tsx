@@ -14,6 +14,7 @@ interface Stats {
   pendingPayouts: number;
   activeEvents: number;
   todayTransactions: number;
+  baseCurrency?: string;
 }
 
 interface Transaction {
@@ -35,8 +36,6 @@ export function RealtimeStats({ initialStats }: { initialStats: Stats }) {
       if (newTransaction.status === 'succeeded') {
         setStats(prev => ({
           ...prev,
-          totalRevenue: prev.totalRevenue + newTransaction.gross_amount,
-          monthlyRevenue: prev.monthlyRevenue + newTransaction.gross_amount,
           todayTransactions: prev.todayTransactions + 1,
         }));
         setRecentTransactions(prev => [newTransaction, ...prev].slice(0, 5));
@@ -45,13 +44,8 @@ export function RealtimeStats({ initialStats }: { initialStats: Stats }) {
       }
     },
     (updatedTransaction) => {
-      // On UPDATE - handle status changes
-      if (updatedTransaction.status === 'succeeded') {
-        setStats(prev => ({
-          ...prev,
-          totalRevenue: prev.totalRevenue + updatedTransaction.gross_amount,
-        }));
-      }
+      // On UPDATE keep counters stable to avoid over/under counting on status flips.
+      void updatedTransaction;
     }
   );
 
@@ -113,8 +107,8 @@ export function RealtimeStats({ initialStats }: { initialStats: Stats }) {
       {/* Live Metrics */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <MetricBadge
-          label="Revenue Today"
-          value={formatCurrency(stats.monthlyRevenue)}
+          label="Revenue Snapshot"
+          value={formatCurrency(stats.monthlyRevenue, stats.baseCurrency || 'USD')}
         />
         <MetricBadge
           label="Transactions"
@@ -145,7 +139,7 @@ export function RealtimeStats({ initialStats }: { initialStats: Stats }) {
                   <span className="text-sm text-foreground">New transaction</span>
                 </div>
                 <span className="text-sm font-medium text-green-500">
-                  +{formatCurrency(tx.gross_amount)}
+                  +{formatCurrency(tx.gross_amount, stats.baseCurrency || 'USD')}
                 </span>
               </div>
             ))}

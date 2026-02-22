@@ -6,97 +6,17 @@ import {
 } from 'lucide-react';
 import { Suspense } from 'react';
 
+import {
+  DEFAULT_BASE_CURRENCY,
+  convertToBaseAmount,
+  loadUsdRates,
+  resolvePlatformBaseCurrency,
+} from '@/lib/finance/currency';
 import { supabaseAdmin } from '@/lib/supabase';
 import { formatCurrency, formatNumber } from '@/lib/utils';
 
 import { AnalyticsCharts } from './charts';
 import { ExportButton } from './export-button';
-
-const DEFAULT_BASE_CURRENCY = 'USD';
-
-function parseCurrencySetting(value: unknown): string | null {
-  if (typeof value === 'string' && value.trim()) {
-    return value.trim().toUpperCase();
-  }
-  if (value && typeof value === 'object') {
-    const payload = value as Record<string, unknown>;
-    const candidates = [payload.code, payload.currency, payload.value];
-    for (const candidate of candidates) {
-      if (typeof candidate === 'string' && candidate.trim()) {
-        return candidate.trim().toUpperCase();
-      }
-    }
-  }
-  return null;
-}
-
-async function resolvePlatformBaseCurrency(): Promise<string> {
-  const { data } = await supabaseAdmin
-    .from('platform_settings')
-    .select('setting_key, value')
-    .in('setting_key', ['platform_base_currency', 'base_currency', 'default_currency']);
-
-  const byKey = new Map<string, unknown>();
-  for (const row of data || []) {
-    byKey.set(String((row as any).setting_key || ''), (row as any).value);
-  }
-
-  const resolved =
-    parseCurrencySetting(byKey.get('platform_base_currency')) ||
-    parseCurrencySetting(byKey.get('base_currency')) ||
-    parseCurrencySetting(byKey.get('default_currency'));
-
-  return resolved || DEFAULT_BASE_CURRENCY;
-}
-
-async function loadUsdRates(codes: string[]) {
-  const { data } = await supabaseAdmin
-    .from('exchange_rates')
-    .select('to_currency, rate, valid_from, created_at')
-    .eq('from_currency', 'USD')
-    .in('to_currency', codes)
-    .or('valid_until.is.null,valid_until.gt.now()')
-    .order('valid_from', { ascending: false });
-
-  const ratesToUsdBase = new Map<string, number>();
-  for (const row of data || []) {
-    const code = String((row as any).to_currency || '').toUpperCase();
-    if (!code || ratesToUsdBase.has(code)) continue;
-    const rate = Number((row as any).rate);
-    if (Number.isFinite(rate) && rate > 0) {
-      ratesToUsdBase.set(code, rate);
-    }
-  }
-
-  ratesToUsdBase.set('USD', 1);
-  return ratesToUsdBase;
-}
-
-function convertToBaseAmount(
-  amountCents: number,
-  fromCurrency: string,
-  baseCurrency: string,
-  usdRates: Map<string, number>
-): number {
-  const from = fromCurrency.toUpperCase();
-  const base = baseCurrency.toUpperCase();
-
-  if (from === base) return amountCents;
-
-  const usdToFrom = usdRates.get(from);
-  const usdToBase = usdRates.get(base) || 1;
-
-  if (!usdToFrom || usdToFrom <= 0) {
-    return amountCents;
-  }
-
-  const amountInUsd = amountCents / usdToFrom;
-  if (base === 'USD') {
-    return Math.round(amountInUsd);
-  }
-
-  return Math.round(amountInUsd * usdToBase);
-}
 
 async function getAnalyticsData() {
   const now = new Date();

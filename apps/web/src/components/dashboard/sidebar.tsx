@@ -55,7 +55,7 @@ interface DashboardSidebarProps {
 // ============================================
 
 const mainNavigation: NavItem[] = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, exact: true },
+  { name: 'Overview', href: '/dashboard', icon: LayoutDashboard, exact: true },
   { name: 'Events', href: '/dashboard/events', icon: Calendar },
   { name: 'Collaborations', href: '/dashboard/collaborations', icon: Users },
   { name: 'Upload', href: '/dashboard/upload', icon: Upload },
@@ -114,6 +114,7 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
   const safePathname = pathname ?? '';
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isSwitchingToAttendee, setIsSwitchingToAttendee] = useState(false);
   const { confirm, ConfirmDialog } = useConfirm();
   const toast = useToast();
 
@@ -159,6 +160,33 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
       return safePathname === item.href;
     }
     return safePathname === item.href || safePathname.startsWith(`${item.href}/`);
+  };
+
+  const handleSwitchToAttendeeView = async () => {
+    if (isSwitchingToAttendee) return;
+    setIsSwitchingToAttendee(true);
+    try {
+      const response = await fetch('/api/account/view-mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetView: 'attendee',
+          ensureAttendee: true,
+          switchView: true,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || 'Failed to switch to attendee view');
+      }
+      toast.success('Done', 'Switched to attendee view');
+      router.replace(payload.redirectPath || '/gallery');
+      router.refresh();
+    } catch (error: any) {
+      toast.error('Switch failed', error?.message || 'Failed to switch view');
+    } finally {
+      setIsSwitchingToAttendee(false);
+    }
   };
 
   const resolvedMainNavigation: NavItem[] = mainNavigation.map((item) => {
@@ -272,6 +300,14 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
 
       {/* Logout */}
       <div className="border-t border-border p-3">
+        <button
+          onClick={handleSwitchToAttendeeView}
+          disabled={isSwitchingToAttendee}
+          className="mb-2 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-secondary transition-all duration-200 hover:bg-muted hover:text-foreground disabled:opacity-60"
+        >
+          <Users className="h-5 w-5" />
+          {isSwitchingToAttendee ? 'Switching...' : 'Switch to Attendee View'}
+        </button>
         <button
           onClick={handleLogout}
           disabled={isLoggingOut}

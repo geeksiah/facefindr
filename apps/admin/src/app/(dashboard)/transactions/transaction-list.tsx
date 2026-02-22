@@ -18,6 +18,7 @@ import { formatCurrency, formatDateTime } from '@/lib/utils';
 
 interface Transaction {
   id: string;
+  source_type?: 'transaction' | 'drop_in_credit_purchase';
   gross_amount: number;
   net_amount: number;
   platform_fee: number;
@@ -27,7 +28,7 @@ interface Transaction {
   payment_provider: string;
   stripe_payment_intent_id: string | null;
   created_at: string;
-  events: { id: string; name: string } | null;
+  event_name?: string | null;
   metadata?: { type?: string; credits_purchased?: number } | null;
   transaction_type?: string | null;
 }
@@ -98,7 +99,7 @@ export function TransactionList({ transactions, total, page, limit }: Transactio
                 </td>
                 <td className="px-6 py-4">
                   <span className="text-foreground">
-                    {tx.events?.name ||
+                    {tx.event_name ||
                       (tx.transaction_type === 'drop_in_credit_purchase' ||
                       tx.metadata?.type === 'drop_in_credit_purchase'
                         ? 'Drop-in Credits'

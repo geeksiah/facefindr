@@ -239,7 +239,7 @@ export default async function DashboardPage() {
     <div className="space-y-8">
       {/* Page Header */}
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
+        <h1 className="text-2xl font-bold text-foreground">Overview</h1>
         <p className="mt-1 text-secondary">
           Welcome back! Here&apos;s what&apos;s happening with your events.
         </p>

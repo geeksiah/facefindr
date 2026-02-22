@@ -103,3 +103,7 @@ supabase/migrations/082_notifications_alignment_finalize.sql
 supabase/migrations/083_creator_plan_feature_guardrails.sql
 supabase/Schema structure.txt
 supabase/Schema structure.txt
+supabase/migrations/085_admin_promo_codes.sql
+supabase/migrations/086_support_tickets_and_promo_redemption_counter.sql
+supabase/migrations/087_admin_finance_unified_transaction_feed.sql
+supabase/Schema structure.txt
