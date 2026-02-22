@@ -7,10 +7,9 @@ export const dynamic = 'force-dynamic';
  * Uses dynamic payment gateway selection based on user preference and country
  */
 
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { v4 as uuidv4 } from 'uuid';
 
 import { getCountryFromRequest, getEffectiveCurrency, getPlatformBaseCurrency } from '@/lib/currency/currency-service';
 import { calculateFees } from '@/lib/payments/fee-calculator';
@@ -494,7 +493,7 @@ export async function POST(
     };
 
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    const txRef = uuidv4();
+    const txRef = randomUUID();
 
     let checkoutUrl: string;
     let sessionId: string;

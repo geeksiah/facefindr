@@ -1,8 +1,7 @@
 export const dynamic = 'force-dynamic';
 
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { v4 as uuidv4 } from 'uuid';
 
 import { getEffectiveCurrency } from '@/lib/currency/currency-service';
 import { getAppUrl } from '@/lib/env';
@@ -505,7 +504,7 @@ export async function POST(request: NextRequest) {
     }
 
     const baseUrl = getAppUrl();
-    const txRef = uuidv4();
+    const txRef = randomUUID();
     const recoveryMetadata = isRecoveryCheckout
       ? {
           media_recovery_request_id: recoveryRequestIds[0] || null,

@@ -12,7 +12,7 @@
  * - SCHEDULED: Payout on specific days (weekly/monthly)
  */
 
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 
 import { createServiceClient } from '@/lib/supabase/server';
 
@@ -100,7 +100,7 @@ async function applyWalletBalancePayout(
 
 export async function processPayout(request: PayoutRequest): Promise<PayoutResult> {
   const supabase = createServiceClient();
-  const reference = `PO-${uuidv4().slice(0, 8).toUpperCase()}`;
+  const reference = `PO-${randomUUID().slice(0, 8).toUpperCase()}`;
   const dedupeWindowStartIso = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const payoutIdentityKey = String(request.identityKey || '').trim() || null;
 
