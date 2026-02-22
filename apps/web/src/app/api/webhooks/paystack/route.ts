@@ -6,6 +6,7 @@ import { NextResponse } from 'next/server';
 import {
   verifyPaystackWebhookSignatureAsync,
 } from '@/lib/payments/paystack';
+import { incrementDropInCredits } from '@/lib/drop-in/credits';
 import { emitFinancialInAppNotification } from '@/lib/payments/financial-notifications';
 import {
   recordDropInCreditPurchaseJournal,
@@ -545,17 +546,11 @@ async function handleDropInCreditPurchaseSuccess(
 
   if (!activated?.id) return;
 
-  const { data: attendee } = await supabase
-    .from('attendees')
-    .select('drop_in_credits')
-    .eq('id', purchase.attendee_id)
-    .maybeSingle();
-  const currentCredits = Number(attendee?.drop_in_credits || 0);
-
-  await supabase
-    .from('attendees')
-    .update({ drop_in_credits: currentCredits + Number(purchase.credits_purchased || 0) })
-    .eq('id', purchase.attendee_id);
+  await incrementDropInCredits(
+    supabase,
+    purchase.attendee_id,
+    Number(purchase.credits_purchased || 0)
+  );
 
   const amountMinor =
     readNumber(metadata.amount_paid_cents) ??

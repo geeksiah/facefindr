@@ -7,6 +7,7 @@ import {
   recordDropInCreditPurchaseJournal,
   recordRefundJournalForTransaction,
   recordSettlementJournalForTransaction,
+  recordSubscriptionChargeJournalFromSourceRef,
 } from '@/lib/payments/financial-flow-ledger';
 import { recordFinancialJournal } from '@/lib/payments/financial-ledger';
 import { createServiceClient } from '@/lib/supabase/server';
@@ -23,6 +24,17 @@ interface ReconcileIssueInput {
   details?: Record<string, unknown>;
   autoHealed?: boolean;
   resolved?: boolean;
+}
+
+type JournalProvider = 'stripe' | 'paypal' | 'flutterwave' | 'paystack';
+
+function normalizeJournalProvider(value: string): JournalProvider | null {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'stripe') return 'stripe';
+  if (normalized === 'paypal') return 'paypal';
+  if (normalized === 'flutterwave') return 'flutterwave';
+  if (normalized === 'paystack') return 'paystack';
+  return null;
 }
 
 async function hasSettlementJournalForTransaction(supabase: ReturnType<typeof createServiceClient>, transactionId: string) {
@@ -67,6 +79,40 @@ async function hasRefundJournalForTransaction(supabase: ReturnType<typeof create
     .maybeSingle();
 
   return Boolean(byMetadata.data?.id);
+}
+
+async function hasSubscriptionChargeJournal(
+  supabase: ReturnType<typeof createServiceClient>,
+  input: {
+    scope: 'creator_subscription' | 'attendee_subscription' | 'vault_subscription';
+    sourceRef: string;
+    externalSubscriptionId?: string | null;
+  }
+) {
+  const expectedSourceId = `${input.sourceRef}:${input.scope}`;
+  const direct = await supabase
+    .from('financial_journals')
+    .select('id')
+    .eq('source_kind', input.scope)
+    .eq('flow_type', 'subscription_charge')
+    .eq('source_id', expectedSourceId)
+    .limit(1)
+    .maybeSingle();
+  if (direct.data?.id) return true;
+
+  const externalId = String(input.externalSubscriptionId || '').trim();
+  if (!externalId) return false;
+
+  const byExternalMetadata = await supabase
+    .from('financial_journals')
+    .select('id')
+    .eq('source_kind', input.scope)
+    .eq('flow_type', 'subscription_charge')
+    .contains('metadata', { external_subscription_id: externalId })
+    .limit(1)
+    .maybeSingle();
+
+  return Boolean(byExternalMetadata.data?.id);
 }
 
 async function upsertReconciliationIssue(
@@ -307,6 +353,137 @@ export async function POST(request: Request) {
         resolved: healed,
         details: {
           purchase_id: purchase.id,
+          dry_run: dryRun,
+        },
+      });
+
+      issues += 1;
+      if (healed) autoHealed += 1;
+    }
+
+    const subscriptionLookbackIso = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString();
+
+    const [creatorSubscriptions, attendeeSubscriptions, vaultSubscriptions] = await Promise.all([
+      supabase
+        .from('subscriptions')
+        .select(
+          'id, photographer_id, status, amount_cents, currency, payment_provider, external_subscription_id, last_webhook_event_at, plan_code'
+        )
+        .in('status', ['active', 'trialing'])
+        .not('last_webhook_event_at', 'is', null)
+        .gte('last_webhook_event_at', subscriptionLookbackIso)
+        .order('last_webhook_event_at', { ascending: false })
+        .limit(limit),
+      supabase
+        .from('attendee_subscriptions')
+        .select(
+          'id, attendee_id, status, amount_cents, currency, payment_provider, external_subscription_id, last_webhook_event_at, plan_code'
+        )
+        .in('status', ['active', 'trialing'])
+        .not('last_webhook_event_at', 'is', null)
+        .gte('last_webhook_event_at', subscriptionLookbackIso)
+        .order('last_webhook_event_at', { ascending: false })
+        .limit(limit),
+      supabase
+        .from('storage_subscriptions')
+        .select(
+          'id, user_id, status, amount_cents, currency, payment_provider, external_subscription_id, last_webhook_event_at, plan_id'
+        )
+        .in('status', ['active', 'trialing'])
+        .not('last_webhook_event_at', 'is', null)
+        .gte('last_webhook_event_at', subscriptionLookbackIso)
+        .order('last_webhook_event_at', { ascending: false })
+        .limit(limit),
+    ]);
+
+    const subscriptionRows: Array<{
+      scope: 'creator_subscription' | 'attendee_subscription' | 'vault_subscription';
+      row: any;
+      actorId: string | null;
+      isPaidPlan: boolean;
+    }> = [
+      ...((creatorSubscriptions.data || []).map((row: any) => ({
+        scope: 'creator_subscription' as const,
+        row,
+        actorId: row.photographer_id || null,
+        isPaidPlan: String(row.plan_code || 'free').toLowerCase() !== 'free',
+      }))),
+      ...((attendeeSubscriptions.data || []).map((row: any) => ({
+        scope: 'attendee_subscription' as const,
+        row,
+        actorId: row.attendee_id || null,
+        isPaidPlan: String(row.plan_code || 'free').toLowerCase() !== 'free',
+      }))),
+      ...((vaultSubscriptions.data || []).map((row: any) => ({
+        scope: 'vault_subscription' as const,
+        row,
+        actorId: row.user_id || null,
+        isPaidPlan: Boolean(row.plan_id),
+      }))),
+    ];
+
+    for (const item of subscriptionRows) {
+      checked += 1;
+      const amountMinor = Number(item.row?.amount_cents || 0);
+      const paymentProvider = normalizeJournalProvider(item.row?.payment_provider || '');
+      const sourceRef =
+        String(item.row?.external_subscription_id || '').trim() || String(item.row?.id || '').trim();
+
+      if (!item.isPaidPlan || amountMinor <= 0 || !paymentProvider || !sourceRef) {
+        continue;
+      }
+
+      const hasJournal = await hasSubscriptionChargeJournal(supabase, {
+        scope: item.scope,
+        sourceRef,
+        externalSubscriptionId: item.row?.external_subscription_id || null,
+      });
+      if (hasJournal) continue;
+
+      if (!dryRun) {
+        await recordSubscriptionChargeJournalFromSourceRef(supabase, {
+          scope: item.scope,
+          sourceRef,
+          amountMinor,
+          currency: String(item.row?.currency || 'USD').toUpperCase(),
+          provider: paymentProvider,
+          actorId: item.scope === 'creator_subscription' ? item.actorId : null,
+          metadata: {
+            subscription_id: item.row?.id || null,
+            external_subscription_id: item.row?.external_subscription_id || null,
+            reconcile_run_id: runId,
+            auto_healed: true,
+          },
+        }).catch(() => {
+          // Reconciliation keeps issue open if heal fails.
+        });
+      }
+
+      const healed = !dryRun
+        ? await hasSubscriptionChargeJournal(supabase, {
+            scope: item.scope,
+            sourceRef,
+            externalSubscriptionId: item.row?.external_subscription_id || null,
+          })
+        : false;
+
+      await upsertReconciliationIssue(supabase, {
+        runId,
+        issueKey: `missing_subscription_charge_journal:${item.scope}:${item.row?.id}`,
+        issueType: 'missing_subscription_charge_journal',
+        sourceKind: item.scope,
+        sourceId: String(item.row?.id || sourceRef),
+        severity: 'error',
+        autoHealed: healed,
+        resolved: healed,
+        details: {
+          scope: item.scope,
+          subscription_id: item.row?.id || null,
+          external_subscription_id: item.row?.external_subscription_id || null,
+          source_ref: sourceRef,
+          amount_minor: amountMinor,
+          currency: String(item.row?.currency || 'USD').toUpperCase(),
+          provider: paymentProvider,
           dry_run: dryRun,
         },
       });

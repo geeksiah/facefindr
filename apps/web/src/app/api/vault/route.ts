@@ -129,6 +129,11 @@ export async function GET(request: NextRequest) {
       .eq('user_id', user.id)
       .maybeSingle();
 
+    const { data: authoritativeVaultRows, error: authoritativeVaultError } = await supabase
+      .from('photo_vault')
+      .select('file_size_bytes')
+      .eq('user_id', user.id);
+
     // Get user's active subscription
     const { data: subscription } = await supabase
       .from('storage_subscriptions')
@@ -191,22 +196,37 @@ export async function GET(request: NextRequest) {
         : Number.isFinite(limitFromUsage)
           ? limitFromUsage
           : 500 * 1024 * 1024;
-    const resolvedTotalPhotos = Number(usage?.total_photos ?? 0);
-    const resolvedTotalSizeBytes = Number(usage?.total_size_bytes ?? 0);
+    const authoritativeTotalPhotos = authoritativeVaultError
+      ? null
+      : Number((authoritativeVaultRows || []).length);
+    const authoritativeTotalSizeBytes = authoritativeVaultError
+      ? null
+      : (authoritativeVaultRows || []).reduce(
+          (sum: number, row: any) => sum + Math.max(0, Number(row?.file_size_bytes || 0)),
+          0
+        );
+    const resolvedTotalPhotos = authoritativeTotalPhotos ?? Number(usage?.total_photos ?? 0);
+    const resolvedTotalSizeBytes =
+      authoritativeTotalSizeBytes ?? Number(usage?.total_size_bytes ?? 0);
 
     if (
       !usage ||
       usage.storage_limit_bytes === null ||
       usage.storage_limit_bytes === undefined ||
-      Number(usage.storage_limit_bytes) !== resolvedStorageLimitBytes
+      Number(usage.storage_limit_bytes) !== resolvedStorageLimitBytes ||
+      Number(usage.total_photos ?? 0) !== resolvedTotalPhotos ||
+      Number(usage.total_size_bytes ?? 0) !== resolvedTotalSizeBytes
     ) {
       await supabase
         .from('storage_usage')
         .upsert(
           {
             user_id: user.id,
+            total_photos: resolvedTotalPhotos,
+            total_size_bytes: resolvedTotalSizeBytes,
             storage_limit_bytes: resolvedStorageLimitBytes,
             photo_limit: -1,
+            calculated_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           },
           { onConflict: 'user_id' }

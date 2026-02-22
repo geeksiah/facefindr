@@ -13,6 +13,60 @@ export async function getStoredDropInCredits(
   return Number((data as any)?.drop_in_credits || 0);
 }
 
+function isMissingRpcFunctionError(error: unknown, fnName: string): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = String((error as any).code || '');
+  const message = String((error as any).message || '').toLowerCase();
+  const details = String((error as any).details || '').toLowerCase();
+  const fn = fnName.toLowerCase();
+  return (
+    code === '42883' ||
+    message.includes(`function ${fn}`) ||
+    details.includes(`function ${fn}`) ||
+    (code.startsWith('PGRST') && message.includes(fn))
+  );
+}
+
+export async function incrementDropInCredits(
+  serviceClient: ReturnType<typeof createServiceClient>,
+  attendeeId: string,
+  deltaCredits: number
+): Promise<number> {
+  const normalizedAttendeeId = String(attendeeId || '').trim();
+  const normalizedDelta = Number.isFinite(Number(deltaCredits))
+    ? Math.trunc(Number(deltaCredits))
+    : 0;
+
+  if (!normalizedAttendeeId) return 0;
+  if (normalizedDelta === 0) {
+    return getStoredDropInCredits(serviceClient, normalizedAttendeeId);
+  }
+
+  const { data, error } = await (serviceClient.rpc('increment_attendee_drop_in_credits', {
+    p_attendee_id: normalizedAttendeeId,
+    p_credits_delta: normalizedDelta,
+  }) as any);
+
+  if (!error) {
+    const balance = Number(data || 0);
+    return Number.isFinite(balance) ? Math.max(0, Math.round(balance)) : 0;
+  }
+
+  if (!isMissingRpcFunctionError(error, 'increment_attendee_drop_in_credits')) {
+    throw error;
+  }
+
+  // Legacy fallback for deployments that have not applied migration 079 yet.
+  const current = await getStoredDropInCredits(serviceClient, normalizedAttendeeId);
+  const next = Math.max(0, current + normalizedDelta);
+  await serviceClient
+    .from('attendees')
+    .update({ drop_in_credits: next })
+    .eq('id', normalizedAttendeeId);
+
+  return next;
+}
+
 function uniqueIds(ids: string[]) {
   return [...new Set(ids.map((id) => String(id || '').trim()).filter(Boolean))];
 }

@@ -33,6 +33,23 @@ export async function GET() {
     }
     const creatorId = creatorProfile.id as string;
 
+    const { data: mediaRows, error: mediaUsageError } = await serviceClient
+      .from('media')
+      .select('file_size, events!inner(photographer_id)')
+      .eq('events.photographer_id', creatorId)
+      .is('deleted_at', null);
+    const authoritativeTotalPhotos = mediaUsageError
+      ? null
+      : Number((mediaRows || []).length);
+    const authoritativeStorageBytes = mediaUsageError
+      ? null
+      : (mediaRows || []).reduce(
+          (sum: number, row: any) => sum + Math.max(0, Number(row?.file_size || 0)),
+          0
+        );
+    const authoritativeStorageGb =
+      authoritativeStorageBytes === null ? null : authoritativeStorageBytes / (1024 * 1024 * 1024);
+
     // Get comprehensive usage summary
     const usage = await getUsageSummary(creatorId);
 
@@ -68,8 +85,8 @@ export async function GET() {
       return NextResponse.json({
         usage: {
           activeEvents: 0,
-          totalPhotos: 0,
-          storageUsedGb: 0,
+          totalPhotos: authoritativeTotalPhotos ?? 0,
+          storageUsedGb: authoritativeStorageGb ?? 0,
           teamMembers: 1,
           faceOpsUsed: 0,
         },
@@ -78,7 +95,16 @@ export async function GET() {
         },
         percentages: {
           events: 0,
-          storage: 0,
+          storage:
+            authoritativeStorageGb !== null && (resolvedPlanLimits.maxStorageGb ?? 0) > 0
+              ? Math.min(
+                  100,
+                  Math.max(
+                    0,
+                    Math.round((authoritativeStorageGb * 100) / Number(resolvedPlanLimits.maxStorageGb || 1))
+                  )
+                )
+              : 0,
           team: 0,
         },
         planId: subscriptionPlanId || currentPlan?.id || freePlan?.id || null,
@@ -90,8 +116,8 @@ export async function GET() {
     return NextResponse.json({
       usage: {
         activeEvents: usage.activeEvents,
-        totalPhotos: usage.totalPhotos,
-        storageUsedGb: usage.storageUsedGb,
+        totalPhotos: authoritativeTotalPhotos ?? usage.totalPhotos,
+        storageUsedGb: authoritativeStorageGb ?? usage.storageUsedGb,
         teamMembers: usage.teamMembers,
         faceOpsUsed: usage.faceOpsUsed,
       },
@@ -104,7 +130,13 @@ export async function GET() {
       },
       percentages: {
         events: Math.min(100, Math.max(0, Number(usage.eventsPercent || 0))),
-        storage: Math.min(100, Math.max(0, Number(usage.storagePercent || 0))),
+        storage:
+          authoritativeStorageGb !== null && Number(usage.maxStorageGb || 0) > 0
+            ? Math.min(
+                100,
+                Math.max(0, Math.round((authoritativeStorageGb * 100) / Number(usage.maxStorageGb || 1)))
+              )
+            : Math.min(100, Math.max(0, Number(usage.storagePercent || 0))),
         team: Math.min(100, Math.max(0, Number(usage.teamPercent || 0))),
       },
       planId: subscriptionPlanId,

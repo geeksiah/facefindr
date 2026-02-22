@@ -9,6 +9,10 @@ import {
 } from './financial-ledger';
 
 type ServiceClient = ReturnType<typeof createServiceClient>;
+type SubscriptionChargeScope =
+  | 'creator_subscription'
+  | 'attendee_subscription'
+  | 'vault_subscription';
 
 interface TransactionLedgerRow {
   id: string;
@@ -232,5 +236,35 @@ export async function recordSubscriptionChargeJournal(
         counterpartyId: input.actorId || null,
       },
     ],
+  });
+}
+
+export async function recordSubscriptionChargeJournalFromSourceRef(
+  supabase: ServiceClient,
+  input: {
+    scope: SubscriptionChargeScope;
+    sourceRef?: string | null;
+    amountMinor?: number | null;
+    currency?: string | null;
+    provider: 'stripe' | 'paypal' | 'flutterwave' | 'paystack';
+    actorId?: string | null;
+    metadata?: Record<string, unknown>;
+  }
+) {
+  const sourceRef = String(input.sourceRef || '').trim();
+  const amountMinor = Number.isFinite(Number(input.amountMinor))
+    ? Math.max(0, Math.round(Number(input.amountMinor)))
+    : 0;
+  if (!sourceRef || amountMinor <= 0) return;
+
+  await recordSubscriptionChargeJournal(supabase, {
+    sourceKind: input.scope,
+    sourceId: `${sourceRef}:${input.scope}`,
+    amountMinor,
+    currency: String(input.currency || 'USD').toUpperCase(),
+    provider: input.provider,
+    scope: input.scope,
+    actorId: input.actorId || null,
+    metadata: input.metadata || {},
   });
 }

@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { recordSubscriptionChargeJournalFromSourceRef } from '@/lib/payments/financial-flow-ledger';
 import { verifyTransactionByRef } from '@/lib/payments/flutterwave';
 import { getBillingSubscription } from '@/lib/payments/paypal';
 import { resolvePhotographerProfileByUser } from '@/lib/profiles/ids';
@@ -320,6 +321,12 @@ export async function POST(request: NextRequest) {
       const cancelAtPeriodEnd = resolveCancelAtPeriodEnd(metadata, manualRenewalMode);
       const billingCycle = normalizeBillingCycle(readString(metadata.billing_cycle));
       const mappedStatus = resolveMappedStatus(readString(verified.status), 'creator_subscription');
+      const chargeAmountCents =
+        readNumber(metadata.pricing_amount_cents) ||
+        parseMinorAmountFromMajor((verified as any).charged_amount) ||
+        parseMinorAmountFromMajor((verified as any).amount);
+      const chargeCurrency =
+        readString(verified.currency) || readString(metadata.pricing_currency) || 'USD';
 
       await syncRecurringSubscriptionRecord({
         supabase: serviceClient,
@@ -341,11 +348,8 @@ export async function POST(request: NextRequest) {
           readString((verified as any).payment_plan) ||
           readString((verified as any).plan),
         billingCycle,
-        currency: readString(verified.currency) || readString(metadata.pricing_currency) || 'USD',
-        amountCents:
-          readNumber(metadata.pricing_amount_cents) ||
-          parseMinorAmountFromMajor((verified as any).charged_amount) ||
-          parseMinorAmountFromMajor((verified as any).amount),
+        currency: chargeCurrency,
+        amountCents: chargeAmountCents,
         currentPeriodStart: readString((verified as any).charged_at) || new Date().toISOString(),
         currentPeriodEnd:
           readString(metadata.current_period_end) ||
@@ -363,6 +367,21 @@ export async function POST(request: NextRequest) {
           verification_source: 'subscriptions.verify.api',
           flutterwave_tx_ref: txRef,
         },
+      });
+
+      await recordSubscriptionChargeJournalFromSourceRef(serviceClient, {
+        scope: 'creator_subscription',
+        sourceRef: txRef,
+        amountMinor: chargeAmountCents,
+        currency: chargeCurrency,
+        provider: 'flutterwave',
+        actorId: creatorId,
+        metadata: {
+          verification_source: 'subscriptions.verify.api',
+          flutterwave_tx_ref: txRef,
+        },
+      }).catch((ledgerError) => {
+        console.error('[LEDGER] failed to record creator subscription charge on verify:', ledgerError);
       });
     } else {
       if (!reference) {
@@ -431,6 +450,8 @@ export async function POST(request: NextRequest) {
       const amountCents =
         readNumber(mergedMetadata.pricing_amount_cents) ??
         (Number.isFinite(Number(verified.amount)) ? Math.round(Number(verified.amount)) : null);
+      const chargeCurrency =
+        readString(verified.currency) || readString(mergedMetadata.pricing_currency) || 'USD';
       const renewalMode = readString(mergedMetadata.renewal_mode) || 'provider_recurring';
       const manualRenewalMode =
         renewalMode === 'manual_renewal' ||
@@ -455,7 +476,7 @@ export async function POST(request: NextRequest) {
         externalSubscriptionId,
         externalPlanId: providerPlanId,
         billingCycle,
-        currency: readString(verified.currency) || readString(mergedMetadata.pricing_currency) || 'USD',
+        currency: chargeCurrency,
         amountCents,
         currentPeriodStart: readString(verified.paid_at) || readString((verified as any)?.created_at) || new Date().toISOString(),
         currentPeriodEnd,
@@ -469,6 +490,21 @@ export async function POST(request: NextRequest) {
           verification_source: 'subscriptions.verify.api',
           renewal_mode: manualRenewalMode ? 'manual_renewal' : 'provider_recurring',
         },
+      });
+
+      await recordSubscriptionChargeJournalFromSourceRef(serviceClient, {
+        scope: 'creator_subscription',
+        sourceRef: reference,
+        amountMinor: amountCents,
+        currency: chargeCurrency,
+        provider: 'paystack',
+        actorId: creatorId,
+        metadata: {
+          verification_source: 'subscriptions.verify.api',
+          paystack_reference: reference,
+        },
+      }).catch((ledgerError) => {
+        console.error('[LEDGER] failed to record creator subscription charge on verify:', ledgerError);
       });
     }
 

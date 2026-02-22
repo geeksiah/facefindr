@@ -2,6 +2,8 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { incrementDropInCredits } from '@/lib/drop-in/credits';
+import { recordDropInCreditPurchaseJournal } from '@/lib/payments/financial-flow-ledger';
 import { verifyPaystackTransaction, resolvePaystackSecretKey } from '@/lib/payments/paystack';
 import { resolveAttendeeProfileByUser } from '@/lib/profiles/ids';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
@@ -132,27 +134,34 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const { data: currentAttendee } = await serviceClient
-      .from('attendees')
-      .select('drop_in_credits')
-      .eq('id', attendee.id)
-      .maybeSingle();
-    const currentCredits = Number(currentAttendee?.drop_in_credits || 0);
-    await serviceClient
-      .from('attendees')
-      .update({ drop_in_credits: currentCredits + purchase.credits_purchased })
-      .eq('id', attendee.id);
+    const totalCredits = await incrementDropInCredits(
+      serviceClient,
+      attendee.id,
+      Number(purchase.credits_purchased || 0)
+    );
 
-    const { data: updatedAttendee } = await serviceClient
-      .from('attendees')
-      .select('drop_in_credits')
-      .eq('id', attendee.id)
-      .maybeSingle();
+    const amountMinor = Math.max(0, Math.round(Number(purchase.amount_paid || 0)));
+    if (amountMinor > 0) {
+      await recordDropInCreditPurchaseJournal(serviceClient, {
+        purchaseId: purchase.id,
+        attendeeId: attendee.id,
+        amountMinor,
+        currency: String(purchase.currency || verified.currency || 'USD').toUpperCase(),
+        provider: 'paystack',
+        metadata: {
+          paystack_reference: verifyReference,
+          paystack_transaction_id: verified.id ? String(verified.id) : null,
+          verification_source: 'drop_in.credits.verify.api',
+        },
+      }).catch((ledgerError) => {
+        console.error('[LEDGER] failed to record verify drop-in credit purchase journal:', ledgerError);
+      });
+    }
 
     return NextResponse.json({
       success: true,
       creditsAdded: purchase.credits_purchased,
-      totalCredits: Number(updatedAttendee?.drop_in_credits || 0),
+      totalCredits,
     });
   } catch (error: any) {
     console.error('Drop-in credit verification error:', error);

@@ -39,16 +39,8 @@ async function getCreatorStorageUsedBytes(
   serviceClient: any,
   photographerId: string
 ): Promise<number> {
-  const { data: usageRow } = await serviceClient
-    .from('photographer_usage')
-    .select('storage_used_bytes')
-    .eq('photographer_id', photographerId)
-    .maybeSingle();
-  const usageBytes = Number(usageRow?.storage_used_bytes);
-  if (Number.isFinite(usageBytes) && usageBytes >= 0) {
-    return usageBytes;
-  }
-
+  // Authoritative source for storage usage is the media table.
+  // Cached counters can drift when deployments miss older trigger migrations.
   const { data: mediaRows, error } = await serviceClient
     .from('media')
     .select('file_size, events!inner(photographer_id)')
