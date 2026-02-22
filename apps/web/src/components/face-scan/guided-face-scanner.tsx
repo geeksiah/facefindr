@@ -1,22 +1,12 @@
 'use client';
 
-import {
-  CheckCircle2,
-  AlertCircle,
-  Loader2,
-  RotateCcw,
-  X,
-  Camera,
-} from 'lucide-react';
+import { AlertCircle, Camera, CheckCircle2, Loader2, RotateCcw, X } from 'lucide-react';
 import Image from 'next/image';
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { useConfirm } from '@/components/ui/toast';
 
-import { FaceGuideHead } from './face-guide-head';
-
-// Face position types
 type FacePosition = 'center' | 'left' | 'right' | 'up' | 'down';
 
 interface PositionConfig {
@@ -30,36 +20,39 @@ const POSITIONS: Record<FacePosition, PositionConfig> = {
   center: {
     label: 'Look Straight',
     instruction: 'Look directly at the camera',
-    yawRange: [-0.2, 0.2],
-    pitchRange: [-0.2, 0.2],
+    yawRange: [-0.24, 0.24],
+    pitchRange: [-0.24, 0.24],
   },
   left: {
     label: 'Turn Left',
-    instruction: 'Turn your head to the left',
-    yawRange: [-0.6, -0.15],
-    pitchRange: [-0.25, 0.25],
+    instruction: 'Turn your head left',
+    yawRange: [-0.9, -0.12],
+    pitchRange: [-0.32, 0.32],
   },
   right: {
     label: 'Turn Right',
-    instruction: 'Turn your head to the right',
-    yawRange: [0.15, 0.6],
-    pitchRange: [-0.25, 0.25],
+    instruction: 'Turn your head right',
+    yawRange: [0.12, 0.9],
+    pitchRange: [-0.32, 0.32],
   },
   up: {
     label: 'Tilt Up',
-    instruction: 'Tilt your head upward',
-    yawRange: [-0.25, 0.25],
-    pitchRange: [-0.6, -0.15],
+    instruction: 'Tilt your head up',
+    yawRange: [-0.35, 0.35],
+    pitchRange: [-0.9, -0.12],
   },
   down: {
     label: 'Tilt Down',
-    instruction: 'Tilt your head downward',
-    yawRange: [-0.25, 0.25],
-    pitchRange: [0.15, 0.6],
+    instruction: 'Tilt your head down',
+    yawRange: [-0.35, 0.35],
+    pitchRange: [0.12, 0.9],
   },
 };
 
 const POSITION_ORDER: FacePosition[] = ['center', 'left', 'right', 'up', 'down'];
+const AUTO_CAPTURE_HOLD_MS = 900;
+const DETECT_INTERVAL_MS = 90;
+const MATCH_STREAK_REQUIRED = 3;
 
 interface GuidedFaceScannerProps {
   onComplete: (captures: string[]) => Promise<void>;
@@ -68,23 +61,161 @@ interface GuidedFaceScannerProps {
 
 type ScanState = 'initializing' | 'ready' | 'processing' | 'complete' | 'error';
 
-export function GuidedFaceScanner({
-  onComplete,
-  onCancel,
-}: GuidedFaceScannerProps) {
+type DetectionSource = 'mediapipe' | 'tfjs';
+
+interface PoseReading {
+  yaw: number;
+  pitch: number;
+}
+
+interface FaceDetectorAdapter {
+  source: DetectionSource;
+  detectPose: (video: HTMLVideoElement, timestampMs: number) => Promise<PoseReading | null>;
+}
+
+const DEFAULT_MEDIAPIPE_WASM_BASE =
+  'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm';
+const DEFAULT_MEDIAPIPE_FACE_MODEL =
+  'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+
+let sharedDetector: FaceDetectorAdapter | null = null;
+let sharedDetectorPromise: Promise<FaceDetectorAdapter> | null = null;
+
+function pickKeypointFromArray(keypoints: any[], name: string, fallbackIndexes: number[]) {
+  const named = keypoints.find((k: any) => k?.name === name);
+  if (named && typeof named.x === 'number' && typeof named.y === 'number') return named;
+
+  for (const index of fallbackIndexes) {
+    const point = keypoints[index];
+    if (point && typeof point.x === 'number' && typeof point.y === 'number') return point;
+  }
+
+  return null;
+}
+
+async function createTfjsDetectorAdapter(): Promise<FaceDetectorAdapter> {
+  const tf = await import('@tensorflow/tfjs');
+  await tf.ready();
+
+  try {
+    await tf.setBackend('webgl');
+  } catch {
+    await tf.setBackend('cpu');
+  }
+  await tf.ready();
+
+  const faceLandmarksDetection = await import('@tensorflow-models/face-landmarks-detection');
+  const detector = await faceLandmarksDetection.createDetector(
+    faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
+    {
+      runtime: 'tfjs',
+      refineLandmarks: false,
+      maxFaces: 1,
+    }
+  );
+
+  return {
+    source: 'tfjs',
+    async detectPose(video) {
+      const faces = await detector.estimateFaces(video, { flipHorizontal: true });
+      const face = faces?.[0];
+      if (!face?.keypoints) return null;
+
+      const keypoints = face.keypoints;
+      const noseTip = pickKeypointFromArray(keypoints, 'noseTip', [1, 4, 168]);
+      const leftEye = pickKeypointFromArray(keypoints, 'leftEye', [33, 133, 159]);
+      const rightEye = pickKeypointFromArray(keypoints, 'rightEye', [263, 362, 386]);
+      if (!noseTip || !leftEye || !rightEye) return null;
+
+      const eyeCenterX = (leftEye.x + rightEye.x) / 2;
+      const eyeCenterY = (leftEye.y + rightEye.y) / 2;
+      const eyeDistance = Math.max(Math.abs(rightEye.x - leftEye.x), 1);
+
+      const yaw = (noseTip.x - eyeCenterX) / eyeDistance;
+      const pitch = (noseTip.y - eyeCenterY) / (eyeDistance * 0.92);
+
+      return { yaw, pitch };
+    },
+  };
+}
+
+async function createMediapipeDetectorAdapter(): Promise<FaceDetectorAdapter> {
+  const tasksVision = await import('@mediapipe/tasks-vision');
+  const wasmBase = process.env.NEXT_PUBLIC_MEDIAPIPE_WASM_BASE || DEFAULT_MEDIAPIPE_WASM_BASE;
+  const modelPath = process.env.NEXT_PUBLIC_MEDIAPIPE_FACE_MODEL_URL || DEFAULT_MEDIAPIPE_FACE_MODEL;
+
+  const vision = await tasksVision.FilesetResolver.forVisionTasks(wasmBase);
+  const landmarker = await tasksVision.FaceLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: modelPath,
+      delegate: 'GPU',
+    },
+    runningMode: 'VIDEO',
+    numFaces: 1,
+  });
+
+  return {
+    source: 'mediapipe',
+    async detectPose(video, timestampMs) {
+      const result = landmarker.detectForVideo(video, timestampMs);
+      const landmarks = result?.faceLandmarks?.[0];
+      if (!landmarks) return null;
+
+      const noseTip = landmarks[1] || landmarks[4];
+      const leftEye = landmarks[33] || landmarks[133];
+      const rightEye = landmarks[263] || landmarks[362];
+      if (!noseTip || !leftEye || !rightEye) return null;
+
+      const eyeCenterX = (leftEye.x + rightEye.x) / 2;
+      const eyeCenterY = (leftEye.y + rightEye.y) / 2;
+      const eyeDistance = Math.max(Math.abs(rightEye.x - leftEye.x), 0.001);
+
+      const yaw = (noseTip.x - eyeCenterX) / eyeDistance;
+      const pitch = (noseTip.y - eyeCenterY) / (eyeDistance * 0.92);
+
+      return { yaw, pitch };
+    },
+  };
+}
+
+async function getSharedFaceDetector() {
+  if (sharedDetector) return sharedDetector;
+  if (sharedDetectorPromise) return sharedDetectorPromise;
+
+  sharedDetectorPromise = (async () => {
+    let detector: FaceDetectorAdapter;
+    try {
+      detector = await createMediapipeDetectorAdapter();
+    } catch (mediapipeError) {
+      console.warn('MediaPipe detector init failed. Falling back to TFJS.', mediapipeError);
+      detector = await createTfjsDetectorAdapter();
+    }
+
+    sharedDetector = detector;
+    return detector;
+  })()
+    .catch((error) => {
+      sharedDetectorPromise = null;
+      throw error;
+    });
+
+  return sharedDetectorPromise;
+}
+
+export function GuidedFaceScanner({ onComplete, onCancel }: GuidedFaceScannerProps) {
   const [state, setState] = useState<ScanState>('initializing');
   const [currentPositionIndex, setCurrentPositionIndex] = useState(0);
   const [captures, setCaptures] = useState<string[]>([]);
   const [faceDetected, setFaceDetected] = useState(false);
   const [positionMatch, setPositionMatch] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [holdProgress, setHoldProgress] = useState(0);
-  const [useAutoCapture, setUseAutoCapture] = useState(true);
-  const [modelLoaded, setModelLoaded] = useState(false);
+  const [autoCaptureReady, setAutoCaptureReady] = useState(false);
+  const [autoCaptureLoading, setAutoCaptureLoading] = useState(false);
+  const [showManualAssist, setShowManualAssist] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [permissionBlocked, setPermissionBlocked] = useState(false);
   const [cameraMessage, setCameraMessage] = useState<string | null>(null);
-  const [autoStatusMessage, setAutoStatusMessage] = useState<string | null>(null);
-  const [showManualAssist, setShowManualAssist] = useState(false);
 
   const { confirm, ConfirmDialog } = useConfirm();
 
@@ -94,28 +225,21 @@ export function GuidedFaceScanner({
   const detectorRef = useRef<any>(null);
   const animationRef = useRef<number | null>(null);
   const holdStartRef = useRef<number | null>(null);
+  const matchStreakRef = useRef(0);
   const noMatchFrameCountRef = useRef(0);
+  const lastDetectAtRef = useRef(0);
+  const captureLockedRef = useRef(false);
 
   const currentPosition = POSITION_ORDER[currentPositionIndex];
   const positionConfig = POSITIONS[currentPosition];
 
-  const pickKeypoint = useCallback((keypoints: any[], name: string, fallbackIndexes: number[]) => {
-    const named = keypoints.find((k: any) => k?.name === name);
-    if (named && typeof named.x === 'number' && typeof named.y === 'number') {
-      return named;
-    }
-
-    for (const index of fallbackIndexes) {
-      const point = keypoints[index];
-      if (point && typeof point.x === 'number' && typeof point.y === 'number') {
-        return point;
-      }
-    }
-
-    return null;
+  const resetMatchingState = useCallback(() => {
+    holdStartRef.current = null;
+    matchStreakRef.current = 0;
+    setHoldProgress(0);
+    setPositionMatch(false);
   }, []);
 
-  // Initialize camera
   const initializeCamera = useCallback(async () => {
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -130,35 +254,40 @@ export function GuidedFaceScanner({
           const permissionStatus = await permissionsApi.query({ name: 'camera' as PermissionName });
           if (permissionStatus?.state === 'denied') {
             setPermissionBlocked(true);
-            setCameraMessage('Camera access is blocked. Enable camera permission in browser settings and retry.');
+            setCameraMessage(
+              'Camera access is blocked. Enable camera permission in browser settings and retry.'
+            );
             return false;
           }
         }
       } catch {
-        // Ignore permissions API failures and continue to browser prompt.
+        // Continue even if Permissions API is unavailable.
       }
 
       const stream = await Promise.race([
         navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: 'user',
-            width: { ideal: 640 },
-            height: { ideal: 480 },
+            width: { ideal: 1280 },
+            height: { ideal: 960 },
           },
+          audio: false,
         }),
         new Promise<never>((_, reject) => {
           setTimeout(() => reject(new Error('Camera initialization timed out')), 12000);
         }),
       ]);
 
+      streamRef.current = stream;
       setPermissionBlocked(false);
       setCameraMessage(null);
 
-      streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        videoRef.current.setAttribute('playsinline', 'true');
         await videoRef.current.play();
       }
+
       return true;
     } catch (err: any) {
       console.error('Camera error:', err);
@@ -173,48 +302,200 @@ export function GuidedFaceScanner({
     }
   }, []);
 
-  // Initialize face detector (optional - for auto-capture)
   const initializeDetector = useCallback(async () => {
+    setAutoCaptureLoading(true);
+    setStatusMessage('Preparing auto capture...');
+
+    const slowLoadTimer = setTimeout(() => {
+      setShowManualAssist(true);
+      setStatusMessage('Manual shutter is ready while auto capture finishes loading.');
+    }, 4500);
+
     try {
-      const tf = await import('@tensorflow/tfjs');
-      await tf.ready();
-
-      try {
-        await tf.setBackend('webgl');
-      } catch {
-        await tf.setBackend('cpu');
-      }
-      await tf.ready();
-
-      const faceLandmarksDetection = await import('@tensorflow-models/face-landmarks-detection');
-
-      detectorRef.current = await faceLandmarksDetection.createDetector(
-        faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
-        {
-          runtime: 'tfjs',
-          refineLandmarks: false,
-          maxFaces: 1,
-        }
+      const detector = await getSharedFaceDetector();
+      detectorRef.current = detector;
+      setAutoCaptureReady(true);
+      setShowManualAssist(false);
+      setStatusMessage(
+        detector.source === 'mediapipe' ? 'Auto capture ready (MediaPipe)' : 'Auto capture ready'
       );
-
-      setModelLoaded(true);
-      return true;
-    } catch (err) {
-      console.warn('Face detection model failed to load, using manual capture mode:', err);
-      setUseAutoCapture(false);
-       setAutoStatusMessage('Auto-capture is unavailable on this device. Use manual shutter.');
-      return false;
+    } catch (detectorError) {
+      console.warn('Auto capture unavailable, falling back to manual shutter:', detectorError);
+      setAutoCaptureReady(false);
+      setShowManualAssist(true);
+      setStatusMessage('Auto capture is unavailable on this device. Use manual shutter.');
+    } finally {
+      clearTimeout(slowLoadTimer);
+      setAutoCaptureLoading(false);
     }
   }, []);
 
-  // Initialize everything - camera first, then model in background
+  const cleanup = useCallback(() => {
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+      animationRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+  }, []);
+
+  const captureCurrentPosition = useCallback(() => {
+    if (captureLockedRef.current) return;
+    if (!videoRef.current || !canvasRef.current) return;
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const context = canvas.getContext('2d');
+    if (!context || !video.videoWidth || !video.videoHeight) return;
+
+    captureLockedRef.current = true;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    context.translate(canvas.width, 0);
+    context.scale(-1, 1);
+    context.drawImage(video, 0, 0);
+    context.setTransform(1, 0, 0, 1, 0, 0);
+
+    const imageData = canvas.toDataURL('image/jpeg', 0.9);
+    const nextCaptures = [...captures, imageData];
+    setCaptures(nextCaptures);
+    resetMatchingState();
+    noMatchFrameCountRef.current = 0;
+    setStatusMessage('Capture saved');
+
+    if (currentPositionIndex < POSITION_ORDER.length - 1) {
+      setCurrentPositionIndex((prev) => prev + 1);
+      captureLockedRef.current = false;
+      return;
+    }
+
+    setState('processing');
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+      animationRef.current = null;
+    }
+
+    void onComplete(nextCaptures)
+      .then(() => {
+        setState('complete');
+      })
+      .catch((completionError) => {
+        console.error('Completion error:', completionError);
+        setError('Failed to process face data. Please try again.');
+        setState('error');
+      })
+      .finally(() => {
+        captureLockedRef.current = false;
+      });
+  }, [captures, currentPositionIndex, onComplete, resetMatchingState]);
+
+  const runDetectionLoop = useCallback(() => {
+    if (state !== 'ready' || !autoCaptureReady || !detectorRef.current) return;
+
+    const detect = async (ts: number) => {
+      if (state !== 'ready' || !autoCaptureReady || !detectorRef.current || !videoRef.current) return;
+      if (captureLockedRef.current) {
+        animationRef.current = requestAnimationFrame(detect);
+        return;
+      }
+
+      if (ts - lastDetectAtRef.current < DETECT_INTERVAL_MS) {
+        animationRef.current = requestAnimationFrame(detect);
+        return;
+      }
+      lastDetectAtRef.current = ts;
+
+      try {
+        const video = videoRef.current;
+        if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+          animationRef.current = requestAnimationFrame(detect);
+          return;
+        }
+
+        const reading = await detectorRef.current.detectPose(video, ts);
+        if (!reading) {
+          setFaceDetected(false);
+          resetMatchingState();
+          noMatchFrameCountRef.current += 1;
+          if (noMatchFrameCountRef.current > 70) {
+            setShowManualAssist(true);
+            setStatusMessage('Face not detected consistently. Use manual shutter.');
+          }
+          animationRef.current = requestAnimationFrame(detect);
+          return;
+        }
+
+        setFaceDetected(true);
+        const yaw = reading.yaw;
+        const pitch = reading.pitch;
+
+        const config = POSITIONS[POSITION_ORDER[currentPositionIndex]];
+        const isMatch =
+          yaw >= config.yawRange[0] &&
+          yaw <= config.yawRange[1] &&
+          pitch >= config.pitchRange[0] &&
+          pitch <= config.pitchRange[1];
+
+        if (!isMatch) {
+          matchStreakRef.current = 0;
+          setPositionMatch(false);
+          holdStartRef.current = null;
+          setHoldProgress(0);
+          noMatchFrameCountRef.current += 1;
+          if (noMatchFrameCountRef.current > 90) {
+            setShowManualAssist(true);
+            setStatusMessage('Auto capture is taking too long for this pose. Use manual shutter.');
+          }
+          animationRef.current = requestAnimationFrame(detect);
+          return;
+        }
+
+        noMatchFrameCountRef.current = 0;
+        setShowManualAssist(false);
+        matchStreakRef.current += 1;
+        if (matchStreakRef.current < MATCH_STREAK_REQUIRED) {
+          animationRef.current = requestAnimationFrame(detect);
+          return;
+        }
+
+        setPositionMatch(true);
+        if (!holdStartRef.current) holdStartRef.current = Date.now();
+        const elapsed = Date.now() - holdStartRef.current;
+        const progress = Math.min(elapsed / AUTO_CAPTURE_HOLD_MS, 1);
+        setHoldProgress(progress);
+        setStatusMessage('Hold still...');
+
+        if (progress >= 1) {
+          captureCurrentPosition();
+          return;
+        }
+      } catch {
+        noMatchFrameCountRef.current += 1;
+        if (noMatchFrameCountRef.current > 90) {
+          setShowManualAssist(true);
+          setStatusMessage('Auto detection is unstable. Use manual shutter.');
+        }
+      }
+
+      animationRef.current = requestAnimationFrame(detect);
+    };
+
+    animationRef.current = requestAnimationFrame(detect);
+  }, [autoCaptureReady, captureCurrentPosition, currentPositionIndex, resetMatchingState, state]);
+
   const initialize = useCallback(async () => {
     setState('initializing');
     setError(null);
-    setUseAutoCapture(false); // Start in manual mode, upgrade if model loads
+    setStatusMessage(null);
     setShowManualAssist(false);
-    setAutoStatusMessage('Loading auto-capture...');
+    setAutoCaptureReady(false);
+    setAutoCaptureLoading(false);
+    resetMatchingState();
     noMatchFrameCountRef.current = 0;
+    captureLockedRef.current = false;
 
     const cameraReady = await initializeCamera();
     if (!cameraReady) {
@@ -223,219 +504,19 @@ export function GuidedFaceScanner({
       return;
     }
 
-    // Camera is ready - show it immediately in manual mode
     setState('ready');
-    setAutoStatusMessage('Loading auto-capture...');
-
-    // Load face detection model in background for auto-capture
-    initializeDetector().then((loaded) => {
-      if (loaded) {
-        setUseAutoCapture(true);
-        setAutoStatusMessage('Auto-capture active');
-      } else {
-        setShowManualAssist(true);
-      }
-    });
-  }, [initializeCamera, initializeDetector]);
+    void initializeDetector();
+  }, [initializeCamera, initializeDetector, resetMatchingState]);
 
   const requestCameraAccess = useCallback(async () => {
     const ok = await initializeCamera();
     if (!ok) return;
     setState('ready');
     setError(null);
-  }, [initializeCamera]);
+    void initializeDetector();
+  }, [initializeCamera, initializeDetector]);
 
-  // Face detection loop (only when auto-capture is enabled)
-  useEffect(() => {
-    if (state !== 'ready' || !useAutoCapture || !modelLoaded || !detectorRef.current) {
-      return;
-    }
-
-    let isRunning = true;
-
-    const detect = async () => {
-      if (!isRunning || !videoRef.current || !detectorRef.current) return;
-
-      try {
-        const faces = await detectorRef.current.estimateFaces(videoRef.current, {
-          flipHorizontal: true,
-        });
-
-        if (faces.length > 0 && isRunning) {
-          setFaceDetected(true);
-          const face = faces[0];
-          const keypoints = face.keypoints;
-
-          const noseTip = pickKeypoint(keypoints, 'noseTip', [1, 4, 168]);
-          const leftEyeOuter = pickKeypoint(keypoints, 'leftEye', [33, 133]);
-          const rightEyeOuter = pickKeypoint(keypoints, 'rightEye', [263, 362]);
-
-          if (noseTip && leftEyeOuter && rightEyeOuter) {
-            const eyeCenter = {
-              x: (leftEyeOuter.x + rightEyeOuter.x) / 2,
-              y: (leftEyeOuter.y + rightEyeOuter.y) / 2,
-            };
-            const eyeWidth = Math.abs(rightEyeOuter.x - leftEyeOuter.x);
-            const yaw = (noseTip.x - eyeCenter.x) / (eyeWidth * 2);
-            const pitch = (noseTip.y - eyeCenter.y) / (eyeWidth * 1.5);
-
-            const config = POSITIONS[POSITION_ORDER[currentPositionIndex]];
-            const yawMatch = yaw >= config.yawRange[0] && yaw <= config.yawRange[1];
-            const pitchMatch = pitch >= config.pitchRange[0] && pitch <= config.pitchRange[1];
-            const match = yawMatch && pitchMatch;
-            setPositionMatch(match);
-            if (match) {
-              noMatchFrameCountRef.current = 0;
-              setShowManualAssist(false);
-              setAutoStatusMessage('Great, hold still for auto-capture');
-            } else {
-              noMatchFrameCountRef.current += 1;
-              if (noMatchFrameCountRef.current > 140) {
-                setShowManualAssist(true);
-                setAutoStatusMessage('Having trouble auto-matching. Use manual shutter below.');
-              }
-            }
-          } else {
-            noMatchFrameCountRef.current += 1;
-            setPositionMatch(false);
-          }
-        } else if (isRunning) {
-          setFaceDetected(false);
-          setPositionMatch(false);
-          noMatchFrameCountRef.current += 1;
-          if (noMatchFrameCountRef.current > 140) {
-            setShowManualAssist(true);
-            setAutoStatusMessage('Face not detected consistently. Use manual shutter below.');
-          }
-        }
-      } catch {
-        // Silently handle detection errors
-        noMatchFrameCountRef.current += 1;
-        if (noMatchFrameCountRef.current > 140) {
-          setShowManualAssist(true);
-          setAutoStatusMessage('Auto-detection is unstable. Switch to manual capture.');
-        }
-      }
-
-      if (isRunning) {
-        animationRef.current = requestAnimationFrame(detect);
-      }
-    };
-
-    void detect();
-
-    return () => {
-      isRunning = false;
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
-    };
-  }, [state, useAutoCapture, modelLoaded, currentPositionIndex, pickKeypoint]);
-
-  // Auto-capture hold timer
-  useEffect(() => {
-    if (!positionMatch || !useAutoCapture || state !== 'ready') {
-      holdStartRef.current = null;
-      setHoldProgress(0);
-      return;
-    }
-
-    if (!holdStartRef.current) {
-      holdStartRef.current = Date.now();
-    }
-
-    const holdDuration = 1200; // 1.2 seconds
-
-    const interval = setInterval(() => {
-      if (!holdStartRef.current) return;
-
-      const elapsed = Date.now() - holdStartRef.current;
-      const progress = Math.min(elapsed / holdDuration, 1);
-      setHoldProgress(progress);
-
-      if (progress >= 1) {
-        captureCurrentPosition();
-        clearInterval(interval);
-        setAutoStatusMessage('Captured. Move to next pose.');
-      }
-    }, 50);
-
-    return () => clearInterval(interval);
-  }, [positionMatch, useAutoCapture, state]);
-
-  // Capture current position
-  const captureCurrentPosition = useCallback(() => {
-    if (!videoRef.current || !canvasRef.current) return;
-
-    // In manual mode without model, always allow capture
-    // With model loaded, only warn but still allow capture
-    if (!useAutoCapture && modelLoaded && !positionMatch) {
-      // Don't block capture - just proceed
-    }
-
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const context = canvas.getContext('2d');
-
-    if (context) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-
-      context.translate(canvas.width, 0);
-      context.scale(-1, 1);
-      context.drawImage(video, 0, 0);
-      context.setTransform(1, 0, 0, 1, 0, 0);
-
-      const imageData = canvas.toDataURL('image/jpeg', 0.9);
-      const newCaptures = [...captures, imageData];
-      setCaptures(newCaptures);
-      setError(null);
-      noMatchFrameCountRef.current = 0;
-      setAutoStatusMessage(useAutoCapture ? 'Auto-capture active' : 'Manual shutter active');
-
-      // Reset for next position
-      setPositionMatch(false);
-      setHoldProgress(0);
-      holdStartRef.current = null;
-
-      if (currentPositionIndex < POSITION_ORDER.length - 1) {
-        setCurrentPositionIndex((prev) => prev + 1);
-      } else {
-        void handleComplete(newCaptures);
-      }
-    }
-  }, [captures, currentPositionIndex, useAutoCapture, modelLoaded, positionMatch]);
-
-  // Handle completion
-  const handleComplete = async (allCaptures: string[]) => {
-    setState('processing');
-
-    if (animationRef.current) {
-      cancelAnimationFrame(animationRef.current);
-    }
-
-    try {
-      await onComplete(allCaptures);
-      setState('complete');
-    } catch (err) {
-      console.error('Completion error:', err);
-      setError('Failed to process face data. Please try again.');
-      setState('error');
-    }
-  };
-
-  // Cleanup
-  const cleanup = useCallback(() => {
-    if (animationRef.current) {
-      cancelAnimationFrame(animationRef.current);
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-    }
-  }, []);
-
-  // Reset
-  const reset = () => {
+  const reset = useCallback(() => {
     cleanup();
     setCaptures([]);
     setCurrentPositionIndex(0);
@@ -443,35 +524,38 @@ export function GuidedFaceScanner({
     setPositionMatch(false);
     setHoldProgress(0);
     setError(null);
-    holdStartRef.current = null;
-    setAutoStatusMessage(null);
+    setStatusMessage(null);
     setShowManualAssist(false);
+    holdStartRef.current = null;
+    matchStreakRef.current = 0;
+    noMatchFrameCountRef.current = 0;
+    captureLockedRef.current = false;
     void initialize();
-  };
+  }, [cleanup, initialize]);
 
-  // Initialize on mount
   useEffect(() => {
     void initialize();
     return cleanup;
-  }, [initialize, cleanup]);
+  }, [cleanup, initialize]);
+
+  useEffect(() => {
+    if (state !== 'ready' || !autoCaptureReady) return;
+    runDetectionLoop();
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+        animationRef.current = null;
+      }
+    };
+  }, [autoCaptureReady, runDetectionLoop, state]);
 
   return (
-    <div className="space-y-6">
-      {/* Animated Head Guide */}
-      <div className="flex justify-center pt-2 pb-4">
-        <FaceGuideHead
-          targetPosition={currentPosition}
-          isMatched={positionMatch}
-          size={100}
-        />
-      </div>
-
-      {/* Progress Steps */}
+    <div className="space-y-4">
       <div className="flex items-center justify-center gap-3">
-        {POSITION_ORDER.map((pos, index) => (
+        {POSITION_ORDER.map((position, index) => (
           <div
-            key={pos}
-            className={`relative flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold transition-all duration-300 ${
+            key={position}
+            className={`relative flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold transition-all ${
               index < currentPositionIndex
                 ? 'bg-success text-white'
                 : index === currentPositionIndex
@@ -479,124 +563,77 @@ export function GuidedFaceScanner({
                   : 'bg-muted text-muted-foreground'
             }`}
           >
-            {index < currentPositionIndex ? (
-              <CheckCircle2 className="h-4 w-4" />
-            ) : (
-              index + 1
-            )}
+            {index < currentPositionIndex ? <CheckCircle2 className="h-4 w-4" /> : index + 1}
           </div>
         ))}
       </div>
 
-      {/* Camera View */}
       <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl bg-black">
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          className="h-full w-full object-cover scale-x-[-1]"
-        />
+        <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover scale-x-[-1]" />
 
-        {/* Initializing Overlay */}
         {state === 'initializing' && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80">
-            <Loader2 className="h-10 w-10 animate-spin text-white mb-4" />
-            <p className="text-white font-medium">Starting camera...</p>
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70">
+            <Loader2 className="mb-3 h-8 w-8 animate-spin text-white" />
+            <p className="text-sm font-medium text-white">Starting camera...</p>
           </div>
         )}
 
-        {/* Face Oval Guide */}
         {state === 'ready' && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="relative">
-              {/* Oval guide */}
-              <div
-                className={`h-56 w-40 rounded-[50%] border-4 transition-all duration-300 ${
-                  positionMatch
-                    ? 'border-success shadow-[0_0_40px_rgba(52,199,89,0.5)]'
-                    : faceDetected
-                      ? 'border-accent shadow-[0_0_20px_rgba(10,132,255,0.3)]'
-                      : 'border-white/60'
-                }`}
-              />
-
-              {/* Progress ring for auto-capture */}
-              {holdProgress > 0 && (
-                <svg
-                  className="absolute -inset-3"
-                  viewBox="0 0 100 140"
-                  style={{ transform: 'rotate(-90deg)' }}
-                >
-                  <ellipse
-                    cx="50"
-                    cy="70"
-                    rx="48"
-                    ry="68"
-                    fill="none"
-                    stroke="rgba(52,199,89,0.2)"
-                    strokeWidth="4"
-                  />
-                  <ellipse
-                    cx="50"
-                    cy="70"
-                    rx="48"
-                    ry="68"
-                    fill="none"
-                    stroke="#34C759"
-                    strokeWidth="4"
-                    strokeDasharray={`${holdProgress * 380} 380`}
-                    strokeLinecap="round"
-                  />
-                </svg>
-              )}
+          <>
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <div className="relative">
+                <div
+                  className={`h-56 w-40 rounded-[50%] border-4 transition-all duration-200 ${
+                    positionMatch
+                      ? 'border-success shadow-[0_0_30px_rgba(52,199,89,0.4)]'
+                      : faceDetected
+                        ? 'border-accent shadow-[0_0_18px_rgba(10,132,255,0.28)]'
+                        : 'border-white/55'
+                  }`}
+                />
+                {holdProgress > 0 && (
+                  <svg className="absolute -inset-3" viewBox="0 0 100 140" style={{ transform: 'rotate(-90deg)' }}>
+                    <ellipse cx="50" cy="70" rx="48" ry="68" fill="none" stroke="rgba(52,199,89,0.22)" strokeWidth="4" />
+                    <ellipse
+                      cx="50"
+                      cy="70"
+                      rx="48"
+                      ry="68"
+                      fill="none"
+                      stroke="#34C759"
+                      strokeWidth="4"
+                      strokeDasharray={`${holdProgress * 380} 380`}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                )}
+              </div>
             </div>
-          </div>
+
+            <div className="absolute right-3 top-3 rounded-full bg-black/55 px-3 py-1 text-xs font-medium text-white">
+              {autoCaptureReady ? 'Auto capture' : 'Manual capture'}
+            </div>
+          </>
         )}
 
-        {/* Status Bar */}
-      {state === 'ready' && (
-        <div className="absolute bottom-4 left-4 right-4">
-          <div
-              className={`rounded-xl px-4 py-3 backdrop-blur-md transition-all ${
-                positionMatch
-                  ? 'bg-success/90'
-                  : 'bg-black/60'
-              }`}
-            >
-              <p className="text-white text-center font-medium">
-                {positionMatch
-                  ? useAutoCapture
-                    ? 'Hold still - capturing...'
-                    : 'Position matched - tap capture'
-                  : positionConfig.instruction}
-              </p>
-            </div>
-            {autoStatusMessage && (
-              <p className="mt-2 text-xs text-white/90 text-center">{autoStatusMessage}</p>
-            )}
-          </div>
-        )}
-
-        {/* Processing Overlay */}
         {state === 'processing' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80">
-            <div className="relative h-16 w-16">
+            <div className="relative h-14 w-14">
               <div className="absolute inset-0 rounded-full border-4 border-white/20" />
-              <div className="absolute inset-0 rounded-full border-4 border-t-accent animate-spin" />
+              <div className="absolute inset-0 animate-spin rounded-full border-4 border-t-accent" />
             </div>
-            <p className="mt-4 text-lg font-medium text-white">Processing...</p>
+            <p className="mt-3 text-base font-medium text-white">Processing...</p>
           </div>
         )}
 
-        {/* Cancel button */}
         {state === 'ready' && (
           <button
             onClick={async () => {
               if (captures.length > 0 || currentPositionIndex > 0) {
                 const confirmed = await confirm({
                   title: 'Cancel Face Scan?',
-                  message: 'Your face scan is in progress. Are you sure you want to cancel? You will need to start over.',
+                  message:
+                    'Your face scan is in progress. Are you sure you want to cancel? You will need to start over.',
                   confirmLabel: 'Cancel Scan',
                   cancelLabel: 'Continue',
                   variant: 'destructive',
@@ -606,94 +643,65 @@ export function GuidedFaceScanner({
               cleanup();
               onCancel?.();
             }}
-            className="absolute top-4 left-4 flex h-10 w-10 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors"
+            className="absolute left-3 top-3 flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white transition-colors hover:bg-black/75"
           >
             <X className="h-5 w-5" />
           </button>
         )}
-
-        {/* Shutter / Capture button - centered at bottom */}
-        {state === 'ready' && (
-          <div className="absolute bottom-20 left-0 right-0 flex justify-center">
-            <button
-              onClick={captureCurrentPosition}
-              className={`flex h-16 w-16 items-center justify-center rounded-full border-4 transition-all shadow-lg ${
-                positionMatch
-                  ? 'bg-success border-success/50 hover:bg-success/90 scale-110'
-                  : 'bg-white/90 border-white/50 hover:bg-white active:scale-95'
-              }`}
-            >
-              <Camera className={`h-7 w-7 ${positionMatch ? 'text-white' : 'text-foreground'}`} />
-            </button>
-          </div>
-        )}
       </div>
 
-      {/* Captured thumbnails */}
+      {state === 'ready' && (
+        <div className="space-y-3">
+          <div className="text-center">
+            <p className="text-sm font-medium text-foreground">{positionConfig.label}</p>
+            <p className="text-xs text-muted-foreground">{positionConfig.instruction}</p>
+            {autoCaptureLoading && (
+              <p className="mt-1 text-xs text-muted-foreground">Auto capture is loading in the background...</p>
+            )}
+            {statusMessage && <p className="mt-1 text-xs text-muted-foreground">{statusMessage}</p>}
+          </div>
+
+          <div className="flex justify-center">
+            <button
+              onClick={captureCurrentPosition}
+              className={`flex h-16 w-16 items-center justify-center rounded-full border-4 shadow-lg transition-all ${
+                positionMatch && autoCaptureReady
+                  ? 'bg-success border-success/55 hover:bg-success/90'
+                  : 'bg-white border-white/60 hover:bg-white/90 active:scale-95'
+              }`}
+            >
+              <Camera className={`h-7 w-7 ${positionMatch && autoCaptureReady ? 'text-white' : 'text-foreground'}`} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {captures.length > 0 && (
         <div className="flex items-center justify-center gap-2">
           {captures.map((capture, index) => (
-            <div
-              key={index}
-              className="relative h-14 w-14 overflow-hidden rounded-xl ring-2 ring-success"
-            >
-              <Image
-                src={capture}
-                alt={`Capture ${index + 1}`}
-                fill
-                className="object-cover"
-              />
+            <div key={index} className="relative h-14 w-14 overflow-hidden rounded-xl ring-2 ring-success">
+              <Image src={capture} alt={`Capture ${index + 1}`} fill className="object-cover" />
             </div>
           ))}
           {Array.from({ length: POSITION_ORDER.length - captures.length }).map((_, index) => (
-            <div
-              key={`empty-${index}`}
-              className="h-14 w-14 rounded-xl border-2 border-dashed border-border"
-            />
+            <div key={`empty-${index}`} className="h-14 w-14 rounded-xl border-2 border-dashed border-border" />
           ))}
         </div>
       )}
 
-      {/* Mode toggle */}
-      {state === 'ready' && (
-        <div className="flex items-center justify-center gap-3 text-sm">
-          <span className={!useAutoCapture ? 'text-foreground font-medium' : 'text-muted-foreground'}>
-            Manual
-          </span>
-          <button
-            disabled={!modelLoaded}
-            onClick={() => setUseAutoCapture(!useAutoCapture)}
-            className={`relative h-6 w-11 rounded-full transition-colors ${
-              !modelLoaded ? 'bg-muted/50 cursor-not-allowed' : useAutoCapture ? 'bg-accent' : 'bg-muted'
-            }`}
-          >
-            <div
-              className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
-                useAutoCapture ? 'translate-x-5' : 'translate-x-0.5'
-              }`}
-            />
-          </button>
-          <span className={useAutoCapture ? 'text-foreground font-medium' : 'text-muted-foreground'}>
-            Auto-capture
-          </span>
-        </div>
-      )}
       {state === 'ready' && showManualAssist && (
-        <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-foreground text-center">
-          Auto-capture is taking too long for this pose. Use the shutter button below to continue.
+        <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-center text-sm text-foreground">
+          Auto capture is taking longer than expected. Continue with manual shutter.
         </div>
       )}
 
-      {/* Error state */}
       {state === 'error' && (
         <div className="rounded-xl bg-destructive/10 p-4">
           <div className="flex items-center gap-3 text-destructive">
             <AlertCircle className="h-5 w-5 flex-shrink-0" />
             <span>{error}</span>
           </div>
-          {cameraMessage && (
-            <p className="mt-2 text-sm text-foreground">{cameraMessage}</p>
-          )}
+          {cameraMessage && <p className="mt-2 text-sm text-foreground">{cameraMessage}</p>}
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
             {permissionBlocked && (
               <Button variant="outline" className="w-full" onClick={requestCameraAccess}>
@@ -708,10 +716,7 @@ export function GuidedFaceScanner({
         </div>
       )}
 
-      {/* Hidden canvas */}
       <canvas ref={canvasRef} className="hidden" />
-
-      {/* Cancel Confirmation Dialog */}
       <ConfirmDialog />
     </div>
   );

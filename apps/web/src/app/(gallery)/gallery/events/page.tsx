@@ -44,12 +44,8 @@ export default function MyEventsPage() {
   const [qrScannerError, setQrScannerError] = useState<string | null>(null);
   const [isInitializingScanner, setIsInitializingScanner] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const scanTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const scanInFlightRef = useRef(false);
-  const barcodeDetectorRef = useRef<any>(null);
-  const lastDecodedAtRef = useRef(0);
+  const scannerControlsRef = useRef<{ stop: () => void } | null>(null);
+  const scannerHandledResultRef = useRef(false);
 
   const refreshEvents = useCallback(async () => {
     try {
@@ -140,18 +136,14 @@ export default function MyEventsPage() {
   };
 
   const stopQrScanner = useCallback(() => {
-    if (scanTimerRef.current !== null) {
-      clearInterval(scanTimerRef.current);
-      scanTimerRef.current = null;
+    if (scannerControlsRef.current) {
+      scannerControlsRef.current.stop();
+      scannerControlsRef.current = null;
     }
 
-    scanInFlightRef.current = false;
-    barcodeDetectorRef.current = null;
-    lastDecodedAtRef.current = 0;
-
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
+    scannerHandledResultRef.current = false;
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
     }
   }, []);
 
@@ -257,131 +249,65 @@ export default function MyEventsPage() {
           throw new Error('Camera is not supported in this browser.');
         }
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
+        const video = videoRef.current;
+        if (!video) {
+          throw new Error('Unable to initialize camera preview.');
+        }
+        const zxing = await import('@zxing/browser');
+        const reader = new zxing.BrowserQRCodeReader(undefined, {
+          delayBetweenScanAttempts: 140,
         });
+
+        const constraintsCandidates: MediaStreamConstraints[] = [
+          {
+            video: {
+              facingMode: { exact: 'environment' },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+            },
+            audio: false,
+          },
+          {
+            video: {
+              facingMode: { ideal: 'environment' },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+            audio: false,
+          },
+          {
+            video: true,
+            audio: false,
+          },
+        ];
+
+        let controls: { stop: () => void } | null = null;
+        let startError: unknown = null;
+
+        for (const constraints of constraintsCandidates) {
+          try {
+            controls = await reader.decodeFromConstraints(constraints, video, (result) => {
+              if (isCancelled || scannerHandledResultRef.current) return;
+              if (!result) return;
+              scannerHandledResultRef.current = true;
+              void handleQrPayload(result.getText());
+            });
+            break;
+          } catch (error) {
+            startError = error;
+          }
+        }
+
+        if (!controls) {
+          throw startError || new Error('Unable to start QR camera.');
+        }
+
         if (isCancelled) {
-          stream.getTracks().forEach((track) => track.stop());
+          controls.stop();
           return;
         }
 
-        streamRef.current = stream;
-        const video = videoRef.current;
-        const canvas = canvasRef.current;
-        if (!video || !canvas) {
-          throw new Error('Unable to initialize camera preview.');
-        }
-        video.srcObject = stream;
-        video.setAttribute('playsinline', 'true');
-        await video.play();
-
-        let jsQR: any = null;
-        try {
-          const jsQrModule: any = await import('jsqr');
-          jsQR = jsQrModule?.default || jsQrModule;
-        } catch {
-          jsQR = null;
-        }
-
-        const maybeBarcodeDetector = (window as any).BarcodeDetector;
-        if (typeof maybeBarcodeDetector === 'function') {
-          try {
-            const supportedFormats: string[] = await maybeBarcodeDetector.getSupportedFormats?.();
-            const canScanQr =
-              !Array.isArray(supportedFormats) || supportedFormats.includes('qr_code');
-            if (canScanQr) {
-              barcodeDetectorRef.current = new maybeBarcodeDetector({ formats: ['qr_code'] });
-            }
-          } catch {
-            barcodeDetectorRef.current = null;
-          }
-        }
-
-        if (typeof jsQR !== 'function' && !barcodeDetectorRef.current) {
-          throw new Error('No QR scanner engine is available in this browser.');
-        }
-
-        const context = canvas.getContext('2d', { willReadFrequently: true });
-        if (!context) {
-          throw new Error('Unable to start QR scanner.');
-        }
-
-        const decodeFrame = async () => {
-          if (isCancelled || scanInFlightRef.current) return;
-          if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.videoWidth < 60 || video.videoHeight < 60) {
-            return;
-          }
-
-          scanInFlightRef.current = true;
-          try {
-            const maxDimension = 960;
-            const sourceWidth = video.videoWidth;
-            const sourceHeight = video.videoHeight;
-            const scale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight));
-            const width = Math.max(320, Math.round(sourceWidth * scale));
-            const height = Math.max(240, Math.round(sourceHeight * scale));
-
-            if (canvas.width !== width || canvas.height !== height) {
-              canvas.width = width;
-              canvas.height = height;
-            }
-
-            context.drawImage(video, 0, 0, width, height);
-
-            const tryDecode = (sx: number, sy: number, sw: number, sh: number): string | null => {
-              if (typeof jsQR !== 'function') return null;
-              if (sw < 80 || sh < 80) return null;
-              const imageData = context.getImageData(sx, sy, sw, sh);
-              const result = jsQR(imageData.data, sw, sh, { inversionAttempts: 'attemptBoth' });
-              return result?.data || null;
-            };
-
-            if (Date.now() - lastDecodedAtRef.current < 1200) {
-              return;
-            }
-
-            let qrValue: string | null = null;
-            if (barcodeDetectorRef.current) {
-              try {
-                const barcodes = await barcodeDetectorRef.current.detect(video);
-                qrValue = barcodes?.[0]?.rawValue || null;
-              } catch {
-                qrValue = null;
-              }
-            }
-
-            if (!qrValue) {
-              qrValue = tryDecode(0, 0, width, height);
-            }
-            if (!qrValue) {
-              const cropRatios = [0.85, 0.7, 0.55];
-              for (const ratio of cropRatios) {
-                const cropWidth = Math.floor(width * ratio);
-                const cropHeight = Math.floor(height * ratio);
-                const startX = Math.floor((width - cropWidth) / 2);
-                const startY = Math.floor((height - cropHeight) / 2);
-                qrValue = tryDecode(startX, startY, cropWidth, cropHeight);
-                if (qrValue) break;
-              }
-            }
-
-            if (qrValue) {
-              lastDecodedAtRef.current = Date.now();
-              await handleQrPayload(qrValue);
-            }
-          } finally {
-            scanInFlightRef.current = false;
-          }
-        };
-
-        await decodeFrame();
-        scanTimerRef.current = setInterval(() => {
-          void decodeFrame();
-        }, 220);
+        scannerControlsRef.current = controls;
       } catch (error: any) {
         console.error('QR scanner initialization failed:', error);
         setQrScannerError(error?.message || 'Failed to start QR scanner.');
@@ -438,7 +364,6 @@ export default function MyEventsPage() {
                     playsInline
                     muted
                   />
-                  <canvas ref={canvasRef} className="hidden" />
                   {isInitializingScanner && (
                     <div className="absolute inset-0 flex items-center justify-center text-white">
                       <div className="h-8 w-8 animate-spin rounded-full border-2 border-white border-t-transparent" />
